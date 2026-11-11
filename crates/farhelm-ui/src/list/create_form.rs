@@ -2881,6 +2881,9 @@ pub(super) fn CreateSessionForm(
     /// Shared with the parent's read admission and ordinary opening actions.
     /// A superseding opening revokes even an already queued DOM submission.
     opening_generation: Signal<u64>,
+    /// A failed Replace with may have removed its source before replying.
+    /// The persistent list refreshes ordinary authoritative absence evidence.
+    on_replace_failed: EventHandler<()>,
     /// A failed quick-launch preparation is visible without losing New's defaults.
     #[props(default)]
     initial_error: Option<String>,
@@ -2897,7 +2900,8 @@ pub(super) fn CreateSessionForm(
     /// from this one prop in the same render, so the request never authorizes
     /// more than the text on screen said.
     replace_source_state: Option<(SessionStatus, usize)>,
-    /// Restart keeps terminal ownership in the originating keyed session view.
+    /// Restart reports through the persistent list even after the originating
+    /// keyed view disappears; its source slot follows current listing evidence.
     #[props(default)]
     restart_bridge: Option<crate::list::RestartBridge>,
     #[props(default)] on_restarted: EventHandler<()>,
@@ -2908,6 +2912,8 @@ pub(super) fn CreateSessionForm(
     on_template_saved: EventHandler<farhelm_proto::launcher::LaunchTemplate>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let mut session_operations = use_context::<crate::session_ops::SessionOps>();
+    let mut shared_replace_progress = use_context::<crate::replace::ReplaceProgress>();
     let sandbox_base = base.clone();
     let sandbox_catalog = use_resource(move || {
         let base = sandbox_base.clone();
@@ -3269,7 +3275,7 @@ pub(super) fn CreateSessionForm(
             .current
             .try_read()
             .ok()
-            .map(|session| session.clone())
+            .and_then(|session| session.clone())
     });
     let restart_stop_first = restart_source
         .as_ref()
@@ -5972,10 +5978,11 @@ pub(super) fn CreateSessionForm(
                         error.set(Some("The source host changed while preparing restart; close and reopen restart with".into()));
                         return;
                     }
-                    let same_launch = bridge
-                        .current
-                        .try_read()
-                        .is_ok_and(|shown| shown.launch.as_ref() == opened_launch.as_deref());
+                    let same_launch = bridge.current.try_read().is_ok_and(|shown| {
+                        shown
+                            .as_ref()
+                            .is_some_and(|shown| shown.launch.as_ref() == opened_launch.as_deref())
+                    });
                     if !same_launch {
                         launch_attempted.set(LaunchAttempt::Refused);
                         error.set(Some(
@@ -6001,6 +6008,13 @@ pub(super) fn CreateSessionForm(
                     )
                     .await;
                     pending_launch.set(None);
+                    if let Err(refusal) = &result {
+                        bridge.error.call(if refusal.deadline_expired {
+                            pending.unknown_outcome(false)
+                        } else {
+                            refusal.text.clone()
+                        });
+                    }
                     bridge.finish(crate::list::RestartOutcome::of(&result));
                     match result {
                         Ok(_) => {
@@ -6180,7 +6194,18 @@ pub(super) fn CreateSessionForm(
             let hosts = hosts.clone();
             let open_host = open_host.clone();
             let prefill_for_submit = prefill_for_submit.clone();
+            let session_claim = if let Some(source) = &binding.replace_source {
+                let Some(claim) = session_operations.claim(source) else {
+                    error.set(Some("Another action on this session is in progress".into()));
+                    return;
+                };
+                session_operations.pending.write().insert(source.clone());
+                Some(claim)
+            } else {
+                None
+            };
             spawn(async move {
+                let _session_claim = session_claim;
                 // This future owns op_guard through every await. Explicit
                 // drops preserve early-release points; cancellation drops
                 // the same owner if the form disappears first.
@@ -6463,6 +6488,12 @@ pub(super) fn CreateSessionForm(
                     quick_launch_hidden().then(|| bound.title.clone()),
                 );
                 pending_launch.set(Some(pending.clone()));
+                if let Some(source) = &bound.replace_source {
+                    shared_replace_progress
+                        .0
+                        .write()
+                        .insert(source.clone(), pending.clone());
+                }
                 let create_result = if let Some(checkout) = &bound.github_checkout {
                     let attempt = github_attempt
                         .peek()
@@ -6575,6 +6606,25 @@ pub(super) fn CreateSessionForm(
                     }
                 };
                 pending_launch.set(None);
+                if let Some(source) = &bound.replace_source {
+                    shared_replace_progress.0.write().remove(source);
+                    if let Err(refusal) = &create_result {
+                        let reason = if refusal.deadline_expired {
+                            pending.unknown_outcome(false)
+                        } else {
+                            refusal.text.clone()
+                        };
+                        session_operations
+                            .errors
+                            .write()
+                            .insert(source.clone(), format!("Replace: {reason}"));
+                    } else {
+                        session_operations.errors.write().remove(source);
+                    }
+                    if create_result.is_err() {
+                        on_replace_failed.call(());
+                    }
+                }
                 match create_result {
                     Ok(session) => {
                         // The callback may open quick-launch naming, which

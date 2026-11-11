@@ -47,11 +47,11 @@ use dioxus::prelude::*;
 
 use crate::SessionNotification;
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
-use crate::anchored_popovers::{Registration, use_anchor_binding, use_rendered_movement};
+use crate::anchored_popovers::{Registration, use_measured_anchor_binding, use_rendered_movement};
 use crate::icons::BellIcon;
 use crate::menu_panel::{
-    PanelPlacement, clamp_title, measurement_outcome, session_menu_placement_style,
-    session_menu_pointer_style, should_measure_on_mount,
+    PanelPlacement, clamp_title, session_menu_placement_style, session_menu_pointer_style,
+    should_measure_on_mount,
 };
 use crate::peer::{DetailPart, PeerLine, PeerText};
 
@@ -147,24 +147,19 @@ pub(super) fn NotificationBell(
     // is discarded, as in the row menus (`menu_panel::measurement_outcome`).
     let mut open_generation = use_signal(|| 0_u64);
     let is_open = open.is_some();
-    // Root opening already revoked any preceding lease. Bind only when this
-    // existing effect/remount path actually starts its own measurement.
-    let bind_anchor = use_anchor_binding(registration.clone(), session_id.clone(), listing_ready);
-    let spawn_measurement = move || {
-        bind_anchor.call(());
-        let generation = *open_generation.peek();
-        spawn(async move {
-            let measured = match bell_handle.peek().clone() {
-                Some(handle) => handle.get_client_rect().await.ok(),
-                None => None,
-            };
-            if let Some(outcome) =
-                measurement_outcome(generation, *open_generation.peek(), measured)
-            {
-                placement.set(outcome);
-            }
-        });
-    };
+    // Root opening already revoked any preceding lease. This existing
+    // effect/remount boundary still owns measurement start. Its row-local
+    // worker also checks delayed heading movement against the published rect;
+    // a pending measurement repeats before painting when that report dirties it.
+    let measure_anchor = use_measured_anchor_binding(
+        registration.clone(),
+        session_id.clone(),
+        listing_ready,
+        bell_handle,
+        placement,
+        open_generation,
+    );
+    let spawn_measurement = move || measure_anchor.call(());
     // A fresh open starts unmeasured and measures again: the bell can move
     // between opens, so a previous open's rectangle is not safe to reuse.
     // Driven by the prop rather than the click, because `ListView` is what

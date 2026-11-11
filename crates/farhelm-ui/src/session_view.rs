@@ -18,20 +18,19 @@ use dioxus::prelude::*;
 use farhelm_proto::host_appearance::HostColor;
 
 use crate::activity::{ACTIVITY_NOW, ActivityStamp};
-use crate::api::{
-    self, close_tab, fetch_hosts, fetch_session, mint_lease, open_tab, restart_session,
-};
+use crate::api::{close_tab, fetch_hosts, fetch_session, mint_lease, open_tab};
 use crate::attachments::{attachment_policy, attachment_status_element_id};
 use crate::feed::{fallback_polls_now, fallback_sleep, use_feed_reader};
 use crate::hosts::{
     HostLookup, HostsRead, SessionUnavailableNotice, is_connected, stale_session_notice,
 };
-use crate::launch_progress::{LaunchAction, LaunchProgress, PendingLaunch};
-use crate::ops::{ConfirmSlot, ConfirmToken, OpGuard, ReadGate, use_confirm_slot};
+use crate::launch_progress::LaunchProgress;
+use crate::ops::{ConfirmSlot, ConfirmToken, ReadGate, use_confirm_slot};
 use crate::peer::{DetailPart, PeerLine, display_peer};
 use crate::reader::{SurfaceReader, Trigger, request_read, sleep_ms};
 use crate::reconnect::reconnect_policy;
-use crate::replace::{PendingReplace, ReplaceAnswer, ReplaceController, ReplaceResult};
+use crate::replace::ReplaceAnswer;
+use crate::session_ops::{HeaderAction, SessionGate, SessionGuard as OpGuard, SessionOps};
 use crate::status::{StatusBadge, StatusBadgeView, status_badge};
 use crate::tabs::{
     AGENT_BANNER_ELEMENT_ID, AGENT_CONNECTING_ELEMENT_ID, AGENT_TERMINAL_ELEMENT_ID,
@@ -147,7 +146,7 @@ fn container_restart_reason(session: &Session) -> Option<&'static str> {
 /// legacy session's launch is never changed (SPEC.md refuses Restart with
 /// for it, naming Replace with), and an agent or command launch can be
 /// edited when Restart could resume it, or an agent launch can accept a named target.
-fn restart_with_reason(session: &Session) -> Option<String> {
+pub(crate) fn restart_with_reason(session: &Session) -> Option<String> {
     match &session.launch {
         Some(crate::SessionLaunch::Agent { .. }) => restart_with_unavailable(session),
         // Restart with resumes, so a command launch needs a declared agent
@@ -501,10 +500,10 @@ fn followed_title(selected: Option<&Session>, shown: &Session) -> Option<crate::
 /// `view_claim` is empty whenever this succeeds: the prompt's claim and any
 /// claim `view_claim` holds are claims of the same lock, so they cannot both
 /// exist, and the set never drops someone else's claim.
-fn confirm_restart_prompt(
-    slot: &mut ConfirmSlot<(), OpGuard>,
+fn confirm_restart_prompt<P: 'static>(
+    slot: &mut ConfirmSlot<(), P>,
     shown: &ConfirmToken<()>,
-    view_claim: &mut Signal<Option<OpGuard>>,
+    view_claim: &mut Signal<Option<P>>,
 ) -> bool {
     let Some(claim) = slot.take(shown) else {
         return false;
@@ -513,18 +512,64 @@ fn confirm_restart_prompt(
     true
 }
 
+/// Refuse a header opening when its click arrives, before the list consumes it.
+/// The list rechecks admission too, but a session claim or launch/registry token
+/// released before its effect runs must not revive a refused composer opening.
+fn publish_header_prefill(
+    gate: SessionGate,
+    composer_ops: crate::ops::OpLock,
+    mut request: Signal<Option<crate::list::HeaderPrefillRequest>>,
+    value: crate::list::HeaderPrefillRequest,
+) {
+    if !gate.busy_now() && !composer_ops.busy_now() {
+        request.set(Some(value));
+    }
+}
+
+/// Reattach after every Restart result, independently of its temporary payload.
+/// A current detail read may consume the reply's terminal-kind override before
+/// this effect runs. The durable completion revision still owes one remount,
+/// including after a refusal or unknown outcome that detached the old viewer.
+fn use_restart_observation(
+    operations: SessionOps,
+    id: Signal<String>,
+    mut mount_generation: Signal<u32>,
+    mut relaunched: Signal<bool>,
+    mut terminal_kind: Signal<Option<Option<farhelm_proto::TerminalKind>>>,
+) {
+    let mut observed = use_signal(|| {
+        operations
+            .lifecycle
+            .peek()
+            .get(id.peek().as_str())
+            .map_or(0, |state| state.restart_revision)
+    });
+    use_effect(move || {
+        let state = operations
+            .lifecycle
+            .read()
+            .get(id.read().as_str())
+            .copied()
+            .unwrap_or_default();
+        if state.restart_revision == *observed.peek() {
+            return;
+        }
+        if let Some(outcome) = state.restart.filter(|outcome| outcome.succeeded) {
+            relaunched.set(true);
+            terminal_kind.set(Some(outcome.agent_terminal));
+        }
+        mount_generation += 1;
+        observed.set(state.restart_revision);
+    });
+}
+
 #[component]
 pub(crate) fn SessionView(
     session: Session,
-    /// The cross-pane write gate (see `ops::PaneGate`): the shared token
-    /// this view's lifecycle claim, refused while the sidebar
-    /// has a per-row operation in flight. Owned by `AppBody`, because a
-    /// view-private token would let the two panes mutate this session
-    /// under each other.
-    gate: crate::ops::PaneGate,
-    /// Reports a replacement's new session to `AppBody`, which owns the
-    /// selected session and therefore controls the keyed view remount.
-    on_replaced: EventHandler<Session>,
+    /// Composer openings and sandbox host mutations share this token. Ordinary
+    /// session lifecycle actions stay independent; a refused opening must not
+    /// become a late opening after the token is released.
+    composer_ops: crate::ops::OpLock,
     /// `AppBody`'s selected session itself, read so this view can follow a
     /// sidebar rename of the session it shows (see the selection effect).
     selection: ReadSignal<Option<Session>>,
@@ -533,9 +578,6 @@ pub(crate) fn SessionView(
     mut open_session_title: Signal<Option<(String, String)>>,
     /// One-shot bridge to the list's existing clone composer.
     prefill_request: Signal<Option<crate::list::HeaderPrefillRequest>>,
-    /// One-shot bridge to the list's delete path, for the header's delete
-    /// button once its confirmation is answered.
-    header_delete: Signal<Option<crate::list::HeaderDeleteRequest>>,
     /// Persistent listing demand after header actions; Replace can unmount this view.
     mut header_refresh: Signal<bool>,
     /// Sessions with a delete in flight (AppBody's set, written by the
@@ -544,6 +586,12 @@ pub(crate) fn SessionView(
     deleting: ReadSignal<std::collections::HashSet<String>>,
 ) -> Element {
     let base = use_context::<ApiBase>().0;
+    let mut operations = use_context::<SessionOps>();
+    let operation_id = use_signal(|| session.id.raw().to_owned());
+    let gate = SessionGate {
+        id: operation_id,
+        operations,
+    };
     let preferences = use_context::<crate::list::SharedPreferences>();
     // The sidebar owns refreshes. This shared snapshot is presentation data,
     // separate from the stale-only host read that explains an outage below.
@@ -554,7 +602,7 @@ pub(crate) fn SessionView(
     // restart is exactly the case where re-reading the server's current
     // answer matters (a stale offer is what caused the refusal).
     let mut current = use_signal(|| session.clone());
-    // Bumped on every successful restart to force the AGENT terminal's
+    // Bumped after every Restart result to force the AGENT terminal's
     // island to remount — and only that one, since restart touches the
     // agent terminal alone (the supervisor's `detach_for_restart`) and a
     // tab's attachment survives it untouched. Both reuse cases need it: a
@@ -562,7 +610,7 @@ pub(crate) fn SessionView(
     // and a fresh terminal is a different pane entirely. Remounting also
     // replays the pane's scrollback, which for a reused terminal is what
     // puts the PRIOR run's output back on screen above the new one.
-    let mut mount_generation = use_signal(|| 0_u32);
+    let mount_generation = use_signal(|| 0_u32);
     // The agent's terminal kind as this view's last successful Restart
     // reported it, until a detail read describing the restarted run
     // commits: `Some(kind)` is the reply's word (itself possibly `None`),
@@ -570,43 +618,57 @@ pub(crate) fn SessionView(
     // generation bump above remounts the agent's terminal at once, while
     // `current` still describes the run the Restart replaced; see
     // `agent_spec_kind`.
-    let mut restart_terminal_kind = use_signal(|| None::<Option<farhelm_proto::TerminalKind>>);
-    // Whether THIS view has relaunched the session since it last saw it
+    let mut restart_terminal_kind = use_signal(|| {
+        operations
+            .lifecycle
+            .peek()
+            .get(session.id.raw())
+            .and_then(|state| state.restart)
+            .filter(|outcome| outcome.succeeded)
+            .map(|outcome| outcome.agent_terminal)
+    });
+    // Whether this client has relaunched the session since it last saw it
     // interrupted. Set by a restart reply, cleared once a read commits any
     // status other than `Interrupted` (the effect below), and read by
     // `terminal_absence`: it is the one fact that lets the terminal mount
     // in the window between a successful restart and the listing catching
     // up, when the session is still reported interrupted but no longer is.
     // Per view on purpose: another client's restart reaches this one
-    // through the listing like any other change. Per MOUNT as well, so
-    // leaving and reopening the session inside that window shows the band
-    // again; a click there sends a plain restart, which the supervisor
-    // refuses only while the new run still reads working (its own pane and
-    // activity recheck). Once that run reads idle the click relaunches it
-    // again, which the restart rule allows (an idle agent restarts without
-    // asking; SPEC.md, Lifecycle operations).
-    let mut relaunched = use_signal(|| false);
+    // through the listing like any other change. A newly mounted view seeds it
+    // from the retained successful reply, so returning before the listing
+    // catches up does not resurrect an interrupted-session card.
+    let mut relaunched = use_signal(|| {
+        operations
+            .lifecycle
+            .peek()
+            .get(session.id.raw())
+            .and_then(|state| state.restart)
+            .is_some_and(|outcome| outcome.succeeded)
+    });
     // Whether a restart is in flight (disables the control and guards
     // re-entry, mirroring `ListView`'s `pending`).
-    let mut restarting = use_signal(|| false);
+    let restarting = use_memo(move || {
+        operations
+            .restarting
+            .read()
+            .contains_key(operation_id.read().as_str())
+    });
     // Plain Restart owns this request snapshot. Restart with also uses the
     // `restarting` fence, but its launcher owns that operation's visible status.
-    let mut restart_progress = use_signal(|| None::<PendingLaunch>);
+    let restart_progress = use_memo(move || {
+        operations
+            .restarting
+            .read()
+            .get(operation_id.read().as_str())
+            .cloned()
+    });
     // One family can be open at a time; confirmations keep their separate
     // consent slots and are admitted only after a menu action is chosen.
     let action_menu = use_signal(|| None::<ActionKind>);
-    // The shared operation lock as claimed by this view's Restart
-    // operations: a header Restart once it is sent (directly, or after its
-    // stop-first prompt is confirmed), and the interrupted card's Restart. Held here, as a
-    // guard in this view's own signal, rather than as a bare claim on the
-    // lock `AppBody` owns: when the view unmounts (the session deleted from
-    // another client, a sign-in prompt replacing the panes) the signal and
-    // its guard go with it, so a claim can never outlive the view and leave
-    // every write action in the window disabled. Releasing is setting it to
-    // `None`.
-    //
-    // Plain Restart releases after every reply. Restart with uses the shared
-    // launcher's submit claim instead; its editing interval holds no lock.
+    // An unanswered header question belongs to this keyed view and releases
+    // its session claim on navigation. An accepted answer hands that claim to
+    // ListView synchronously; its request and outcome then outlive this view.
+    // Restart keeps the guard in this short-lived slot only during that handoff.
     let mut view_claim = use_signal(|| None::<OpGuard>);
     // The header Restart's stop-first prompt for a still-running agent (the
     // same in-page pattern delete uses, never a browser dialog, which wry's
@@ -622,32 +684,54 @@ pub(crate) fn SessionView(
     // other Restart path follows. The prompt only ever holds the claim
     // between opening and its answer; Restart with never goes through it.
     let mut confirming_restart: ConfirmSlot<(), OpGuard> = use_confirm_slot();
-    let mut restart_error = use_signal(|| None::<String>);
+    let restart_error = use_memo(move || {
+        operations
+            .errors
+            .read()
+            .get(operation_id.read().as_str())
+            .filter(|message| message.starts_with("Restart:"))
+            .cloned()
+    });
     // Stop owns a claim from opening through completion just like Restart.
     // Its notice survives the refresh, since a stopped agent does not prove
     // that the host closed every terminal tab.
     let mut confirming_stop: ConfirmSlot<(), OpGuard> = use_confirm_slot();
-    let mut stopping = use_signal(|| false);
-    let mut stop_error = use_signal(|| None::<String>);
+    let stopping = use_memo(move || {
+        operations
+            .stopping
+            .read()
+            .contains(operation_id.read().as_str())
+    });
+    let stop_error = use_memo(move || {
+        operations
+            .errors
+            .read()
+            .get(operation_id.read().as_str())
+            .filter(|message| message.starts_with("Stop:"))
+            .cloned()
+    });
     // Replace has its own prompt and error because it creates a new session
     // before deleting this one; sharing restart state would lose the
     // endpoint's partial-failure wording or make the two operations race.
-    let mut replacing = use_signal(|| false);
-    // Navigation retains the page's retry identity. Only the local question
-    // belongs to this keyed view, including its permanent-answer mount timing.
-    let replace_yolo = use_confirm_slot::<PendingReplace, ()>();
-    let replace_yolo_error = use_signal(|| None::<String>);
-    let replace_controller = ReplaceController::session(
-        use_context::<crate::list::ReplaceIntent>().0,
-        use_context::<crate::list::ReplaceYoloQuestions>().0,
-        use_context::<crate::replace::ReplaceProgress>(),
-        replace_yolo,
-        replace_yolo_error,
-    );
-    use_drop(move || replace_controller.release_question());
+    let replacing = use_memo(move || {
+        operations
+            .pending
+            .read()
+            .contains(operation_id.read().as_str())
+    });
+    // ListView owns Replace's request and YOLO continuation. The header only
+    // shares its progress and can retire an unsubmitted source retry on Cancel.
+    let mut replace_retry = use_context::<crate::list::ReplaceIntent>().0;
+    let replace_progress = use_context::<crate::replace::ReplaceProgress>();
     let replace_source_id = use_signal(|| session.id.raw().to_owned());
-    let cancel_replace_intent = move || {
-        replace_controller.cancel_source(&replace_source_id.peek());
+    let mut cancel_replace_intent = move || {
+        if replace_retry
+            .peek()
+            .as_ref()
+            .is_some_and(|(id, _)| id == replace_source_id.peek().as_str())
+        {
+            replace_retry.set(None);
+        }
     };
     // Each Replace prompt is a `ConfirmSlot` holding the lifecycle claim it
     // took when it opened: confirming moves that claim into the replace
@@ -659,18 +743,32 @@ pub(crate) fn SessionView(
     let mut confirming_header_replace: ConfirmSlot<(), OpGuard> = use_confirm_slot();
     // The header delete's confirmation holds the lifecycle claim while it is
     // open, so a restart or replace cannot start under the question, and
-    // gives it back in the confirm handler just before the request goes to
-    // the list: the list's delete refuses to start while that same shared
-    // token is held, so a claim carried across the handoff would turn every
-    // confirmed delete into a silent no-op.
+    // transfers it to the persistent list in the confirm handler. That callback
+    // releases the question's claim and immediately admits its request without
+    // yielding, dispatching input, or leaving an old guard behind.
     let mut confirming_header_delete: ConfirmSlot<(), OpGuard> = use_confirm_slot();
-    let mut replace_error = use_signal(|| None::<String>);
-    // One synchronously claimed token covers each header lifecycle prompt
-    // and its request, so two clicks in one render frame cannot authorize
-    // operations from two different snapshots. The token
-    // is the SHARED one (`gate` — see the prop doc), so the same claim
-    // also excludes the sidebar's create/host mutations, and is refused
-    // while a sidebar row operation runs.
+    let replace_error = use_memo(move || {
+        operations
+            .errors
+            .read()
+            .get(operation_id.read().as_str())
+            .filter(|message| message.starts_with("Replace:"))
+            .cloned()
+    });
+    let other_action_error = use_memo(move || {
+        operations
+            .errors
+            .read()
+            .get(operation_id.read().as_str())
+            .filter(|message| {
+                !message.starts_with("Stop:")
+                    && !message.starts_with("Restart:")
+                    && !message.starts_with("Replace:")
+            })
+            .cloned()
+    });
+    // The session guard excludes only this source. ListView's row entry points
+    // consult the same state, including while one of these questions is open.
     let mut lifecycle = gate;
     // Counts restart ATTEMPTS, and versions every read of this session
     // against them. The detail read below is a round trip that can outlive
@@ -678,20 +776,19 @@ pub(crate) fn SessionView(
     // without this, that stale answer would land on top of the restart's
     // own fresher one and the view would go back to describing the run
     // that no longer exists.
-    let mut restart_epoch = use_signal(|| 0_u32);
     // Which of several in-flight reads may be BELIEVED, per surface
     // (`ops::ReadGate`). Two gates rather than one because they order two
     // unrelated resources: a slow `/api/hosts` must not make a fresh session
     // detail look superseded, or vice versa.
     //
-    // Distinct from `restart_epoch`, which answers a different question —
+    // Distinct from the shared lifecycle revision, which answers a different question —
     // that one invalidates reads that span a restart, this one orders reads
     // against each other. Both are needed: a read can be perfectly current
     // with respect to restarts and still be the older of two replies.
     let mut detail_reads = use_signal(ReadGate::default);
     let mut host_reads = use_signal(ReadGate::default);
     // How many times this session has crossed the stale/fresh line. The
-    // host-state read's own epoch, mirroring what `restart_epoch` does for
+    // host-state read's own epoch, mirroring what the lifecycle revision does for
     // the detail read: ordering says which of two replies is newer, and this
     // says whether a reply is still about the situation that asked for it.
     // A host reading taken while the session was stale must not explain a
@@ -831,7 +928,7 @@ pub(crate) fn SessionView(
     // of their own, and that is the load-bearing part: all three must be
     // sampled synchronously at the point the request is issued, BEFORE the
     // `await`, or they stop describing the request they are supposed to
-    // version. `restart_epoch` is read a second time INSIDE, after the
+    // version. The shared lifecycle revision is read a second time INSIDE, after the
     // await, and that one has to stay here: it is the current value that
     // `started_at` is compared against.
     //
@@ -885,7 +982,7 @@ pub(crate) fn SessionView(
                 &mut detail_reads.write(),
                 generation,
                 started_at,
-                *restart_epoch.peek(),
+                operations.revision(&operation_id.peek()),
             ) {
                 // A newer read already spoke for this view; this one is spent
                 // rather than lost.
@@ -929,7 +1026,21 @@ pub(crate) fn SessionView(
                     closed_tabs.write().retain(|id| live.contains(id.as_str()));
                     occurrences.observe(&fresh);
                     workspace_occurrences.observe(&fresh);
+                    let fresh_confirms_run =
+                        fresh.stale || !matches!(fresh.status, SessionStatus::Interrupted);
                     current.set(fresh);
+                    if fresh_confirms_run
+                        && !operations
+                            .pending
+                            .peek()
+                            .contains(operation_id.peek().as_str())
+                        && let Some(state) = operations
+                            .lifecycle
+                            .write()
+                            .get_mut(operation_id.peek().as_str())
+                    {
+                        state.restart = None;
+                    }
                     // The restart epoch admits only reads started after a
                     // Restart finished, so this one describes the restarted
                     // run and its kind replaces the reply's.
@@ -971,7 +1082,7 @@ pub(crate) fn SessionView(
         let base = detail_base.clone();
         let id = detail_id.clone();
         let generation = detail_reads.write().start();
-        let started_at = restart_epoch.peek().to_owned();
+        let started_at = operations.revision(&operation_id.peek());
         let index = poll_sequence.peek().to_owned();
         poll_sequence += 1;
         async move {
@@ -983,7 +1094,7 @@ pub(crate) fn SessionView(
                 // successful-read fence and the restart lifetime. An old
                 // failure must not warn over an answer for the new run.
                 if detail_reads.peek().accept_failure(generation)
-                    && *restart_epoch.peek() == started_at
+                    && operations.revision(&operation_id.peek()) == started_at
                 {
                     let consecutive = (*detail_failures.peek()).saturating_add(1).min(2);
                     detail_failures.set(consecutive);
@@ -1363,96 +1474,46 @@ pub(crate) fn SessionView(
         }
     });
 
-    let restart_base = base.clone();
-    // The detail door, for the refresh a restart owes (see below).
-    let refresh_after_restart = request_detail.clone();
-    // Both plain Restart and the launcher fence detail reads before sending,
-    // then reattach after every POST result. A refusal can detach too.
-    let begin_restart = use_callback(move |()| {
-        restarting.set(true);
-        restart_error.set(None);
-        restart_epoch += 1;
-    });
-    let finish_restart = use_callback(move |outcome: crate::list::RestartOutcome| {
-        if outcome.succeeded {
-            header_refresh.set(true);
-            relaunched.set(true);
-            restart_terminal_kind.set(Some(outcome.agent_terminal));
+    // Requests live in ListView. This keyed view observes only the session's
+    // lifecycle boundaries, so a return during an operation sees its completion.
+    let refresh_after_operation = request_detail.clone();
+    let mut observed_operation = use_signal(|| operations.revision(&operation_id.peek()));
+    use_restart_observation(
+        operations,
+        operation_id,
+        mount_generation,
+        relaunched,
+        restart_terminal_kind,
+    );
+    use_effect(move || {
+        let state = operations
+            .lifecycle
+            .read()
+            .get(operation_id.read().as_str())
+            .copied()
+            .unwrap_or_default();
+        if state.revision == *observed_operation.peek() {
+            return;
         }
-        mount_generation += 1;
-        // Reads begun during the request describe the old run as well.
-        restart_epoch += 1;
-        restarting.set(false);
-        refresh_after_restart(Trigger::Explicit);
+        observed_operation.set(state.revision);
+        detail_reads.write().fence();
+        refresh_after_operation(Trigger::Explicit);
     });
-    let admit_restart = use_callback(move |edit: api::RestartEdit| {
-        let shown = current.read();
-        if let Some(reason) = restart_with_reason(&shown) {
-            return Err(reason);
-        }
-        let same_kind = match (&edit, &shown.launch) {
-            (
-                api::RestartEdit::Agent(selection) | api::RestartEdit::NamedAgent(selection, _),
-                Some(crate::SessionLaunch::Agent {
-                    selection: saved, ..
-                }),
-            ) => selection.harness == saved.harness,
-            (api::RestartEdit::Command(command), Some(crate::SessionLaunch::Command(saved))) => {
-                command.agent == saved.agent && command.resume.is_some()
-            }
-            _ => false,
-        };
-        if !same_kind {
-            return Err("The session's launch kind and agent type cannot be changed here".into());
-        }
-        drop(shown);
-        begin_restart.call(());
-        Ok(())
-    });
-    let restart_bridge = crate::list::RestartBridge {
-        current,
-        before: admit_restart,
-        after: finish_restart,
-    };
     let restart = move |stop_if_running: bool| {
         if restarting() {
             view_claim.set(None);
             return;
         }
-        begin_restart.call(());
-        let base = restart_base.clone();
         let source = current.read().clone();
-        let id = source.id.raw().to_owned();
-        spawn(async move {
-            let pending = PendingLaunch::new(
-                LaunchAction::Restart,
-                source
-                    .host_name
-                    .as_ref()
-                    .map(|name| name.raw().to_owned())
-                    .unwrap_or_else(|| "this host".to_string()),
-                None,
-            );
-            restart_progress.set(Some(pending.clone()));
-            let outcome = restart_session(&base, &id, stop_if_running, None, false).await;
-            restart_progress.set(None);
-            if let Err(error) = &outcome {
-                restart_error.set(Some(if error.deadline_expired {
-                    pending.unknown_outcome(false)
-                } else {
-                    error.text.clone()
-                }));
-            }
-            view_claim.set(None);
-            finish_restart.call(crate::list::RestartOutcome::of(&outcome));
-        });
+        let claim = view_claim.write().take();
+        if let Some(claim) = claim {
+            operations.send(HeaderAction::Restart(source, stop_if_running, claim));
+        }
     };
-    let mut confirm_restart = restart.clone();
-    let mut notice_restart = restart.clone();
+    let mut confirm_restart = restart;
+    let mut notice_restart = restart;
     let mut direct_restart = restart;
 
-    let stop_base = base.clone();
-    let refresh_after_stop = request_detail.clone();
     // Read fences protect both sides of Stop: a read begun before the request
     // or while tabs are closing must not restore that intermediate tab strip.
     // Both consent flags are passed by the answered render; current is read
@@ -1461,77 +1522,35 @@ pub(crate) fn SessionView(
                      refuse_if_tabs_open: bool,
                      refuse_if_agent_running: bool,
                      suspend: bool| {
-        stopping.set(true);
-        stop_error.set(None);
-        detail_reads.write().fence();
-        let base = stop_base.clone();
-        let id = current.peek().id.raw().to_owned();
-        let refresh = refresh_after_stop.clone();
-        spawn(async move {
-            let _claim = claim;
-            let result = if suspend {
-                api::stop_and_suspend(&base, &id, refuse_if_tabs_open, refuse_if_agent_running)
-                    .await
-                    .map(|()| farhelm_proto::SessionStopOutcome::default())
-            } else {
-                api::stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await
-            };
-            match result {
-                Ok(outcome) => {
-                    stop_error.set(outcome.notice.map(|notice| format!("Stop: {notice}")))
-                }
-                Err(error) => stop_error.set(Some(format!("Stop: {error}"))),
-            }
-            detail_reads.write().fence();
-            stopping.set(false);
-            header_refresh.set(true);
-            refresh(Trigger::Explicit);
-        });
+        operations.send(HeaderAction::Stop(
+            current.peek().clone(),
+            refuse_if_tabs_open,
+            refuse_if_agent_running,
+            suspend,
+            claim,
+        ));
     };
-    let mut direct_stop = stop.clone();
-    let mut confirm_stop_suspend = stop.clone();
-    let mut confirm_stop = stop;
+    let direct_stop = stop;
+    let confirm_stop_suspend = stop;
+    let confirm_stop = stop;
 
-    let replace_base = base.clone();
-    let replace_preferences = preferences;
-    // A Replace deletes its source, whose notice the session list shows.
-    let delete_notice = use_context::<crate::list::DeleteNotice>();
-    // The surface owns admission, task cancellation and successful selection;
-    // the controller owns the shared request sequence and captured consent.
+    // The persistent list consumes captured consent and owns the request and
+    // selection decision; this view may disappear before the reply arrives.
     let replace = move |claim: OpGuard,
                         source: Session,
                         guard: crate::DeleteGuard,
                         answered: Option<ReplaceAnswer>| {
-        if replacing() {
-            return;
-        }
-        replacing.set(true);
-        replace_error.set(None);
-        let base = replace_base.clone();
-        let preferences = replace_preferences;
-        let attempt = replace_controller.prepare(source.clone(), guard, answered);
-        spawn(async move {
-            let _claim = claim;
-            match replace_controller.run(&base, attempt).await {
-                ReplaceResult::Replaced(new_session, notice) => {
-                    header_refresh.set(true);
-                    delete_notice.publish(notice);
-                    let new_session = crate::list::with_source_host(*new_session, &source);
-                    crate::list::remember_selection(&base, preferences, new_session.id.raw());
-                    on_replaced.call(new_session);
-                }
-                ReplaceResult::Refused(reason) => replace_error.set(Some(reason)),
-                ReplaceResult::QuestionHandled => {}
-            }
-            replacing.set(false);
-        });
+        operations.send(HeaderAction::Replace(
+            source,
+            guard,
+            answered.map(Box::new),
+            claim,
+        ));
     };
-    let mut confirm_replace = replace.clone();
-    let mut header_confirm_replace = replace.clone();
-    let mut direct_card_replace = replace.clone();
-    let mut direct_header_replace = replace.clone();
-    let mut yolo_confirm_replace = replace.clone();
-    let mut yolo_stop_asking_replace = replace.clone();
+    let confirm_replace = replace;
+    let header_confirm_replace = replace;
+    let direct_card_replace = replace;
+    let direct_header_replace = replace;
 
     // The add-tab control. Unlike `ListView`'s create, navigating away
     // while this is in flight is deliberately NOT locked out: a stranded
@@ -1902,12 +1921,12 @@ pub(crate) fn SessionView(
         );
     });
 
-    // The interrupted card's Replace prompt holds a claim of the shared
-    // operation lock. When the card stops rendering while the view stays up
+    // The interrupted card's Replace prompt holds this session's claim.
+    // When the card stops rendering while the view stays up
     // (another client restarted the session, so it is no longer
     // interrupted), nothing in the card can close the prompt any more, and
-    // its claim would stay held with every write action in the window
-    // disabled. Reconcile it away instead, which drops the claim.
+    // its claim would keep this session's lifecycle actions disabled.
+    // Reconcile it away instead, which drops the claim.
     //
     // `interrupted_card_shown` is the ONE statement of when the card renders:
     // the rsx below draws the card from it too, so the condition that closes
@@ -2163,13 +2182,15 @@ pub(crate) fn SessionView(
     let with_unavailable = with_reason.is_some();
     let with_opening = shown.clone();
     let on_restart_with = EventHandler::new(move |()| {
-        if with_unavailable || lifecycle.busy_now() {
+        if with_unavailable {
             return;
         }
-        prefill_request.set(Some(crate::list::HeaderPrefillRequest::RestartWith(
-            with_opening.clone(),
-            restart_bridge,
-        )));
+        publish_header_prefill(
+            gate,
+            composer_ops,
+            prefill_request,
+            crate::list::HeaderPrefillRequest::RestartWith(with_opening.clone()),
+        );
     });
     let on_replace = EventHandler::new(move |()| {
         if let Some(claim) = lifecycle.claim_guard() {
@@ -2186,13 +2207,14 @@ pub(crate) fn SessionView(
         }
     });
     let on_replace_with = EventHandler::new(move |()| {
-        if lifecycle.busy_now() {
-            return;
-        }
-        cancel_replace_intent();
-        prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(
-            header_replace_session.clone(),
-        )));
+        // ListView retires the prior retry identity only after it admits this
+        // opening; a refused click must not erase an unrelated pending intent.
+        publish_header_prefill(
+            gate,
+            composer_ops,
+            prefill_request,
+            crate::list::HeaderPrefillRequest::ReplaceWith(header_replace_session.clone()),
+        );
     });
     rsx! {
         div { class: "layout", "data-claude-trust-prompt": "{shown.claude_trust_prompt}",
@@ -2305,7 +2327,7 @@ pub(crate) fn SessionView(
                 // way to its progress, the same label the sidebar row shows.
                 // They are hidden rather than unmounted: every action is
                 // already disabled for the duration (the delete is a row
-                // operation, which `PaneGate` refuses claims against), and a
+                // operation, whose session claim excludes another action), and a
                 // failed delete brings the same controls straight back.
                 div { class: if header_deleting { "titlebar-actions deleting" } else { "titlebar-actions" },
                     if header_deleting {
@@ -2323,6 +2345,7 @@ pub(crate) fn SessionView(
                         if let Some(host) = &sandbox_host {
                             crate::sandbox_sessions::Controls {
                                 host: host.clone(), session: shown.clone(), disabled: lifecycle.busy(),
+                                ops: composer_ops,
                                 claim: sandbox_claim, on_done: move |_| header_refresh.set(true),
                             }
                         }
@@ -2348,7 +2371,10 @@ pub(crate) fn SessionView(
                                 }
                             },
                             ActionIcon { glyph: ActionGlyph::Stop }
-                            "Stop"
+                            if stopping() {
+                                span { class: "delete-spinner", "aria-hidden": "true" }
+                                "Stopping…"
+                            } else { "Stop" }
                         }
                         if let Some(shown_stop) = header_stop_shown.clone() {
                             div { id: "stop-confirm-panel", class: "header-confirm header-stop-confirm",
@@ -2378,7 +2404,7 @@ pub(crate) fn SessionView(
                                     }, "Stop"
                                 }
                                 if sandbox.is_some() {
-                                    button { r#type: "button", class: "btn btn-danger", disabled: stopping() || sandbox_frozen,
+                                    button { r#type: "button", class: "btn btn-danger", disabled: stopping() || sandbox_frozen || composer_ops.busy(),
                                         "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole sandbox",
                                         onkeydown: crate::guard_confirmation_enter,
                                         onclick: {
@@ -2386,8 +2412,12 @@ pub(crate) fn SessionView(
                                             let no_tabs = tabs.is_empty();
                                             let ended = shown.status.has_ended();
                                             move |_| {
+                                                let mut host_ops = composer_ops;
+                                                let Some(host_guard) = host_ops.claim_guard() else {
+                                                    return;
+                                                };
                                                 if let Some(claim) = confirming_stop.take(&token) {
-                                                    confirm_stop_suspend(claim, no_tabs, ended, true);
+                                                    confirm_stop_suspend(claim.with_host_guard(host_guard), no_tabs, ended, true);
                                                 }
                                             }
                                         }, "Stop and suspend" }
@@ -2598,8 +2628,8 @@ pub(crate) fn SessionView(
                         r#type: "button",
                         class: "btn btn-neutral header-clone",
                         "data-tooltip": "Clone: open the new-session form with these settings; this session keeps running",
-                        disabled: lifecycle.busy(),
-                        onclick: move |_| prefill_request.set(Some(crate::list::HeaderPrefillRequest::Clone(header_session.clone()))),
+                        disabled: lifecycle.busy() || composer_ops.busy(),
+                        onclick: move |_| publish_header_prefill(gate, composer_ops, prefill_request, crate::list::HeaderPrefillRequest::Clone(header_session.clone())),
                         ActionIcon { glyph: ActionGlyph::Clone }
                         "Clone"
                     }
@@ -2629,12 +2659,7 @@ pub(crate) fn SessionView(
                                 move |_| {
                                     if let Some(claim) = lifecycle.claim_guard() {
                                         if skip_session_confirmations && sandbox.is_none() {
-                                            drop(claim);
-                                            header_delete.set(Some(crate::list::HeaderDeleteRequest {
-                                                sandbox,
-                                                id: id.clone(),
-                                                guard: header_delete_guard,
-                                            }));
+                                            operations.send(HeaderAction::Delete(id.clone(), header_delete_guard, sandbox, claim));
                                         } else {
                                             confirming_header_delete.open((), claim);
                                         }
@@ -2678,12 +2703,7 @@ pub(crate) fn SessionView(
                                             let Some(claim) = confirming_header_delete.take(&shown_delete) else {
                                                 return;
                                             };
-                                            drop(claim);
-                                            header_delete.set(Some(crate::list::HeaderDeleteRequest {
-                                                sandbox,
-                                                id: id.clone(),
-                                                guard: header_delete_guard,
-                                            }));
+                                            operations.send(HeaderAction::Delete(id.clone(), header_delete_guard, sandbox, claim));
                                         }
                                     },
                                     if sandbox.is_some() { "Delete session and sandbox" } else { "Delete" }
@@ -2711,7 +2731,7 @@ pub(crate) fn SessionView(
                     if let Some(pending) = restart_progress() {
                         LaunchProgress { pending }
                     }
-                    if let Some(pending) = replace_controller.progress(shown.id.raw()) {
+                    if let Some(pending) = replace_progress.0.read().get(shown.id.raw()).cloned() {
                         LaunchProgress { pending }
                     }
                 }
@@ -2742,62 +2762,14 @@ pub(crate) fn SessionView(
                     parts: vec![DetailPart::peer(err)],
                 }
             }
-            if let Some(question) = replace_controller.question() {
-                crate::yolo_confirm::YoloConfirmation {
-                    ask: question.key().ask.clone(),
-                    busy: replacing(),
-                    error: replace_controller.error(),
-                    confirm_submits: false,
-                    // Both answers continue the Replace the user confirmed,
-                    // with the snapshot and nothing-alive answer that prompt
-                    // carried, not a fresh read of the session, and only
-                    // while the opening this render drew is still the open
-                    // one (`answer_session`).
-                    on_confirm: {
-                        let question = question.clone();
-                        move |_| {
-                            if !replace_controller.is_open(&question) {
-                                return;
-                            }
-                            if let Some(claim) = lifecycle.claim_guard()
-                                && let Some(answer) = replace_controller.answer_session(&question, false)
-                            {
-                                let pending = answer.pending.clone();
-                                yolo_confirm_replace(claim, pending.source, pending.guard, Some(answer));
-                            }
-                        }
-                    },
-                    // Keep the mounted question through the host-setting write;
-                    // the controller hides it on success or keeps its reason.
-                    on_confirm_and_stop_asking: {
-                        let question = question.clone();
-                        move |_| {
-                            if !replace_controller.is_open(&question) {
-                                return;
-                            }
-                            if let Some(claim) = lifecycle.claim_guard()
-                                && let Some(answer) = replace_controller.answer_session(&question, true)
-                            {
-                                let pending = answer.pending.clone();
-                                yolo_stop_asking_replace(claim, pending.source, pending.guard, Some(answer));
-                            }
-                        }
-                    },
-                    on_cancel: move |_| {
-                        // A permanent answer keeps this question mounted through
-                        // the host save. Refuse a Cancel queued before the busy
-                        // render, or a failed save would have nowhere to show why.
-                        if *replacing.peek() {
-                            return;
-                        }
-                        replace_controller.cancel_question(&question);
-                    },
-                }
+            if let Some(err) = other_action_error() {
+                PeerLine { class: "session-action-error".to_string(), parts: vec![DetailPart::peer(err)] }
             }
+
             if let Some(err) = replace_error.read().clone() {
                 PeerLine {
                     class: "replace-error".to_string(),
-                    parts: vec![DetailPart::text("Replace: "), DetailPart::peer(err)],
+                    parts: vec![DetailPart::peer(err)],
                 }
             }
             // Worded to state the FACT (the helm stopped listing this
@@ -2873,7 +2845,7 @@ pub(crate) fn SessionView(
                     if let Some(pending) = restart_progress() {
                         LaunchProgress { pending }
                     }
-                    if let Some(pending) = replace_controller.progress(shown.id.raw()) {
+                    if let Some(pending) = replace_progress.0.read().get(shown.id.raw()).cloned() {
                         LaunchProgress { pending }
                     }
                     if restart_available {
@@ -2902,8 +2874,7 @@ pub(crate) fn SessionView(
                             "data-tooltip": "Replace with: edit the settings, then swap this session for a new one",
                             disabled: lifecycle.busy(),
                             onclick: move |_| {
-                                cancel_replace_intent();
-                                prefill_request.set(Some(crate::list::HeaderPrefillRequest::ReplaceWith(card_replace_with_session.clone())));
+                                publish_header_prefill(gate, composer_ops, prefill_request, crate::list::HeaderPrefillRequest::ReplaceWith(card_replace_with_session.clone()));
                             },
                             "Replace with"
                         }
@@ -3958,6 +3929,149 @@ fn TerminalTextSize() -> Element {
 mod tests {
     use super::*;
     use crate::LaunchHarness;
+
+    /// A detail commit can run before queued observer effects. Consuming its
+    /// temporary Restart payload must not erase the reattachment owed by that
+    /// completion, whether the request succeeded or detached before refusing.
+    #[farhelm_testtrace::test]
+    fn a_consumed_restart_reply_still_remounts_the_agent_once() {
+        use std::cell::Cell;
+        thread_local! {
+            static HANDLES: Cell<Option<(SessionOps, Signal<u32>)>> = const { Cell::new(None) };
+        }
+        fn app() -> Element {
+            let operations = use_hook(SessionOps::new);
+            let id = use_signal(|| "source".to_string());
+            let generation = use_signal(|| 0u32);
+            let relaunched = use_signal(|| false);
+            let kind = use_signal(|| None);
+            use_restart_observation(operations, id, generation, relaunched, kind);
+            HANDLES.with(|slot| slot.set(Some((operations, generation))));
+            rsx! {}
+        }
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        let (mut operations, generation) = HANDLES.with(Cell::get).unwrap();
+        for (index, succeeded) in [false, true].into_iter().enumerate() {
+            dom.in_runtime(|| {
+                operations.boundary("source", None);
+                operations.boundary(
+                    "source",
+                    Some(crate::list::RestartOutcome {
+                        succeeded,
+                        agent_terminal: None,
+                    }),
+                );
+                // Model the admitted post-completion detail commit before any
+                // observer gets to run, rather than relying on network timing.
+                operations
+                    .lifecycle
+                    .write()
+                    .get_mut("source")
+                    .unwrap()
+                    .restart = None;
+                assert_eq!(
+                    *generation.peek(),
+                    index as u32,
+                    "premise: observer has not run"
+                );
+            });
+            dom.render_immediate(&mut dioxus::core::NoOpMutations);
+            assert_eq!(*generation.peek(), index as u32 + 1);
+            dom.mark_dirty(dioxus::core::ScopeId::APP);
+            dom.render_immediate(&mut dioxus::core::NoOpMutations);
+            assert_eq!(
+                *generation.peek(),
+                index as u32 + 1,
+                "one remount per completion"
+            );
+        }
+    }
+
+    /// A queued Clone must refuse both its busy source and a busy composer.
+    /// Releasing either claim before the list reads its mailbox must not revive
+    /// the old event; a fresh click after release remains usable.
+    #[farhelm_testtrace::test]
+    fn header_clone_refuses_at_delivery_before_its_mailbox_is_consumed() {
+        use std::cell::Cell;
+        type Handles = (
+            SessionGate,
+            crate::ops::OpLock,
+            Signal<Option<crate::list::HeaderPrefillRequest>>,
+        );
+        thread_local! { static HANDLES: Cell<Option<Handles>> = const { Cell::new(None) }; }
+        fn app() -> Element {
+            let operations = use_hook(SessionOps::new);
+            let composer_ops = crate::ops::use_op_lock();
+            let id = use_signal(|| live_session().id.raw().to_owned());
+            let request = use_signal(|| None);
+            HANDLES.with(|slot| {
+                slot.set(Some((
+                    SessionGate { id, operations },
+                    composer_ops,
+                    request,
+                )))
+            });
+            rsx! {}
+        }
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let (gate, mut composer_ops, mut request) = HANDLES.with(Cell::get).unwrap();
+        dom.in_runtime(|| {
+            let claim = gate.operations.claim(&gate.id.peek()).expect("idle source");
+            publish_header_prefill(
+                gate,
+                composer_ops,
+                request,
+                crate::list::HeaderPrefillRequest::Clone(live_session()),
+            );
+            drop(claim);
+            assert!(
+                request.peek().is_none(),
+                "the busy click published nothing to consume later"
+            );
+            publish_header_prefill(
+                gate,
+                composer_ops,
+                request,
+                crate::list::HeaderPrefillRequest::Clone(live_session()),
+            );
+            assert!(
+                request.peek().is_some(),
+                "a new click after release is admitted"
+            );
+            request.set(None);
+            let launch = composer_ops
+                .claim_guard()
+                .expect("the launch token is idle");
+            assert!(
+                !gate.busy_now(),
+                "the source remains independent of the busy composer"
+            );
+            publish_header_prefill(
+                gate,
+                composer_ops,
+                request,
+                crate::list::HeaderPrefillRequest::Clone(live_session()),
+            );
+            drop(launch);
+            assert!(
+                request.peek().is_none(),
+                "release cannot revive a globally refused opening"
+            );
+            publish_header_prefill(
+                gate,
+                composer_ops,
+                request,
+                crate::list::HeaderPrefillRequest::Clone(live_session()),
+            );
+            assert!(
+                request.peek().is_some(),
+                "a new click after the launch finishes is admitted"
+            );
+        });
+    }
 
     /// Why this matters: the header's command tooltip is the only full view
     /// of a long command, and its copy button is how people take it to a
@@ -5228,7 +5342,7 @@ mod tests {
     fn a_stale_restart_answer_neither_confirms_nor_cancels_a_reopened_prompt() {
         use std::cell::Cell;
         type Handles = (
-            crate::ops::PaneGate,
+            crate::session_ops::SessionGate,
             ConfirmSlot<(), OpGuard>,
             Signal<Option<OpGuard>>,
         );
@@ -5239,13 +5353,13 @@ mod tests {
         // The pieces `SessionView` wires together for this prompt: the
         // shared gate, the prompt's slot and the view's Restart claim.
         fn app() -> Element {
-            let lock = crate::ops::use_op_lock();
-            let row_ops = use_signal(|| 0_u32);
+            let operations = use_hook(crate::session_ops::SessionOps::new);
+            let id = use_signal(|| "session".to_string());
             let slot = use_confirm_slot::<(), OpGuard>();
             let view_claim = use_signal(|| None::<OpGuard>);
             HANDLES.with(|cell| {
                 cell.set(Some((
-                    crate::ops::PaneGate::new(lock, row_ops),
+                    crate::session_ops::SessionGate { id, operations },
                     slot,
                     view_claim,
                 )));

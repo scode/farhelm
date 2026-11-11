@@ -1,8 +1,9 @@
 //! Batch lifecycle work keeps the ordinary row admission and completion owners.
 //!
-//! Admission happens before these futures are polled. Keeping queued rows admitted
-//! holds navigation and automatic selection until all hosts finish, while polling
-//! one core at a time per host avoids the supervisor's management admission limit.
+//! Admission happens before these futures are polled. Queued rows keep their
+//! source claims while navigation and other sessions remain usable. Admitted
+//! Deletes defer automatic selection until the batch settles; Stop does not.
+//! Polling one core at a time per host avoids the supervisor's management limit.
 //! Lifecycle consent is a separate snapshot: reconciliation can shrink its identities
 //! and replace its wording, but an answer can never discover additional targets.
 
@@ -85,8 +86,8 @@ pub(super) fn admit_batch(
 
 /// Drive all hosts together, but poll only one admitted row core on each host.
 ///
-/// All queued futures already own row claims. Finishing a fast host cannot unlock
-/// navigation while another host still has a held request or queued rows. Errors
+/// All queued futures already own their source claims. Finishing a fast host
+/// cannot release another host's sending or queued rows. Navigation stays usable. Errors
 /// are handled by each core, so one refusal never prevents the next row running.
 pub(super) async fn run_paced(work: Vec<(Option<HostId>, RowWork)>) {
     let mut hosts: Vec<(Option<HostId>, Vec<RowWork>)> = Vec::new();
@@ -251,7 +252,8 @@ pub(super) fn admitted_targets(
 /// Both lifecycle verbs reuse this styled modal, and every close path addresses
 /// that same installation. Separate confirmation slots keep the verbs distinct.
 pub(super) const DIALOG: &str = ".bulk-delete-dialog";
-/// The count remains focusable after confirmation disables every action button.
+/// The count remains a stable focus destination when confirmation gives way to
+/// a pending batch; navigation and unrelated toolbar actions remain usable.
 pub(super) const ACCEPTED_FOCUS: &str = "(document.querySelector('.marked-count') ?? document.querySelector('.sort-title'))?.focus({preventScroll:true});";
 /// Cancellation retains marks and can return to their ordinary enabled action.
 pub(super) const CANCEL_FOCUS: &str = "(document.querySelector('.marked-menu-toggle') ?? document.querySelector('.sort-title'))?.focus({preventScroll:true});";
@@ -422,15 +424,15 @@ mod tests {
     }
     use crate::list::row::row_specimen;
     use crate::list::view::{begin_row_operation, end_row_operation};
-    use crate::ops::{ConfirmSlot, OpLock, PaneGate, use_confirm_slot, use_op_lock};
+    use crate::ops::{ConfirmSlot, use_confirm_slot};
+    use crate::session_ops::SessionOps;
 
-    /// Real hooks let the pacing tests inspect the same live row count that
-    /// excludes cross-pane operations and automatic selection in ListView.
+    /// Real hooks expose the same per-session claims as ListView, including
+    /// accepted requests still queued behind another request on their host.
     #[derive(Clone, Copy)]
     struct State {
-        ops: OpLock,
+        operations: SessionOps,
         pending: Signal<HashSet<String>>,
-        count: Signal<u32>,
         question: ConfirmSlot<Vec<DeleteSnapshot>>,
     }
 
@@ -440,10 +442,10 @@ mod tests {
 
     /// Keep every handle alive in a mounted list-like owner for a whole test.
     fn owner() -> Element {
+        let operations = use_hook(SessionOps::new);
         let state = State {
-            ops: use_op_lock(),
-            pending: use_signal(HashSet::new),
-            count: use_signal(|| 0),
+            operations,
+            pending: operations.pending,
             question: use_confirm_slot(),
         };
         STATE.with(|cell| cell.set(Some(state)));
@@ -472,14 +474,14 @@ mod tests {
 
     /// A held first request on host 1 must not start host 1's second request,
     /// while host 2 must start before host 1 is released. Queued claims keep the
-    /// actual pane gate locked when either host finishes earlier than the other.
+    /// admitted rows claimed when either host finishes earlier than the other.
     #[farhelm_testtrace::test]
     fn admission_is_upfront_and_requests_are_sequential_per_host_parallel_across_hosts() {
         let mut dom = VirtualDom::new(owner);
         dom.rebuild_in_place();
         dom.in_runtime(|| {
             let state = STATE.with(|cell| cell.get().unwrap());
-            let mut gate = PaneGate::new(state.ops, state.count);
+            let operations = state.operations;
             let rows: Vec<_> = (1..=9)
                 .map(|n| session(&format!("a{n}"), 1))
                 .chain([session("b1", 2)])
@@ -489,31 +491,25 @@ mod tests {
             let work = admit_batch(
                 snapshots(&rows),
                 |id, _guard, _refuse_tabs, _refuse_agent| {
-                    assert!(begin_row_operation(
-                        state.ops,
-                        state.pending,
-                        state.count,
-                        false,
-                        &id
-                    ));
+                    assert!(begin_row_operation(state.operations, false, &id));
                     let (tx, rx) = oneshot::channel();
                     releases.push(tx);
                     let dispatched = dispatched.clone();
                     Some(Box::pin(async move {
                         dispatched.borrow_mut().push(id.clone());
                         rx.await.expect("the test owns this request's completion");
-                        end_row_operation(state.pending, state.count, &id);
+                        end_row_operation(state.operations, &id);
                     }))
                 },
                 |id| panic!("unexpected refusal for {id}"),
             );
             assert_eq!(
-                *state.count.peek(),
+                state.pending.peek().len(),
                 10,
                 "all rows hold claims before first poll"
             );
             assert!(dispatched.borrow().is_empty(), "admission sends nothing");
-            assert!(gate.claim_guard().is_none());
+            assert!(operations.claim("a1").is_none());
             let mut run = Box::pin(run_paced(work));
             assert!(poll(run.as_mut()).is_pending());
             assert_eq!(*dispatched.borrow(), ["a1", "b1"]);
@@ -522,29 +518,37 @@ mod tests {
             // claims, although only its first request has been dispatched.
             releases.pop().unwrap().send(()).unwrap();
             assert!(poll(run.as_mut()).is_pending());
-            assert_eq!(*state.count.peek(), 9);
-            assert!(gate.busy_now());
-            assert!(gate.claim_guard().is_none());
+            assert_eq!(state.pending.peek().len(), 9);
+            assert!(!operations.pending.peek().is_empty());
+            assert!(operations.claim("a1").is_none());
             for finished in 1..=9 {
                 releases.remove(0).send(()).unwrap();
                 let result = poll(run.as_mut());
-                assert_eq!(*state.count.peek(), 9 - finished, "no unlocked request gap");
+                assert_eq!(
+                    state.pending.peek().len(),
+                    9 - finished,
+                    "no unlocked request gap"
+                );
                 if finished < 9 {
                     assert!(result.is_pending());
-                    assert!(gate.busy_now());
-                    assert!(gate.claim_guard().is_none());
+                    assert!(!operations.pending.peek().is_empty());
+                    assert!(operations.claim(&format!("a{}", finished + 1)).is_none());
+                    assert!(
+                        operations.claim("independent").is_some(),
+                        "another session remains usable"
+                    );
                     assert_eq!(
                         dispatched.borrow().last().unwrap(),
                         &format!("a{}", finished + 1)
                     );
-                    assert_eq!(dispatched.borrow().len(), finished as usize + 2);
+                    assert_eq!(dispatched.borrow().len(), finished + 2);
                 } else {
                     assert!(result.is_ready());
                 }
             }
-            assert_eq!(*state.count.peek(), 0);
+            assert_eq!(state.pending.peek().len(), 0);
             assert!(state.pending.peek().is_empty());
-            assert!(gate.claim_guard().is_some());
+            assert!(operations.claim("a1").is_some());
         });
     }
 
@@ -570,7 +574,7 @@ mod tests {
                 snapshots(&rows),
                 |id, _, _, _| {
                     let asking = id == "question";
-                    if !begin_row_operation(state.ops, state.pending, state.count, asking, &id) {
+                    if !begin_row_operation(state.operations, asking, &id) {
                         return None;
                     }
                     let reads = if id == "first" { held.take() } else { None };
@@ -581,7 +585,7 @@ mod tests {
                             request.await.unwrap();
                             post_request_read.await.unwrap();
                         }
-                        end_row_operation(state.pending, state.count, &id);
+                        end_row_operation(state.operations, &id);
                     }))
                 },
                 |id| {
@@ -607,11 +611,11 @@ mod tests {
                 ["first"],
                 "a reply alone is not core completion"
             );
-            assert_eq!(*state.count.peek(), 2);
+            assert_eq!(state.pending.peek().len(), 2);
             read_done.send(()).unwrap();
             assert!(poll(run.as_mut()).is_ready());
             assert_eq!(*starts.borrow(), ["first", "next"]);
-            assert_eq!(*state.count.peek(), 0);
+            assert_eq!(state.pending.peek().len(), 0);
             assert_eq!(
                 LifecycleAction::Delete.not_started(),
                 "Delete: not started, another operation is in progress; try again"

@@ -165,6 +165,25 @@ pub(super) fn clears_on_escape(event: &KeyboardEvent) -> bool {
 /// mount and yields if another control has already received focus meanwhile.
 pub(super) fn return_header_focus() {
     let destination = crate::modal_dialog::FocusTarget::new(".sort-title", None, false).script();
+    return_header_focus_with_script(&destination);
+}
+
+/// Finish a batch's disappearing-toolbar return without reclaiming newer focus.
+///
+/// The batch settles independently of the toolbar. Its completion keeps the
+/// explicit clear path's captured-source and post-removal timing, but the final
+/// asynchronous handoff uses the shared current-owner guard.
+pub(super) fn return_header_focus_after_async() {
+    let destination =
+        crate::modal_dialog::FocusTarget::new(".sort-title", None, false).async_script(None);
+    return_header_focus_with_script(&destination);
+}
+
+/// Capture toolbar ownership before the caller removes its marked projection.
+///
+/// Both clear paths must request this before clearing marks: after rendering,
+/// the removed source can no longer establish whether a return was owed.
+fn return_header_focus_with_script(destination: &str) {
     document::eval(&format!(
         r#"(() => {{
         const source = document.activeElement;
@@ -190,6 +209,9 @@ pub(super) fn MarkedBar(
     on_action: EventHandler<(MetadataAction, Vec<Session>)>,
     on_lifecycle: EventHandler<(LifecycleAction, Vec<Session>)>,
     on_clear: EventHandler<()>,
+    /// A fresh user opening owns this marking interaction even with unchanged
+    /// targets. An older batch must not unmount its menu during completion.
+    on_open: EventHandler<()>,
 ) -> Element {
     let mut open = use_signal(|| false);
     let mut opened_epoch = use_signal(|| *layout_epoch.peek());
@@ -281,6 +303,7 @@ pub(super) fn MarkedBar(
         });
     };
     let mut begin_open = move |next_intent| {
+        on_open.call(());
         generation += 1;
         placement.set(PanelPlacement::Unmeasured);
         handles.write().clear();
@@ -307,8 +330,8 @@ pub(super) fn MarkedBar(
                     on_clear.call(());
                 }
             },
-            // Accepted lifecycle work disables the buttons. This surviving,
-            // nonsequential target receives the modal's confirming handback.
+            // This surviving, nonsequential target receives the modal's
+            // confirming handback while the admitted work runs independently.
             span { class: "marked-count", tabindex: "-1", "{targets.len()} marked" }
             button {
                 r#type: "button", class: "btn btn-neutral marked-stop", disabled,
@@ -615,7 +638,7 @@ mod tests {
                 MarkedBar {
                     targets: vec![row_specimen("one"), row_specimen("two")],
                     disabled: false, layout_epoch: epoch,
-                    on_action: |_| {}, on_lifecycle: |_| {}, on_clear: |_| {},
+                    on_action: |_| {}, on_lifecycle: |_| {}, on_clear: |_| {}, on_open: |_| {},
                 }
             }
         }
@@ -633,20 +656,20 @@ mod tests {
         );
     }
 
-    /// Confirming Delete locks every action before the dialog's focus handback.
-    /// Its count must remain a visible programmatic target outside sequential Tab
-    /// order; focusing one of the newly disabled buttons would lose that handback.
+    /// The count remains a programmatic target even in a disabled toolbar.
+    /// Dialog handback must not rely on an action being enabled, and must not
+    /// add the count to the ordinary sequential Tab order.
     #[farhelm_testtrace::test]
     fn locked_toolbar_keeps_a_programmatic_count_target() {
         use dioxus::core::{AttributeValue, DynamicNode, ScopeId, TemplateAttribute, TemplateNode};
 
-        /// Mount the toolbar in the same locked state as an accepted batch.
+        /// Exercise the component's disabled presentation without claiming a batch is pending.
         fn app() -> Element {
             use_context_provider(MovementOwner::default);
             let epoch = use_signal(|| 0);
             rsx! { MarkedBar {
                 targets: vec![row_specimen("pending")], disabled: true,
-                layout_epoch: epoch, on_action: |_| {}, on_lifecycle: |_| {}, on_clear: |_| {},
+                layout_epoch: epoch, on_action: |_| {}, on_lifecycle: |_| {}, on_clear: |_| {}, on_open: |_| {},
             } }
         }
 

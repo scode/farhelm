@@ -1966,12 +1966,10 @@ test("create dialog surfaces a precondition failure, preserves the form, and cre
 // be disabled for the WHOLE round trip, not just synchronously after the
 // click handler returns. A normal create is too fast to observe that
 // window reliably, so this holds the POST until the assertions finish.
-// Only POST is held; the list's reads keep flowing. Also covers the two
-// other controls the shared submission guard locks: the "new session" toggle
-// (which would otherwise unmount the form mid-POST) and every row's open
-// button (which would change selection while the create is about to
-// reconcile it). See `guarded_open` in list/view.rs for the shared token's
-// role even though the sidebar itself stays mounted.
+// Only POST is held; the list's reads keep flowing. Also covers the
+// other control the submission guard locks: the "new session" toggle,
+// which would otherwise unmount the form mid-POST. Row Open remains enabled;
+// the composer's modal isolation still governs pointer access in this phase.
 test("create dialog disables the submit control while a create is in flight", async ({
   page,
   request,
@@ -2018,13 +2016,11 @@ test("create dialog disables the submit control while a create is in flight", as
     // response with nothing left to act on it (see CreateSessionForm's
     // lifecycle contract in list/create_form.rs).
     await expect(page.locator(".new-session-button")).toBeDisabled();
-    // And the row-open guard from the same design: opening the shared
-    // session right now would replace the keyed session view and change
-    // selection while the create is about to reconcile it. The sidebar
-    // remains mounted; the shared operation token guards this transition.
+    // Row navigation does not consult the submission token. This checks the
+    // control's enabled state; modal isolation still prevents a pointer click.
     await expect(
       sharedSessionRow(page).locator(".session-row-open"),
-    ).toBeDisabled();
+    ).toBeEnabled();
 
     // Let the held request proceed: success navigates into the new
     // session's terminal, same as the multi-session flow above.
@@ -2092,14 +2088,18 @@ test("alive delete opens an inline confirming state with the is-still-running wo
     // the prompt — `SessionRow` swaps them out entirely.
     await expect(row.locator(".session-row-stop")).toHaveCount(0);
     await expect(row.locator(".session-row-delete")).toHaveCount(0);
-    // The open button stays present and visible but disabled (cancel is
-    // the only way back to normal, not an implicit click on open — see
-    // `SessionRow`'s doc). The confirm prompt lives in the floating
-    // actions panel now, so it no longer competes with the open button
-    // for the row's space — the MT-8 overflow that once forced the
-    // button to be hidden outright cannot recur by construction.
-    await expect(row.locator(".session-row-open")).toBeDisabled();
+    // Open remains available. Its pointer press is outside the inline question,
+    // so the ordinary outside-click policy safely cancels without dispatching.
+    await expect(row.locator(".session-row-open")).toBeEnabled();
     await expect(row.locator(".session-row-open")).toBeVisible();
+    await row.locator(".session-row-open").click();
+    await expect(row).toHaveAttribute("data-session-selected", "true");
+    await expect(row.locator(".confirm-consequence")).toHaveCount(0);
+    expect(deleteRequests).toBe(0);
+    // Reopen a fresh question so the explicit Cancel path remains covered too.
+    await openRowMenu(row);
+    await row.locator(".session-row-delete").click();
+    await expect(row.locator(".confirm-consequence")).toHaveText("Still running — deleting kills the agent:");
     expect(deleteRequests).toBe(0);
 
     // Cancel: the row returns to normal, with no DELETE ever sent and the
@@ -3291,16 +3291,10 @@ test("a failed action's error is keyed to its own session, not shared across row
   }
 });
 
-// The per-session in-flight guard (`pending` in lib.rs's `ListView`, and
-// the GLOBAL `nav_locked` derived from it — see that flag's own docs):
-// while session A has a stop or delete running, A's own stop, delete, AND
-// open buttons must all be disabled (open via the global nav lock, since
-// opening ANY row would unmount `ListView` and cancel A's in-flight op
-// just the same), while an unrelated session B's stop and delete stay
-// perfectly usable (that half of the guard IS per-session) — and B's OWN
-// open button is disabled too, which is the interesting, easy-to-miss
-// half of this: the nav lock does not care WHICH session is busy.
-test("stop's in-flight guard disables this row's stop, delete, and open, while another row's stop and delete stay usable", async ({
+/** A pending Stop excludes a second lifecycle action only on its own session.
+ * Opening either row must remain possible, and switching away must not cancel
+ * the list-owned request or release its source session's claim. */
+test("stop's in-flight guard keeps navigation and another row's actions usable", async ({
   page,
   request,
 }) => {
@@ -3376,18 +3370,21 @@ test("stop's in-flight guard disables this row's stop, delete, and open, while a
     // must not replace the existing per-session guard.
     await expect(rowA.getByRole("menu")).toHaveCount(0);
     await openRowMenu(rowA);
-    // While the delayed stop is in flight: A's own controls are locked...
+    // The operation claim survives opening its own pending session.
     await expect(rowA.locator(".session-row-stop")).toBeDisabled();
     await expect(rowA.locator(".session-row-delete")).toBeDisabled();
-    await expect(rowA.locator(".session-row-open")).toBeDisabled();
-    // ...B's stop/delete (per-session) are unaffected — switching the
-    // one-at-a-time menu slot to B's panel is what makes them visible...
+    await expect(rowA.locator(".session-row-open")).toBeEnabled();
+    await rowA.locator(".session-row-open").click();
+    await expect(rowA).toHaveAttribute("data-session-selected", "true");
+    await expect(page.locator(".session-topbar")).toContainText("Stopping…");
+    // B stays usable while A's actual supervisor request is still held.
+    await rowB.locator(".session-row-open").click();
+    await expect(rowB).toHaveAttribute("data-session-selected", "true");
     await openRowMenu(rowB);
     await expect(rowB.locator(".session-row-stop")).toBeEnabled();
     await expect(rowB.locator(".session-row-delete")).toBeEnabled();
-    // ...but B's open is ALSO disabled — the nav lock is global, not
-    // scoped to whichever session happens to be busy.
-    await expect(rowB.locator(".session-row-open")).toBeDisabled();
+    await expect(rowB.locator(".session-row-open")).toBeEnabled();
+    expect(stopRequests).toBe(1);
 
     releaseStop();
     await expect

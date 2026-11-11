@@ -1015,10 +1015,27 @@ pub(crate) fn forget_menu_focus<A: Copy, Id: 'static, const N: usize>(
 /// cannot run this leaves the keyboard experience unimproved rather than
 /// losing a safety default (see this section's own note).
 pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: &str) {
+    document::eval(&menu_toggle_script(id_attr, id_value, toggle_selector));
+}
+
+/// Recover a removed session menu without claiming another control's focus.
+///
+/// A reply-driven row render may remove its flyout. Its old focus bookkeeping
+/// is not authority over a newer menu, so only document focus is admitted here.
+/// Explicit user handoffs retain `focus_menu_toggle`'s ordinary policy.
+pub(crate) fn focus_menu_toggle_after_async(id_attr: &str, id_value: &str, toggle_selector: &str) {
+    let focus = menu_toggle_script(id_attr, id_value, toggle_selector);
+    document::eval(&crate::modal_dialog::async_focus_script(None, &focus));
+}
+
+/// Resolve opaque menu identities as data, preserving the original owner checks.
+/// Both explicit and asynchronous returns use this exact lookup; neither turns
+/// a peer-supplied row id into a CSS selector.
+fn menu_toggle_script(id_attr: &str, id_value: &str, toggle_selector: &str) -> String {
     let id_js = serde_json::to_string(id_value).expect("a string is serializable");
     let attr_js = serde_json::to_string(id_attr).expect("a string is serializable");
     let toggle_js = serde_json::to_string(toggle_selector).expect("a string is serializable");
-    document::eval(&format!(
+    format!(
         r#"(() => {{
             const wanted = {id_js};
             const attrName = {attr_js};
@@ -1041,7 +1058,7 @@ pub(crate) fn focus_menu_toggle(id_attr: &str, id_value: &str, toggle_selector: 
                 }}
             }}
         }})();"#
-    ));
+    )
 }
 
 // ===== Outside-click dismissal, shared by both rows' menus ============

@@ -4,10 +4,12 @@
  * vendor provides a dialable new sandbox. Backend tests cover that task. */
 import { expect, test } from "./helpers/evidence";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { cleanupSession, createSession, openHostsPanel, openRowMenu, patchPreferences, pinAutoSelect, readPreferences, stubFeed } from "./helpers/fleet";
+import { cleanupSession, createSession, localHostId, openHostsPanel, openRowMenu, patchPreferences, pinAutoSelect, readPreferences, stubFeed } from "./helpers/fleet";
 import { drainedRoute } from "./helpers/drained-route";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
-import { answerYolo } from "./helpers/term";
+import { answerYolo, waitForTermText } from "./helpers/term";
+import { routeGate } from "./helpers/route-gate";
+import { waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 /** Every controlled response retains the serving build stamp. Owned remote
  * identity and session transport stay real; only its presentation is replaced. */
@@ -307,13 +309,96 @@ test("Resume restores owned controls and Stop and suspend keeps its host-wide qu
     expect(requests).toEqual([]);
     await question.getByRole("button", { name: "Stop and suspend", exact: true }).click();
     await expect.poll(() => requests.length).toBe(1);
-    await expect(page.locator(".sandbox-session-controls").getByRole("alert")).toContainText("combined action fixture refused");
+    // Combined Stop failures use the persistent lifecycle result, visible on
+    // both the source row and its selected header rather than local controls.
+    await expect(row.locator(".action-error").first()).toContainText("combined action fixture refused");
+    await expect(page.locator(".stop-error")).toContainText("combined action fixture refused");
+    expect(requests).toHaveLength(1);
     expect(fixture.calls).toEqual(["resume"]);
   } finally {
     await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
       ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`resume route ${index}`, stop]),
       ["session", () => cleanupSession(request, session.id)],
       ["preferences", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+    ]);
+  }
+});
+
+/** Resume is a session-owned action even though it calls the host endpoint.
+ * Hold that fixture endpoint across a view switch, then apply its existing
+ * connected transition. Delete is normally allowed while suspended, so its
+ * refusal during the wait proves the operation claim rather than frozen state. */
+test("an owned session's pending Resume survives switching and excludes its competing actions", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request);
+  const held = routeGate();
+  const owned: string[] = [];
+  let resumeRequests = 0;
+  let deleteRequests = 0;
+  try {
+    const local = await localHostId(request);
+    expect(local, "the independent session must not share the owned sandbox host").not.toBe(fixture.remote.id);
+    const source = await createSession(request, { title: `owned-resume-switch-${Date.now()}`, host: fixture.remote.id });
+    owned.push(source.id);
+    const other = await createSession(request, { title: `owned-resume-independent-${Date.now()}`, host: local });
+    owned.push(other.id);
+    // This newest route only holds admission. Falling through after release
+    // uses ownedHost's existing success, phase change and feed notification.
+    fixture.stops.push(await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async (route) => {
+      expect(route.request().method()).toBe("POST");
+      resumeRequests++;
+      await held.wait();
+      await route.fallback();
+    }));
+    fixture.stops.push(await drainedRoute(page, `**/api/sessions/${encodeURIComponent(source.id)}?delete_sandbox=true`, async (route) => {
+      deleteRequests++;
+      await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.build }, body: "unexpected competing Delete" });
+    }));
+    await pinAutoSelect(page, source.id);
+    await page.goto("/");
+    const card = page.getByRole("region", { name: "Session unavailable", exact: true });
+    const sourceRow = page.locator(`.session-row[data-session-id="${source.id}"]`);
+    const otherRow = page.locator(`.session-row[data-session-id="${other.id}"]`);
+    await expect(sourceRow).toHaveAttribute("data-session-selected", "true");
+    await expect(sourceRow).toHaveClass(/\bstale\b/);
+    await expect(card).toContainText("Session suspended");
+    await expect(page.locator(".header-delete"), "Delete works on a suspended sandbox before Resume claims it").toBeEnabled();
+    const resume = page.locator(".header-stop-anchor > .sandbox-session-controls")
+      .getByRole("button", { name: "Resume", exact: true });
+    await resume.click();
+    await expect.poll(() => resumeRequests, { message: "the accepted Resume request remains held before its fixture state change" }).toBe(1);
+    expect(fixture.calls).toEqual([]);
+    await expect(page.locator(".header-delete")).toBeDisabled();
+    await otherRow.locator(".session-row-open").click();
+    await expect(otherRow).toHaveAttribute("data-session-selected", "true");
+    await waitForSessionRevealed(page, other.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator(".header-stop")).toBeEnabled();
+    await sourceRow.locator(".session-row-open").click();
+    await expect(card).toContainText("Session suspended");
+    await expect(page.locator(".header-delete")).toBeDisabled();
+    await page.locator(".header-delete").dispatchEvent("click");
+    await resume.dispatchEvent("click");
+    await expect(page.locator(".header-delete-confirm")).toHaveCount(0);
+    expect(deleteRequests).toBe(0);
+    await otherRow.locator(".session-row-open").click();
+    await expect(otherRow).toHaveAttribute("data-session-selected", "true");
+    held.release();
+    await expect.poll(() => fixture.calls).toEqual(["resume"]);
+    await expect(sourceRow).not.toHaveClass(/\bstale\b/);
+    await expect(otherRow).toHaveAttribute("data-session-selected", "true");
+    await sourceRow.locator(".session-row-open").click();
+    await expect(card).toHaveCount(0);
+    await expect(page.locator(".header-stop-anchor > .sandbox-session-controls")
+      .getByRole("button", { name: "Suspend", exact: true })).toBeEnabled();
+    await expect(page.locator(".header-stop")).toBeEnabled();
+    await expect(page.locator(".header-delete")).toBeEnabled();
+    expect(resumeRequests).toBe(1);
+    expect(deleteRequests).toBe(0);
+  } finally {
+    held.release();
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`owned resume-switch route ${index}`, stop]),
+      ...owned.map((id): [string, () => Promise<void>] => ["owned real session", () => cleanupSession(request, id)]),
     ]);
   }
 });

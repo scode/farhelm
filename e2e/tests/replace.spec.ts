@@ -1,7 +1,8 @@
 // Replace's browser contract: the "Replace" menu item (row.rs's
 // `.session-row-replace`) opens an inline confirmation in the same panel
 // clone/delete already use, and confirming creates a fresh session
-// with the source's cwd, title, and invocation, selects it, and removes the
+// with the source's cwd, title, and invocation, selects it if the user remains
+// on the source, and removes the
 // source — all in one round trip through `POST /api/sessions/{id}/replace`
 // (SPEC.md's "Replace"). The helm-level composition (create-then-delete, the
 // two failure modes) is covered
@@ -39,6 +40,7 @@ import {
   localHostId,
   observeFeedReaders,
   openRowMenu,
+  readFeedReaders,
   type SessionRow,
   stopSession,
   stubFeed,
@@ -53,6 +55,8 @@ import { fulfillAsHelm, helmBuild, installTerminalSuiteHooks, LIVE_BADGE, LIVE_S
  * create that already landed, so the UI keeps the key for a same-key retry. */
 const UNACCEPTED = { "x-farhelm-create-outcome": "definitely-unaccepted" };
 import { routeGate } from "./helpers/route-gate";
+import { drainedRoute } from "./helpers/drained-route";
+import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { selectSessionActionWith } from "./helpers/session-actions";
 import { answerYolo, attachSession, waitForTermText, termText } from "./helpers/term";
 import { waitForSessionRevealed } from "./helpers/terminal-readiness";
@@ -349,31 +353,34 @@ async function cleanupReplaceFixtures(bodyFailed: boolean, steps: (() => Promise
   }
 }
 
-// Source identity alone is not ownership when the single page slot moves
-// A → B → A. The old YOLO question must not cancel A's newer retry key.
-// Equivalent controls must also leave only one question to answer or cancel.
+// An unanswered inline question owns its source through both surfaces, just
+// like an ordinary confirmation. Its own answer must transfer that claim to
+// the request, while another source remains usable and keeps its own result.
 for (const surface of ["sidebar", "header"] as const) {
-  test(`plain Replace keeps a newer same-source key after old ${surface} YOLO cancellation`, async ({ page, request }) => {
-    const source = await createSession(request, { title: `replace-return-${surface}-${Date.now()}` });
-    const other = await createSession(request, { title: `replace-between-${surface}-${Date.now()}` });
+  test(`plain Replace YOLO question excludes only its source (${surface})`, async ({ page, request }) => {
+    const source = await createSession(request, { title: `replace-question-${surface}-${Date.now()}` });
+    const other = await createSession(request, { title: `replace-independent-${surface}-${Date.now()}` });
     const sourceEndpoint = `**/api/sessions/${encodeURIComponent(source.id)}/replace`;
     const otherEndpoint = `**/api/sessions/${encodeURIComponent(other.id)}/replace`;
-    const keys: string[] = [];
+    const posts: { intent_key: string; confirm_yolo?: boolean }[] = [];
+    let otherPosts = 0;
     let bodyFailed = false;
     try {
       await page.setViewportSize({ width: 1280, height: 1100 });
       await page.route(sourceEndpoint, async (route) => {
-        keys.push(route.request().postDataJSON().intent_key);
-        if (keys.length <= 2 || keys.length >= 5) {
+        posts.push(route.request().postDataJSON());
+        if (posts.length !== 2) {
           await fulfillAsHelm(route, {
             status: 409,
             body: "fixture asks for YOLO confirmation",
             headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
           });
-        } else if (keys.length === 3) await route.abort();
-        else await fulfillAsHelm(route, { status: 403, body: "new intent answered", headers: UNACCEPTED });
+        } else await fulfillAsHelm(route, { status: 403, body: "source answer received", headers: UNACCEPTED });
       });
-      await page.route(otherEndpoint, (route) => route.abort());
+      await page.route(otherEndpoint, async (route) => {
+        otherPosts += 1;
+        await fulfillAsHelm(route, { status: 403, body: "other answer received", headers: UNACCEPTED });
+      });
       await page.goto("/");
       await attachSession(page, source.id);
       const sourceRow = row(page, source.id);
@@ -382,51 +389,46 @@ for (const surface of ["sidebar", "header"] as const) {
         await page.locator(".header-replace").click();
         await page.locator(".header-replace-confirm .btn-danger").click();
       }
-      const question = page.locator(".yolo-confirmation");
+      const question = page.getByRole("group", { name: `Replace ${source.title}`, exact: true }).locator(".yolo-confirmation");
       await expect(question).toHaveCount(1);
-      const refused = page.waitForResponse((response) =>
-        response.url().includes(`/api/sessions/${encodeURIComponent(source.id)}/replace`) && response.status() === 409
-      );
-      if (surface === "sidebar") {
-        await page.locator(".header-replace").click();
-        await page.locator(".header-replace-confirm .btn-danger").click();
-      } else await confirmSidebarReplace(sourceRow);
-      await refused;
+      for (const selector of [".header-stop", ".restart-primary", ".header-replace", ".header-delete", ".header-clone"]) {
+        await expect(page.locator(selector)).toBeDisabled();
+      }
+      await expect(page.getByRole("button", { name: "New terminal", exact: true })).toBeDisabled();
+      await openRowMenu(sourceRow);
+      for (const action of ["stop", "replace", "delete", "clone"]) {
+        await expect(sourceRow.locator(`.session-row-${action}`)).toHaveAttribute("aria-disabled", "true");
+      }
+      // aria-disabled menu items still receive pointer events. Exercise the
+      // actual handler refusal, not only the disabled presentation.
+      await sourceRow.locator(".session-row-replace").click({ force: true });
+      await expect(sourceRow.locator(".confirm-replace")).toHaveCount(0);
+      expect(posts).toHaveLength(1);
+      const otherRow = row(page, other.id);
+      await confirmSidebarReplace(otherRow);
+      await expect(otherRow.locator(".action-error").first()).toContainText("other answer received");
+      expect(otherPosts).toBe(1);
+      await attachSession(page, other.id);
+      await expect(otherRow).toHaveAttribute("data-session-selected", "true");
       await expect(page.locator(".header-replace")).toBeEnabled();
       await expect(question).toHaveCount(1);
-      expect(keys).toHaveLength(2);
-      expect(keys[1]).toBe(keys[0]);
-      await confirmSidebarReplace(row(page, other.id));
-      await expect(row(page, other.id).locator(".action-error").first()).toContainText("Replace:");
-      // Dismissing an errored menu must preserve its row's footprint: the
-      // source toggle is the same pointer target on press and release. An
-      // explicit Escape here would hide that race from this real click.
-      const otherRow = row(page, other.id);
-      const errorRowHeight = (await otherRow.boundingBox())!.height;
-      await confirmSidebarReplace(sourceRow);
-      expect((await otherRow.boundingBox())!.height, "menu dismissal keeps the next pointer target in place")
-        .toBe(errorRowHeight);
-      await expect(sourceRow.locator(".action-error").first()).toContainText("Replace:");
-      expect(keys).toHaveLength(3);
-      expect(keys[2]).not.toBe(keys[0]);
-      await expect(question).toHaveCount(1);
-    await question.locator(".yolo-cancel").click();
-      await expect(question).toHaveCount(0);
-      await confirmSidebarReplace(sourceRow);
-      await expect(sourceRow.locator(".action-error").first()).toContainText("new intent answered");
-      expect(keys).toHaveLength(4);
-      expect(keys[3]).toBe(keys[2]);
-      // Leaving a header question must release its source for either pane's next question.
-      await page.locator(".header-replace").click();
-      await page.locator(".header-replace-confirm .btn-danger").click();
-      await expect(question).toHaveCount(1);
-      await attachSession(page, other.id);
-      await expect(question).toHaveCount(0);
       await attachSession(page, source.id);
+      await expect(sourceRow).toHaveAttribute("data-session-selected", "true");
+      await expect(page.locator(".header-replace")).toBeDisabled();
+      await question.locator(".yolo-confirm").click();
+      await expect(sourceRow.locator(".action-error").first()).toContainText("source answer received");
+      await expect(question).toHaveCount(0);
+      expect(posts).toHaveLength(2);
+      expect(posts[0].confirm_yolo).not.toBe(true);
+      expect(posts[1].confirm_yolo).toBe(true);
+      await expect(page.locator(".header-replace")).toBeEnabled();
+      await expect(otherRow.locator(".action-error").first()).toContainText("other answer received");
+      // Cancel releases the question too, independently of the answer path.
       await confirmSidebarReplace(sourceRow);
       await expect(question).toHaveCount(1);
-    await question.locator(".yolo-cancel").click();
+      await question.locator(".yolo-cancel").click();
       await expect(question).toHaveCount(0);
+      await expect(page.locator(".header-replace")).toBeEnabled();
     } catch (error) {
       bodyFailed = true;
       throw error;
@@ -440,6 +442,268 @@ for (const surface of ["sidebar", "header"] as const) {
     }
   });
 }
+
+/** Independent Replace replies can both need consent after their requests end.
+ * Release them in reverse dispatch order: each question and source claim must
+ * survive the other's arrival, answer and refusal, without a global prompt slot
+ * silently consuming the result that arrived first. */
+test("plain Replace preserves two sources' YOLO questions and answers independently", async ({ page, request }) => {
+  const owned: string[] = [];
+  const disposers: (() => Promise<void>)[] = [];
+  const firstReply = routeGate();
+  const secondReply = routeGate();
+  let bodyFailed = false;
+  try {
+    await page.setViewportSize({ width: 1280, height: 1400 });
+    const first = await createSession(request, { title: `replace-question-first-${Date.now()}` });
+    owned.push(first.id);
+    const second = await createSession(request, { title: `replace-question-second-${Date.now()}` });
+    owned.push(second.id);
+    const firstPosts: { confirm_yolo?: boolean }[] = [];
+    const secondPosts: { confirm_yolo?: boolean }[] = [];
+    for (const [source, posts, held, reason] of [
+      [first, firstPosts, firstReply, "first answer received"],
+      [second, secondPosts, secondReply, "second answer received"],
+    ] as const) {
+      disposers.push(await drainedRoute(page, `**/api/sessions/${encodeURIComponent(source.id)}/replace`, async (route) => {
+        posts.push(route.request().postDataJSON());
+        if (posts.length === 1) {
+          await held.wait();
+          await fulfillAsHelm(route, {
+            status: 409,
+            body: "fixture asks for YOLO confirmation",
+            headers: { "x-farhelm-yolo-confirmation": "confirmation-required" },
+          });
+        } else await fulfillAsHelm(route, { status: 403, body: reason, headers: UNACCEPTED });
+      }));
+    }
+    await page.goto("/");
+    await attachSession(page, first.id);
+    await confirmSidebarReplace(row(page, first.id));
+    await expect.poll(() => firstPosts.length, { message: "first request waits before its YOLO reply" }).toBe(1);
+    await confirmSidebarReplace(row(page, second.id));
+    await expect.poll(() => secondPosts.length, { message: "second source is admitted while the first waits" }).toBe(1);
+    await expect(page.locator(".yolo-confirmation")).toHaveCount(0);
+    const firstGroup = page.getByRole("group", { name: `Replace ${first.title}`, exact: true });
+    const secondGroup = page.getByRole("group", { name: `Replace ${second.title}`, exact: true });
+    const firstQuestion = firstGroup.locator(".yolo-confirmation");
+    const secondQuestion = secondGroup.locator(".yolo-confirmation");
+    secondReply.release();
+    await expect(secondQuestion).toBeVisible();
+    await expect(secondGroup).toContainText(second.title);
+    const secondOpening = await secondQuestion.getAttribute("data-yolo-confirm-id");
+    expect(secondOpening).toBeTruthy();
+    firstReply.release();
+    await expect(page.locator(".yolo-confirmation")).toHaveCount(2);
+    await expect(firstGroup).toContainText(first.title);
+    await expect(secondQuestion).toHaveAttribute("data-yolo-confirm-id", secondOpening!);
+    await expect(page.locator(".header-replace")).toBeDisabled();
+    await firstQuestion.locator(".yolo-confirm").click();
+    await expect(row(page, first.id).locator(".action-error").first()).toContainText("first answer received");
+    await expect(firstQuestion).toHaveCount(0);
+    await expect(secondQuestion).toHaveAttribute("data-yolo-confirm-id", secondOpening!);
+    expect(firstPosts.map((post) => post.confirm_yolo === true)).toEqual([false, true]);
+    await expect(page.locator(".header-replace")).toBeEnabled();
+    await expect(page.getByRole("button", { name: "New terminal", exact: true })).toBeEnabled();
+    await attachSession(page, second.id);
+    await expect(page.locator(".header-replace")).toBeDisabled();
+    await secondQuestion.locator(".yolo-confirm").click();
+    await expect(row(page, second.id).locator(".action-error").first()).toContainText("second answer received");
+    await expect(page.locator(".yolo-confirmation")).toHaveCount(0);
+    expect(secondPosts.map((post) => post.confirm_yolo === true)).toEqual([false, true]);
+    await expect(page.locator(".header-replace")).toBeEnabled();
+    await expect(row(page, first.id).locator(".action-error").first()).toContainText("first answer received");
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    firstReply.release();
+    secondReply.release();
+    await cleanupOwnedSteps(bodyFailed, [
+      ...disposers.map((dispose): [string, () => Promise<void>] => ["controlled Replace reply", dispose]),
+      ...owned.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+    ]);
+  }
+});
+
+// A successful backend Replace removes its source before its response can reach
+// the browser. A complete fleet refresh in that gap must not count as a user
+// switch. Failure after external removal must release that same deferral and
+// request ordinary reconciliation even with no further feed notification.
+for (const mode of ["plain", "with"] as const) {
+  for (const outcome of ["success", "refusal"] as const) {
+    const label = mode === "plain" ? "plain Replace" : "Replace with";
+    const behavior = outcome === "success"
+      ? "selects its replacement after an earlier complete fleet refresh"
+      : "reconciles an externally removed source after refusal";
+    test(`${label} ${behavior}`, async ({ page, request }) => {
+      const owned: string[] = [];
+      const held = routeGate();
+      let disposeRoute: (() => Promise<void>) | undefined;
+      let bodyFailed = false;
+      let replacementId: string | undefined;
+      let replyHeld = false;
+      try {
+        const source = await createSession(request, { title: `replace-refresh-${mode}-source-${Date.now()}` });
+        owned.push(source.id);
+        const other = await createSession(request, { title: `replace-refresh-${mode}-other-${Date.now()}` });
+        owned.push(other.id);
+        await observeFeedReaders(page);
+        const feed = await stubFeed(page);
+        await page.goto("/");
+        await feed.waitForConnection(1);
+        feed.notify(1);
+        // Visit a bystander first so a mistaken removal can restore a real
+        // previous selection. No user selection happens after submission.
+        await attachSession(page, other.id);
+        await attachSession(page, source.id);
+        await waitForTermText(page, "FAKE-AGENT READY");
+        const form = mode === "with" ? await openReplaceWith(page, source.id, LIVE_BADGE) : undefined;
+        await waitForFeedReadersSettled(page);
+        disposeRoute = await drainedRoute(page, `**/api/sessions/${encodeURIComponent(source.id)}/replace`, async (route) => {
+          expect(route.request().method()).toBe("POST");
+          if (outcome === "success") {
+            // Fetch really creates the replacement and removes the source;
+            // only delivery of that successful reply is held by this fixture.
+            const response = await route.fetch({ maxRetries: 0 });
+            expect(response.ok(), await response.text()).toBe(true);
+            replacementId = (await response.json()).id;
+            expect(replacementId).toEqual(expect.any(String));
+            owned.push(replacementId!);
+            replyHeld = true;
+            await held.wait();
+            await route.fulfill({ response });
+          } else {
+            // The external client removes the source while this request waits.
+            // This controlled refusal dispatches no replacement to the helm.
+            replyHeld = true;
+            await held.wait();
+            await fulfillAsHelm(route, { status: 403, body: "replacement refused after external removal", headers: UNACCEPTED });
+          }
+        });
+        if (form) await form.locator(".create-session-submit").click();
+        else {
+          await page.locator(".header-replace").click();
+          await page.locator(".header-replace-confirm .btn-danger").click();
+        }
+        await expect.poll(() => replyHeld, { message: `${label}'s response remains held while the source disappears` }).toBe(true);
+        if (outcome === "refusal") {
+          await stopSession(request, source.id);
+          const removed = await request.delete(`/api/sessions/${encodeURIComponent(source.id)}`);
+          expect(removed.ok(), await removed.text()).toBe(true);
+        }
+        const backend = (await listSessions(request)).sessions;
+        expect(backend.some((session) => session.id === source.id), "the backend source is already gone before refreshing the page").toBe(false);
+        if (replacementId) expect(backend.some((session) => session.id === replacementId)).toBe(true);
+
+        const refreshed = page.waitForResponse((response) => response.request().method() === "GET"
+          && new URL(response.url()).pathname === "/api/sessions");
+        feed.notify(2);
+        const response = await refreshed;
+        expect(response.ok(), await response.text()).toBe(true);
+        expect([...new URL(response.url()).searchParams.keys()], "the refresh asks for the unfiltered fleet").toEqual(["sort"]);
+        const listing: { sessions: SessionRow[]; truncated: boolean } = await response.json();
+        expect(listing.truncated, "a truncated response cannot prove source absence").toBe(false);
+        expect(listing.sessions.some((session) => session.id === source.id)).toBe(false);
+        if (replacementId) expect(listing.sessions.some((session) => session.id === replacementId)).toBe(true);
+        // Removed sidebar DOM establishes that the page committed this absent
+        // source. Network completion alone would not establish reconciliation.
+        await expect(row(page, source.id)).toHaveCount(0);
+        if (replacementId) await expect(row(page, replacementId)).toBeVisible();
+        const readers = await readFeedReaders(page);
+        expect(readers.find((reader) => reader.role === "list")?.selected, "pending Replace keeps the selected source until its own result").toBe(source.id);
+        await expect(page.locator(".session-details .title")).toHaveText(source.title);
+        await expect(row(page, other.id)).not.toHaveAttribute("data-session-selected", "true");
+
+        held.release();
+        if (replacementId) {
+          await expect(row(page, replacementId)).toHaveAttribute("data-session-selected", "true");
+          await expect(row(page, other.id)).not.toHaveAttribute("data-session-selected", "true");
+          if (form) await expect(form).toHaveCount(0);
+        } else {
+          if (form) await expect(form.locator(".create-session-error")).toContainText("replacement refused after external removal");
+          // The only post-removal notification was sent while Replace waited.
+          // Its failed completion must request a fresh authoritative read itself.
+          await expect(row(page, other.id)).toHaveAttribute("data-session-selected", "true");
+          await expect(page.locator(".session-details .title")).toHaveText(other.title);
+        }
+      } catch (error) {
+        bodyFailed = true;
+        throw error;
+      } finally {
+        held.release();
+        await cleanupOwnedSteps(bodyFailed, [
+          ["held Replace route", () => disposeRoute?.()],
+          ...owned.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+        ]);
+      }
+    });
+  }
+}
+
+/** A real successful Replace must not pull the user back after a switch.
+ * Freeze unsolicited feed reads and hold the accepted reply, so the source's
+ * later removal from this page proves its persistent owner consumed that reply. */
+test("plain Replace keeps another session selected after its successful reply", async ({ page, request }) => {
+  const owned: string[] = [];
+  const held = routeGate();
+  let disposeRoute: (() => Promise<void>) | undefined;
+  let bodyFailed = false;
+  let replacementId: string | undefined;
+  let replyHeld = false;
+  try {
+    const source = await createSession(request, { title: `replace-away-source-${Date.now()}` });
+    owned.push(source.id);
+    const other = await createSession(request, { title: `replace-away-other-${Date.now()}` });
+    owned.push(other.id);
+    await observeFeedReaders(page);
+    const feed = await stubFeed(page);
+    await page.goto("/");
+    await feed.waitForConnection(1);
+    feed.notify(1);
+    await attachSession(page, source.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await waitForFeedReadersSettled(page);
+    disposeRoute = await drainedRoute(page, `**/api/sessions/${encodeURIComponent(source.id)}/replace`, async (route) => {
+      expect(route.request().method()).toBe("POST");
+      const response = await route.fetch({ maxRetries: 0 });
+      expect(response.ok(), await response.text()).toBe(true);
+      replacementId = (await response.json()).id;
+      expect(replacementId).toEqual(expect.any(String));
+      owned.push(replacementId!);
+      replyHeld = true;
+      await held.wait();
+      await route.fulfill({ response });
+    });
+    await page.locator(".header-replace").click();
+    await page.locator(".header-replace-confirm .btn-danger").click();
+    await expect.poll(() => replyHeld, { message: "the real replacement exists, but its successful GUI reply is held" }).toBe(true);
+    const sourceRow = row(page, source.id);
+    await expect(sourceRow, "the controlled feed has not retired the displayed source").toBeVisible();
+    await row(page, other.id).locator(".session-row-open").click();
+    await expect(row(page, other.id)).toHaveAttribute("data-session-selected", "true");
+    await waitForSessionRevealed(page, other.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(sourceRow).toBeVisible();
+    held.release();
+    // Without feed notifications, this is the Replace completion's own
+    // reconciliation; a network success alone would not prove it ran.
+    await expect(sourceRow).toHaveCount(0, { timeout: 20_000 });
+    await expect(row(page, replacementId!)).toBeVisible();
+    await expect(row(page, other.id)).toHaveAttribute("data-session-selected", "true");
+    await expect(row(page, replacementId!)).not.toHaveAttribute("data-session-selected", "true");
+    await expect(page.locator(".session-details .title")).toContainText(other.title);
+  } catch (error) {
+    bodyFailed = true;
+    throw error;
+  } finally {
+    held.release();
+    await cleanupOwnedSteps(bodyFailed, [
+      ["held Replace route", () => disposeRoute?.()],
+      ...owned.map((id): [string, () => Promise<void>] => ["owned session", () => cleanupSession(request, id)]),
+    ]);
+  }
+});
 
 // Rows intentionally run concurrently. An older row's answered result or its
 // still-open YOLO question must not end the unresolved intent of a newer row.

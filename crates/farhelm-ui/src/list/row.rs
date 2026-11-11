@@ -1,7 +1,8 @@
 //! One session row and its lifecycle, metadata, and menu controls.
 //!
-//! The row keeps the floating-panel hook state with the component; only the
-//! geometry decisions are delegated to the pure menu-panel helpers.
+//! The row keeps floating-panel placement and opening generation with the
+//! component. Its scoped binding shares measurement and delayed verification;
+//! the menu-panel helpers turn that same measured rect into presentation.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -9,7 +10,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 
 use crate::activity::ActivityStamp;
-use crate::anchored_popovers::{Registration, use_anchor_binding};
+use crate::anchored_popovers::{Registration, use_measured_anchor_binding};
 
 use crate::icons::{
     EndedGlyph, EndedStatusIcon, HarnessGlyph, HarnessIcon, ManagedCheckoutMark, PermissionGlyph,
@@ -28,8 +29,8 @@ use super::shared::{
 use super::summary_card::SessionSummarySource;
 use crate::menu_panel::{
     self, MenuFocusQueue, MenuOpenIntent, PanelPlacement, cancel_menu_focus, clamp_title,
-    closed_toggle_key_intent, focus_menu_toggle, forget_menu_focus, handle_menu_key,
-    measurement_outcome, record_menu_item_focus, remember_menu_item, session_menu_placement_style,
+    closed_toggle_key_intent, focus_menu_toggle, focus_menu_toggle_after_async, forget_menu_focus,
+    handle_menu_key, record_menu_item_focus, remember_menu_item, session_menu_placement_style,
     session_menu_pointer_style, should_measure_on_mount,
 };
 use crate::ops::ConfirmToken;
@@ -1026,6 +1027,12 @@ pub(super) type StopConfirmation = (String, ConfirmToken<RowQuestion>, bool, boo
 pub(super) fn SessionRow(
     session: Session,
     state: RowState,
+    /// Only sandbox mutations consult the launch/host token. Ordinary row
+    /// actions and selection stay usable while another launch is pending.
+    host_ops: crate::ops::OpLock,
+    /// A Stop's request lifetime is independent of the last reported agent status.
+    #[props(default)]
+    stopping: bool,
     /// Whether the shared sidebar preference hides the host/directory line.
     /// Compactness keeps identity controls visible: it cannot hide status,
     /// locality, or the menu target a keyboard user needs to reach.
@@ -1146,9 +1153,10 @@ pub(super) fn SessionRow(
     let sandbox_suspended = sandbox_host
         .as_ref()
         .is_some_and(|host| matches!(host.state, crate::HostPhase::Suspended { .. }));
-    let sandbox_gate = try_use_context::<crate::ops::PaneGate>();
+    let operations = try_use_context::<crate::session_ops::SessionOps>();
+    let sandbox_id = session.id.raw().to_owned();
     let sandbox_claim =
-        use_callback(move |()| sandbox_gate.and_then(|mut gate| gate.claim_guard()));
+        use_callback(move |()| operations.and_then(|operations| operations.claim(&sandbox_id)));
     let RowState {
         error,
         busy,
@@ -1503,48 +1511,24 @@ pub(super) fn SessionRow(
     // without this counter the OLDER one finishing LAST would silently
     // overwrite the newer, correct measurement with a stale one.
     let open_generation = use_signal(|| 0_u64);
-    // This lease follows the same measurement starts, including recovery;
-    // it neither owns placement nor changes the existing generation timing.
-    let bind_anchor = use_anchor_binding(
-        menu_registration,
-        session.id.raw().to_owned(),
-        listing_ready,
-    );
     // Shared by the toggle's `onclick` (every fresh open) and its
     // `onmounted` (healing a remount that lands with the menu ALREADY
     // open — see that handler's own doc for why that happens and why
     // re-measuring there is what fixes it). Takes no arguments: both call
     // sites close over this row's own `toggle_handle`/`placement`/
     // `open_generation` directly, and both want the exact same
-    // capture-generation → query → classify-if-still-current sequence, so
-    // this is the one place that sequence is written.
-    let spawn_measurement = move || {
-        bind_anchor.call(());
-        let handle = toggle_handle;
-        let mut placement = placement;
-        // Captured SYNCHRONOUSLY, before the `await` below yields — a
-        // generation bump landing after this line but before the read
-        // would otherwise be invisible to this task, defeating the guard
-        // it exists to provide.
-        let generation = open_generation();
-        spawn(async move {
-            let measured = match handle.peek().clone() {
-                Some(handle) => handle.get_client_rect().await.ok(),
-                None => None,
-            };
-            // `measurement_outcome` (in `menu_panel`) is the apply-if-current
-            // decision itself, pinned by its own unit test; this call is
-            // just where the real async race it guards against actually
-            // happens. See `open_generation`'s own doc for the concrete
-            // interleaving a newer open superseding this one guards
-            // against.
-            if let Some(outcome) =
-                measurement_outcome(generation, *open_generation.peek(), measured)
-            {
-                placement.set(outcome);
-            }
-        });
-    };
+    // capture-generation → query → classify-if-still-current sequence.
+    // The opt-in binder also verifies delayed heading movement against this
+    // opening's own rect, without changing its placement or start timing.
+    let measure_anchor = use_measured_anchor_binding(
+        menu_registration,
+        session.id.raw().to_owned(),
+        listing_ready,
+        toggle_handle,
+        placement,
+        open_generation,
+    );
+    let spawn_measurement = move || measure_anchor.call(());
     // Everything a FRESH open has to reset, in one place, because two
     // paths open this menu: the toggle's `onclick` (pointer, and the
     // native activation Enter and Space produce) and its `onkeydown` for
@@ -1766,7 +1750,7 @@ pub(super) fn SessionRow(
             // clone never reaches this flag (its handler returns before
             // opening anything), so the menu keeps its focus there.
             if was_inside && !renaming && !composer_transfer_open {
-                focus_menu_toggle("data-session-id", &dismiss_id, ".session-row-menu");
+                focus_menu_toggle_after_async("data-session-id", &dismiss_id, ".session-row-menu");
             }
         },
     ));
@@ -1848,15 +1832,10 @@ pub(super) fn SessionRow(
                     // entirely on unselected rows (a conditional
                     // attribute), not `"false"`.
                     aria_current: if selected { "true" },
-                    // Disabled by ANY of the three locks: the global nav
-                    // lock (any in-flight op anywhere), or this row's own
-                    // confirmation or standalone rename editor being open — the
-                    // simplest way to satisfy "cancel is the only way back
-                    // to normal" (see the component doc above) is to make
-                    // the open button inert for the whole time a prompt is
-                    // showing, rather than giving it a second, competing
-                    // meaning as an implicit cancel.
-                    disabled: nav_disabled || confirming || confirming_replace || confirming_stop
+                    // Inline lifecycle questions and accepted requests do not
+                    // impede opening this session. Rename is a true modal with
+                    // its own draft/focus lifetime, so it retains that refusal.
+                    disabled: nav_disabled
                         || renaming,
                     // Only Shift suppresses native range text selection. Plain
                     // presses retain the browser's ordinary pointer defaults.
@@ -1963,6 +1942,12 @@ pub(super) fn SessionRow(
                                 span { class: "delete-progress", role: "status",
                                     span { class: "delete-spinner", "aria-hidden": "true" }
                                     "{delete_progress}"
+                                }
+                            }
+                            if stopping {
+                                span { class: "stop-progress", role: "status",
+                                    span { class: "delete-spinner", "aria-hidden": "true" }
+                                    "Stopping…"
                                 }
                             }
                             if identity.pinned {
@@ -2365,7 +2350,7 @@ pub(super) fn SessionRow(
                                     }, "Confirm stop"
                                 }
                                 if sandbox.is_some() {
-                                    button { r#type: "button", class: "btn btn-danger", disabled: busy,
+                                    button { r#type: "button", class: "btn btn-danger", disabled: busy || host_ops.busy(),
                                         "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole sandbox",
                                         onkeydown: crate::guard_confirmation_enter,
                                         onclick: move |_| {
@@ -2428,11 +2413,10 @@ pub(super) fn SessionRow(
                                     r#type: "button",
                                     class: "btn btn-danger confirm-delete",
                                     "data-tooltip": "Delete this session and its state now",
-                                    // Disabled while the shared token is held:
-                                    // the handler refuses then anyway (keeping
-                                    // the prompt), and the attribute is that
-                                    // refusal made visible. Cancel stays
-                                    // enabled — backing out is always safe.
+                                    // The question's own session claim leaves
+                                    // its answer enabled; only a running request
+                                    // disables it. The rendered opening token
+                                    // still decides whether this answer is valid.
                                     disabled: busy,
                                     autofocus: !busy,
                                     onkeydown: crate::guard_confirmation_enter,
@@ -2770,6 +2754,7 @@ pub(super) fn SessionRow(
                                 if let Some(host) = &sandbox_host {
                                     crate::sandbox_sessions::Controls {
                                         host: host.clone(), session: session.clone(), disabled: busy,
+                                        ops: host_ops,
                                         claim: sandbox_claim, stop_choice: true, on_done: move |_| {},
                                         buttons: {
                                             let row_id = session.id.raw().to_owned();
@@ -3521,6 +3506,7 @@ mod tests {
         /// Render an open row menu or confirmation with the supplied peer text.
         /// Inspecting mutation payloads keeps Rust debug escaping out of the proof.
         fn app() -> Element {
+            let host_ops = crate::ops::use_op_lock();
             let on_open = use_callback(|_: (Session, Gesture)| {});
             let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
             let on_clone = use_callback(|_: Session| {});
@@ -3562,6 +3548,7 @@ mod tests {
             };
             rsx! {
                 SessionRow {
+                    host_ops,
                     menu_registration: menu_registration.clone(),
                     bell_registration: bell_registration.clone(),
                     listing_ready,
@@ -3820,6 +3807,7 @@ mod tests {
         /// `use_test_question` opens it, but the lanes are kept so the test
         /// can reopen the question behind the render's back.
         fn app() -> Element {
+            let host_ops = crate::ops::use_op_lock();
             let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
             let on_open = use_callback(|_: (Session, Gesture)| {});
             let on_clone = use_callback(|_: Session| {});
@@ -3876,6 +3864,7 @@ mod tests {
             DRAWN.with(|cell| *cell.borrow_mut() = question.clone());
             rsx! {
                 SessionRow {
+                    host_ops,
                     menu_registration: menu_registration.clone(),
                     bell_registration: bell_registration.clone(),
                     listing_ready,
@@ -4061,6 +4050,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn repeated_parent_refreshes_do_not_rerender_an_unchanged_row() {
         fn app() -> Element {
+            let host_ops = crate::ops::use_op_lock();
             let (menu_registration, bell_registration, listing_ready) = use_test_anchors();
             let on_open = use_callback(|_: (Session, Gesture)| {});
             let on_clear_marks = use_callback(|()| {});
@@ -4091,6 +4081,7 @@ mod tests {
             let session = row_specimen("session-1");
             rsx! {
                 SessionRow {
+                    host_ops,
                     menu_registration: menu_registration.clone(),
                     bell_registration: bell_registration.clone(),
                     listing_ready,
@@ -4174,6 +4165,7 @@ mod tests {
         }
 
         fn app() -> Element {
+            let host_ops = crate::ops::use_op_lock();
             let on_open = use_callback(|_: (Session, Gesture)| {});
             let on_clone = use_callback(|_: Session| {});
             let on_replace_with = use_callback(|_: Session| {});
@@ -4204,6 +4196,7 @@ mod tests {
             rsx! {
                 for id in ["session-1", "session-2", "session-3"] {
                     SessionRow {
+                        host_ops,
                         key: "{id}",
                         menu_registration: menu_registration.clone(),
                         bell_registration: bell_registration.clone(),
@@ -4340,6 +4333,7 @@ mod tests {
         });
         /// Rebuild the actual row with explicit state and closed root anchors.
         fn app() -> Element {
+            let host_ops = crate::ops::use_op_lock();
             let Case {
                 session,
                 deleting,
@@ -4352,6 +4346,7 @@ mod tests {
             let read_through = session.notifications_read_through;
             rsx! {
                 SessionRow {
+                    host_ops,
                     menu_registration: menu_registration.clone(),
                     bell_registration: bell_registration.clone(),
                     listing_ready,

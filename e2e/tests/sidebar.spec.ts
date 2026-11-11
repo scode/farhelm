@@ -12,7 +12,7 @@ import { recordPage } from "./helpers/timeline";
  * that the list and the selected session are visibly side by side, that
  * switching sessions REMOUNTS the keyed view rather than patching the old
  * one, that a stacked row stays inside the fixed column under hostile
- * content, and that a view-side operation in flight pins the selection.
+ * content, and that pending session actions survive a direct view switch.
  *
  * These are layout- and lifecycle-level assertions, deliberately separate
  * from terminal.spec.ts's behavioral suite: every test here would pass in
@@ -78,6 +78,8 @@ import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-
 import { attachFocusTrace, installFocusTrace } from "./helpers/focus-trace";
 import { stackScratchDir } from "./helpers/scratch";
 import { attachSession, restartIdleAgent, waitForTermText, answerYolo, terminalScreen } from "./helpers/term";
+import { routeGate } from "./helpers/route-gate";
+import { drainedRoute } from "./helpers/drained-route";
 
 function row(page: Page, id: string) {
   return page.locator(`[data-session-id="${id}"]`);
@@ -1400,38 +1402,34 @@ test("a long cwd shows its tail with characters in logical order", async ({
   }
 });
 
-/**
- * A view-side operation in flight pins the selection: while the selected
- * session's restart is unanswered, every row's open control is disabled
- * and the right pane stays on the busy session.
- *
- * This is the cross-pane half of the shared write gate (`ops::PaneGate`):
- * without it, selecting another row mid-operation unmounts the keyed view
- * that owns the reply, and the operation's outcome — success or refusal —
- * is silently discarded. The route hold makes the window deterministic
- * instead of racing a fast supervisor.
- * Cleanup owns each session from acquisition, so a failed sibling creation
- * cannot leave the first session running in the shared test stack.
- */
-test("an unanswered view operation disables row selection until it completes", async ({
+/** A header Restart belongs to the persistent session operation owner, not to
+ * the keyed view. Switching to B must permit B's own Stop while A stays
+ * claimed; remounting A must show that claim and observe its eventual reply. */
+test("a pending header Restart survives switching and permits another session's Stop", async ({
   page,
   request,
 }) => {
   let a: Awaited<ReturnType<typeof createResumableSession>> | undefined;
   let b: Awaited<ReturnType<typeof createSession>> | undefined;
   let bodyFailed = false;
-  let releaseRestart: () => void = () => {};
-  const restartHeld = new Promise<void>((resolve) => {
-    releaseRestart = resolve;
-  });
+  const restartHeld = routeGate();
+  let stopRoute: (() => Promise<void>) | undefined;
+  let restarts = 0;
+  let sourceAttachments = 0;
   try {
     // Own each session as soon as creation returns, including when creating
     // the sibling or installing its held route fails.
     // Resumable: an unavailable Restart would send no request to hold.
     a = await createResumableSession(request, { title: `busy-a-${Date.now()}`, cwd: "/tmp" });
-    b = await createSession(request, { title: `busy-b-${Date.now()}`, cwd: "/tmp", invocation: "sleep 300" });
-    await page.route(`**/api/sessions/${encodeURIComponent(a.id)}/restart`, async (route) => {
-      await restartHeld;
+    b = await createSession(request, { title: `busy-b-${Date.now()}`, cwd: "/tmp" });
+    const sourcePath = `/api/sessions/${encodeURIComponent(a.id)}/term`;
+    page.on("websocket", (socket) => {
+      const url = new URL(socket.url());
+      if (url.pathname === sourcePath && !url.searchParams.has("tab")) sourceAttachments++;
+    });
+    stopRoute = await drainedRoute(page, `**/api/sessions/${encodeURIComponent(a.id)}/restart`, async (route) => {
+      restarts++;
+      await restartHeld.wait();
       await route.continue();
     });
     await page.goto("/");
@@ -1445,26 +1443,41 @@ test("an unanswered view operation disables row selection until it completes", a
     // samples — see `restartIdleAgent`); the POST is now held open by the
     // route.
     await restartIdleAgent(page);
-
-    // While held: B's open control is disabled — the gate made visible —
-    // and the pane still belongs to A.
-    await expect(row(page, b.id).locator(".session-row-open")).toBeDisabled();
-    await expect(page.locator(".session-details .title")).toContainText(a.title);
-
-    releaseRestart();
-    // Once the reply lands the gate lifts and the switch works normally.
-    await expect(row(page, b.id).locator(".session-row-open")).toBeEnabled({
-      timeout: 15_000,
-    });
+    await expect.poll(() => restarts, { message: "A's Restart was dispatched and remains held" }).toBe(1);
+    await expect(row(page, b.id).locator(".session-row-open")).toBeEnabled();
     await row(page, b.id).locator(".session-row-open").click();
     await expect(page.locator(".session-details .title")).toContainText(b.title);
+    await waitForSessionReady(page, b.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    await expect(page.locator(".header-stop")).toBeEnabled();
+    await page.locator(".header-stop").click();
+    await expect.poll(async () => (await listSessions(request)).sessions.find((session) => session.id === b!.id)?.status?.state,
+      { timeout: 20_000, message: "B's own lifecycle action completes while A's Restart is still held" }).toBe("exited");
+    expect(restarts).toBe(1);
+
+    await row(page, a.id).locator(".session-row-open").click();
+    await expect(page.locator(".session-details .title")).toContainText(a.title);
+    await expect(page.locator(".restart-primary")).toBeDisabled();
+    await expect(page.locator(".header-stop")).toBeDisabled();
+    await waitForSessionRevealed(page, a.id);
+    const beforeReply = sourceAttachments;
+    expect(beforeReply, "the remounted pending view has its own source attachment").toBeGreaterThan(0);
+    await page.locator(".restart-primary").dispatchEvent("click");
+    restartHeld.release();
+    await expect(page.locator(".restart-primary")).toBeEnabled({ timeout: 20_000 });
+    // Old screen text can survive a missing remount. Require a new source
+    // socket after completion before accepting the restarted agent's screen.
+    await expect.poll(() => sourceAttachments, { timeout: 20_000, message: "Restart completion reattaches A's terminal" }).toBeGreaterThan(beforeReply);
+    await waitForSessionRevealed(page, a.id);
+    await waitForTermText(page, "FAKE-AGENT READY");
+    expect(restarts).toBe(1);
   } catch (error) {
     bodyFailed = true;
     throw error;
   } finally {
-    releaseRestart();
+    restartHeld.release();
     await cleanupOwnedSteps(bodyFailed, [
-      ["restart route", () => a && page.unroute(`**/api/sessions/${encodeURIComponent(a.id)}/restart`)],
+      ["restart route", () => stopRoute?.()],
       ["session A", () => a && cleanupSession(request, a.id)],
       ["session B", () => b && cleanupSession(request, b.id)],
     ]);
@@ -2352,6 +2365,226 @@ test("a row above an open menu growing a detail line closes the menu", async ({ 
     for (const id of sessions.reverse()) await cleanupSession(request, id);
   }
 });
+
+type HeadingResizeAction = "hold" | "pending" | "release" | "probes" | "restore";
+
+/** Delay actual heading resize records without delaying other layout observers.
+ * A fresh popup can measure the changed DOM before an older notification reaches
+ * Rust. Forward native entries and methods intact; no product state is exposed.
+ */
+async function installHeadingResizeDelivery(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const NativeResizeObserver = window.ResizeObserver;
+    const nativeRect = Element.prototype.getBoundingClientRect;
+    const queued: { entries: ResizeObserverEntry[]; observer: ResizeObserver; callback: ResizeObserverCallback }[] = [];
+    let holding = false;
+    let probes = 0;
+    const release = () => {
+      const pending = queued.splice(0);
+      for (const entry of pending) entry.callback.call(entry.observer, entry.entries, entry.observer);
+      return pending.length;
+    };
+    window.ResizeObserver = class extends NativeResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          if (!holding) return callback.call(observer, entries, observer);
+          const heading = entries.filter((entry) => entry.target.matches(".session-heading"));
+          const other = entries.filter((entry) => !entry.target.matches(".session-heading"));
+          if (heading.length) queued.push({ entries: heading, observer, callback });
+          if (other.length) callback.call(observer, other, observer);
+        });
+      }
+      disconnect() {
+        for (let index = queued.length - 1; index >= 0; index--) {
+          if (queued[index].observer === this) queued.splice(index, 1);
+        }
+        super.disconnect();
+      }
+    };
+    // Count only real toggle reads. Checking this counter after release proves
+    // that the delayed notification reached its anchor query, rather than just
+    // asserting that a notification which never ran did not close anything.
+    Element.prototype.getBoundingClientRect = function () {
+      if (this.matches(".session-row-menu")) probes++;
+      return nativeRect.call(this);
+    };
+    const owner = window as typeof window & { __fhSidebarHeadingResizeFixture?: Record<HeadingResizeAction, () => number> };
+    owner.__fhSidebarHeadingResizeFixture = {
+      hold() { holding = true; return 0; },
+      pending() { return queued.length; },
+      release() { holding = false; return release(); },
+      probes() { return probes; },
+      restore() {
+        holding = false;
+        const count = release();
+        window.ResizeObserver = NativeResizeObserver;
+        Element.prototype.getBoundingClientRect = nativeRect;
+        delete owner.__fhSidebarHeadingResizeFixture;
+        return count;
+      },
+    };
+  });
+}
+
+/** Read the scheduling fixture without touching geometry and fabricating a probe. */
+async function headingResizeDelivery(page: Page, action: HeadingResizeAction): Promise<number> {
+  return page.evaluate((action) => {
+    const owner = window as typeof window & { __fhSidebarHeadingResizeFixture?: Record<HeadingResizeAction, () => number> };
+    if (!owner.__fhSidebarHeadingResizeFixture) {
+      if (action === "restore") return 0;
+      throw new Error("the heading resize delivery fixture is not installed");
+    }
+    return owner.__fhSidebarHeadingResizeFixture[action]();
+  }, action);
+}
+
+for (const change of ["count wraps", "warning appears"] as const) {
+  /** Header text matters only when its real layout moves a measured anchor.
+   * Consistent controlled listings make 9→10 cross a measured flex threshold,
+   * or add the actual incomplete-list warning. An old popup must close, while
+   * a fresh popup measured after that move must survive delayed notification.
+   */
+  test(`heading ${change} invalidates old geometry without closing a freshly measured menu`, async ({ page, request }) => {
+    const preferences = await readPreferences(request);
+    const session = await createSession(request, { title: `heading-menu-${Date.now()}`, invocation: "sleep 300", cwd: "/tmp" });
+    let stopListing: (() => Promise<void>) | undefined;
+    let bodyFailed = true;
+    try {
+      await patchPreferences(request, { list_sort: "activity", compact: true });
+      await waitForFixtureStates(request, [session], "idle");
+      const listed = await listSessions(request);
+      const source = listed.sessions.find((candidate) => candidate.id === session.id);
+      expect(source, "the owned selected session must exist before authoring the frozen listing").toBeDefined();
+      const build = requireHelmBuild(await request.get("/api/sessions"), "heading movement fixture");
+      let changed = false;
+      stopListing = await drainedRoute(page, SESSION_LISTING, async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        const shown = changed && change === "count wraps" ? 10 : 9;
+        const total = changed && change === "warning appears" ? 10 : shown;
+        await route.fulfill({
+          headers: { "x-farhelm-build": build, "content-type": "application/json" },
+          json: {
+            // Only the owned real session is selected or attached. The inert
+            // sibling rows supply an honest count without starting nine agents.
+            sessions: [{ ...source!, pinned: true }, ...Array.from({ length: shown - 1 }, (_, index) => ({
+              ...source!, id: `${session.id}-heading-${index}`, title: `heading sibling ${index}`, pinned: false,
+            }))],
+            total, matching: total, truncated: changed && change === "warning appears",
+          },
+        });
+      });
+      const feed = await stubFeed(page);
+      feed.notifyOnConnect(1);
+      await installHeadingResizeDelivery(page);
+      await pinAutoSelect(page, session.id);
+      await page.setViewportSize({ width: 1000, height: 1000 });
+      await page.goto("/");
+      await feed.waitForConnection(1);
+      await waitForSessionRevealed(page, session.id);
+      await waitForHostsListSettled(page);
+      await page.evaluate(() => document.fonts.ready);
+      const heading = page.locator(".session-heading");
+      const target = row(page, session.id);
+      const toggle = target.locator(".session-row-menu");
+      await expect(heading.locator(".session-count")).toHaveText("9");
+      if (change === "count wraps") {
+        // Fit halfway between the real one- and two-digit flex widths, instead
+        // of assuming identical font metrics in Chromium and WebKit. The
+        // unchanged row column stays wide; this is the heading's wrap fixture.
+        await heading.evaluate((node) => {
+          const heading = node as HTMLElement;
+          const style = getComputedStyle(heading);
+          const count = heading.querySelector(".session-count")!;
+          const canvas = document.createElement("canvas").getContext("2d")!;
+          canvas.font = getComputedStyle(count).font;
+          const extra = canvas.measureText("10").width - canvas.measureText("9").width;
+          if (!(extra > 0)) throw new Error("the count fixture needs a wider two-digit label");
+          const children = [...heading.children].filter((child) => child.getClientRects().length);
+          if (children.length !== 3) throw new Error("the heading fixture needs its title, count and action group");
+          const width = children.reduce((sum, child) => sum + child.getBoundingClientRect().width, 0) +
+            parseFloat(style.columnGap) * 2 + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + extra / 2;
+          heading.style.boxSizing = "border-box";
+          heading.style.width = `${width}px`;
+        });
+      }
+      // Actual DOM size and native/probe observations supply readiness below;
+      // a frame pair then lets their render/effect consequences settle.
+      const frames = () => page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }));
+      await frames();
+      expect(await heading.evaluate((node) => {
+        const boxes = [...node.children].filter((child) => child.getClientRects().length)
+          .map((child) => child.getBoundingClientRect());
+        return Math.max(...boxes.map((box) => box.top)) < Math.min(...boxes.map((box) => box.bottom));
+      }), "the nine-session heading starts on one actual flex line").toBe(true);
+      await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", session.id);
+      const restingHeading = (await heading.boundingBox())!;
+      const restingToggle = (await toggle.boundingBox())!;
+      let revision = 1;
+      const publish = async (next: boolean) => {
+        changed = next;
+        const response = page.waitForResponse((reply) =>
+          new URL(reply.url()).pathname === "/api/sessions" && reply.request().method() === "GET");
+        feed.notify(++revision);
+        await response;
+        if (next && change === "warning appears") {
+          await expect(heading.locator('[data-warning="true"]')).toContainText("Showing 9 of 10 sessions");
+        } else {
+          await expect(heading.locator(".session-count")).toHaveText(next ? "10" : "9");
+        }
+      };
+      await openRowMenu(target);
+      const old = (await target.locator(".session-row-menu-panel").elementHandle())!;
+      await publish(true);
+      await expect.poll(async () => (await heading.boundingBox())!.height,
+        { message: "the changed heading must actually wrap and grow before dismissal is judged" })
+        .toBeGreaterThan(restingHeading.height + 10);
+      await expect.poll(async () => (await toggle.boundingBox())!.y,
+        { message: "the unchanged first row's toggle must move with the growing heading" })
+        .toBeGreaterThan(restingToggle.y + 10);
+      await expect(page.locator(".session-row").first()).toHaveAttribute("data-session-id", session.id);
+      const grownHeading = (await heading.boundingBox())!;
+      const movedToggle = (await toggle.boundingBox())!;
+      expect(Math.abs(movedToggle.y - restingToggle.y - (grownHeading.height - restingHeading.height)),
+        "the heading's growth accounts for the anchor's movement").toBeLessThanOrEqual(1);
+      await expect(target.locator(".session-row-menu-panel")).toHaveCount(0);
+      expect(await old.evaluate((node) => node.isConnected)).toBe(false);
+
+      await publish(false);
+      await expect.poll(async () => (await heading.boundingBox())!.height).toBe(restingHeading.height);
+      await frames();
+      await headingResizeDelivery(page, "hold");
+      await publish(true);
+      await expect.poll(async () => (await heading.boundingBox())!.height).toBeGreaterThan(restingHeading.height + 10);
+      await expect.poll(() => headingResizeDelivery(page, "pending"),
+        { message: "a native heading resize must be queued before the new popup measures" }).toBeGreaterThan(0);
+      await openRowMenu(target);
+      await expect(target.locator(".session-row-rename")).toBeFocused();
+      await frames();
+      const fresh = (await target.locator(".session-row-menu-panel").elementHandle())!;
+      const probes = await headingResizeDelivery(page, "probes");
+      expect(await headingResizeDelivery(page, "release")).toBeGreaterThan(0);
+      await expect.poll(() => headingResizeDelivery(page, "probes"),
+        { message: "the delayed heading notification must inspect the current opening's anchor" }).toBeGreaterThan(probes);
+      await frames();
+      expect(await fresh.evaluate((node) => node.isConnected), "the same freshly measured popup survives").toBe(true);
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect(target.locator(".session-row-rename")).toBeFocused();
+      bodyFailed = false;
+    } finally {
+      await cleanupOwnedSteps(bodyFailed, [
+        ["restore heading resize delivery", async () => { await headingResizeDelivery(page, "restore"); }],
+        ["stop controlled listing", async () => { await stopListing?.(); }],
+        ["close geometry page", () => page.close()],
+        ["remove heading fixture", () => cleanupSession(request, session.id)],
+        ["restore heading preferences", () => patchPreferences(request, {
+          list_sort: preferences.list_sort, compact: preferences.compact, last_selected: preferences.last_selected,
+        })],
+      ]);
+    }
+  });
+}
 
 /**
  * An in-flight operation makes the menu's commands inert WITHOUT making

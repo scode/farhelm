@@ -1808,6 +1808,17 @@ The client supports: create, open, rename, restart, restart with, clone, replace
 sessions additionally offer Suspend, Resume and Stop and suspend, with the restrictions under
 [Sandbox sessions](#sandbox-sessions).
 
+Pending Stop, Restart, Replace and Delete requests do not block opening another session from the sidebar or quick
+switcher, marking rows, clearing marks, or acting on other sessions. Each session excludes its own competing actions: an
+open lifecycle confirmation or a pending request refuses another lifecycle action, New terminal or Clone on that
+session. Opening the session remains possible, including while its Delete is pending. A Stop shows a spinner and
+**Stopping…** on its row and at the top of the open session until it finishes.
+
+Actions and their results survive switching sessions. A failure, unknown outcome or partial result appears on the source
+session's row and at the top when it is opened again. A view opened during Stop or Restart observes that operation's
+completion, including the terminal refresh or reattachment it needs. A completed Replace opens its replacement only if
+the source is still selected; otherwise it appears in the list and the user stays where they are.
+
 A list rename opens in a modal editor owned by the list rather than by the row-actions popup. Listing updates may
 reorder, filter, or temporarily fail without moving its textarea, so its draft, selection, composition, and source
 session identity stay intact. A successful rename closes that editor; a refusal leaves its draft and error visible for
@@ -2148,11 +2159,13 @@ choices reuse the ordinary writes and row-local errors, and clear marks once the
 Bulk Stop and Delete run one request at a time on each host, with different hosts progressing independently. Accepted
 queued rows remain pending until their completions finish; filtering or a listing failure does not cancel accepted work
 or add new targets. A failure remains on its own row without undoing successful siblings. Each refused row gets the
-ordinary action-specific not-started message, including a row engaged by its own question or rename. An old toolbar
-action reaching a globally locked page starts nothing and keeps the marks; an accepted batch clears all stored marks
-when every completion has finished, including when some rows failed or were refused. Open buttons, marking, Clear and
-bar actions obey the same live navigation lock. Automatic selection after Delete waits until the accepted batch has
-settled and cannot open a session still being deleted by that batch, including on another host.
+ordinary action-specific not-started message, including a row engaged by its own question or rename. An accepted batch
+clears its own targets when every completion has finished, including when some rows failed or were refused, only if the
+user has made no newer marking choice or opened a marked-actions menu or bulk question. Otherwise it leaves the current
+marks alone, including its original targets, even if that newer menu or question was then cancelled. Pending rows do not
+prevent opening sessions, marking other rows, Clear or actions on other rows. Automatic selection after Delete waits
+until every admitted Delete has settled, queued rows and other hosts included, and never opens a session that is still
+being deleted. Pending Stop batches do not delay automatic selection.
 
 Bulk Stop and Delete ask once when any target would need its ordinary confirmation, unless **Skip session
 confirmations** is on; a batch containing a sandbox Delete always asks. Their structured modal lists one row per target:
@@ -3218,11 +3231,11 @@ matches come before matches only in host name or directory, with most recent act
 nothing typed, sessions appear in most recent activity order. Every match is reachable by scrolling; if the helm's
 listing cap cut the snapshot, the switcher says only the most recently active sessions were searched. Rows show status,
 agent, host (with its chosen mark) and directory, with matching characters marked. Arrow keys choose and Enter opens the
-selected session, using the same busy refusals as a sidebar row; the first match is initially selected. Opening a
-session hidden by the host choice or status filter resets both to All after the open is accepted; a refused pick keeps
-both choices. A pick already visible through both leaves them in place. Escape or a click outside closes and restores
-the previous focus. A loading list says loading, rather than no matches, and Enter picks nothing until a reply arrives;
-a failed read says so.
+selected session, including while a session action is pending; the first match is initially selected. Opening a session
+hidden by the host choice or status filter resets both to All after the open is accepted; a refused pick keeps both
+choices. A pick already visible through both leaves them in place. Escape or a click outside closes and restores the
+previous focus. A loading list says loading, rather than no matches, and Enter picks nothing until a reply arrives; a
+failed read says so.
 
 While text is typed, a pinned row below the scrolling session matches offers "New session named X". It follows the
 sessions in arrow-key order and is selected when no session matches, except while the session list is still loading,

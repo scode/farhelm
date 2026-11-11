@@ -14,6 +14,9 @@
 //! dismissal and which focus destination belongs to that close reason. DOM
 //! removal only releases leftover isolation; it never returns focus, since a
 //! successful handoff can intentionally give the keyboard to another surface.
+//! Session-action completions use `FocusTarget::async_script` for their delayed
+//! handoffs, yielding to a newer keyboard owner without changing modal opening
+//! focus or the returns explicitly requested by the user's handlers.
 //!
 //! Frame helpers below share only presentation. They receive caller-rendered
 //! headings, hints and native controls; scroll bodies keep their existing
@@ -143,6 +146,16 @@ impl DialogHandle {
             "{} requestAnimationFrame(() => {{ {return_focus_body} }});",
             self.release_script(),
         ));
+    }
+
+    /// Retire a dialog after a reply without taking a newer control's focus.
+    ///
+    /// Automatic retirement still releases isolation before the closing render,
+    /// but its delayed return belongs only to an otherwise unfocused document.
+    /// Explicit user closes keep [`Self::close`]'s ordinary handoff; a reply no
+    /// longer owns that handoff once the user has focused something else.
+    pub(crate) fn close_after_async(self, target: &FocusTarget) {
+        self.close(&target.async_script(None));
     }
 
     /// Release for a modal handoff without scheduling a competing focus return.
@@ -339,6 +352,20 @@ impl FocusTarget {
         document::eval(&self.script());
     }
 
+    /// Yield an asynchronous handoff to any control outside its leaving surface.
+    ///
+    /// A request or timer no longer owns the page when it finishes. Check the
+    /// active element and move focus in the same script, preserving the normal
+    /// quiet-target behavior without a check-to-focus gap across the eval bridge.
+    /// With no leaving surface, only the document body or document element may
+    /// yield focus. A supplied selector names the surface this handoff leaves,
+    /// not a general permission to take focus from other controls. Callers still
+    /// own release and frame timing; a returning modal's opening and the user's
+    /// own handlers use their ordinary focus path.
+    pub(crate) fn async_script(&self, leaving_surface: Option<&str>) -> String {
+        async_focus_script(leaving_surface, &self.script())
+    }
+
     /// Focus descendants of an already captured, visible `dialog` root.
     ///
     /// The enclosing script supplies that exact node and checks its visibility.
@@ -349,6 +376,27 @@ impl FocusTarget {
     pub(crate) fn surface_script(&self) -> String {
         target_js("dialog", self, true)
     }
+}
+
+/// Admit one asynchronous focus action against the owner present when it runs.
+///
+/// Most callers use `FocusTarget::async_script`. A menu's identity-safe lookup
+/// needs its existing script instead of a second CSS escaping scheme, so both
+/// share this same guard. The supplied action is internal code, never peer text;
+/// callers remain responsible for serializing any values they embed in it.
+/// Admission and the action run together, without another eval or frame between.
+pub(crate) fn async_focus_script(leaving_surface: Option<&str>, focus: &str) -> String {
+    let leaving =
+        serde_json::to_string(&leaving_surface).expect("an optional selector always serializes");
+    format!(
+        r#"(() => {{
+            const active = document.activeElement;
+            const leaving = {leaving};
+            if (active !== document.body && active !== document.documentElement
+                && !(leaving && active?.closest(leaving))) return;
+            {focus}
+        }})();"#,
+    )
 }
 
 /// Share target preference and quiet focus while retaining each lookup scope.

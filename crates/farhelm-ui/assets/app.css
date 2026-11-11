@@ -5745,7 +5745,8 @@ a:any-link,
    state hook). Accent fill plus a leading bar is how a SELECTED row looks,
    and the session being deleted is usually the selected one, so a tint
    here would read as selection rather than as "going". */
-.delete-progress {
+.delete-progress,
+.stop-progress {
   align-items: center;
   color: var(--accent);
   display: inline-flex;
@@ -9894,6 +9895,7 @@ a:any-link,
 .session-row.selected .status-badge,
 .session-row.selected .status-badge .status-dot,
 .session-row.selected .delete-progress,
+.session-row.selected .stop-progress,
 .session-row.selected .action-error,
 .session-row.selected .session-row-menu,
 .session-row.selected .session-row-bell,
