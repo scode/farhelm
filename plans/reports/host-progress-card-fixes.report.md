@@ -62,3 +62,56 @@ cover the hover and preview changes. Browser WebKit supplies engine-family cover
 Each PR passed its own fresh-context gpt-6.1-sol high-effort adversarial review, including the test-authoring checklist.
 The release-note corrections were checked by the same reviewers. Commit messages passed fresh cold reads. No code
 findings or required decisions remain open.
+
+### Landing
+
+#### What landed with it
+
+This plan landed in the same round as tensorlake-key-order, which changes the SSH options Farhelm uses for Tensorlake
+connections. The two touch separate code and separate sections of the specs, and nothing else besides plan bookkeeping
+and a TODO.md entry (#3313) reached main while they were in flight. A second, independent review of the two diffs
+together found no interaction.
+
+#### Fixes made while landing
+
+None.
+
+#### Minor behavior the landing review noted
+
+These do not need a decision, and none blocked the landing:
+
+- In a very short browser window, when two long messages share the hover card, one message's share of the space can be
+  less than one line. That message then shows no text at all, only its heading and `Full details in Hosts`. Before this
+  change it showed a sliver of a cut-off line, which was not readable either.
+- If a host finishes its work while the card is showing and the pointer is resting on the row's progress bar or padding,
+  the card can stay up until the pointer moves onto another element. This is new with this change, since before it only
+  the host's name opened the card.
+
+#### Checks
+
+These checks ran on the round's combined tree: host-progress-card-fixes with tensorlake-key-order stacked above it, on
+main before either landed. Test runs went through the recorder with the pinned tmux first on `PATH`, and none printed a
+runtime `SKIPPED` line. Since then main has gained only a TODO.md entry (#3313), so what merged is the tested tree.
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and
+  `cargo clippy -p farhelm-ui -p farhelm-helm --all-targets -- -D warnings` passed.
+- `node --test` in `crates/farhelm-ui/js-tests` passed with no failures.
+- Browser: `npx playwright test --project=<engine>-<spec> --repeat-each=3 --retries=0` for `host-updates`, `tooltip` and
+  `tooltip-coverage` on Chromium and WebKit ran 234 tests, and all passed. They ran on Tensorlake sandboxes at the
+  maintainer's request, one project per sandbox. The sandboxes run Node 24.16 against 24.20 locally. Run ids:
+  `2d4b9620-510e-4d01-ae1a-205dceb4db55`, `8008bcd0-4d70-4904-b694-943ec79afae2`,
+  `ae9ca261-c478-4d0d-90f0-939975240076`, `a662159e-e9d3-411f-b958-f73dc54f6d48`, `58770221-2996-452b-9453-ee93b6fd02fe`
+  and `5e49b5ad-f42a-46b3-b6c3-4a950e3d09a4`.
+- Rust: the seven focused Tensorlake SSH option tests that tensorlake-key-order's executor ran passed again (run
+  `f57c4baa-0379-4214-a338-534766140639`). So did every test in the helm's `tensorlake::`, `provisioning::`, `ssh::` and
+  `transport::` modules (`cargo nextest run -p farhelm-helm --lib -E <filter>`: 515 passed, run
+  `0dcbabeb-54bd-4c29-9f1a-3efce5acdc88`), which covers each caller that builds the Tensorlake ssh options.
+
+Reused from host-progress-card-fixes' executor: its browser run of the provisioning spec's
+`single Update shows inline progress` test on both engines, which the hover change does not reach beyond what the
+repeated runs above cover.
+
+Skipped: the rest of the browser suite and the workspace's other Rust tests, because neither change reaches beyond the
+sidebar's hover card and the Tensorlake ssh options. Also skipped: a live Tensorlake gateway, an OpenSSH 7.6–7.9 client
+(the executor checked those from upstream source), and hosted CI (manual-only, not dispatched).
