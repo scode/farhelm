@@ -575,6 +575,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   next response carried the requested reconnect marker; three exact unchanged WebKit repetitions passed in
   `d600f92e-e638-4260-83d0-99d8e35f80e6`, and this distinct race remains open under the existing exclusion.
 
+- **Bulk Stop tab-precondition test reads the session list before the stopped session settles.**
+  `bulk Stop carries each target's tab precondition with skip false` in `e2e/tests/stop-tabs.spec.ts` failed on Chromium
+  in a landing round's full browser run on Tensorlake sandboxes (run `4b9c5927-2abf-4298-a638-81375806c9da`), then in 3
+  of 30 repeats on that build and 2 of 15 on an older build without the plan being landed: right after the bulk Stop
+  finishes, a single read of the session list still shows the stopped session running or with its tab. Cause suspected,
+  not established; see FLAKES.md, 2026-11-11.
+
 ### Difficult deflake
 
 ## Broken tests

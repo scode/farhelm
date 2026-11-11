@@ -4770,3 +4770,32 @@ slots, zero retries). The failed run directory is kept privately until the fix l
 Class: fixture-premise
 
 Cause: hypothesis
+
+## 2026-11-11 — bulk Stop tab-precondition test reads the session list once, too early (e2e/tests/stop-tabs.spec.ts)
+
+`bulk Stop carries each target's tab precondition with skip false` failed on Chromium in the full browser run of the
+podman-environments landing on Tensorlake sandboxes (run `4b9c5927-2abf-4298-a638-81375806c9da`): after the bulk Stop of
+two sessions, with the dialog answered, one refused for its open tab and the other stopped, the test's single read of
+the session list still showed the stopped session `running`. Repeats with `--grep` and `--repeat-each=15` per engine on
+the same build failed 3 of 30 (two Chromium, one WebKit; runs `124a534b-7d00-41bd-9e40-41a31577b723` and
+`589cf0ea-34ca-4c20-97e7-302ed9fb0665`), once as above and twice with the stopped session's tab still listed. On round
+229's build, which has none of that plan, the same repeats failed 2 of 15 on Chromium and passed 15 of 15 on WebKit
+(runs `5da3ee4c-297d-4393-9895-d8eeb4329fcb` and `5459d195-2b14-48c4-923e-f86b80af02d6`), so the flake predates it. The
+test is unchanged by that plan. Suspected cause: the test waits only for the page's row error and for the selection bar
+to go, then reads the list once, and the helm's listing can lag the stop the request already completed; a poll on the
+stopped session's state and tab count would settle it, if the lag is what this is. Not investigated further.
+
+```text
+Expected: "exited"
+Received: "running"
+  > 334 |       expect(listed.find((entry) => entry.id === ids[1])?.status?.state).toBe("exited");
+```
+
+Evidence: Tensorlake sandboxes (Ubuntu 24.04, Node 24.16, three stacks each, the recorder's generic mode with
+`npx playwright test --project=<engine>-stop-tabs --retries=0`), builds of the clean stack tip `058464ed` and of round
+229's tested tip `96b1c3a2`. Pinned tmux 3.7c in each pack; per-case load unavailable. The failed run directories are
+kept privately.
+
+Class: readiness
+
+Cause: hypothesis
