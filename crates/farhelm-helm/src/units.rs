@@ -21,7 +21,7 @@
 //! Everything here is pure: no environment reads, no filesystem access,
 //! no process spawning. Callers pass the paths they resolved.
 
-use anyhow::bail;
+use anyhow::{Context as _, bail};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -551,6 +551,23 @@ pub struct ManagerEnvironment {
 }
 
 impl ManagerEnvironment {
+    /// Decode systemctl's shell-literal output as data, preserving empty
+    /// assignments and ANSI-C escapes. No assignment is evaluated or sourced.
+    /// Proxy inheritance needs exact values even when a host lacks busctl.
+    pub fn from_show_environment_exact(text: &str) -> anyhow::Result<Self> {
+        let mut entries = Vec::new();
+        for line in text.lines() {
+            let Some((name, value)) = line.split_once('=') else {
+                continue;
+            };
+            entries.push((
+                name.to_string(),
+                ManagerValue::Value(decode_manager_value(value)?),
+            ));
+        }
+        Ok(Self { entries })
+    }
+
     /// Parse `busctl --user get-property … Environment --json=short` output.
     pub fn from_busctl_json(text: &str) -> anyhow::Result<Self> {
         #[derive(serde::Deserialize)]
@@ -572,7 +589,7 @@ impl ManagerEnvironment {
             .data
             .iter()
             .filter_map(|entry| entry.split_once('='))
-            .map(|(name, value)| (name.to_string(), plain(value)))
+            .map(|(name, value)| (name.to_string(), ManagerValue::Value(value.to_string())))
             .collect();
         Ok(Self { entries })
     }
@@ -625,11 +642,128 @@ impl ManagerEnvironment {
 
     /// The first assignment of `name`, as the manager applies it.
     pub fn get(&self, name: &str) -> ManagerValue {
+        match self.get_exact(name) {
+            ManagerValue::Value(value) if value.is_empty() => ManagerValue::Absent,
+            other => other,
+        }
+    }
+
+    /// Read structured environment input without collapsing an explicitly
+    /// empty value. Proxy inheritance must preserve that choice exactly.
+    /// The show-environment fallback retains its existing unreadable markers.
+    pub fn get_exact(&self, name: &str) -> ManagerValue {
         self.entries
             .iter()
             .find(|(entry, _)| entry == name)
             .map_or(ManagerValue::Absent, |(_, value)| value.clone())
     }
+}
+
+/// systemctl emits either raw text or a quoted shell literal. Decoding the
+/// finite literal grammar avoids executing substitutions in proxy credentials.
+fn decode_manager_value(value: &str) -> anyhow::Result<String> {
+    let (body, ansi) = if let Some(body) = value.strip_prefix("$'") {
+        (
+            body.strip_suffix('\'')
+                .context("unterminated manager environment quote")?,
+            true,
+        )
+    } else if let Some(body) = value.strip_prefix('\'') {
+        return Ok(body
+            .strip_suffix('\'')
+            .context("unterminated manager environment quote")?
+            .to_string());
+    } else if let Some(body) = value.strip_prefix('"') {
+        (
+            body.strip_suffix('"')
+                .context("unterminated manager environment quote")?,
+            false,
+        )
+    } else {
+        return Ok(value.to_string());
+    };
+    let mut decoded = Vec::new();
+    let mut characters = body.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '\\' {
+            decoded.extend(character.to_string().bytes());
+            continue;
+        }
+        let escaped = characters
+            .next()
+            .context("truncated manager environment escape")?;
+        if !ansi {
+            // POSIX double quotes only consume these backslashes. An old
+            // systemctl's literal \n remains two bytes in a quoted value.
+            if matches!(escaped, '$' | '\u{60}' | '"' | '\\') {
+                decoded.extend(escaped.to_string().bytes());
+            } else if escaped != '\n' {
+                decoded.push(b'\\');
+                decoded.extend(escaped.to_string().bytes());
+            }
+            continue;
+        }
+        match escaped {
+            'a' => decoded.push(7),
+            'b' => decoded.push(8),
+            'e' | 'E' => decoded.push(27),
+            'f' => decoded.push(12),
+            'n' => decoded.push(b'\n'),
+            'r' => decoded.push(b'\r'),
+            't' => decoded.push(b'\t'),
+            'v' => decoded.push(11),
+            '\\' | '\'' | '"' | '?' => decoded.push(escaped as u8),
+            'x' | 'u' | 'U' => {
+                let limit = match escaped {
+                    'x' => 2,
+                    'u' => 4,
+                    'U' => 8,
+                    _ => unreachable!(),
+                };
+                let mut digits = String::new();
+                while digits.len() < limit
+                    && characters
+                        .peek()
+                        .is_some_and(|character| character.is_ascii_hexdigit())
+                {
+                    digits.push(characters.next().unwrap());
+                }
+                anyhow::ensure!(
+                    !digits.is_empty(),
+                    "invalid manager environment hexadecimal escape"
+                );
+                let codepoint = u32::from_str_radix(&digits, 16)?;
+                if escaped == 'x' {
+                    decoded.push(u8::try_from(codepoint)?);
+                } else {
+                    decoded.extend(
+                        char::from_u32(codepoint)
+                            .context("invalid manager environment codepoint")?
+                            .to_string()
+                            .bytes(),
+                    );
+                }
+            }
+            '0'..='7' => {
+                let mut digits = escaped.to_string();
+                while digits.len() < 3
+                    && characters
+                        .peek()
+                        .is_some_and(|character| matches!(*character, '0'..='7'))
+                {
+                    digits.push(characters.next().unwrap());
+                }
+                let codepoint = u32::from_str_radix(&digits, 8)?;
+                decoded.push(u8::try_from(codepoint)?);
+            }
+            _ => bail!("unsupported manager environment escape"),
+        }
+    }
+    anyhow::ensure!(
+        !decoded.contains(&0),
+        "manager environment contains a NUL value"
+    );
+    String::from_utf8(decoded).context("manager environment is not UTF-8")
 }
 
 /// A raw value, with the empty string read as unset.
@@ -644,6 +778,37 @@ fn plain(value: &str) -> ManagerValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Proxy inputs are copied into another environment, so an explicitly
+    /// empty assignment and every escaped byte must survive the fallback.
+    #[farhelm_testtrace::test]
+    fn exact_manager_environment_preserves_shell_literals_without_evaluation() {
+        let environment = ManagerEnvironment::from_show_environment_exact(
+            "https_proxy=$'https://u:p a\\'ss@$proxy.example/\\nline'\n\
+             HTTP_PROXY=\n\
+             no_proxy=\"space and \\\"quote\\\" and \\$dollar\"\n\
+             unicode=$'\\xc3\\xa9\\040\\u03bb'\n",
+        )
+        .unwrap();
+        assert_eq!(
+            environment.get_exact("https_proxy"),
+            ManagerValue::Value("https://u:p a'ss@$proxy.example/\nline".into())
+        );
+        assert_eq!(
+            environment.get_exact("HTTP_PROXY"),
+            ManagerValue::Value(String::new())
+        );
+        assert_eq!(environment.get("HTTP_PROXY"), ManagerValue::Absent);
+        assert_eq!(
+            environment.get_exact("no_proxy"),
+            ManagerValue::Value("space and \"quote\" and $dollar".into())
+        );
+        assert_eq!(
+            environment.get_exact("unicode"),
+            ManagerValue::Value("é λ".into())
+        );
+        assert!(ManagerEnvironment::from_show_environment_exact("x=$'\\x'").is_err());
+    }
 
     /// The manager's environment reads the same from `busctl` JSON and from
     /// the plain `show-environment` lines, and a value `show-environment`

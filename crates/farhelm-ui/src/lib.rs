@@ -926,6 +926,8 @@ pub enum HostKind {
     /// but its destination is the sandbox's, removing it deletes the sandbox,
     /// and it can be suspended.
     Tensorlake,
+    /// A session-owned rootless container, reached through its ordinary host.
+    Podman,
     #[serde(other)]
     Unrecognized,
 }
@@ -936,10 +938,10 @@ pub enum HostKind {
 /// a comparison defaults to.
 #[warn(clippy::wildcard_enum_match_arm)]
 impl HostKind {
-    /// Only a Tensorlake sandbox has a machine lifecycle owned by Farhelm.
+    /// Disposable environments have a machine lifecycle owned by Farhelm.
     pub(crate) fn suspends(self) -> bool {
         match self {
-            Self::Tensorlake => true,
+            Self::Tensorlake | Self::Podman => true,
             Self::Local | Self::Ssh | Self::Unrecognized => false,
         }
     }
@@ -949,7 +951,9 @@ impl HostKind {
     pub(crate) fn edits_destination(self) -> bool {
         match self {
             HostKind::Ssh => true,
-            HostKind::Local | HostKind::Tensorlake | HostKind::Unrecognized => false,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
+                false
+            }
         }
     }
 
@@ -958,7 +962,7 @@ impl HostKind {
     /// ([`Self::removal_deletes_machine`]).
     pub(crate) fn is_removable(self) -> bool {
         match self {
-            HostKind::Ssh | HostKind::Tensorlake => true,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
             HostKind::Local | HostKind::Unrecognized => false,
         }
     }
@@ -969,7 +973,7 @@ impl HostKind {
     /// `Remove hosts without asking` says.
     pub(crate) fn removal_deletes_machine(self) -> bool {
         match self {
-            HostKind::Tensorlake => true,
+            HostKind::Tensorlake | HostKind::Podman => true,
             HostKind::Local | HostKind::Ssh | HostKind::Unrecognized => false,
         }
     }
@@ -978,7 +982,7 @@ impl HostKind {
     /// stay closed until this client understands their defaults and routes.
     pub(crate) fn supports_appearance(self) -> bool {
         match self {
-            HostKind::Local | HostKind::Ssh | HostKind::Tensorlake => true,
+            HostKind::Local | HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
             HostKind::Unrecognized => false,
         }
     }
@@ -987,7 +991,7 @@ impl HostKind {
     /// a remote ssh update. Local setup and anything unrecognized confirm.
     pub(crate) fn updates_automatically(self) -> bool {
         match self {
-            HostKind::Ssh | HostKind::Tensorlake => true,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
             HostKind::Local | HostKind::Unrecognized => false,
         }
     }
@@ -998,7 +1002,7 @@ impl HostKind {
     /// unrecognized kind is offered nothing.
     pub(crate) fn offers_provisioning_actions(self) -> bool {
         match self {
-            HostKind::Local | HostKind::Ssh | HostKind::Tensorlake => true,
+            HostKind::Local | HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
             HostKind::Unrecognized => false,
         }
     }
@@ -1016,7 +1020,7 @@ impl HostKind {
     /// happen to agree today.
     pub(crate) fn updates_from_panel(self) -> bool {
         match self {
-            HostKind::Ssh | HostKind::Tensorlake => true,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
             HostKind::Local | HostKind::Unrecognized => false,
         }
     }
@@ -1029,7 +1033,9 @@ impl HostKind {
     pub(crate) fn uninstalls_from_panel(self) -> bool {
         match self {
             HostKind::Ssh => true,
-            HostKind::Local | HostKind::Tensorlake | HostKind::Unrecognized => false,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
+                false
+            }
         }
     }
 
@@ -1039,7 +1045,9 @@ impl HostKind {
     pub(crate) fn sets_up_locally(self) -> bool {
         match self {
             HostKind::Local => true,
-            HostKind::Ssh | HostKind::Tensorlake | HostKind::Unrecognized => false,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
+                false
+            }
         }
     }
 
@@ -1049,7 +1057,9 @@ impl HostKind {
     pub(crate) fn is_this_machine(self) -> bool {
         match self {
             HostKind::Local => true,
-            HostKind::Ssh | HostKind::Tensorlake | HostKind::Unrecognized => false,
+            HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
+                false
+            }
         }
     }
 }

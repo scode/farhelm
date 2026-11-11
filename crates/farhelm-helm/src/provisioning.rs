@@ -1076,6 +1076,7 @@ mod tests {
                 local_links_without_asking: false,
                 icon: Default::default(),
                 color: Default::default(),
+                podman: None,
                 tensorlake: None,
             };
             let error = layout(root.path())
@@ -1136,6 +1137,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            podman: None,
             tensorlake: None,
         };
         let plan = PlanLayout::production(root.path().join("state"))
@@ -1367,6 +1369,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            podman: None,
             tensorlake: None,
         };
         let reach = Reach {
@@ -2966,6 +2969,49 @@ mod tests {
         assert_eq!(preview.plan.state_dir, state_dir);
         assert_eq!(harness.store.list_hosts().await.unwrap(), before);
         assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// Update must never substitute for a container's copied-state admission.
+    /// A confirmed container can still be an interrupted first installation,
+    /// whose absent coordinates must survive without even probing its image.
+    #[farhelm_testtrace::test]
+    async fn update_refuses_unfinished_container_before_probing() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let place = local_row(&harness).await;
+        let host = harness
+            .store
+            .register_session_container(crate::store::NewPodmanHost {
+                name: "farhelm-sess-test-unfinished-update".into(),
+                recipe: "dev".into(),
+                place_host: place,
+                user: "ubuntu".into(),
+                home: "/home/ubuntu".into(),
+                uid: 1000,
+            })
+            .await
+            .unwrap();
+        harness
+            .store
+            .set_podman_container_id(host, &"a".repeat(64))
+            .await
+            .unwrap();
+        let before = harness.store.list_hosts().await.unwrap();
+        let row = before.iter().find(|row| row.id == host).unwrap();
+        assert!(row.podman.as_ref().unwrap().container_id.is_some());
+        assert!(row.remote_farhelm.is_none() && row.remote_state_dir.is_none());
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+
+        let refusal = service.plan_update(host).await.unwrap_err();
+
+        assert!(
+            refusal.to_string().contains("initial container setup"),
+            "{refusal:#}"
+        );
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(backend.operations.lock().unwrap().is_empty());
+        assert_eq!(harness.store.list_hosts().await.unwrap(), before);
     }
 
     /// A floor refusal must describe the answering installation without

@@ -120,6 +120,11 @@ enum Revalidation {
 #[derive(Clone, PartialEq, Eq)]
 enum ProbeRegistration {
     Local,
+    /// A disposable host already owns its row. Its synthetic destination
+    /// must never pass through ordinary SSH registration.
+    ExistingEnvironment {
+        guard: crate::store::PodmanInstallGuard,
+    },
     Ssh {
         destination: String,
         remote_farhelm: Option<String>,
@@ -958,6 +963,35 @@ impl ProvisioningService {
         discovered: Option<DiscoveredDial>,
     ) -> anyhow::Result<HostId> {
         let (host, inserted) = match registration {
+            ProbeRegistration::ExistingEnvironment { guard } => {
+                let farhelm = plan
+                    .map(|plan| path_text(&plan.farhelm_path))
+                    .transpose()?
+                    .or(discovered
+                        .as_ref()
+                        .map(|dial| path_text(&dial.farhelm))
+                        .transpose()?)
+                    .or(guard.farhelm.clone());
+                let state_dir = plan
+                    .map(|plan| path_text(&plan.state_dir))
+                    .transpose()?
+                    .or(discovered
+                        .as_ref()
+                        .and_then(|dial| dial.state_dir.as_deref())
+                        .map(path_text)
+                        .transpose()?)
+                    .or(guard.state_dir.clone());
+                let (Some(farhelm), Some(state_dir)) = (farhelm, state_dir) else {
+                    bail!("the container has no admitted installation coordinates");
+                };
+                anyhow::ensure!(
+                    self.store
+                        .admit_podman_install(guard.clone(), &farhelm, &state_dir)
+                        .await?,
+                    "the environment binding changed during provisioning"
+                );
+                (guard.host, false)
+            }
             ProbeRegistration::Local => {
                 let row = self
                     .store
@@ -1177,6 +1211,7 @@ impl ProvisioningService {
                 .find(|row| row.destination.as_deref() == Some(destination))
                 .map(|row| row.id),
             ProbeRegistration::Local => None,
+            ProbeRegistration::ExistingEnvironment { guard } => Some(guard.host),
         };
         if let Some(existing) = existing
             && !self.memory.lock().await.busy.insert(existing)
@@ -1285,12 +1320,15 @@ impl ProvisioningService {
             .expect("the provisioning planning semaphore is never closed");
         let row = self.host_row(host).await?;
         // Update can discover and adopt install coordinates too. It cannot
-        // replace the initial sandbox run's copied-state admission check.
-        if row.tensorlake.is_some()
+        // replace the provider's initial copied-state admission check.
+        if row.kind.environment_provider().is_some()
             && (row.remote_farhelm.is_none() || row.remote_state_dir.is_none())
         {
+            let binding = row
+                .environment_binding()
+                .context("an environment host has no provider binding")?;
             return Err(anyhow::Error::new(ProvisioningRequestError::Refused(
-                "initial Tensorlake setup must finish before Update; run setup again from its host row".into(),
+                binding.handle.initial_setup_refusal().into(),
             )));
         }
         if let Some(reason) = self.suspended_refusal(host) {
@@ -1573,6 +1611,9 @@ impl ProvisioningService {
             return Err(anyhow::Error::new(match row.kind {
                 HostKind::Tensorlake => ProvisioningRequestError::RemoveInstead(
                     super::uninstall_refusal::TENSORLAKE_DELETE_INSTEAD.to_string(),
+                ),
+                HostKind::Podman => ProvisioningRequestError::RemoveInstead(
+                    "Delete the container to remove its Farhelm installation.".to_string(),
                 ),
                 HostKind::Local | HostKind::Ssh => {
                     ProvisioningRequestError::Refused(LOCAL_UNINSTALL_HANDOFF.to_string())
@@ -2985,6 +3026,9 @@ async fn require_no_running_sessions(
 fn registration_for_row(row: &HostRow) -> anyhow::Result<ProbeRegistration> {
     match row.kind {
         HostKind::Local => Ok(ProbeRegistration::Local),
+        HostKind::Podman => Ok(ProbeRegistration::ExistingEnvironment {
+            guard: crate::store::PodmanInstallGuard::of(row)?,
+        }),
         // A sandbox's row is converged by its destination like any ssh
         // row's; registration never changes its kind or its binding.
         HostKind::Ssh | HostKind::Tensorlake => Ok(ProbeRegistration::Ssh {

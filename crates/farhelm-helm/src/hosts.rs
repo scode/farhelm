@@ -53,7 +53,8 @@ pub(crate) struct HostView {
     #[serde(skip)]
     pub(crate) entry_uuid: String,
     /// `"local"` for the one reserved row, `"ssh"` for a registered
-    /// destination, `"tensorlake"` for a sandbox Farhelm created. The
+    /// destination, `"tensorlake"` for a sandbox, or `"podman"` for a
+    /// session-owned container Farhelm created. The
     /// distinction is not cosmetic: it is what tells a client which rows
     /// offer edit and remove at all, and what removing one does.
     pub(crate) kind: &'static str,
@@ -510,6 +511,7 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                     HostKind::Local => "local",
                     HostKind::Ssh => "ssh",
                     HostKind::Tensorlake => "tensorlake",
+                    HostKind::Podman => "podman",
                 },
                 is_session_owned: snapshot.is_session_owned,
                 tensorlake: registry
@@ -1589,6 +1591,41 @@ pub(crate) async fn retry_host(
     }
 }
 
+/// Read cached place status without contacting the host. The launcher can
+/// render immediately and schedule a separate refresh when it opens.
+pub(crate) async fn podman_probe(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+) -> axum::response::Response {
+    let result = async {
+        let row = state
+            .store
+            .list_hosts()
+            .await?
+            .into_iter()
+            .find(|row| row.id == host)
+            .ok_or_else(|| anyhow::Error::new(HostStoreError::HostNotFound(host)))?;
+        state.podman_places.view(&row)
+    }
+    .await;
+    match result {
+        Ok(view) => axum::Json(view).into_response(),
+        Err(error) => http_error(error),
+    }
+}
+
+/// Refresh one requested place in the background. Repeated requests join the
+/// existing attempt and never start synchronous fleet-wide work.
+pub(crate) async fn refresh_podman_probe(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+) -> axum::response::Response {
+    match state.podman_places.refresh(state.store.clone(), host).await {
+        Ok(()) => axum::http::StatusCode::ACCEPTED.into_response(),
+        Err(error) => http_error(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{HostStateView, RefreshView};
@@ -1627,6 +1664,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            podman: None,
             tensorlake: Some(crate::store::TensorlakeBinding {
                 sandbox: "sbx".into(),
                 sandbox_id: None,

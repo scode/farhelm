@@ -48,10 +48,6 @@ impl HostAccess {
 /// `RemoteRoute` makes recursive container nesting unrepresentable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
-#[allow(
-    dead_code,
-    reason = "place routes become constructible with Podman storage"
-)]
 pub(crate) enum BaseRoute {
     Local,
     Ssh {
@@ -59,6 +55,39 @@ pub(crate) enum BaseRoute {
         #[serde(skip_serializing_if = "SshAccessKind::is_user_config")]
         access: SshAccessKind,
     },
+}
+
+impl BaseRoute {
+    /// Run on an ordinary place using the same argv and SSH lowering as
+    /// supervisor access. A place borrows its supervisor's existing master.
+    pub(crate) fn command(
+        &self,
+        control_dir: &Path,
+        payload: RemoteCommand<'_>,
+    ) -> anyhow::Result<ProcessCommand> {
+        match self {
+            Self::Local => {
+                let mut argv = payload.argv().into_iter();
+                let program = argv.next().context("an empty command has no executable")?;
+                Ok(ProcessCommand {
+                    program: program.into(),
+                    args: argv.collect(),
+                })
+            }
+            Self::Ssh {
+                destination,
+                access,
+            } => RemoteRoute::Ssh {
+                destination: destination.clone(),
+                access: *access,
+            }
+            .command(
+                control_dir,
+                ConnectionPolicy::Shared(SharedConnection::Supervisor),
+                payload,
+            ),
+        }
+    }
 }
 
 /// The login identity established when a container is created. Podman exec
@@ -81,10 +110,6 @@ pub(crate) enum RemoteRoute {
         #[serde(skip_serializing_if = "SshAccessKind::is_user_config")]
         access: SshAccessKind,
     },
-    #[allow(
-        dead_code,
-        reason = "container routes become constructible with Podman storage"
-    )]
     PodmanExec {
         via: BaseRoute,
         container: String,
@@ -287,8 +312,8 @@ fn quote_argv(argv: &[String]) -> String {
         .join(" ")
 }
 
-/// Convert current storage kinds in one place. The store-backed resolver below
-/// refreshes the row first, and is where a future place-host join belongs.
+/// Convert standalone host rows. Container access needs a registry snapshot
+/// containing its place too, supplied by the store-backed resolver below.
 pub(crate) fn host_access(row: &HostRow) -> anyhow::Result<HostAccess> {
     Ok(match row.kind {
         HostKind::Local => HostAccess::Local,
@@ -302,28 +327,123 @@ pub(crate) fn host_access(row: &HostRow) -> anyhow::Result<HostAccess> {
                 .ssh_access()
                 .context("an SSH host has no access policy")?,
         }),
+        HostKind::Podman => anyhow::bail!("a container route requires its current place row"),
     })
 }
 
-/// Resolve registry access at the start of each operation. Keeping the database
-/// read here lets container access join its editable place row in the same
-/// snapshot once storage supplies that relationship.
+/// Resolve the resource and its editable place in the same registry snapshot
+/// at the start of each attempt. No environment caches an SSH destination.
 pub(crate) async fn resolve_host_access(
     store: &HelmStore,
     host: HostId,
 ) -> anyhow::Result<HostAccess> {
-    let row = store
-        .list_hosts()
-        .await?
-        .into_iter()
+    let rows = store.list_hosts().await?;
+    let row = rows
+        .iter()
         .find(|row| row.id == host)
         .with_context(|| format!("host {host} is no longer registered"))?;
-    host_access(&row)
+    match row.kind {
+        HostKind::Local | HostKind::Ssh | HostKind::Tensorlake => host_access(row),
+        HostKind::Podman => {
+            let binding = row
+                .podman
+                .as_ref()
+                .context("a container row has no binding")?;
+            let place = rows
+                .iter()
+                .find(|place| place.id == binding.place_host)
+                .context("the container's place host is no longer registered")?;
+            Ok(HostAccess::Remote(RemoteRoute::PodmanExec {
+                via: base_route(place)?,
+                container: binding
+                    .container_id
+                    .clone()
+                    .context("the container create has no confirmed identity")?,
+                user: binding.login_user(),
+            }))
+        }
+    }
+}
+
+/// Only ordinary hosts form a base route. This check prevents a hand-edited
+/// binding from turning container routing into recursive environment nesting.
+pub(crate) fn base_route(row: &HostRow) -> anyhow::Result<BaseRoute> {
+    match row.kind {
+        HostKind::Local => Ok(BaseRoute::Local),
+        HostKind::Ssh => Ok(BaseRoute::Ssh {
+            destination: row
+                .destination
+                .clone()
+                .context("an SSH place has no destination")?,
+            access: SshAccessKind::UserConfig,
+        }),
+        HostKind::Tensorlake | HostKind::Podman => {
+            anyhow::bail!("an environment cannot hold containers")
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Container access must resolve the current place row on every attempt.
+    /// A raw endpoint edit models externally changed registry input and catches
+    /// accidental caching even though the ordinary UI refuses such a retarget.
+    #[farhelm_testtrace::test]
+    async fn container_access_joins_the_current_place_destination() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        let place = store
+            .add_ssh_host("before.example", None, None)
+            .await
+            .unwrap();
+        let host = store
+            .register_session_container(crate::store::NewPodmanHost {
+                name: "farhelm-sess-test-route".into(),
+                recipe: "dev".into(),
+                place_host: place,
+                user: "developer".into(),
+                home: "/home/developer".into(),
+                uid: 1000,
+            })
+            .await
+            .unwrap();
+        let container_id = "a".repeat(64);
+        store
+            .set_podman_container_id(host, &container_id)
+            .await
+            .unwrap();
+        let route = |destination: &str| {
+            HostAccess::Remote(RemoteRoute::PodmanExec {
+                via: BaseRoute::Ssh {
+                    destination: destination.into(),
+                    access: SshAccessKind::UserConfig,
+                },
+                container: container_id.clone(),
+                user: ContainerUser {
+                    name: "developer".into(),
+                    home: "/home/developer".into(),
+                    uid: 1000,
+                },
+            })
+        };
+        assert_eq!(
+            resolve_host_access(&store, host).await.unwrap(),
+            route("before.example")
+        );
+        let conn = rusqlite::Connection::open(path).unwrap();
+        conn.execute(
+            "UPDATE hosts SET destination = 'after.example' WHERE id = ?1",
+            [place],
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_host_access(&store, host).await.unwrap(),
+            route("after.example")
+        );
+    }
 
     /// Hostile container, user and home spellings distinguish literal argv
     /// from accidental interpolation at either of the two shell boundaries.

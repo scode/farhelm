@@ -1672,6 +1672,11 @@ async fn prepare(
                 HostKind::Tensorlake => {
                     crate::api::probe_tensorlake_host(base, "", "", Some(host.id)).await?
                 }
+                HostKind::Podman => {
+                    return Err("Set up this container through its environment launch."
+                        .to_string()
+                        .into());
+                }
                 HostKind::Ssh => {
                     let destination = host
                         .destination

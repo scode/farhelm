@@ -4055,7 +4055,9 @@ impl HostActor {
             progress,
             match row.kind {
                 HostKind::Local => ConnectionStage::ConnectingToSupervisor,
-                HostKind::Ssh | HostKind::Tensorlake => ConnectionStage::ConnectingToHost,
+                HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => {
+                    ConnectionStage::ConnectingToHost
+                }
             },
         );
         let Some(binding) = row.environment_binding() else {
@@ -5529,6 +5531,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            podman: None,
             tensorlake: None,
         }
     }
@@ -6277,6 +6280,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            podman: None,
             tensorlake: None,
         };
         let remote = row(7, HostKind::Ssh, Some("box.example"));
@@ -12530,6 +12534,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            podman: None,
             tensorlake: None,
         };
         let cases = [
@@ -12592,6 +12597,7 @@ mod tests {
             local_links_without_asking: false,
             icon: Default::default(),
             color: Default::default(),
+            podman: None,
             tensorlake: None,
         };
         let error = classify_local_dial(anyhow::Error::new(std::io::Error::new(
