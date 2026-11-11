@@ -1182,6 +1182,10 @@ pub(crate) struct FleetBuilder {
     /// What the actors ask before dialing a Tensorlake host, when a test
     /// scripts it; otherwise the manager's "cannot ask" default.
     sandboxes: Option<Arc<dyn crate::environment::EnvironmentProvider>>,
+    /// The Podman provider the actors ask about container hosts, when a test
+    /// stands one in; `None` leaves the slot empty, so a container row never
+    /// dials ("this helm has no Podman provider").
+    podman: Option<Arc<dyn crate::environment::EnvironmentProvider>>,
 }
 
 impl FleetBuilder {
@@ -1216,6 +1220,16 @@ impl FleetBuilder {
         sandboxes: Arc<dyn crate::environment::EnvironmentProvider>,
     ) -> Self {
         self.sandboxes = Some(sandboxes);
+        self
+    }
+    /// Put `podman` in the helm's Podman provider slot, so a test can plant a
+    /// connected container session's host the way [`Self::sandboxes`] lets it
+    /// plant a Tensorlake one.
+    pub(crate) fn podman(
+        mut self,
+        podman: Arc<dyn crate::environment::EnvironmentProvider>,
+    ) -> Self {
+        self.podman = Some(podman);
         self
     }
     /// A fresh helm.db with only its reserved local row, and a local host
@@ -1259,6 +1273,7 @@ impl FleetBuilder {
             tensorlake_api: None,
             tensorlake_shell: None,
             sandboxes: None,
+            podman: None,
         }
     }
 
@@ -1401,7 +1416,7 @@ impl FleetBuilder {
         if let Some(shell) = self.tensorlake_shell {
             tensorlake = tensorlake.with_shell(shell);
         }
-        let providers = if let Some(observations) = self.sandboxes {
+        let mut providers = if let Some(observations) = self.sandboxes {
             crate::environment::Providers::with_scripted_tensorlake(
                 observations,
                 Arc::new(tensorlake.clone()),
@@ -1409,6 +1424,9 @@ impl FleetBuilder {
         } else {
             crate::environment::Providers::with_tensorlake(Arc::new(tensorlake.clone()))
         };
+        if let Some(podman) = self.podman {
+            providers.set_test_podman(podman);
+        }
         let manager = if let Some(client) = self.ntfy_client {
             ConnectionManager::start_with_ntfy_and_providers(
                 self.store.clone(),

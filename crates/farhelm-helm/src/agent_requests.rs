@@ -102,6 +102,20 @@
 //! lifecycle verb routes its target before asking, so a session no host
 //! knows is refused without a card. Listings never ask.
 //!
+//! # Agents inside disposable environments reach only their own
+//!
+//! A sandbox or container session runs on a session-owned host row, and an
+//! agent there is confined to that row ([`AgentScope`], SPEC.md "Agents and
+//! environments"): its listings show only its environment, its creates land
+//! there, its lifecycle verbs reach only sessions there, and clone, the
+//! template verbs and the host verbs are refused before any card. What makes
+//! this safe to decide here is the same thing that makes `current`
+//! computable: the connection a request arrived on says which row asked, and
+//! a confined supervisor cannot claim to be another row. Inside its scope a
+//! confined agent gets the ordinary rules, cards included, under its
+//! environment host's own settings. Deleting another session in its
+//! environment is session-only, because the asker is still there.
+//!
 //! # What this side does NOT verify, and why that is deliberate
 //!
 //! The `session_id` on an upcall, and the claim that the connection it
@@ -338,11 +352,77 @@ const AGENT_PROMPTS_ENABLED: bool = false;
 const AGENT_PROMPTS_OFF_REFUSAL: &str = "sending prompts to other sessions is turned off in this version of Farhelm, so nothing \
      was sent";
 
-/// Disposable sandbox and container sessions have no agent-request authority.
-/// The owning helm enforces this at the existing relay boundary, without asking
-/// the supervisor to persist policy or produce a notification.
-const SANDBOX_AGENT_REFUSAL: &str =
-    "Agents in sandbox and container sessions can't ask Farhelm to act yet.";
+/// The one refusal an agent in a sandbox or container session gets for
+/// anything outside its own environment (SPEC.md, "Agents and environments").
+/// One fixed sentence for every verb, so an agent learns the rule rather than
+/// a per-verb detail it could probe around.
+const ENVIRONMENT_SCOPE_REFUSAL: &str =
+    "Agents in sandbox and container sessions can only act within their own sandbox or container.";
+
+/// How far an agent request may reach, decided once per request from the
+/// host row its connection serves.
+///
+/// An origin whose row is session-owned (the hidden host of a sandbox or
+/// container session, for any provider) is confined to that row: it may list,
+/// create on and act on its own environment and nothing else, and it may not
+/// touch templates or hosts at all. Every other origin keeps the fleet-wide
+/// reach the rest of this module describes.
+///
+/// The decision rests on the connection the request arrived on, never on
+/// anything the request or its supervisor says, so a confined supervisor
+/// cannot widen its own scope. Nothing here names a provider: a third kind of
+/// disposable environment is confined because its rows are session-owned,
+/// not because a branch remembered it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AgentScope {
+    /// An ordinary host's agent: the whole fleet, minus session-owned rows
+    /// as destinations.
+    Fleet,
+    /// An agent inside the environment served by this session-owned row.
+    Environment(HostId),
+}
+
+impl AgentScope {
+    /// Whether a host listing shows `view` to this scope's agents. Ordinary
+    /// agents never see session-owned rows (they are nobody's destination);
+    /// a confined agent sees exactly its own row.
+    fn lists_host(self, view: &crate::hosts::HostView) -> bool {
+        match self {
+            Self::Fleet => !view.is_session_owned,
+            Self::Environment(own) => view.id == own,
+        }
+    }
+
+    /// Refuse a lifecycle target outside a confined origin's environment.
+    /// Ordinary origins reach any target here; their own restrictions on
+    /// session-owned targets live in the verbs that have them.
+    fn admit_target(self, target: &SessionKey) -> anyhow::Result<()> {
+        match self {
+            Self::Fleet => Ok(()),
+            Self::Environment(own) if target.host == own => Ok(()),
+            Self::Environment(_) => Err(environment_scope_refusal()),
+        }
+    }
+
+    /// Refuse outright a verb a confined origin has no form of (clone, the
+    /// template verbs, the host verbs). A no-op for ordinary origins.
+    fn admit_fleet_verb(self) -> anyhow::Result<()> {
+        match self {
+            Self::Fleet => Ok(()),
+            Self::Environment(_) => Err(environment_scope_refusal()),
+        }
+    }
+}
+
+/// [`ENVIRONMENT_SCOPE_REFUSAL`] as the error every confined refusal returns.
+/// `Unauthorized`, like the other policy refusals an agent cannot retry its
+/// way past.
+fn environment_scope_refusal() -> anyhow::Error {
+    anyhow::Error::new(crate::SupervisorError::helm(
+        ErrorKind::Unauthorized,
+        ENVIRONMENT_SCOPE_REFUSAL.to_string(),
+    ))
+}
 
 /// The most ENCODED session bytes one `sessions` reply will ever carry.
 ///
@@ -397,16 +477,6 @@ impl AgentRequestHandler for HelmAgentRequests {
                 message: "the host connection was replaced; retry".to_string(),
             };
         }
-        if state
-            .manager
-            .status(origin.host)
-            .is_some_and(|status| status.is_session_owned)
-        {
-            return AgentOutcome::Err {
-                kind: ErrorKind::Unauthorized,
-                message: SANDBOX_AGENT_REFUSAL.to_string(),
-            };
-        }
         // Keep the wire type's exhaustive classification as the authority for
         // lost-reply handling, even though dispatch takes only parsed fields.
         let mutating = verb.is_mutating();
@@ -432,7 +502,31 @@ impl AgentRequestHandler for HelmAgentRequests {
                 message: "the host connection was replaced; retry".to_string(),
             };
         };
+        // The scope comes from the same captured status as the caller's
+        // entry, so the row the request is attributed to and the row that
+        // decides its reach cannot be two different observations.
+        let scope = if caller_status.is_session_owned {
+            AgentScope::Environment(origin.host)
+        } else {
+            AgentScope::Fleet
+        };
         let caller_entry_uuid = caller_status.entry_uuid;
+        // Verbs a confined origin has no form of are refused before any of
+        // their own work, so a refusal never depends on the target existing.
+        if matches!(
+            verb,
+            ParsedAgentVerb::Templates
+                | ParsedAgentVerb::TemplateCreate { .. }
+                | ParsedAgentVerb::TemplateEdit { .. }
+                | ParsedAgentVerb::TemplateDelete { .. }
+                | ParsedAgentVerb::HostAdd { .. }
+                | ParsedAgentVerb::HostEdit { .. }
+                | ParsedAgentVerb::HostRemove { .. }
+                | ParsedAgentVerb::Clone { .. }
+        ) && let Err(refusal) = scope.admit_fleet_verb()
+        {
+            return outcome_of(Err(refusal), mutating);
+        }
         let reply = match verb {
             ParsedAgentVerb::Hosts => {
                 crate::hosts::host_views(&state)
@@ -440,7 +534,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                     .map(|views| AgentReply::Hosts {
                         hosts: views
                             .iter()
-                            .filter(|view| !view.is_session_owned)
+                            .filter(|view| scope.lists_host(view))
                             .map(|view| agent_host(view, origin.host))
                             .collect(),
                         complete: true,
@@ -448,7 +542,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                     })
             }
             ParsedAgentVerb::Sessions => {
-                session_listing(&state, origin.host, session_id, &caller_entry_uuid).await
+                session_listing(&state, scope, origin.host, session_id, &caller_entry_uuid).await
             }
             ParsedAgentVerb::OpenUrl { url } => {
                 crate::browser::open_url(&state, origin, session_id, url).await
@@ -458,7 +552,8 @@ impl AgentRequestHandler for HelmAgentRequests {
                 expected_title,
                 title,
             } => {
-                let target = match resolve_target(
+                let target = match resolve_scoped_target(
+                    scope,
                     &state,
                     origin,
                     target.into_string(),
@@ -507,13 +602,19 @@ impl AgentRequestHandler for HelmAgentRequests {
                 }
             }
             ParsedAgentVerb::Stop { session_id: target } => {
-                let target =
-                    match resolve_target(&state, origin, target.into_string(), session_id, "stop")
-                        .await
-                    {
-                        Ok(target) => target,
-                        Err(error) => return outcome_of(Err(error), mutating),
-                    };
+                let target = match resolve_scoped_target(
+                    scope,
+                    &state,
+                    origin,
+                    target.into_string(),
+                    session_id,
+                    "stop",
+                )
+                .await
+                {
+                    Ok(target) => target,
+                    Err(error) => return outcome_of(Err(error), mutating),
+                };
                 let (target_claim, _) =
                     match crate::sessions::route_active_session(&state, &target).await {
                         Ok(route) => route,
@@ -555,7 +656,8 @@ impl AgentRequestHandler for HelmAgentRequests {
                 session_id: target,
                 stop_if_running,
             } => {
-                let target = match resolve_target(
+                let target = match resolve_scoped_target(
+                    scope,
                     &state,
                     origin,
                     target.into_string(),
@@ -567,7 +669,12 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Ok(target) => target,
                     Err(error) => return outcome_of(Err(error), mutating),
                 };
-                if let Err(error) = refuse_sandbox_target(&state, target.host).await {
+                // Only the user deletes a session in somebody else's
+                // environment. A confined origin's own targets were already
+                // held to its environment, where deletion is session-only.
+                if scope == AgentScope::Fleet
+                    && let Err(error) = refuse_sandbox_target(&state, target.host).await
+                {
                     return outcome_of(Err(error), mutating);
                 }
                 if target == SessionKey::new(origin.host, session_id) {
@@ -576,13 +683,14 @@ impl AgentRequestHandler for HelmAgentRequests {
                         "a session cannot delete itself; use stop to end its agent while keeping the session".to_string(),
                     ))), mutating);
                 }
-                agent_delete(&state, origin, session_id, &target, stop_if_running).await
+                agent_delete(&state, origin, scope, session_id, &target, stop_if_running).await
             }
             ParsedAgentVerb::Prompt {
                 session_id: target,
                 prompt,
             } => {
-                let target = match resolve_target(
+                let target = match resolve_scoped_target(
+                    scope,
                     &state,
                     origin,
                     target.into_string(),
@@ -609,7 +717,8 @@ impl AgentRequestHandler for HelmAgentRequests {
                 session_id: target,
                 stop_if_running,
             } => {
-                let target = match resolve_target(
+                let target = match resolve_scoped_target(
+                    scope,
                     &state,
                     origin,
                     target.into_string(),
@@ -789,6 +898,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                             spawn,
                         },
                         intent_key,
+                        scope,
                     },
                 )
                 .await
@@ -1319,6 +1429,23 @@ async fn resolve_target(
     crate::sessions::resolve_session_ref(state, &target).await
 }
 
+/// [`resolve_target`], then held to `scope`: a confined origin's lifecycle
+/// verb is refused before routing, approval or any supervisor contact when its
+/// target lies outside the origin's own environment. Resolving first keeps the
+/// audit line and the ordinary malformed-reference refusals unchanged.
+async fn resolve_scoped_target(
+    scope: AgentScope,
+    state: &AppState,
+    origin: AgentOrigin,
+    target: String,
+    asking: &str,
+    verb: &str,
+) -> anyhow::Result<SessionKey> {
+    let key = resolve_target(state, origin, target, asking, verb).await?;
+    scope.admit_target(&key)?;
+    Ok(key)
+}
+
 /// Render an id for the AUDIT LOG with everything that could forge the
 /// line's presentation replaced by a visible `\u{…}` escape.
 ///
@@ -1354,6 +1481,9 @@ pub(crate) fn escape_for_log(id: &str) -> String {
 struct CreateRequest {
     edits: LaunchEditsRequest,
     intent_key: Option<String>,
+    /// The origin's reach. A confined origin creates only on its own host
+    /// ([`confine_create`]).
+    scope: AgentScope,
 }
 
 /// What an agent's create asked for, as it asked: the templates and flags,
@@ -1784,7 +1914,14 @@ async fn create_for_agent(
     asking_session: &str,
     request: CreateRequest,
 ) -> anyhow::Result<AgentReply> {
-    let CreateRequest { edits, intent_key } = request;
+    let CreateRequest {
+        edits,
+        intent_key,
+        scope,
+    } = request;
+    if let AgentScope::Environment(own) = scope {
+        confine_create(state, own, &edits).await?;
+    }
     let spawned = edits.spawn.is_some();
     let parent = match edits.spawn.as_ref().and_then(|spawn| spawn.parent.clone()) {
         Some(raw) => {
@@ -1816,8 +1953,10 @@ async fn create_for_agent(
     // the remaining gap, accepted (SPEC.md, Agent-spawned sessions): the
     // retry is then an ordinary create on that machine, with every check a
     // fresh create gets. A spawn always creates on its own host and takes no
-    // `--host`.
-    if intent_key.is_some() && !spawned && edits.host.is_none() {
+    // `--host`, and neither does a confined origin's create, whose host is its
+    // own environment whatever its templates say (they are refused if they
+    // name one).
+    if intent_key.is_some() && !spawned && edits.host.is_none() && scope == AgentScope::Fleet {
         return Err(crate::sessions::invalid_request(
             "an idempotency key needs --host: the key is kept on the host the first attempt \
              reached, so a retry must name that host rather than take it from a template"
@@ -1837,7 +1976,7 @@ async fn create_for_agent(
         ),
         None => None,
     };
-    let mut resolved = resolve_agent_create(state, origin, &edits).await?;
+    let mut resolved = resolve_agent_create(state, origin, scope, &edits).await?;
     if resolved.resolution.github_repo.is_some() {
         // Only the helm turns session-authenticated repository intent into
         // a checkout payload. Recovery must precede preview and the card:
@@ -1954,6 +2093,54 @@ async fn create_for_agent(
         },
     )
     .await
+}
+
+/// Hold a confined origin's create (spawn included) to its own environment
+/// before any template is applied or any card shown.
+///
+/// What is refused: a `--host` other than the environment's own name, and any
+/// placement a template or the flags would carry, whether an installed host or
+/// a recipe target. Templates are checked by their stored fields rather than
+/// after resolution, because resolution would otherwise report a recipe
+/// template as merely "unavailable" and an installed-host template as a
+/// stale host, neither of which tells the agent the actual rule.
+///
+/// Everything else (launch choices, destination, title, prompt) is the
+/// ordinary create's, resolved and approved as on any host.
+async fn confine_create(
+    state: &AppState,
+    own: HostId,
+    edits: &LaunchEditsRequest,
+) -> anyhow::Result<()> {
+    if let Some(name) = &edits.host {
+        let views = crate::hosts::host_views(state).await?;
+        let own_name = views
+            .iter()
+            .find(|view| view.id == own)
+            .map(|view| &view.name);
+        if own_name != Some(name) {
+            return Err(environment_scope_refusal());
+        }
+    }
+    let places = |fields: &farhelm_proto::launcher::TemplateFields| {
+        fields.host.is_some() || fields.launch_target().is_some()
+    };
+    if places(&edits.edits) {
+        return Err(environment_scope_refusal());
+    }
+    if edits.templates.is_empty() {
+        return Ok(());
+    }
+    let stored = state.store.launch_templates().await?;
+    let placing = edits.templates.iter().any(|name| {
+        stored
+            .iter()
+            .any(|template| &template.name == name && places(&template.fields))
+    });
+    if placing {
+        return Err(environment_scope_refusal());
+    }
+    Ok(())
 }
 
 /// Execute managed intent on one target connection, from recovery through
@@ -2173,6 +2360,7 @@ async fn create_checkout_for_agent(
 async fn resolve_agent_create(
     state: &AppState,
     origin: AgentOrigin,
+    scope: AgentScope,
     edits: &LaunchEditsRequest,
 ) -> anyhow::Result<ResolvedCreate> {
     let views = crate::hosts::host_views(state).await?;
@@ -2203,6 +2391,15 @@ async fn resolve_agent_create(
             .map(|view| view.name.clone())
             .unwrap_or_default();
         (origin.host, name)
+    } else if let AgentScope::Environment(own) = scope {
+        // `confine_create` already refused any other `--host` and every
+        // template that names a host, so the environment is the only answer.
+        let name = views
+            .iter()
+            .find(|view| view.id == own)
+            .map(|view| view.name.clone())
+            .ok_or_else(|| crate::sessions::no_such_host(own))?;
+        (own, name)
     } else if let Some(name) = edits.host.clone() {
         resolve_host(state, origin, name).await?
     } else if let Some(identity) = &resolution.template_host {
@@ -2491,9 +2688,15 @@ async fn agent_prompt(
 /// Bind an approved deletion to one target snapshot. The supervisor checks
 /// this guard again under its lifecycle claim; a restarted agent or new tab
 /// cannot gain destructive consent while the approval card waits.
+///
+/// A confined origin's deletion is session-only: the target shares the
+/// asker's environment, which therefore keeps at least the asker and must not
+/// be destroyed. It uses the supervisor delete Replace uses for its source,
+/// never the user's whole-environment Delete.
 async fn agent_delete(
     state: &AppState,
     origin: AgentOrigin,
+    scope: AgentScope,
     asking: &str,
     target: &SessionKey,
     stop_if_running: bool,
@@ -2517,9 +2720,17 @@ async fn agent_delete(
         guard,
     };
     approved(state, origin, asking, target.host == origin.host, action).await?;
-    crate::sessions::do_delete_session(state, target, guard, Some(client.connection_id()))
-        .await
-        .map(|outcome| AgentReply::Deleted { outcome })
+    let connection = Some(client.connection_id());
+    match scope {
+        AgentScope::Fleet => {
+            crate::sessions::do_delete_session(state, target, guard, connection).await
+        }
+        AgentScope::Environment(_) => {
+            crate::sessions::delete_session_within_environment(state, target, guard, connection)
+                .await
+        }
+    }
+    .map(|outcome| AgentReply::Deleted { outcome })
 }
 
 /// The delete card and dispatch share this guard. Unknown status may still
@@ -3899,13 +4110,21 @@ fn agent_row_of_mutation(
 /// Each row is measured as it is projected and the projection stops BEFORE
 /// the row that would exceed the allowance, so the helm never encodes a
 /// reply it has already decided not to send.
+///
+/// A confined origin's listing is filtered to its own host by the listing's
+/// own host filter, so the fleet-wide cap cannot crowd its sessions out and
+/// `truncated` describes that environment alone.
 async fn session_listing(
     state: &AppState,
+    scope: AgentScope,
     asking_host: HostId,
     asking_session: &str,
     caller_entry_uuid: &str,
 ) -> anyhow::Result<AgentReply> {
-    let filter = crate::store::SessionFilter::default();
+    let filter = match scope {
+        AgentScope::Fleet => crate::store::SessionFilter::default(),
+        AgentScope::Environment(own) => crate::store::SessionFilter::default().host(own),
+    };
     let sort = crate::store::ListSort::default();
     let listing =
         crate::aggregate::session_list(&state.manager, &state.store, &filter, sort).await?;
@@ -8108,9 +8327,10 @@ mod tests {
             spawn: None,
         };
         let resolve = async || {
-            let resolved = resolve_agent_create(&h.state, origin_of(&h, local), &request)
-                .await
-                .expect("the template's host resolves");
+            let resolved =
+                resolve_agent_create(&h.state, origin_of(&h, local), AgentScope::Fleet, &request)
+                    .await
+                    .expect("the template's host resolves");
             // This test holds a command launch across a host replacement.
             // Choose its no-trust policy without adding a host observation.
             let launch = try_without_workspace_trust(resolved.resolution.launch)
@@ -10209,7 +10429,7 @@ mod tests {
             },
             spawn: None,
         };
-        let mut resolved = resolve_agent_create(&h.state, origin, &request)
+        let mut resolved = resolve_agent_create(&h.state, origin, AgentScope::Fleet, &request)
             .await
             .unwrap();
         let (claim, client) = crate::sessions::host_client(&h.state, resolved.host).unwrap();
@@ -13224,197 +13444,809 @@ mod tests {
         (h, local, remote)
     }
 
-    /// Sandbox refusal precedes permissions, cards and every verb's target
-    /// work. Ordinary-origin agents also cannot create or destroy a billed
-    /// resource through a source session or a recipe template.
-    #[farhelm_testtrace::test]
-    async fn sandbox_agent_policy_refuses_origins_and_billed_targets_without_cards() {
-        let (h, local, _) = host_fleet().await;
-        let owned = h
-            .store
-            .register_session_sandbox(crate::store::NewTensorlakeHost {
-                destination: crate::tensorlake::ssh::destination("farhelm-sess-test-owned"),
-                entry: crate::store::NewHostEntry::new(Some("Owned sandbox")).unwrap(),
-                sandbox: "farhelm-sess-test-owned".into(),
-                recipe: "dev".into(),
-                resources: farhelm_proto::tensorlake::recipes::RecipeSize {
-                    cpus: 1,
-                    memory_gb: 1,
-                    disk_gb: 10,
-                },
+    // -----------------------------------------------------------------
+    // Agents and environments (SPEC.md, "Agents and environments")
+    // -----------------------------------------------------------------
+
+    /// A Podman provider that only ever says a container is running and asks
+    /// for no connection resources: just enough for a planted container row
+    /// to dial its scripted supervisor, as the real Tensorlake service's
+    /// "dial anyway" policy already lets a planted sandbox row do. Every other
+    /// provider operation fails the test, since nothing in these tests may
+    /// create, suspend or destroy an environment.
+    struct RunningContainers;
+
+    #[async_trait::async_trait]
+    impl crate::environment::EnvironmentProvider for RunningContainers {
+        async fn rebuild_recipe(
+            &self,
+            _: &str,
+            _: farhelm_proto::Place,
+            _: Arc<crate::feed::FleetEvents>,
+        ) -> anyhow::Result<()> {
+            unreachable!("agent-request fixture")
+        }
+        async fn clean_recipe(
+            &self,
+            _: &str,
+            _: &crate::tensorlake::build::DeleteGuard,
+        ) -> anyhow::Result<()> {
+            unreachable!("agent-request fixture")
+        }
+        async fn places(&self) -> anyhow::Result<Vec<crate::environment::EnvironmentPlace>> {
+            unreachable!("agent-request fixture")
+        }
+        async fn ensure_prepared(
+            &self,
+            _: &str,
+            _: &crate::environment::recipes::Recipe,
+            _: farhelm_proto::Place,
+            _: Arc<crate::feed::FleetEvents>,
+            _: &dyn crate::environment::PreparationProgress,
+        ) -> anyhow::Result<crate::environment::PreparedArtifact> {
+            unreachable!("agent-request fixture")
+        }
+        async fn create(
+            &self,
+            _: &crate::environment::EnvironmentBinding,
+            _: Option<crate::environment::PreparedArtifact>,
+            _: &dyn crate::environment::PreparationProgress,
+        ) -> anyhow::Result<crate::environment::CreatedEnvironment> {
+            unreachable!("agent-request fixture")
+        }
+        async fn list_owned(
+            &self,
+            _: farhelm_proto::Place,
+        ) -> anyhow::Result<Vec<crate::environment::OwnedEnvironment>> {
+            unreachable!("agent-request fixture")
+        }
+        async fn status(
+            &self,
+            _: &crate::environment::EnvironmentBinding,
+        ) -> Result<crate::environment::EnvironmentStatus, crate::environment::StatusUnanswered>
+        {
+            Ok(crate::environment::EnvironmentStatus::Running)
+        }
+        async fn suspend(
+            &self,
+            _: &crate::manager::ConnectionManager,
+            _: &crate::environment::EnvironmentBinding,
+        ) -> anyhow::Result<()> {
+            unreachable!("agent-request fixture")
+        }
+        async fn resume(
+            &self,
+            _: &crate::manager::ConnectionManager,
+            _: &crate::environment::EnvironmentBinding,
+        ) -> anyhow::Result<()> {
+            unreachable!("agent-request fixture")
+        }
+        async fn destroy(
+            &self,
+            _: &crate::environment::EnvironmentBinding,
+        ) -> anyhow::Result<crate::environment::Destroyed> {
+            unreachable!("agent-request fixture")
+        }
+        async fn connected(
+            &self,
+            _: &crate::store::HostRow,
+            _: Arc<crate::client::SupervisorClient>,
+            _: Arc<crate::feed::FleetEvents>,
+        ) -> crate::environment::ConnectedResources {
+            crate::environment::ConnectedResources::default()
+        }
+    }
+
+    /// [`host_fleet`] with [`RunningContainers`] in the Podman slot, so a
+    /// test can add a connected environment of either provider beside it.
+    async fn environment_fleet() -> (Harness, HostId, HostId) {
+        let (builder, remote) = FleetBuilder::new()
+            .await
+            .podman(Arc::new(RunningContainers))
+            .local(HostScript {
+                identity: Some("identity-local".to_string()),
+                sessions: vec![scripted("local-live", 30, farhelm_proto::AgentKind::Claude)],
+                ..HostScript::default()
             })
             .await
-            .unwrap();
-        h.store
-            .admit_tensorlake_install(owned, "/fixture/farhelm", "/fixture/state")
-            .await
-            .unwrap();
+            .ssh(
+                "user@builder",
+                HostScript {
+                    identity: Some("identity-builder".to_string()),
+                    sessions: vec![scripted("remote-a", 40, farhelm_proto::AgentKind::Claude)],
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let h = builder.start().await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        h.await_refreshed(remote).await;
+        trust_without_asking(&h).await;
+        (h, local, remote)
+    }
+
+    /// What a scripted environment supervisor was asked to do, in order:
+    /// `create:<cwd>` for each `CreateSession`, `delete:<id>` for each
+    /// `DeleteSession`, `prompt-target:<id>` for each `PromptTargetInfo` and
+    /// `prompt:<id>:<text>` for each `PromptSession`.
+    type EnvironmentRequests = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+
+    /// Script the supervisor inside a stand-in environment: it creates every
+    /// session it is asked for (echoing the folder), deletes every session it
+    /// is asked to and accepts every prompt, recording each request. Listing
+    /// and other housekeeping is the splice's, from the host script's
+    /// sessions.
+    ///
+    /// Spawned before the fleet dials the environment, for the ordering
+    /// reason [`spliced_local_fleet`] documents; nothing joins it, for the
+    /// reason [`spawn_create_responder`] gives.
+    fn spawn_environment_responder(peer: tokio::io::DuplexStream) -> EnvironmentRequests {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+        let seen: EnvironmentRequests = Default::default();
+        let recorded = std::sync::Arc::clone(&seen);
+        tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            let mut created = 0usize;
+            while let Ok(Some(frame)) = reader.read_frame().await {
+                let reply = match parse_control(&frame).expect("decode request") {
+                    ControlMsg::CreateSession {
+                        req_id,
+                        cwd,
+                        launch,
+                        title,
+                        ..
+                    } => {
+                        recorded.lock().unwrap().push(format!("create:{cwd}"));
+                        created += 1;
+                        ControlMsg::SessionCreated {
+                            req_id,
+                            session: SessionInfo {
+                                cwd,
+                                title: title.unwrap_or_default(),
+                                launch: launch.unwrap_or_else(|| {
+                                    farhelm_proto::SessionLaunch::plain_command("")
+                                }),
+                                ..session(&format!("env-created-{created}"), 100)
+                            },
+                        }
+                    }
+                    ControlMsg::DeleteSession {
+                        req_id, session_id, ..
+                    } => {
+                        recorded
+                            .lock()
+                            .unwrap()
+                            .push(format!("delete:{session_id}"));
+                        ControlMsg::SessionDeleted {
+                            req_id,
+                            notice: None,
+                            archived: false,
+                        }
+                    }
+                    ControlMsg::PromptTargetInfo { req_id, session_id } => {
+                        recorded
+                            .lock()
+                            .unwrap()
+                            .push(format!("prompt-target:{session_id}"));
+                        ControlMsg::PromptTarget {
+                            req_id,
+                            session: session(&session_id, 100),
+                            attached: false,
+                        }
+                    }
+                    ControlMsg::PromptSession {
+                        req_id,
+                        session_id,
+                        prompt,
+                    } => {
+                        recorded
+                            .lock()
+                            .unwrap()
+                            .push(format!("prompt:{session_id}:{prompt}"));
+                        ControlMsg::SessionPrompted { req_id }
+                    }
+                    _ => continue,
+                };
+                if writer.write_control(&reply).await.is_err() {
+                    return;
+                }
+            }
+        });
+        seen
+    }
+
+    /// Stand up a connected session-owned host of `provider` beside
+    /// [`host_fleet`]'s ordinary hosts, its supervisor spliced to `peer` and
+    /// listing `sessions`.
+    ///
+    /// Each provider's row is registered through its own store path, so the
+    /// confinement tests run once per provider through the one provider-neutral
+    /// check. The container's place is the local host, as a launch would choose.
+    /// "Run farhelm commands without asking" is turned on for the environment
+    /// so tests about scope are not held by cards; the permission defaults
+    /// themselves are checked where they matter.
+    async fn owned_environment(
+        h: &Harness,
+        provider: farhelm_proto::ProviderKind,
+        peer: tokio::io::DuplexStream,
+        sessions: Vec<SessionInfo>,
+    ) -> HostId {
+        let local = local_id(&h.store).await;
+        let owned = match provider {
+            farhelm_proto::ProviderKind::Tensorlake => {
+                let owned = h
+                    .store
+                    .register_session_sandbox(crate::store::NewTensorlakeHost {
+                        destination: crate::tensorlake::ssh::destination("farhelm-sess-test-owned"),
+                        entry: crate::store::NewHostEntry::new(None).unwrap(),
+                        sandbox: "farhelm-sess-test-owned".into(),
+                        recipe: "dev".into(),
+                        resources: farhelm_proto::tensorlake::recipes::RecipeSize {
+                            cpus: 1,
+                            memory_gb: 1,
+                            disk_gb: 10,
+                        },
+                    })
+                    .await
+                    .unwrap();
+                h.store
+                    .admit_tensorlake_install(owned, "/fixture/farhelm", "/fixture/state")
+                    .await
+                    .unwrap();
+                owned
+            }
+            farhelm_proto::ProviderKind::Podman => {
+                let owned = h
+                    .store
+                    .register_session_container(crate::store::NewPodmanHost {
+                        name: "farhelm-sess-test-owned".into(),
+                        recipe: "dev".into(),
+                        place_host: local,
+                        user: "developer".into(),
+                        home: "/home/developer".into(),
+                        uid: 1000,
+                    })
+                    .await
+                    .unwrap();
+                assert!(
+                    h.store
+                        .set_podman_container_id(owned, &"c".repeat(64))
+                        .await
+                        .unwrap()
+                );
+                let guard =
+                    crate::store::PodmanInstallGuard::of(&host_row(h, owned).await.unwrap())
+                        .unwrap();
+                assert!(
+                    h.store
+                        .admit_podman_install(guard, "/fixture/farhelm", "/fixture/state")
+                        .await
+                        .unwrap()
+                );
+                owned
+            }
+        };
         h.store
             .set_commands_without_asking(owned, true)
-            .await
-            .unwrap();
-        h.store
-            .set_own_sessions_without_asking(owned, true)
             .await
             .unwrap();
         h.fleet.edit(owned, |script| {
             *script = HostScript {
                 identity: Some("owned-install".into()),
-                sessions: vec![session("owned-session", 50)],
+                sessions,
+                peer: Some(peer),
                 ..HostScript::default()
             }
         });
         h.manager.sync_registry().await.unwrap();
         h.await_refreshed(owned).await;
-        assert!(h.manager.status(owned).unwrap().is_session_owned);
-        let _gui = h.manager.events().admit(1).unwrap();
-        let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
-        let origin = origin_of(&h, owned);
-        let mut spawn = command_create("unused", "~", "true", None, None);
-        if let AgentVerb::Create { host, spawn, .. } = &mut spawn {
-            *host = None;
-            *spawn = Some(farhelm_proto::SpawnPlacement {
-                parent: Some("owned-session".into()),
-                ..Default::default()
-            });
-        }
-        let target = full_id(&h, local, "local-live");
-        let before = h.fleet.host_requests(owned);
-        for verb in [
-            spawn,
-            command_create("Local (this machine)", "~", "true", None, None),
-            AgentVerb::Clone {
-                source_session_id: Some(target.clone()),
-                host: Some("Local (this machine)".into()),
-                cwd: None,
-                title: None,
-                intent_key: None,
-                confirm_yolo: false,
-            },
-            AgentVerb::Stop {
-                session_id: Some(target.clone()),
-            },
-            AgentVerb::Prompt {
-                session_id: Some(target),
-                prompt: "continue".into(),
-            },
-            AgentVerb::Templates {},
-            AgentVerb::Hosts {},
-        ] {
-            let (kind, message) = refused(handler.handle(origin, "owned-session", verb).await);
-            assert_eq!(kind, ErrorKind::Unauthorized);
-            assert_eq!(
-                message,
-                "Agents in sandbox and container sessions can't ask Farhelm to act yet."
-            );
-            assert!(h.state.approvals.list().is_empty());
-        }
-        assert_eq!(
-            h.fleet.host_requests(owned),
-            before,
-            "no supervisor work or notification RPC"
+        let status = h.manager.status(owned).unwrap();
+        assert!(status.is_session_owned, "premise: a session-owned row");
+        assert!(
+            status.client.is_some(),
+            "premise: its supervisor is connected"
         );
-        let (kind, message) = refused(
-            HelmAgentRequests::for_state(&h.state)
+        owned
+    }
+
+    /// The display name the hosts listing gives `host`, which is what an
+    /// agent passes as `--host`.
+    async fn listed_name(h: &Harness, host: HostId) -> String {
+        crate::hosts::host_views(&h.state)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|view| view.id == host)
+            .unwrap()
+            .name
+    }
+
+    /// An agent in a sandbox or container session reaches its own
+    /// environment and nothing else (SPEC.md, "Agents and environments"):
+    /// this is the whole trust boundary that lifting the old blanket refusal
+    /// rests on, so every verb family is checked, for both providers, and each
+    /// refusal must happen before any card or any supervisor contact elsewhere.
+    ///
+    /// Spec: listings show only the environment; spawn, create with no host
+    /// and create naming the environment create there; Delete of a sibling is
+    /// session-only (the row survives); every other host, template, clone and
+    /// host verb is refused with the one scope sentence.
+    #[farhelm_testtrace::test]
+    async fn confined_agents_reach_only_their_own_environment() {
+        for provider in [
+            farhelm_proto::ProviderKind::Tensorlake,
+            farhelm_proto::ProviderKind::Podman,
+        ] {
+            let (h, local, remote) = environment_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let seen = spawn_environment_responder(peer);
+            let owned = owned_environment(
+                &h,
+                provider,
+                client_side,
+                vec![session("asker", 50), session("sibling", 51)],
+            )
+            .await;
+            let _gui = h.manager.events().admit(1).unwrap();
+            let handler = HelmAgentRequests::for_state(&h.state);
+            let origin = origin_of(&h, owned);
+            let own_name = listed_name(&h, owned).await;
+            let remote_name = listed_name(&h, remote).await;
+            put_template(
+                &h,
+                "elsewhere",
+                farhelm_proto::launcher::TemplateFields {
+                    host: Some("identity-builder".into()),
+                    ..command_template("true")
+                },
+            )
+            .await;
+            put_template(
+                &h,
+                "recipe-template",
+                farhelm_proto::launcher::TemplateFields {
+                    recipe: Some("dev".into()),
+                    ..command_template("true")
+                },
+            )
+            .await;
+
+            let AgentOutcome::Ok {
+                reply: AgentReply::Hosts { hosts, .. },
+            } = handler.handle(origin, "asker", AgentVerb::Hosts {}).await
+            else {
+                panic!("{provider:?}: a confined origin lists its own host")
+            };
+            assert_eq!(hosts.len(), 1, "{provider:?}: {hosts:?}");
+            assert_eq!(hosts[0].name, own_name);
+            assert!(hosts[0].current);
+            let AgentOutcome::Ok {
+                reply: AgentReply::Sessions { sessions, .. },
+            } = handler
+                .handle(origin, "asker", AgentVerb::Sessions {})
+                .await
+            else {
+                panic!("{provider:?}: a confined origin lists its own sessions")
+            };
+            let mut listed: Vec<_> = sessions.iter().map(|row| row.id.clone()).collect();
+            listed.sort();
+            let mut expected = vec![full_id(&h, owned, "asker"), full_id(&h, owned, "sibling")];
+            expected.sort();
+            assert_eq!(
+                listed, expected,
+                "{provider:?}: only this environment's sessions"
+            );
+
+            let local_before = h.fleet.host_requests(local);
+            let remote_before = h.fleet.host_requests(remote);
+            let elsewhere = full_id(&h, local, "local-live");
+            let with_template = |name: &str| {
+                let mut create = command_create(&own_name, "/work", "true", None, None);
+                if let AgentVerb::Create { templates, .. } = &mut create {
+                    templates.push(name.into());
+                }
+                create
+            };
+            for verb in [
+                AgentVerb::Stop {
+                    session_id: Some(elsewhere.clone()),
+                },
+                AgentVerb::Rename {
+                    session_id: Some(full_id(&h, remote, "remote-a")),
+                    expected_title: Some(String::new()),
+                    title: "renamed".into(),
+                },
+                AgentVerb::Restart {
+                    session_id: Some(elsewhere.clone()),
+                    stop_if_running: true,
+                },
+                AgentVerb::Delete {
+                    session_id: Some(elsewhere.clone()),
+                    stop_if_running: true,
+                },
+                AgentVerb::Clone {
+                    source_session_id: Some(full_id(&h, owned, "sibling")),
+                    host: Some(own_name.clone()),
+                    cwd: None,
+                    title: None,
+                    intent_key: None,
+                    confirm_yolo: false,
+                },
+                AgentVerb::Templates {},
+                AgentVerb::TemplateCreate {
+                    name: "new".into(),
+                    fields: command_template("true"),
+                    host: None,
+                    shortcuts: Default::default(),
+                },
+                AgentVerb::TemplateDelete {
+                    name: "elsewhere".into(),
+                },
+                AgentVerb::HostAdd {
+                    destination: "user@other".into(),
+                    alias: None,
+                },
+                AgentVerb::HostEdit {
+                    host: remote_name.clone(),
+                    alias: Some(HostAliasEdit::Set("renamed".into())),
+                    icon: None,
+                    color: None,
+                },
+                AgentVerb::HostRemove {
+                    host: remote_name.clone(),
+                },
+                command_create(&remote_name, "/work", "true", None, None),
+                with_template("elsewhere"),
+                with_template("recipe-template"),
+            ] {
+                let shown = format!("{verb:?}");
+                let (kind, message) = refused(handler.handle(origin, "asker", verb).await);
+                assert_eq!(kind, ErrorKind::Unauthorized, "{provider:?}: {shown}");
+                assert_eq!(message, ENVIRONMENT_SCOPE_REFUSAL, "{provider:?}: {shown}");
+                assert!(
+                    h.state.approvals.list().is_empty(),
+                    "{provider:?}: no card for {shown}"
+                );
+            }
+            assert_eq!(h.fleet.host_requests(local), local_before, "{provider:?}");
+            assert_eq!(h.fleet.host_requests(remote), remote_before, "{provider:?}");
+            assert!(
+                seen.lock().unwrap().is_empty(),
+                "{provider:?}: nothing reached the environment"
+            );
+
+            let mut spawn = command_create("unused", "/spawned", "true", None, None);
+            if let AgentVerb::Create { host, spawn, .. } = &mut spawn {
+                *host = None;
+                *spawn = Some(farhelm_proto::SpawnPlacement {
+                    parent: Some("asker".into()),
+                    ..Default::default()
+                });
+            }
+            let mut no_host = command_create("unused", "/no-host", "true", None, None);
+            if let AgentVerb::Create { host, .. } = &mut no_host {
+                *host = None;
+            }
+            for verb in [
+                spawn,
+                no_host,
+                command_create(&own_name, "/named", "true", None, Some("key")),
+            ] {
+                let shown = format!("{verb:?}");
+                let AgentOutcome::Ok {
+                    reply: AgentReply::Created { session },
+                } = handler.handle(origin, "asker", verb).await
+                else {
+                    panic!("{provider:?}: {shown} creates in the environment")
+                };
+                assert_eq!(
+                    session.host_id,
+                    crate::hosts::registry_row(&h.state, owned)
+                        .await
+                        .unwrap()
+                        .entry_uuid,
+                    "{provider:?}: {shown}"
+                );
+            }
+            let AgentOutcome::Ok {
+                reply: AgentReply::Deleted { .. },
+            } = handler
                 .handle(
                     origin,
-                    "owned-session",
-                    AgentVerb::Prompt {
-                        session_id: None,
-                        prompt: "x".into(),
+                    "asker",
+                    AgentVerb::Delete {
+                        session_id: Some(full_id(&h, owned, "sibling")),
+                        stop_if_running: true,
                     },
                 )
-                .await,
-        );
-        assert_eq!(kind, ErrorKind::Unauthorized);
-        assert_eq!(
-            message, AGENT_PROMPTS_OFF_REFUSAL,
-            "global prompts-off precedence remains ordinary"
-        );
-
-        put_template(
-            &h,
-            "recipe-template",
-            farhelm_proto::launcher::TemplateFields {
-                recipe: Some("dev".into()),
-                ..command_template("true")
-            },
-        )
-        .await;
-        let ordinary = origin_of(&h, local);
-        let owned_ref = full_id(&h, owned, "owned-session");
-        for verb in [
-            AgentVerb::Delete {
-                session_id: Some(owned_ref.clone()),
-                stop_if_running: true,
-            },
-            AgentVerb::Clone {
-                source_session_id: Some(owned_ref),
-                host: Some("Local (this machine)".into()),
-                cwd: None,
-                title: None,
-                intent_key: None,
-                confirm_yolo: false,
-            },
-            AgentVerb::TemplateDelete {
-                name: "recipe-template".into(),
-            },
-            AgentVerb::TemplateEdit {
-                name: "recipe-template".into(),
-                fields: farhelm_proto::launcher::TemplateFields {
-                    name: Some("edited".into()),
-                    ..Default::default()
-                },
-                host: None,
-                shortcuts: Default::default(),
-            },
-        ] {
-            let expected = if matches!(&verb, AgentVerb::Delete { .. } | AgentVerb::Clone { .. }) {
-                "Only the user can delete or clone a sandbox session in Farhelm"
-            } else {
-                "Recipe templates can only be used and edited in Farhelm's GUI"
+                .await
+            else {
+                panic!("{provider:?}: a sibling in the same environment can be deleted")
             };
-            let (kind, message) = refused(handler.handle(ordinary, "local-live", verb).await);
-            assert_eq!(kind, ErrorKind::Unauthorized);
-            assert_eq!(message, expected);
-            assert!(h.state.approvals.list().is_empty());
+            assert_eq!(
+                *seen.lock().unwrap(),
+                [
+                    "create:/spawned",
+                    "create:/no-host",
+                    "create:/named",
+                    "delete:sibling"
+                ],
+                "{provider:?}"
+            );
+            assert!(
+                host_row(&h, owned).await.is_some(),
+                "{provider:?}: deleting a sibling is session-only and keeps the environment"
+            );
+            assert!(h.state.approvals.list().is_empty(), "{provider:?}");
         }
-        let AgentOutcome::Ok {
-            reply: AgentReply::Hosts { hosts, .. },
-        } = handler
-            .handle(ordinary, "local-live", AgentVerb::Hosts {})
-            .await
-        else {
-            panic!("ordinary origin can list ordinary hosts")
-        };
-        assert!(!hosts.iter().any(|host| host.name == "Owned sandbox"));
-        let AgentOutcome::Ok {
-            reply: AgentReply::Templates { templates, .. },
-        } = handler
-            .handle(ordinary, "local-live", AgentVerb::Templates {})
-            .await
-        else {
-            panic!("ordinary origin can list ordinary templates")
-        };
-        assert!(
-            !templates
-                .iter()
-                .any(|template| template.name == "recipe-template")
-        );
-        let mut create = command_create("Local (this machine)", "~", "true", None, None);
-        if let AgentVerb::Create { templates, .. } = &mut create {
-            templates.push("recipe-template".into());
+    }
+
+    /// Prompt types into another session's running agent, which makes it the
+    /// most dangerous verb an agent can aim across hosts, and its confinement
+    /// rests only on the scoped target resolution in its own arm. Production
+    /// refuses every prompt ahead of that arm while [`AGENT_PROMPTS_ENABLED`]
+    /// is off, so [`confined_agents_reach_only_their_own_environment`], which
+    /// uses the production handler, never reaches it. This test runs the
+    /// handler with prompts enabled so that re-enabling them cannot ship a
+    /// cross-host prompt from inside an environment.
+    ///
+    /// Spec: with agent prompts enabled, a Prompt from an agent in a sandbox
+    /// or container to a session on another host (this machine or an SSH
+    /// host) is refused with the one scope sentence, before any card and
+    /// before any request to either supervisor; a Prompt to a sibling in its
+    /// own environment is delivered there. Both providers.
+    #[farhelm_testtrace::test]
+    async fn confined_prompts_reach_only_their_own_environment() {
+        for provider in [
+            farhelm_proto::ProviderKind::Tensorlake,
+            farhelm_proto::ProviderKind::Podman,
+        ] {
+            let (h, local, remote) = environment_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let seen = spawn_environment_responder(peer);
+            let owned = owned_environment(
+                &h,
+                provider,
+                client_side,
+                vec![session("asker", 50), session("sibling", 51)],
+            )
+            .await;
+            let _gui = h.manager.events().admit(1).unwrap();
+            let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
+            let origin = origin_of(&h, owned);
+            let prompt = |target: String| AgentVerb::Prompt {
+                session_id: Some(target),
+                prompt: "continue".into(),
+            };
+
+            // Both other hosts run farhelm commands without asking
+            // (`environment_fleet`), so an unconfined prompt would reach
+            // their supervisors at once; only the scope check stops it.
+            let local_before = h.fleet.host_requests(local);
+            let remote_before = h.fleet.host_requests(remote);
+            for target in [
+                full_id(&h, local, "local-live"),
+                full_id(&h, remote, "remote-a"),
+            ] {
+                let (kind, message) = refused(
+                    handler
+                        .handle(origin, "asker", prompt(target.clone()))
+                        .await,
+                );
+                assert_eq!(kind, ErrorKind::Unauthorized, "{provider:?}: {target}");
+                assert_eq!(message, ENVIRONMENT_SCOPE_REFUSAL, "{provider:?}: {target}");
+                assert!(
+                    h.state.approvals.list().is_empty(),
+                    "{provider:?}: no card for {target}"
+                );
+            }
+            assert_eq!(h.fleet.host_requests(local), local_before, "{provider:?}");
+            assert_eq!(h.fleet.host_requests(remote), remote_before, "{provider:?}");
+            assert!(
+                seen.lock().unwrap().is_empty(),
+                "{provider:?}: nothing reached the environment"
+            );
+
+            let outcome = handler
+                .handle(origin, "asker", prompt(full_id(&h, owned, "sibling")))
+                .await;
+            assert!(
+                matches!(
+                    outcome,
+                    AgentOutcome::Ok {
+                        reply: AgentReply::Prompted {}
+                    }
+                ),
+                "{provider:?}: a sibling in the same environment can be prompted: {outcome:?}"
+            );
+            assert_eq!(
+                *seen.lock().unwrap(),
+                ["prompt-target:sibling", "prompt:sibling:continue"],
+                "{provider:?}"
+            );
         }
-        let (_, message) = refused(handler.handle(ordinary, "local-live", create).await);
-        assert!(
-            message.contains("recipe") && message.contains("unavailable"),
-            "{message}"
-        );
-        assert!(h.state.approvals.list().is_empty());
-        assert!(
-            host_row(&h, owned).await.is_some(),
-            "agent requests changed no resource ownership"
-        );
+    }
+
+    /// A confined origin's acting verbs still go through the ordinary card,
+    /// decided by the environment host's own settings: lifting the blanket
+    /// refusal must not lift approval with it. With "run farhelm commands
+    /// without asking" off on the environment (its default), a spawn into the
+    /// environment waits for a card naming the environment as the asking host,
+    /// and Deny creates nothing.
+    #[farhelm_testtrace::test]
+    async fn confined_requests_still_ask_on_the_environment_hosts_card() {
+        for provider in [
+            farhelm_proto::ProviderKind::Tensorlake,
+            farhelm_proto::ProviderKind::Podman,
+        ] {
+            let (h, _, _) = environment_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let seen = spawn_environment_responder(peer);
+            let owned =
+                owned_environment(&h, provider, client_side, vec![session("asker", 50)]).await;
+            h.store
+                .set_commands_without_asking(owned, false)
+                .await
+                .unwrap();
+            assert!(
+                host_row(&h, owned).await.unwrap().yolo_without_asking,
+                "{provider:?}: premise: environment hosts start allowing YOLO launches"
+            );
+            let _gui = h.manager.events().admit(1).unwrap();
+            let handler = HelmAgentRequests::for_state(&h.state);
+            let origin = origin_of(&h, owned);
+            let mut spawn = command_create("unused", "/spawned", "true", None, None);
+            if let AgentVerb::Create { host, spawn, .. } = &mut spawn {
+                *host = None;
+                *spawn = Some(farhelm_proto::SpawnPlacement {
+                    parent: Some("asker".into()),
+                    ..Default::default()
+                });
+            }
+            let task = tokio::spawn(async move { handler.handle(origin, "asker", spawn).await });
+            let card = await_card(&h, &task).await;
+            assert_eq!(
+                card.host_id, owned,
+                "{provider:?}: the environment host asks"
+            );
+            assert!(
+                card.own_host_session_action,
+                "{provider:?}: a same-host spawn"
+            );
+            assert_eq!(
+                answer_card(&h, "deny").await,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            let (kind, message) = refused(task.await.unwrap());
+            assert!(message.contains("declined"), "{provider:?}: {message}");
+            assert_eq!(kind, ErrorKind::Unauthorized, "{provider:?}");
+            assert!(
+                seen.lock().unwrap().is_empty(),
+                "{provider:?}: Deny created nothing"
+            );
+        }
+    }
+
+    /// Agents on ordinary hosts keep their limits on other sessions'
+    /// environments: only the user deletes one, no create or template can aim
+    /// at an environment's host entry, and recipe templates stay out of the
+    /// agent template verbs. Checked for both providers because the rule
+    /// rests on the session-owned row, not on a provider.
+    #[farhelm_testtrace::test]
+    async fn ordinary_agents_cannot_delete_or_target_other_environments() {
+        for provider in [
+            farhelm_proto::ProviderKind::Tensorlake,
+            farhelm_proto::ProviderKind::Podman,
+        ] {
+            let (h, local, _) = environment_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let seen = spawn_environment_responder(peer);
+            let owned = owned_environment(
+                &h,
+                provider,
+                client_side,
+                vec![session("owned-session", 50)],
+            )
+            .await;
+            let _gui = h.manager.events().admit(1).unwrap();
+            let handler = HelmAgentRequests::for_state(&h.state);
+            let ordinary = origin_of(&h, local);
+            let own_name = listed_name(&h, owned).await;
+            put_template(
+                &h,
+                "recipe-template",
+                farhelm_proto::launcher::TemplateFields {
+                    recipe: Some("dev".into()),
+                    ..command_template("true")
+                },
+            )
+            .await;
+            let (kind, message) = refused(
+                handler
+                    .handle(
+                        ordinary,
+                        "local-live",
+                        AgentVerb::Delete {
+                            session_id: Some(full_id(&h, owned, "owned-session")),
+                            stop_if_running: true,
+                        },
+                    )
+                    .await,
+            );
+            assert_eq!(kind, ErrorKind::Unauthorized, "{provider:?}");
+            assert_eq!(
+                message, "Only the user can delete or clone a sandbox session in Farhelm",
+                "{provider:?}"
+            );
+            let (kind, message) = refused(
+                handler
+                    .handle(
+                        ordinary,
+                        "local-live",
+                        command_create(&own_name, "/work", "true", None, None),
+                    )
+                    .await,
+            );
+            assert_eq!(kind, ErrorKind::NotFound, "{provider:?}: {message}");
+            for verb in [
+                AgentVerb::TemplateDelete {
+                    name: "recipe-template".into(),
+                },
+                AgentVerb::TemplateEdit {
+                    name: "recipe-template".into(),
+                    fields: farhelm_proto::launcher::TemplateFields {
+                        name: Some("edited".into()),
+                        ..Default::default()
+                    },
+                    host: None,
+                    shortcuts: Default::default(),
+                },
+            ] {
+                let (kind, message) = refused(handler.handle(ordinary, "local-live", verb).await);
+                assert_eq!(kind, ErrorKind::Unauthorized, "{provider:?}");
+                assert_eq!(
+                    message, "Recipe templates can only be used and edited in Farhelm's GUI",
+                    "{provider:?}"
+                );
+            }
+            let AgentOutcome::Ok {
+                reply: AgentReply::Hosts { hosts, .. },
+            } = handler
+                .handle(ordinary, "local-live", AgentVerb::Hosts {})
+                .await
+            else {
+                panic!("{provider:?}: an ordinary origin lists ordinary hosts")
+            };
+            assert!(
+                !hosts.iter().any(|host| host.name == own_name),
+                "{provider:?}"
+            );
+            let AgentOutcome::Ok {
+                reply: AgentReply::Templates { templates, .. },
+            } = handler
+                .handle(ordinary, "local-live", AgentVerb::Templates {})
+                .await
+            else {
+                panic!("{provider:?}: an ordinary origin lists ordinary templates")
+            };
+            assert!(
+                !templates
+                    .iter()
+                    .any(|template| template.name == "recipe-template"),
+                "{provider:?}"
+            );
+            assert!(h.state.approvals.list().is_empty(), "{provider:?}");
+            assert!(seen.lock().unwrap().is_empty(), "{provider:?}");
+            assert!(host_row(&h, owned).await.is_some(), "{provider:?}");
+        }
     }
 
     /// The registry row for `host`, which these tests read to see what a

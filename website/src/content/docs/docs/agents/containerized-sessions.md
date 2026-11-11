@@ -102,11 +102,12 @@ and files if replacement fails or the outcome is uncertain.
 
 Containers appear in **Hosts**, the session list and the usual update and problem notices. The permanent icons in the
 [navigation rail](/docs/using/manage-hosts/), the column of icons at the sidebar's left edge, are reserved for ordinary
-hosts. Each additional container session starts through a fresh **New container** launch.
+hosts. A container session you start yourself always gets a fresh **New container** launch; an agent inside a container
+can start more sessions in that same container.
 
-Farhelm **refuses requests from agents in container and session-owned sandbox environments**, including requests to open
-browser links. It also refuses agents' requests from other hosts to Delete or Clone these sessions. You can use the UI
-yourself. [Approve what agents do](/docs/using/approve-agent-requests/) covers ordinary hosts.
+An agent in a container **can ask Farhelm to act only within its own container**, as
+[Agents in sandboxes and containers](/docs/using/approve-agent-requests/#agents-in-sandboxes-and-containers) explains.
+Farhelm refuses agents' requests from other hosts to Delete or Clone container sessions.
 
 ### Proxies and containment
 
