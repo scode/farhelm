@@ -224,9 +224,10 @@ through the recorder with `--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`, or o
 ## 4. Release gate and CI in GitHub
 
 The Linux release gate includes the full farhelm integration selection as well as the other workspace targets. Its setup
-prepares rootless Podman and the exact cached Ubuntu digest, alongside loopback SSH, pinned static tmux and musl build
-tools before the workspace selection. The focused nextest setup builds the same-source installer payload before
-cargo-dist has produced a release artifact. The real recipe's network bootstrap is part of the gate.
+prepares rootless Podman, starts the runner's systemd user manager, exports its bus environment and verifies a transient
+user scope before caching the exact Ubuntu digest. Loopback SSH, pinned static tmux and musl build tools are also ready
+before the workspace selection. The focused nextest setup builds the same-source installer payload before cargo-dist has
+produced a release artifact. The real recipe's network bootstrap is part of the gate.
 
 Only once the static checks pass and the sweep has finished with every failure fixed or recorded. On top of the stack
 (or of `main` when all fixes have already landed):

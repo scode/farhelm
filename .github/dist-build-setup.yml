@@ -220,7 +220,21 @@
   run: |
     # The focused nextest setup builds native musl payloads before cargo-dist
     # has produced any release artifact. It reuses the pinned static tmux above.
-    sudo apt-get install -y podman uidmap slirp4netns fuse-overlayfs musl-tools
+    sudo apt-get install -y podman uidmap slirp4netns fuse-overlayfs musl-tools dbus-user-session
+    # Hosted jobs have no login session. Podman's production probe needs the
+    # runner's user manager, its environment and a usable transient scope;
+    # installing the engine alone leaves that prerequisite unavailable.
+    runner_uid=$(id -u)
+    sudo loginctl enable-linger "$runner_uid"
+    sudo systemctl start "user@$runner_uid.service"
+    export XDG_RUNTIME_DIR="/run/user/$runner_uid"
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+    test -S "$XDG_RUNTIME_DIR/bus"
+    systemctl --user show-environment >/dev/null
+    systemd-run --user --scope --collect --quiet --unit="farhelm-ci-probe-$(uuidgen).scope" -- true
+    # Later steps start fresh shells; the test helm must inherit the same bus.
+    printf 'XDG_RUNTIME_DIR=%s\nDBUS_SESSION_BUS_ADDRESS=%s\n' \
+      "$XDG_RUNTIME_DIR" "$DBUS_SESSION_BUS_ADDRESS" >> "$GITHUB_ENV"
     test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
     base=docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
     podman pull "$base"

@@ -106,14 +106,15 @@ that its required systemd or SSH substrate ran.
   — executes applicable unit and integration targets, including the support crates omitted from default-members. Nextest
   starts a process per test and bounds concurrency across binaries; the e2e group has four slots, supervisor tmux
   modules share two, the two-host fixture reserves two, and RSS and the real Podman fixture reserve all four. The
-  release gate runs this same selection, including the farhelm integration targets, after preparing rootless Podman and
-  its offline Ubuntu image. It narrows every later Rust step with a filter rather than `-p`, so those steps share one
-  build; ordinary CI does not run this suite. Do not also run the old full libtest battery. The e2e suite's in-process
-  harness and its real supervisor process fixture create new terminals unless a test asks for old ones by name
-  (`harness_tmux`, `supervisor_process_tmux`, `SupervisorSeams::tmux_terminals()`), as the supervisor's own unit tests
-  that need a real terminal do; those, and the tests of tmux itself, are what the pinned tmux is for. On Linux it needs
-  Python 3 at `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's `managed_supervisor::` stop
-  test runs a Python stand-in whose main thread exits before its other thread.
+  release gate runs this same selection, including the farhelm integration targets, after preparing rootless Podman, the
+  runner's systemd user manager and bus environment, a verified transient user scope, and its offline Ubuntu image. It
+  narrows every later Rust step with a filter rather than `-p`, so those steps share one build; ordinary CI does not run
+  this suite. Do not also run the old full libtest battery. The e2e suite's in-process harness and its real supervisor
+  process fixture create new terminals unless a test asks for old ones by name (`harness_tmux`,
+  `supervisor_process_tmux`, `SupervisorSeams::tmux_terminals()`), as the supervisor's own unit tests that need a real
+  terminal do; those, and the tests of tmux itself, are what the pinned tmux is for. On Linux it needs Python 3 at
+  `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's `managed_supervisor::` stop test runs a
+  Python stand-in whose main thread exits before its other thread.
 - `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' --tmux required -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
   — preserves doctest coverage separately because nextest does not execute it.
 - `scripts/test-tmux-pinned-shutdown.sh` — the x86_64 Linux release gate builds the exact checksummed release named by
