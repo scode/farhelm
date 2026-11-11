@@ -141,9 +141,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`normal-quit-misses-empty-download-directory.md`](normal-quit-misses-empty-download-directory.md) — A narrow
   normal-Quit race may leave an empty download staging folder; saved files are unaffected by this mechanism.
 
-- [`notification-bell-removal-skips-focus-return.md`](notification-bell-removal-skips-focus-return.md) — Removing the
-  notification bell may skip keyboard-focus return; browser fallback is unverified.
-
 - [`pinned-host-dialog-chrome-can-hide-content.md`](pinned-host-dialog-chrome-can-hide-content.md) — The deleted dialog
   record still has an unresolved Host Settings footer-clipping case; exact geometry is unverified.
 
