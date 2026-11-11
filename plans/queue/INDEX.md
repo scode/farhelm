@@ -9,4 +9,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `yolo-focus-origin.md` — Replace's YOLO question and a sandbox session's Suspend and Stop-and-suspend questions take focus only if nothing was pressed since the click and focus is still where the click left it
 - [complete] `tensorlake-key-order.md` — Tensorlake connections accept only ed25519 keys and load no hardware-token provider, so Farhelm's key is always offered first; the documented exceptions go
 - [pending] `sandbox-suspend-overlap.md` — A sandbox Suspend or Resume no longer blocks launches on other hosts (refused only while this page launches on or wakes that host), and a launch's wake waits out a busy host and fails fast if the host is suspended again
-- [pending] `bell-trash-reads.md` — Windows re-read a host's Trash only when the helm saw a Trash change there, not on every session status change or fallback poll
+- [in-flight 966c11] `bell-trash-reads.md` — Windows re-read a host's Trash only when the helm saw a Trash change there, not on every session status change or fallback poll
