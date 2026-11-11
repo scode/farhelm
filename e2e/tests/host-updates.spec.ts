@@ -128,6 +128,7 @@ async function prepare(page: Page, request: APIRequestContext) {
   const completed = new Map<number, number>();
   const stepCounts = new Map<number, number>();
   const connectionErrors = new Map<number, string>();
+  const runMessages = new Map<number, string>();
   const updates: { id: number; method: string; body: string | null }[] = [];
   const admission = routeGate();
   releases.push(admission.release);
@@ -181,7 +182,7 @@ async function prepare(page: Page, request: APIRequestContext) {
               status: index < done ? "completed" : index === done ? "running" : "pending",
             }))
             : [],
-          message: null,
+          message: runMessages.get(id) ?? null,
         },
       });
     }),
@@ -241,6 +242,8 @@ async function prepare(page: Page, request: APIRequestContext) {
       ages.set(id, "connecting");
       connectionErrors.set(id, error);
     },
+    /** Exercise the separately budgeted run diagnosis beside connection errors. */
+    setRunMessage(id: number, message: string) { runMessages.set(id, message); },
     /** An attended filter read still observes new build stamps after skew stops the feed. */
     async observeBuildThroughFilter(hostId?: number) {
       const reply = page.waitForResponse((response) =>
@@ -596,7 +599,7 @@ test("host progress cards agree across surfaces and follow connection detail", a
 });
 
 /**
- * A connection failure can exceed an entire short window. Preview only that
+ * Connection and run failures can exceed an entire short window. Preview only that
  * overflow, keep the actual current step readable, and make the promised full
  * diagnosis reachable through the ordinary identity button. Re-cloning must
  * restore whole text when either the window grows or the diagnosis gets shorter.
@@ -610,34 +613,50 @@ test(stepCount === 0 ? "host progress previews long diagnostics before any steps
   const diagnosis = "SSH failed while reconnecting. ".repeat(18) + "Final diagnosis: permission denied.";
   fixture.setStepCount(IDS.busy, stepCount);
   fixture.setConnectionError(IDS.busy, diagnosis);
+  fixture.setRunMessage(IDS.busy, diagnosis);
   await fixture.publish();
   const open = attentionRow(page, IDS.busy).locator(".host-attention-open");
   await expect(open).toBeVisible();
   await expect(attentionRow(page, IDS.busy)).toHaveAttribute("data-attention-kind", "working");
   const card = page.locator(".farhelm-tooltip .host-progress-card");
   const detail = card.locator(".host-progress-connection-detail");
+  const runDetail = card.locator(".host-progress-run-detail");
   const notice = card.locator(".host-progress-preview-notice");
+
+  /** Glyph rectangles expose partial lines that ordinary visibility accepts.
+   * The last rectangle must be fully readable, proving the actual tail shows.
+   */
+  const wholeTail = (text: Locator) => text.evaluate(node => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const rects = Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0);
+    const bounds = node.getBoundingClientRect();
+    const visible = rects.filter(rect => rect.bottom > bounds.top + 0.5 && rect.top < bounds.bottom - 0.5);
+    const inside = (rect: DOMRect) => rect.top >= bounds.top - 0.5 && rect.bottom <= bounds.bottom + 0.5;
+    return node.isConnected && visible.length > 0 && visible.every(inside) && inside(rects[rects.length - 1])
+      && node.scrollTop > 0;
+  });
 
   /** Reveal scrolling dismisses help, even when its event arrives after hover.
    * Keep reveal separate from pointer entry and cross the browser's scroll-event
    * phase before entering. This is a viewport-opening boundary only: live
    * diagnosis changes below must update the already-open card without re-entry.
    */
-  const hoverAtHeight = async (height: number) => {
+  const hoverAtHeight = async (height: number, target: Locator = open) => {
     await page.mouse.move(0, 0);
     await page.setViewportSize({ width: 1024, height });
     await page.evaluate(() => document.fonts.ready);
-    await open.scrollIntoViewIfNeeded();
-    await expect(open, "the working identity must fit its actual scroller and viewport before entry")
+    await target.scrollIntoViewIfNeeded();
+    await expect(target, "the progress trigger must fit its actual scroller and viewport before entry")
       .toBeInViewport({ ratio: 1 });
     // Scroll steps precede animation-frame callbacks. Flush the reveal's queued
     // scroll before hover, rather than cancelling the tooltip's pending timer.
     await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())));
-    await expect.poll(() => open.evaluate(node => {
+    await expect.poll(() => target.evaluate(node => {
       const rect = node.getBoundingClientRect();
       return node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
     }), { message: "the revealed identity owns the hover hit point" }).toBe(true);
-    await open.hover();
+    await target.hover();
     await expect(card).toBeVisible();
   };
 
@@ -669,6 +688,7 @@ test(stepCount === 0 ? "host progress previews long diagnostics before any steps
   await expect.poll(readablePreview, { message: "a long diagnosis must leave its current step and full-details notice readable" })
     .toEqual(expectedPreview);
   await expect.poll(() => detail.evaluate((node) => node.isConnected && node.scrollHeight > node.clientHeight)).toBe(true);
+  for (const text of [detail, runDetail]) await expect.poll(() => wholeTail(text)).toBe(true);
   // The elapsed clock replaces clones. Sample visibility and style on the same
   // connected copy instead of accepting a detached element's empty style.
   await expect.poll(() => card.evaluate(node =>
@@ -682,17 +702,22 @@ test(stepCount === 0 ? "host progress previews long diagnostics before any steps
   await hoverAtHeight(300);
   await expect(notice).toBeVisible();
   fixture.setConnectionError(IDS.busy, "Short connection failure.");
+  fixture.setRunMessage(IDS.busy, "Short run failure.");
   await fixture.publish();
   await expect(detail).toContainText("Short connection failure.");
   await expect(notice).toBeHidden();
   await expect.poll(() => detail.evaluate((node) => node.isConnected && node.scrollHeight <= node.clientHeight + 1)).toBe(true);
 
   fixture.setConnectionError(IDS.busy, diagnosis);
+  fixture.setRunMessage(IDS.busy, diagnosis);
   await fixture.publish();
   await expect(notice).toBeVisible();
   await expect.poll(readablePreview).toEqual(expectedPreview);
   await open.click();
   await expect(page.locator(".hosts-panel-toggle")).toHaveAttribute("aria-pressed", "true");
+  await hoverAtHeight(300, page.locator(`[data-host-id="${IDS.busy}"] .host-update-running`));
+  await expect(notice).toBeVisible();
+  for (const text of [detail, runDetail]) await expect.poll(() => wholeTail(text)).toBe(true);
   await page.locator(".host-details-toggle").check();
   const fullDetail = page.locator(`[data-host-id="${IDS.busy}"] .host-detail`);
   await expect(fullDetail).toContainText(diagnosis);
