@@ -1750,23 +1750,6 @@
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: `pending`.
 
-## notification-bell-removal-skips-focus-return.md
-
-- Outcome: `discard` (revised 2026-11-10 from `fix code`; see Decision).
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: When
-  another window clears the last notification, the row drops the bell component entirely, so its close effect never runs
-  and focus is not returned. The finding offers two fix routes ("from a surviving owner or an appropriate unmount path")
-  and has not verified the browser's focus fallback.
-- Decision: the user picked "Write one rule and apply it" (2026-10-26 ten-question triage page, Q9), and added in chat:
-  "on that focus rule apply complexity gate to the fixes i'm worried about it getting uber complicated and i want to
-  know if that happens by having plans blocked" The rule is carried by `guarded-answer-loses-launcher-focus.md`; execute
-  after it. Superseded 2026-11-10 along with `guarded-answer-loses-launcher-focus.md`: the user said of these four "all
-  of those seem ok to just discard, please do so, none seem critical".
-- Completion criteria: remove the feedback file and its index entry; no code or spec change. (The superseded criteria
-  were: this case follows the SPEC.md focus rule under the maintainer's complexity gate of roughly 50 lines of non-test
-  code or any new focus-tracking mechanism.)
-- Execution: `pending`.
-
 ## reselecting-terminal-does-not-restore-focus.md
 
 - Outcome: `discard` (revised 2026-11-10 from `fix code`; see Decision).
