@@ -1434,7 +1434,17 @@ pub(crate) async fn forget_host_locked(
             .transport()
             .release_shared_connections(&row)
             .await;
-        match state.tensorlake.delete_sandbox(&row).await {
+        let result = async {
+            let binding = row.environment_binding().ok_or_else(|| {
+                anyhow::anyhow!("host {host} has no recorded environment binding")
+            })?;
+            let provider = state.providers.get(binding.provider()).map_err(|reason| {
+                crate::SupervisorError::helm(farhelm_proto::ErrorKind::Conflict, reason.0)
+            })?;
+            provider.destroy(&binding).await
+        }
+        .await;
+        match result {
             Ok(deleted) => Some(deleted),
             Err(error) => {
                 state.manager.release_hold(host, true);

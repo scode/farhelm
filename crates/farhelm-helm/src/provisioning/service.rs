@@ -2073,7 +2073,7 @@ impl ProvisioningService {
         &self,
         host: HostId,
         run_task: RunTask,
-        deleted: Option<&crate::tensorlake::hosts::SandboxDeleted>,
+        deleted: Option<&crate::environment::Destroyed>,
     ) -> anyhow::Result<bool> {
         let serialized = self.manager.host_write_lock(host).await;
         self.store.remove_host_row(host, deleted).await?;

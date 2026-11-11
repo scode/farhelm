@@ -23,12 +23,14 @@
 //!   install coordinates carried to new hosts. The build registry owns its jobs.
 //! - [`hosts`]: what a Tensorlake host needs from the API once it exists: the
 //!   status check before every dial, and removal, which deletes the sandbox.
+//!   It implements the shared [`crate::environment::EnvironmentProvider`] seam.
 //!   The host model itself (`HostKind::Tensorlake` and its columns) is in
 //!   [`crate::store`]; its ssh connections use the same [`ssh`] options as
 //!   the builder.
 //!
 //! Host creation is an outer provisioning plan in [`crate::provisioning`].
-//! [`lifecycle`] owns explicit Suspend/Resume.
+//! [`lifecycle`] retains the provider's explicit Suspend/Resume ordering under
+//! the shared environment dispatcher.
 //! [`tunnels`] ties recipe forwards to each connected actor's lifetime;
 //! [`orphans`] lists reserved-name sandboxes with no owner on this helm and
 //! deletes one only on an explicit request.

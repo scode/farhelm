@@ -47,6 +47,18 @@ fn answer(result: anyhow::Result<()>) -> Response {
 /// withdraws that old connection before success, even if the actor missed an
 /// external suspension.
 pub(crate) async fn change(state: &AppState, host: HostId, resume: bool) -> anyhow::Result<()> {
+    crate::environment::lifecycle::change(state, host, resume).await
+}
+
+/// Keep account validation ahead of connection withdrawal. The provider seam
+/// delegates here after selection, and this function re-reads the binding under
+/// the existing provisioning lock before any provider operation.
+pub(super) async fn change_tensorlake(
+    service: &super::Tensorlake,
+    state: &AppState,
+    host: HostId,
+    resume: bool,
+) -> anyhow::Result<()> {
     let _lock = state.manager.try_host_provision_lock(host).ok_or_else(|| {
         refusal(
             ErrorKind::Conflict,
@@ -60,8 +72,7 @@ pub(crate) async fn change(state: &AppState, host: HostId, resume: bool) -> anyh
             "Suspend and Resume are available only for Tensorlake hosts",
         )
     })?;
-    let key = state
-        .tensorlake
+    let key = service
         .api_key()
         .await
         .map_err(|reason| refusal(ErrorKind::Conflict, &reason))?;
@@ -91,7 +102,7 @@ pub(crate) async fn change(state: &AppState, host: HostId, resume: bool) -> anyh
             .await;
     }
     let result = async {
-        let transitioned = transition(&state.tensorlake, &key, sandbox, resume).await?;
+        let transitioned = transition(service, &key, sandbox, resume).await?;
         if resume && transitioned && !held_before_request {
             // An external suspension may precede the actor's next refresh.
             // Its still-published Connected label then describes the old

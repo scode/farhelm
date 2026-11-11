@@ -110,6 +110,8 @@ impl Fixture {
     /// Put the same injected backend and account behind the real user router.
     /// The ordinary Add tests keep their service-only composition; recipe launch
     /// additionally needs the resulting session and cleanup to use this account.
+    /// The mutation registry must share the replacement account service so a
+    /// failed launch cleans up through the same API that created its resource.
     async fn bind_session_launch(&mut self) {
         self.tensorlake.ensure_host_key().await.unwrap();
         let mut state = crate::AppState::with_provisioning(
@@ -119,6 +121,8 @@ impl Fixture {
             self.harness.state.mode,
         );
         state.tensorlake = self.tensorlake.clone();
+        state.providers =
+            crate::environment::Providers::with_tensorlake(Arc::new(state.tensorlake.clone()));
         self.harness.state = Arc::new(state);
     }
 
