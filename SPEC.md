@@ -1199,18 +1199,18 @@ agent choice is independent of that destination:
   longer supplies what its active launch kind needs opens New with it applied and a prominent banner saying it needs
   more choices before it can launch. The same banner accompanies an incomplete Cmd+J or quick-switcher pick, without
   recommending the sequence prefix. A launch refusal or YOLO question reveals New with the same draft, error or
-  confirmation; nothing bypasses host admission, and the shortcut never retries itself. The mark is a nullable template
-  name on the helm's shared preferences, independent of the template fields. Clicking another bolt moves it; clicking
-  the lit bolt clears it. An agent-launch template needs an agent to be marked; a command-launch template needs a
-  nonblank command. With no launch kind, it is judged as an agent launch. The same rule decides whether a template or
-  combined sequence can launch directly. A marked template that no longer qualifies can still be unmarked. Renaming
-  repoints the mark before deleting the old name; deleting that name clears its mark through the shared delete path, and
-  Undo never restores the mark. The editor says whether its saved template is marked. The shortcut reads the mark and
-  templates fresh on each use, so another window's change takes effect without reloading. Templates' hover and a
-  separate quick-switcher row advertise the chord and marked name. A browser that reserves the chord keeps its behavior;
-  the quick-switcher row remains available. An agent may set or clear the mark through `farhelm agent template create`
-  or `edit`, behind a template approval card. The helm applies the same eligibility rule to an agent's write as the
-  Templates editor does.
+  confirmation, or offers it in a notice once the user has moved on (see [Keyboard focus](#keyboard-focus)); nothing
+  bypasses host admission, and the shortcut never retries itself. The mark is a nullable template name on the helm's
+  shared preferences, independent of the template fields. Clicking another bolt moves it; clicking the lit bolt clears
+  it. An agent-launch template needs an agent to be marked; a command-launch template needs a nonblank command. With no
+  launch kind, it is judged as an agent launch. The same rule decides whether a template or combined sequence can launch
+  directly. A marked template that no longer qualifies can still be unmarked. Renaming repoints the mark before deleting
+  the old name; deleting that name clears its mark through the shared delete path, and Undo never restores the mark. The
+  editor says whether its saved template is marked. The shortcut reads the mark and templates fresh on each use, so
+  another window's change takes effect without reloading. Templates' hover and a separate quick-switcher row advertise
+  the chord and marked name. A browser that reserves the chord keeps its behavior; the quick-switcher row remains
+  available. An agent may set or clear the mark through `farhelm agent template create` or `edit`, behind a template
+  approval card. The helm applies the same eligibility rule to an agent's write as the Templates editor does.
 - Template number shortcuts: a template may hold one of ten shared keys, 1–9 then 0, independently of ⚡. Cmd+digit in
   the Mac desktop app, or Ctrl+Shift+digit everywhere else (including a Mac browser), starts its template through the
   same direct launch path as quick launch on the page, and applies it to an open session launcher draft under the same
@@ -1323,11 +1323,13 @@ After submitting a launch, including Restart with or Replace with, the launcher 
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
 accept a second launch or be replaced with another draft. Launches and changes to the host registry still exclude each
 other. Preparation and required confirmations remain modal until the launch is submitted. A failure, unknown outcome or
-follow-up question restores the same launcher with its draft and ordinary retry rules. Switching to a session on another
-host does not change the submitted launch's destination or retry identity. If another dialog is open when the launcher
-needs to return, it waits for that dialog to close. The acted-on session's progress, actions, terminal attachment and
-row outcome settle as soon as the reply arrives; only the returning launcher waits. Successfully waking a suspended
-sandbox continues to create without revealing the launcher, restoring its page isolation or waiting for another dialog.
+follow-up question restores the same launcher with its draft and ordinary retry rules if the user has not moved on since
+submitting it. Otherwise a notice offers it, and the launcher returns when the user opens that notice (see
+[Keyboard focus](#keyboard-focus)). Whether such a notice keeps New and other launches refused until it is opened is not
+settled yet. Switching to a session on another host does not change the submitted launch's destination or retry
+identity. The acted-on session's progress, actions, terminal attachment and row outcome settle as soon as the reply
+arrives; only the launcher's return depends on the user. Successfully waking a suspended sandbox continues to create
+without revealing the launcher, restoring its page isolation or waiting for another dialog.
 
 Once the request has waited about two seconds, a small pill at the bottom of the window shows a spinner and a status:
 Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second, including
@@ -1390,12 +1392,12 @@ agent's, and agents follow their own rule under Agent-spawned sessions, whatever
 relaunches the session's own stored launch and needs no YOLO confirmation again. The question stays inline and has no
 header Close: its answers read Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the
 filled one-time YOLO answer. Tab follows that same order; Cancel keeps initial focus, except that a plain Replace's
-question, which arrives after its reply, leaves focus where it is if the user has pressed a key or pointer button since
-answering Replace and some control now holds focus. Plain Replace, agent clone and inherited spawn also copy the stored
-command; pre-upgrade no-flag sessions therefore remain own-setting, with plain Replace asking on hosts that ask before
-YOLO launches and agent copies refused there. Clone, Replace with and Restart with compile new choices and get the
-guarded flags. Remote hosts must be updated after this protocol change before launches resume; older releases cannot
-read launches stored as guarded.
+question, which arrives after its reply, takes focus only if the user has not moved on since answering Replace (see
+[Keyboard focus](#keyboard-focus)). Plain Replace, agent clone and inherited spawn also copy the stored command;
+pre-upgrade no-flag sessions therefore remain own-setting, with plain Replace asking on hosts that ask before YOLO
+launches and agent copies refused there. Clone, Replace with and Restart with compile new choices and get the guarded
+flags. Remote hosts must be updated after this protocol change before launches resume; older releases cannot read
+launches stored as guarded.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
@@ -1997,24 +1999,8 @@ not skip a sandbox session's Delete (including bulk Delete), YOLO, host or trash
 Replace with launcher. Host setup and removal retain their separate choices; sandbox Suspend and Stop and suspend keep
 the host-wide activity confirmation described under Sandbox sessions.
 
-After a user explicitly opens a confirmation, keyboard focus starts on its enabled confirming button, so a new Enter
-goes ahead; if that button is disabled, focus starts on Cancel instead. This covers session Stop, Delete, Replace,
-Restart and tab close, host setup, removal and uninstall, and permanent trash deletion. Repeated or composing Enter
-cannot answer the new question. Escape cancels the header's Stop, Restart, Replace or Delete question and returns focus
-to the terminal. The YOLO confirmation and Restart with launcher still start on Cancel.
-
-Every modal dialog keeps Tab and Shift+Tab within its visible, enabled controls and keyboard scroll regions. The page
-behind it cannot receive focus or clicks, while independent agent approval cards remain usable. Hidden quick-launch
-preparation blocks page input without focusing its hidden fields; revealing the launcher supplies its normal focus. Once
-a submitted launch is pending, its hidden launcher releases that isolation until it needs to show an outcome or
-question.
-
-A primary click on empty space keeps focus on the control in use in the session launcher, Restart with, the dialogs that
-share the host and Settings installer, and the session row and header Stop, Restart, Replace and Delete questions; text
-can still be selected. Rename, tab close, the interrupted card's Replace question and the host update confirmation do
-not have this rule yet. If a dialog container itself has focus, Enter presses its enabled main action, including a
-destructive confirmation. A dialog without one main action does nothing on container Enter. Held or composing Enter
-cannot confirm.
+Where keyboard focus starts in a confirmation, and how modal dialogs keep it, is under
+[Keyboard focus](#keyboard-focus).
 
 Confirmed 2026-10-01: a destructive confirmation authorizes only what the prompt the user answered said would happen.
 This covers every destructive confirmation (Stop, Delete, Restart, Restart with, Replace and Replace with, and permanent
@@ -2395,19 +2381,6 @@ of rail expansion.
 Host setup, removal, uninstall and refusal dialogs normally pin their header and answers. A window too short to fit them
 scrolls the whole card, so every explanation and control stays reachable. A shortened heading retains the full
 destination in the body.
-
-Every scrollable region in the GUI can be reached and scrolled with the keyboard alone in every engine Farhelm ships on,
-WebKit included. A region whose content holds nothing focusable gets its own tab stop with an accessible name. Pop-up
-suggestion lists and menus use their own arrow keys, the pointer-only file hover cannot be scrolled by anyone, and the
-terminal scrolls with Shift+PageUp/PageDown. On macOS, keyboard-only users reach buttons with Keyboard navigation or
-Option-Tab (the default Tab order includes only text fields and pop-ups), so button-only regions need no extra stop.
-
-Confirmed 2026-10-17: when the user moves between controls (menu items, buttons, switches) by different means within
-tens of milliseconds of each other, such as an arrow key and a pointer or screen reader at nearly the same instant, a
-race may leave focus or selection somewhere other than where they meant. That is accepted. Such a race is still worth
-fixing when the fix is reasonably simple, but it is not a defect to engineer around otherwise. The bound is firm: a race
-never runs a command, or applies a destructive action, that the user did not activate on a control that was visibly
-focused when they activated it.
 
 Pinned sessions appear first in the sidebar in a manual order shared by every client of the helm, independent of the
 list's chosen sort. A new pin goes at the bottom of the pinned group; unpinning and pinning again puts it there again.
@@ -3219,6 +3192,138 @@ position is current when the transfer completes. For a typical screenshot this i
 Upload failures must be visible; an attachment must never disappear silently. Confirmed 2026-10-10: that covers
 Farhelm's own failures and crashes. Whether an attachment survives a power loss or system crash right after its upload
 completed is best effort.
+
+## Keyboard focus
+
+NOTE: This section is the rulebook for where keyboard focus (where typing goes) moves in the GUI. It takes precedence
+over older focus wording elsewhere in this document. Parts of the current UI predate it; where they differ, this section
+is the intended behavior and the UI is behind.
+
+Confirmed 2026-11-10, after a walk through thirty concrete scenarios. Focus had been decided one bug at a time, mostly
+in code that ran when something finished later, and each fix answered only the case in front of it. These rules answer
+the question once, in product terms, so they hold whatever toolkit draws the GUI.
+
+Here's the short version: the selected session's terminal is home, and only the user moves focus. Things that finish
+later, and things the user did not start, wait to be reached. The one exception is a result the user sat and waited for.
+Nothing closes what it did not open, and nothing changes what the user is typing.
+
+### Who may move focus
+
+Something the user started that finishes later (a launch's reply, a terminal that finishes loading, a question that
+arrives after a reply) first asks whether the user has moved on since starting it. Moving on means any key press or any
+click inside Farhelm. A modifier pressed alone, a repeat of the gesture that started it (auto-repeat, a double-click or
+repeated Enter on the same submit), scrolling, pointer movement, and switching to another app and back do not count.
+
+Once the user has moved on, the result moves no focus, opens no dialog and switches no session. It shows up where it
+belongs (the session's row, a question card on its session) or as a notice the user can click. A launch that fails after
+the user moved on shows a notice, and clicking it brings back the launcher with its draft and error.
+
+If the user has not moved on, the result may take focus, and lands somewhere safe: a new session opens with its terminal
+focused, and a question starts on its harmless answer (Cancel), never on the risky one. A launch that finishes while the
+user is in another app has not been moved on from, so it is open when they come back.
+
+Things the user did not start never take focus and never open over what the user is doing, even while a dialog is open.
+That covers agent approvals, an agent's request to add a host, and anything else another window, an agent or a host
+begins. They announce themselves and wait. The user reaches a waiting item with the pointer, or with a keyboard shortcut
+that answers it or moves focus to it. While a terminal has focus, Tab, Escape, Enter and ordinary keys keep going to its
+program. How each kind of item announces itself, and which shortcuts reach it, is not settled here.
+
+### Where focus rests
+
+The selected session's terminal is home. On the main screen, with no dialog, menu or popup list open, whenever nothing
+holds focus it goes to the selected session's terminal. The cause does not matter: the user closed or deleted the
+focused control, it went away on its own (the last notice was dismissed, a shell tab exited), or Farhelm selected the
+next session after a Delete, including a Delete from another window or by an agent. The terminal never takes focus from
+a control that holds it, such as the session filter or a header button. This accepts that a key can occasionally land in
+a terminal unexpectedly, in exchange for never having to click back into it. A short delay before the terminal takes
+focus back is a possible later mitigation, not a rule.
+
+With no terminal on screen, focus rests on New when there are no sessions, and on a stopped session's card when the
+selected session has stopped. Enter on that card does nothing, so typing that was already under way cannot restart
+anything; Tab reaches its Restart and Replace.
+
+Choosing a session, including the one already selected, focuses its terminal.
+
+### Opening and closing
+
+A confirmation the user just opened starts on the action they asked for: focus starts on its enabled confirming button,
+so a new Enter goes ahead (from a row's menu, Delete then Enter deletes). If that button is disabled, focus starts on
+Cancel instead. This covers session Stop, Delete, Replace, Restart and tab close, host setup, removal and uninstall, and
+permanent trash deletion. A risky action that cannot be undone starts on Cancel instead, as the YOLO confirmation does.
+The Restart with launcher also starts on Cancel. Repeated or composing Enter cannot answer the new question. Escape
+cancels the header's Stop, Restart, Replace or Delete question and returns focus to the terminal. Questions that arrive
+later always start on their harmless answer, as above.
+
+Every modal dialog keeps Tab and Shift+Tab within its visible, enabled controls and keyboard scroll regions. The page
+behind it cannot receive focus or clicks, while independent agent approval cards remain usable. Hidden quick-launch
+preparation blocks page input without focusing its hidden fields; revealing the launcher supplies its normal focus. Once
+a submitted launch is pending, its hidden launcher releases that isolation until it needs to show an outcome or
+question.
+
+A primary click on empty space keeps focus on the control in use in the session launcher, Restart with, the dialogs that
+share the host and Settings installer, and the session row and header Stop, Restart, Replace and Delete questions; text
+can still be selected. Rename, tab close, the interrupted card's Replace question and the host update confirmation do
+not have this rule yet. If a dialog container itself has focus, Enter presses its enabled main action, including a
+destructive confirmation. A dialog without one main action does nothing on container Enter. Held or composing Enter
+cannot confirm.
+
+Closing something the user opened returns focus to where it was before it opened, on every platform, including those
+where clicking the button that opened it did not move focus to the button.
+
+Inside a dialog or menu, focus stays inside. When the focused control goes away, focus moves to the closest remaining
+control in the same dialog or menu, never out to the page or a terminal behind it.
+
+Nothing closes a dialog, menu, popup list or confirmation that it did not open. Each goes away when the user closes it,
+when whatever opened it closes it, or when the thing it is about is gone (a deleted session's open menu, say). A bulk
+Stop that finishes, for example, leaves a Delete confirmation open on another row alone.
+
+### Things changing underneath
+
+Focus follows the thing, not the position. When the session list reorders, a focused row, or its open menu, moves with
+its session.
+
+A refresh never changes what the user is typing. Text, caret and focus stay as they are, and only what the user is not
+editing updates. If the new information makes the input invalid, the field shows that and saving refuses, but focus does
+not move.
+
+A menu has one highlight. Whichever moved last, the pointer or the keys, sets it, and Enter acts on the highlighted
+item. Keys typed before a menu finishes appearing apply in order, as if typed slowly.
+
+Confirmed 2026-10-17: when the user moves between controls (menu items, buttons, switches) by different means within
+tens of milliseconds of each other, such as an arrow key and a pointer or screen reader at nearly the same instant, a
+race may leave focus or selection somewhere other than where they meant. That is accepted. Such a race is still worth
+fixing when the fix is reasonably simple, but it is not a defect to engineer around otherwise. The bound is firm: a race
+never runs a command, or applies a destructive action, that the user did not activate on a control that was visibly
+focused when they activated it. Keys alone do not race this way, per the menu rule above.
+
+### Reaching everything by keyboard
+
+Every scrollable region in the GUI can be reached and scrolled with the keyboard alone in every engine Farhelm ships on,
+WebKit included. A region whose content holds nothing focusable gets its own tab stop with an accessible name. Pop-up
+suggestion lists and menus use their own arrow keys, the pointer-only file hover cannot be scrolled by anyone, and the
+terminal scrolls with Shift+PageUp/PageDown. On macOS, keyboard-only users reach buttons with Keyboard navigation or
+Option-Tab (the default Tab order includes only text fields and pop-ups), so button-only regions need no extra stop.
+
+Where a specific control starts with focus, or which control a specific dialog returns focus to, is described with that
+feature elsewhere in this document. Those details apply these rules; they do not override them.
+
+### Cases that settled disputed points
+
+These came out of the walkthrough and are worth keeping as acceptance cases, because each one has gone wrong before:
+
+- The user submits a launch, then clicks another session and types. When the launch finishes, their typing keeps going
+  to that session; the new session appears in the list with a brief **Started** report.
+- The user clicks a plain Replace and touches nothing; the YOLO question arrives and Cancel takes focus. Had they typed
+  into the terminal meanwhile, the question would appear without focus and wait.
+- The user selects a session and, before its terminal finishes loading, types in the session filter. The filter keeps
+  focus when the terminal arrives.
+- The user's session is deleted from another window while they type in it. The next session is selected and its terminal
+  takes the rest of their typing (the terminal is home).
+- A shell tab exits on its own while the user types in it. The session's agent tab takes focus.
+- An agent asks to add a host while the user types in a terminal or fills in the launcher. A notice offers the request;
+  nothing opens until the user opens it.
+- Escape typed into a terminal while a question waits on that session goes to the terminal's program, not to the
+  question.
 
 ## Desktop window chrome
 
@@ -4072,16 +4177,16 @@ completeness fields. The templates listing includes a prefix's words when one is
 and are also visible in process listings, so templates must not hold secrets in them.
 
 Agents can also add, change and remove hosts. `farhelm agent host add <destination> [--alias <name>]` asks to add an SSH
-host. The focused visible window opens the ordinary add host dialog, prefilled with destination and alias and labelled
-with the asking host and session. Other windows show a card whose action opens that dialog there. Opening is not
-approval. An existing draft or another modal is kept; automatic admission rechecks focus when that modal leaves. Listing
-refreshes preserve edits. Add answers Allow with the destination then in the dialog, and Cancel, header close and Escape
-answer Deny through the ordinary approval route. Only the window whose Allow is accepted starts the ordinary
-discovery-first add flow, with the edited destination and alias, the same duplicate and alias refusals, and the same SSH
-second-factor help. A late or refused answer starts nothing. The command reports the actual approved destination as
-accepted as soon as the user answers, without waiting for discovery or setup. **Accepted is not installed:** adding may
-still fail, need setup, or be cancelled at the setup question. The agent checks `farhelm agent hosts` and the host's
-state before relying on it.
+host. Every visible window shows a card whose action opens the ordinary add host dialog there, prefilled with
+destination and alias and labelled with the asking host and session. The request never opens the dialog by itself,
+because the user did not start it (see [Keyboard focus](#keyboard-focus)). Opening is not approval. An existing draft or
+another modal is kept. Listing refreshes preserve edits. Add answers Allow with the destination then in the dialog, and
+Cancel, header close and Escape answer Deny through the ordinary approval route. Only the window whose Allow is accepted
+starts the ordinary discovery-first add flow, with the edited destination and alias, the same duplicate and alias
+refusals, and the same SSH second-factor help. A late or refused answer starts nothing. The command reports the actual
+approved destination as accepted as soon as the user answers, without waiting for discovery or setup. **Accepted is not
+installed:** adding may still fail, need setup, or be cancelled at the setup question. The agent checks
+`farhelm agent hosts` and the host's state before relying on it.
 
 The user's confirmation-skipping settings spare confirmation clicks on actions the user started in the UI: they avoid
 accidental clicks, not grant permissions. An agent's request is inherently different. An agent add always shows the

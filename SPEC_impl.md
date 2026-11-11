@@ -1169,6 +1169,13 @@ must observe an actual visible layout or ownership change, rather than treating 
 asynchronous GUI paths predate these rules; the TODO entry “Stop asynchronous completions from moving focus or closing
 things the user has moved on from, across the whole UI” covers them.
 
+SPEC.md, "Keyboard focus" (confirmed 2026-11-10), now states the product rules in toolkit-neutral terms, and this code
+does not yet follow all of them. In particular, a launcher owed back after the user moved on should wait behind a notice
+instead of returning by itself; focus left on the document body on the main screen should go to the selected session's
+terminal; an agent's host-add request should no longer be admitted as a dialog automatically; and the guard above admits
+focus on the document body where the spec now leaves a moved-on result quiet. Treat the spec as the target when changing
+any of these paths.
+
 `launch_activity::LaunchActivity` observes one window-owned key/pointer press count installed before page shortcuts. Its
 capture listener publishes a scalar through an ordered hidden-input relay before the original event reaches Rust;
 user-answer handlers synchronously peek that signal. A quick dispatch captures its baseline before fresh reads or host
