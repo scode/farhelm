@@ -2040,29 +2040,14 @@ pub(crate) async fn stop_live_agent(
     entry: &SessionEntry,
     roots: impl IntoIterator<Item = (u32, u64)>,
 ) -> Result<(), StopFailure> {
-    let runtime = crate::container::ContainerRuntime::for_session(
-        &sup.state_dir,
-        session_id,
-        entry.generation,
-        &entry.info.cwd,
-        &entry.info.launch,
-    )
-    .map_err(StopFailure::Sweep)?;
-    let container = match runtime.as_ref() {
-        Some(runtime) => Some(runtime.acquire().await.map_err(StopFailure::Sweep)?),
-        None => None,
-    };
+    super::core::require_active_launch(&entry.info.launch)
+        .map_err(|error| StopFailure::Sweep(error.into()))?;
     sup.record(session_id, entry, Transition::StopRequested)
         .await
         .map_err(StopFailure::Unrecorded)?;
-    if let Some(container) = &container {
-        container.revoke().map_err(StopFailure::Sweep)?;
-    }
     // Restart shares this agent reap and must keep tabs running. Stop's
     // handler closes tabs separately under its lifecycle claim, through
     // their own close paths, so their live roots remain available to sweep.
-    // A containerized Stop then ends the whole container below, after this exec
-    // client and its helpers are gone; its keeper must survive this first sweep.
     reap_process_tree(
         &sup.seams.scopes,
         ScopeUnits::recorded(entry.scope.clone()),
@@ -2076,9 +2061,6 @@ pub(crate) async fn stop_live_agent(
     )
     .await
     .map_err(StopFailure::Sweep)?;
-    if let Some(container) = &container {
-        container.stop().await.map_err(StopFailure::Sweep)?;
-    }
     let exit_code = dead_pane_exit_code(sup, entry.terminal.as_ref(), session_id).await;
     // The cleanup above ended this launch's writers. Sample its spec before any
     // cleanup can remove the startup evidence; an observer may already have

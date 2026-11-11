@@ -1,15 +1,15 @@
 ---
 title: Manage hosts
-description: Change host settings, update Farhelm, and suspend or delete Tensorlake sandboxes.
+description: Change host settings, update Farhelm, and manage sandbox and container environments.
 sidebar:
   order: 6
 ---
 
 import Screenshot from '../../../../components/Screenshot.astro';
 
-The navigation rail, the column of icons down the left edge of the sidebar, shows every machine that runs your
-sessions: your Mac, captioned **Local**, and each remote Linux machine or Mac you added, each with its mark, a short name,
-and a dot that says whether Farhelm can reach that host right now. Point at a host's mark to see its full name. To keep every
+The navigation rail, the column of icons down the left edge of the sidebar, shows your ordinary session hosts. It shows
+your Mac, captioned **Local**, and each remote Linux machine or Mac you added, each with its mark, a short name, and a
+dot that says whether Farhelm can reach that host right now. Point at a host's mark to see its full name. To keep every
 name in view, select **»** (Expand navigation rail) at the very bottom of the rail: the rail widens beside the session
 list, and **«** **Collapse** narrows it again. Each device remembers which you chose. Choosing a host
 there shows only its sessions, and **All** shows every host's again ([Read the session list](/docs/using/session-list/)).
@@ -44,7 +44,9 @@ If **Retry** or **Adopt** fails, a dialog shows why.
 A [Tensorlake sandbox](/docs/using/tensorlake-sandboxes/) also offers **Suspend**, or **Resume** when suspended. It has
 **Delete sandbox** in place of **Remove**, and no **Uninstall**: Farhelm owns that machine, so deleting it loses its
 files and sessions. [Suspend or delete a Tensorlake sandbox](#suspend-or-delete-a-tensorlake-sandbox) covers those
-actions.
+actions. A [container session](/docs/agents/containerized-sessions/#stopping-and-deleting) has **Suspend** and
+**Resume** too, and **Delete container** removes its whole environment and files. Session-owned containers and sandboxes
+appear in Hosts and update notices without permanent rail icons.
 
 ## Host settings
 
@@ -161,6 +163,10 @@ To remove Farhelm from your Mac, see [Uninstall Farhelm](/docs/get-started/unins
 For an SSH host, removing it only makes Farhelm forget it. Nothing is stopped or uninstalled on the host, and
 adding the same destination again brings back its sessions, though their pins, and which ones you had already looked
 at, start fresh. **Cancel** or Escape leaves the host where it was.
+Removing a container host or changing its destination requires cleaning up the environments and recipe images recorded
+there first. A refusal names what needs cleanup.
+[Container sessions](/docs/agents/containerized-sessions/#stopping-and-deleting) explains their confirmed deletion.
+
 The dialog stays open until Farhelm answers; if removal is refused, it shows why. If you chose to skip the confirmation,
 a refusal opens a short dialog instead.
 
@@ -193,7 +199,7 @@ SSH hosts, and other open Farhelm windows pick up a change when they reload. Ten
 **Create Tensorlake sandboxes without asking** switch under **Tensorlake**; deleting a sandbox always asks.
 
 Choose a section to see its settings. Unsaved fields keep what you typed while you switch sections; closing Settings
-discards those drafts, except that an edited Tensorlake recipe asks whether to save or discard changes. At phone width,
+discards those drafts, except that an edited recipe asks whether to save, discard or keep editing. At phone width,
 **‹ Settings** returns to the section list.
 
 **Sessions** holds **Color terminal frames by host**, **Name sessions on quick launch** (covered in
@@ -204,8 +210,10 @@ and, in the desktop app, file types to open with a modifier-click and
 [tunnels](/docs/using/work-in-a-session/#open-a-remote-localhost-link). **Checkouts** holds **Default checkout folder**, **Post-clone command** and
 [**Keep a checkout ready for faster launches**](/docs/using/start-a-session/#prepared-checkouts), while **Agent trust** holds the managed-checkout trust switches; both are covered in
 [Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout). **Credentials** holds the GitHub tokens,
-agent logins and API endpoint tokens that [Tensorlake recipes](/docs/using/tensorlake-sandboxes/#save-named-credentials)
-can use.
+agent logins and API endpoint tokens that [shared recipes](/docs/using/tensorlake-sandboxes/#save-named-credentials)
+can use. **Recipes** holds the shared catalog, with build status and Rebuild for each container host or the Tensorlake
+account. **Tensorlake** keeps its cloud account settings and sandbox leftovers. **Containers** shows
+[Podman readiness and container leftovers](/docs/agents/containerized-sessions/).
 
 **Appearance** chooses **System**, **Dark** or **Light**; **System** follows your device's own setting, and the terminal
 stays dark either way. Unlike the other settings, this choice is kept by the browser or app on this device rather than
@@ -224,7 +232,9 @@ updates automatically**, which is about updating Farhelm itself; see
 A Tensorlake host's details also show its sandbox name, recipe, CPU and memory, and tunnel mappings and status. A failed
 tunnel makes its dot amber and shows the reason. A suspended host's details say when suspension was noticed and whether
 it happened outside Farhelm. [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/) covers its recipes and account
-settings.
+settings. A [container environment](/docs/agents/containerized-sessions/) has its own entry in Hosts and update
+notices, without a permanent navigation rail icon. Its details identify the recipe, container host, tunnel status and
+credential delivery warnings.
 
 ## Next
 

@@ -4652,3 +4652,121 @@ temporary evidence; no additional full-suite run was used to classify it.
 Class: fixture-premise
 
 Cause: established
+
+## 2026-11-11 — corrupt-sentinel fixture accepts an unavailable terminal (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs)
+
+`launch_sentinel_error_status::a_corrupt_sentinel_defers_reconciliation_but_lists_succeed` failed alone among 6,068
+executed workspace tests in retained run `a6a1f51c-6706-4333-a9af-bbdbb8d1504d`: its absent-terminal premise returned
+`Unknown` instead of `Exited { exit_code: None }` after 0.545 seconds. The test, shared terminal-ending helper and
+listing implementation were unchanged from main. The helper ends a terminal through another connection, which takes over
+the owning runtime's connection, then accepts either `Gone` or `Unavailable`. An unavailable reconnect can end that
+runtime permanently; this in-process fixture has no ticker to readopt it, and listing alone neither readopts nor
+reconciles it. The premise therefore admitted a state its next assertion rejected. Six complete isolated repetitions of
+the old source passed; another attempt passed its assertion but lost console forwarding and is excluded. Fixed in
+[#3330](https://github.com/scode/farhelm/pull/3330/changes): this test shuts down its existing owning runtime within a
+bound and requires confirmed `Gone` before planting the corrupt evidence. Its durable-`Running`, corrupt-file retention,
+repair and final-exit assertions remain. Corrected exact run `40c6da7b-f7f8-4631-9d6b-7b1beecc9f82` passed in 0.543
+seconds. This establishes the fixture-contract defect; it does not attribute the triggering reconnect outcome to load.
+
+```text
+assertion `left == right` failed: fixture premise: the pane is absent before reconciliation
+  left: Unknown
+ right: Exited { exit_code: None }
+```
+
+Evidence: clean failing source `b1640e841c311adb3b630ac378f28ebcc593dfab`, fingerprint
+`74268f54cf7fc698f3e56fdbe6ce18471059a9a537e27adaf1436937d75f58be`; child command
+`cargo nextest run --workspace --exclude farhelm-desktop`, pinned nextest 0.9.148, four slots and zero retries. The
+corrected run used clean `28961fd98249393eb438045bd449090cdbe239b9`, fingerprint
+`cc09eb103e30d13175ef96491fac684b3dd0e625eabb80c25160a5c4640c90a7`, and the same workspace command with
+`-E 'test(=launch_sentinel_error_status::a_corrupt_sentinel_defers_reconciliation_but_lists_succeed)'`. The complete
+old-source repetitions are in batches `c93e6a6b-992d-4054-b7ae-ec038809a8cf` (three complete, one incomplete, six not
+started) and `5a0bf3f6-d589-4642-8ef1-549f33650cbb` (three complete); no added load or browser run overlapped them. The
+failing workspace run had no other owned build or browser run active; other agents' activity and per-case load are
+unavailable. Recorded substrate: x86_64 Linux kernel 6.8.0-149-generic, Python 3.15.2, C.UTF-8 locale, tmux 3.7c with
+recorded executable SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. Ambient `FARHELM_*`
+variables were scrubbed; the child received recorder-owned `FARHELM_TEST_TRACE_DIR`. Full failed output, report and
+traces remain in the private UUID record until temporary-file cleanup. The failed workspace command remains failed; the
+corrected exact pass supplies separate evidence.
+
+Class: fixture-premise
+
+Cause: established
+
+## 2026-11-11 — busy-row menu retry spends its budget waiting for a dismissed flyout (e2e/tests/provisioning.spec.ts)
+
+`two provisioning-busy rows reconcile independently` failed on WebKit in retained browser run
+`1cd61d98-e960-43ea-b40c-985de6c586c7`, alone among 412 selected cases (411 passed). The test and menu helper were
+unchanged from main. The failed case took 18.317 seconds; its Chromium counterpart passed in 10.737 seconds. The
+retained trace establishes a nested-wait budget defect: the second row's eight-second open-and-read retry spent five
+seconds waiting for a flyout that had closed. Its next attempt reached the measured menu and began checking the correct
+disabled Settings item, but the outer deadline expired; that assertion then passed 35.8 milliseconds later. The first
+flyout's dismissal is consistent with the existing geometry-change contract, but its precise trigger is not established.
+Three exact old-source WebKit repetitions passed in `d6e050cd-a359-43d0-84fe-8d95359e15cc`. Fixed in
+[#3329](https://github.com/scode/farhelm/pull/3329/changes) by bounding the individual menu waits to one second only
+inside this retry. Other callers keep their defaults; native hover/click, measured-menu readiness, both rows' state
+assertions and the eight-second outer bound remain. Corrected run `d1fab191-7f8e-4a7b-85cb-05d4d273f55a` passed the
+exact case on both engines, two actual cases, in 18.2 seconds including stack startup. The failed batch remains failed.
+
+```text
+Error: expect(locator).toBeVisible() failed
+Locator: locator('[data-host-id="61"]').locator('.host-row-menu-flyout')
+Expected: visible
+Timeout: 5000ms
+Error: element(s) not found
+Call Log:
+- Timeout 8000ms exceeded while waiting on the predicate
+```
+
+Evidence: failed batch and old-source repetitions used clean `fe085427ccfd53c2c27371f5fb5f49b9c24126ac`, fingerprint
+`c18bdd4c05b26e2e004a0e0c9a342696554048795642efff9b53347eb8ee609b`. The batch selected fifteen whole spec files on both
+engines with `npx playwright test <file-patterns>`, three workers, one stack each and zero retries. Exact repeats used
+generic recording around
+`npx playwright test --project=webkit-provisioning --grep '<exact title>' --repeat-each=3 --retries=0`; their counts
+come from complete console output. Earlier attempt `0d21ef45-78e4-488f-80e7-8261ecf42f79` selected no tests because its
+grep was incorrectly anchored; it is excluded. The corrected controlled both-engine command selected
+`provisioning.spec.ts` and the exact title at clean `d10f932f5f7acd558c0d4aee60a529e7c4882482`, fingerprint
+`4aac83272c0cf621abbc4433b60782f495bcc0685b14c4680b2de831f505867d`. Its report, source and forwarding are complete.
+Recorded substrate: x86_64 Linux kernel 6.8.0-149-generic, Node 26.13.0, Playwright 1.64.0, C.UTF-8 locale, tmux 3.7c
+with executable SHA256 `7ffdb77af092113ce3a777e581bbe9751c15504105404a68828a598cbf3e6bc1`. Browser build identifiers and
+other agents' per-case load are unavailable. No other owned build or runtime check overlapped the failing batch or
+repetitions. Ambient `FARHELM_*` variables were scrubbed; child variables were recorder-owned `FARHELM_TEST_TRACE_DIR`
+and `FARHELM_PLAYWRIGHT_POLICY_FILE`. Full failed output, trace, screenshot and report remain in the private UUID record
+until temporary-file cleanup.
+
+Class: budget
+
+Cause: established
+
+## 2026-11-11 — dead-or-absent gate test ends its terminal through a second connection (crates/farhelm/tests/e2e/launch_sentinel_error_status.rs)
+
+`launch_sentinel_error_status::the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the_pane_dies` failed
+once among 597 tests on one shard of a workspace run split across Tensorlake sandboxes, during the landing of
+[#3330](https://github.com/scode/farhelm/pull/3330/changes): after ending the session's terminal, reconciliation listed
+the session as `Unknown` instead of the planted `Error`. The test and the helper it used are unchanged from main. The
+helper ends the terminal through another connection, which takes over the owning runtime's connection and can leave that
+runtime unavailable for good; the corrupt-sentinel test in the same file failed the same way and is described in the
+entry above. Fixed in the same PR the same way: the test now shuts its terminal host down through the owning runtime and
+requires confirmed `Gone` before reconciling. That the takeover is what happened here is inferred from the matching
+`Unknown` and the shard's trace (the runtime's connection ended and it was reconnecting), not observed directly.
+
+```text
+assertion `left == right` failed: once the pane is dead-or-absent, the same planted sentinel classifies error: Unknown
+  left: Unknown
+ right: Error { detail: "exec_failed argv0=/nope errno=2" }
+```
+
+Evidence: shard run `b838d783-a0ce-46e1-b1b8-962c281c28ef`, a nextest archive of the whole workspace (minus the desktop
+crate) built on x86_64 Linux and run through the recorder's generic mode on a Tensorlake sandbox (Ubuntu 24.04, systemd
+user manager running, four slots, zero retries), with the real Podman tests skipped on purpose. The archive was built
+from the clean stack tip `058464eda5452cfbc5998c379a1cec6709613f53`, which did not change this test, its helper or the
+reconciliation it checks. The failure took 0.253 seconds; the other 596 tests on that shard passed, as did the same test
+in round 230's run of an earlier tip on the same kind of sandbox. Its pinned tmux, locale and the shard's recorded
+`FARHELM_*` names were not collected for this entry; per-case load is unavailable. Not reproduced: the fix was made
+without a reproduction attempt on the old fixture. After the fix, the whole `launch_sentinel_error_status` module passed
+ten stress iterations of its ten tests locally (run `a3898bfa-35e7-4745-aa83-7f699051f5af`, pinned tmux 3.7c, four
+slots, zero retries). The failed run directory is kept privately until the fix lands.
+
+Class: fixture-premise
+
+Cause: hypothesis

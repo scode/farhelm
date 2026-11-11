@@ -752,11 +752,7 @@ fn full_width_row(row: &CardRow) -> bool {
 fn single_line_fact(label: &str) -> bool {
     matches!(
         label,
-        "folder"
-            | "managed checkout of"
-            | "ssh destination"
-            | "destination"
-            | "container GitHub token file"
+        "folder" | "managed checkout of" | "ssh destination" | "destination"
     )
 }
 
@@ -1407,21 +1403,17 @@ fn template_rows(fields: &TemplateFields, host_name: Option<&str>, rows: &mut Ve
             None => rows.push(CardRow::Note("wrapper prefix", "none")),
         }
     }
+    // Old template records remain decodable, but their settings no longer
+    // describe runnable isolation. A card must not present them as launch options.
     if let Some(container) = &fields.container {
-        match container {
-            Some(config) => {
-                rows.push(CardRow::Value("container image", config.image.clone()));
-                rows.push(CardRow::Value(
-                    "container proxy port",
-                    config.api_proxy_port.to_string(),
-                ));
-                rows.push(match &config.github_token_file {
-                    Some(path) => CardRow::Value("container GitHub token file", path.clone()),
-                    None => CardRow::Note("container GitHub token file", "none"),
-                });
-            }
-            None => rows.push(CardRow::Note("container", "none")),
-        }
+        rows.push(CardRow::Note(
+            "retired container setting",
+            if container.is_some() {
+                farhelm_proto::RETIRED_CONTAINER_REASON
+            } else {
+                "remove the retired choice"
+            },
+        ));
     }
     if let Some(command) = &fields.command {
         rows.push(CardRow::Block("command", command.clone()));
@@ -1606,7 +1598,6 @@ mod tests {
             "managed checkout of",
             "ssh destination",
             "destination",
-            "container GitHub token file",
         ] {
             assert!(single_line_fact(label), "{label}");
         }
@@ -2374,53 +2365,37 @@ mod tests {
         );
     }
 
-    /// Template approval must expose isolation and its removal, since an agent's
-    /// write can change what a later launch runs with. The token path is data;
-    /// the card never reads or displays the credential it names.
+    /// Historical template fields describe a retired choice, not runnable image
+    /// or account options. Explicit reset remains distinct from field omission.
     #[test]
-    fn a_template_card_shows_container_choices_and_removal() {
-        let mut fields = TemplateFields {
-            container: Some(Some(farhelm_proto::ContainerConfig {
-                engine: farhelm_proto::ContainerEngine::Podman,
-                image: "localhost/agent:latest".into(),
-                api_proxy_port: 42000,
-                github_token_file: Some("~/.config/agent-token".into()),
-            })),
-            ..Default::default()
-        };
+    fn a_template_card_explains_retired_container_fields_and_removal() {
+        let mut fields: TemplateFields = serde_json::from_value(serde_json::json!({
+            "container": {"engine":"podman","image_file":"legacy.tar","api_proxy_port":42000}
+        }))
+        .unwrap();
         let card = |fields| {
             action_rows(&ApprovalAction::TemplateWrite {
-                name: "isolated".into(),
+                name: "historical".into(),
                 replaces_existing: true,
                 fields,
                 host_name: None,
             })
         };
-        let rows = card(fields.clone());
-        for (label, value) in [
-            ("container image", "localhost/agent:latest"),
-            ("container proxy port", "42000"),
-            ("container GitHub token file", "~/.config/agent-token"),
-        ] {
-            assert!(
-                rows.contains(&CardRow::Value(label, value.into())),
-                "{rows:?}"
-            );
-        }
-        fields
-            .container
-            .as_mut()
-            .unwrap()
-            .as_mut()
-            .unwrap()
-            .github_token_file = None;
-        assert!(
-            card(fields.clone()).contains(&CardRow::Note("container GitHub token file", "none"))
-        );
+        assert!(card(fields.clone()).contains(&CardRow::Note(
+            "retired container setting",
+            farhelm_proto::RETIRED_CONTAINER_REASON
+        )));
         fields.container = Some(None);
-        assert!(card(fields.clone()).contains(&CardRow::Note("container", "none")));
+        assert!(card(fields.clone()).contains(&CardRow::Note(
+            "retired container setting",
+            "remove the retired choice"
+        )));
         fields.container = None;
-        assert!(!card(fields).contains(&CardRow::Note("container", "none")));
+        assert!(
+            !card(fields)
+                .iter()
+                .any(|row| matches!(row, CardRow::Note("retired container setting", _)))
+        );
     }
 
     /// Launch permissions use the session classifier and keep the guarded

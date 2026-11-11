@@ -15,7 +15,6 @@
 //! their fixed rules; private template replay never recursively publishes or
 //! retires a pair. Permission recovery stores immutable values, not edit code.
 
-use crate::container_controls::ContainerDraft;
 use dioxus::prelude::*;
 
 use crate::github_checkout::{GithubPreview, PreviewAuthority};
@@ -85,7 +84,7 @@ pub(super) struct LaunchDraft {
     permission_flags: String,
     wrapper: String,
     wrapper_explicit: bool,
-    container: ContainerDraft,
+    container: Option<farhelm_proto::ContainerConfig>,
     tab: LaunchTab,
     invocation: String,
     invocation_raw_seed: Option<String>,
@@ -150,7 +149,7 @@ impl LaunchDraft {
             permission_flags: String::new(),
             wrapper: String::new(),
             wrapper_explicit: false,
-            container: ContainerDraft::default(),
+            container: None,
             tab: LaunchTab::Agent,
             invocation: String::new(),
             invocation_raw_seed: None,
@@ -220,22 +219,17 @@ impl LaunchDraft {
         self.wrapper_explicit
     }
 
-    /// Container text belongs to this opening, never to remembered defaults.
-    pub(super) fn container(&self) -> ContainerDraft {
+    /// Preserve the retired choice for source fingerprints and explicit refusal.
+    /// New openings and ordinary command choices do not inherit it as a default.
+    pub(super) fn container(&self) -> Option<farhelm_proto::ContainerConfig> {
         self.container.clone()
     }
 
-    /// A selected container must never silently fall back to a host launch.
-    /// The form supplies managed placement evidence from the current destination
-    /// or an unchanged copied checkout on the same confirmed host installation.
-    pub(super) fn container_refusal(&self, managed_destination: bool) -> Option<String> {
-        if self.tab != LaunchTab::Agent || !self.container.enabled {
-            return None;
-        }
-        if !managed_destination {
-            return Some("Containerized sessions require a managed checkout".into());
-        }
-        self.container.launch_config().err()
+    /// Retired stored choices remain visible to compatibility fingerprints, but
+    /// never turn into an ordinary launch by dropping their former isolation.
+    pub(super) fn container_refusal(&self) -> Option<String> {
+        (self.tab == LaunchTab::Agent && self.container.is_some())
+            .then(|| farhelm_proto::RETIRED_CONTAINER_REASON.into())
     }
 
     /// The active launch kind; each group's dormant values remain intact.
@@ -751,7 +745,9 @@ impl LaunchDraft {
     /// Reuse structured normalization after the post-mint missing-agent and
     /// wrapper guards, before that caller refuses a changed active mode.
     pub(super) fn structured_selection(&self) -> Option<LaunchSelection> {
-        self.container.launch_config().ok()?;
+        if self.container.is_some() {
+            return None;
+        }
         let mut selection = self.editing_selection(self.harness?);
         if !self.is_restart() {
             selection.permissions = crate::launch_composer::normalized_permissions(
@@ -843,7 +839,7 @@ impl LaunchDraft {
                 &self.permission_flags,
             ),
             wrapper_prefix: super::wrapper_words(&self.wrapper).ok().flatten(),
-            container: self.container.config().ok().flatten(),
+            container: self.container.clone(),
             workspace_trust: None,
         }
     }
@@ -855,17 +851,6 @@ impl LaunchDraft {
         super::wrapper_words(&self.wrapper).ok()?;
         self.retry_permissions()?;
         self.structured_selection()
-    }
-
-    /// Incomplete inputs stay editable but never compare equal to host execution.
-    /// Dormant edits on Command do not retire an unrelated command retry.
-    pub(super) fn edit_container(&mut self, value: ContainerDraft) -> bool {
-        let before = self.container.config();
-        let after = value.config();
-        let changed = self.tab == LaunchTab::Agent
-            && !matches!((before, after), (Ok(before), Ok(after)) if before == after);
-        self.container = value;
-        changed
     }
 
     /// Effective permission and Custom words share one request identity. Raw
@@ -1111,7 +1096,7 @@ impl LaunchDraft {
         self.permissions_explicit = false;
         self.wrapper.clear();
         self.wrapper_explicit = false;
-        self.container = ContainerDraft::default();
+        self.container = None;
     }
 
     /// A stored launch replaces only the structured group and is explicit.
@@ -1136,7 +1121,7 @@ impl LaunchDraft {
             .as_ref()
             .map(|words| words.join(" "))
             .unwrap_or_default();
-        self.container = ContainerDraft::from_config(selection.container.as_ref());
+        self.container = selection.container.clone();
         self.permissions_explicit = true;
         self.wrapper_explicit = true;
         before.is_none() || before != self.retry_selection()
@@ -1230,7 +1215,7 @@ pub(super) struct DraftFields {
     pub(super) structured_permission_flags: Memo<String>,
     pub(super) structured_wrapper: Memo<String>,
     pub(super) wrapper_is_explicit: Memo<bool>,
-    pub(super) container: Memo<ContainerDraft>,
+    pub(super) container: Memo<Option<farhelm_proto::ContainerConfig>>,
 }
 
 /// Existing picker handles observed only after a scalar edit earns admission.
@@ -1585,18 +1570,6 @@ impl LaunchDraftState {
     /// Admission preserves explicitness even when only inter-word spacing changes.
     pub(super) fn edit_wrapper(self, text: String) -> bool {
         self.apply_ordinary(|draft| draft.edit_wrapper(text))
-    }
-
-    /// The ordinary live gate protects retries from late container input events.
-    pub(super) fn edit_container(self, edit: crate::container_controls::ContainerEdit) -> bool {
-        self.apply_ordinary(|draft| {
-            if draft.is_restart() {
-                return false;
-            }
-            let mut value = draft.container();
-            value.apply(edit);
-            draft.edit_container(value)
-        })
     }
 
     /// Custom flags share every ordinary editor's live queued-event protection.
@@ -1967,6 +1940,7 @@ impl LaunchDraftState {
     /// True means admitted even on equality, so Enter can submit the completed
     /// Agent setup. Command fields and one-time inputs remain retained. The old
     /// escalation notice is cleared; this direct route adds no switch observer.
+    /// Retired container choices refuse before history, draft or retry state changes.
     #[expect(
         clippy::too_many_arguments,
         reason = "captured history and existing UI lifetimes are independent inputs"
@@ -1989,6 +1963,16 @@ impl LaunchDraftState {
             return false;
         }
         self.apply_edit(EditRule::Ordinary, |draft| {
+            if entry.selection.container.is_some() {
+                reset_reason.set(Some(farhelm_proto::RETIRED_CONTAINER_REASON.into()));
+                return (
+                    false,
+                    EditFacts {
+                        publish: false,
+                        changed: false,
+                    },
+                );
+            }
             let tab_changed = draft.tab() != LaunchTab::Agent;
             let correcting_invalid = targets.correcting_invalid();
             if entry.target.is_none()
@@ -2544,7 +2528,7 @@ impl LaunchDraftState {
             );
         }
         if let Some(container) = fields.container {
-            draft.edit_container(ContainerDraft::from_config(container.as_ref()));
+            draft.container = container;
         }
         // Template-owned command text deliberately discards peer raw seeds.
         if let Some(command) = fields.command {
@@ -2662,6 +2646,14 @@ impl LaunchDraftState {
                 )));
                 return (None, false, false);
             }
+        }
+        // Refusal cannot masquerade as a Browse path, nor adopt the historical
+        // destination before the retired selection has been classified.
+        if let ComposerSearchResult::Recent(entry) = &result
+            && entry.selection.container.is_some()
+        {
+            action_error.set(Some(farhelm_proto::RETIRED_CONTAINER_REASON.into()));
+            return (None, false, false);
         }
         // Capture before history adoption or path override can clear the old claim.
         let correcting_invalid = !remembered_destination_matches(
@@ -3195,11 +3187,10 @@ mod tests {
         assert_eq!(draft.cwd(), "~");
     }
 
-    /// Copying a launch retains its isolation intent. An incomplete correction
-    /// cannot project as an ordinary host launch, and a folder destination must
-    /// explain its incompatibility instead of discarding the container choice.
+    /// Historical container intent cannot disappear into an ordinary launch.
+    /// It still round-trips in the editing projection used for compatibility.
     #[test]
-    fn container_copies_and_invalid_edits_preserve_isolation_intent() {
+    fn retired_container_choice_is_retained_and_refused() {
         let mut draft = LaunchDraft::new(None);
         draft.choose_harness(
             LaunchHarness::Codex,
@@ -3207,51 +3198,20 @@ mod tests {
             String::new(),
             ChoiceOrigin::Control,
         );
-        assert_eq!(structured(&draft).container, None);
-        let mut container = ContainerDraft {
-            enabled: true,
-            image: "localhost/agent:latest".into(),
-            api_proxy_port: "43210".into(),
-            github_token_file: "/tokens/github".into(),
-        };
-        draft.edit_container(container.clone());
+        draft.container = Some(farhelm_proto::ContainerConfig {
+            engine: farhelm_proto::ContainerEngine::Podman,
+            image: "old-image".into(),
+            api_proxy_port: 43210,
+            github_token_file: None,
+        });
+        assert!(draft.container_refusal().unwrap().contains("Delete only"));
+        assert!(draft.structured_selection().is_none());
         assert!(
             draft
-                .container_refusal(false)
-                .unwrap()
-                .contains("managed checkout")
+                .editing_selection(LaunchHarness::Codex)
+                .container
+                .is_some()
         );
-        draft.choose_destination_type(true);
-        assert_eq!(draft.container_refusal(true), None);
-        let selection = structured(&draft);
-        assert_eq!(selection.container, container.config().unwrap());
-        let mut copied = LaunchDraft::new(None);
-        copied.restore_launch(&selection, Some(LaunchHarness::Codex));
-        assert_eq!(copied.container(), container);
-        container.api_proxy_port = "bad port".into();
-        assert!(copied.edit_container(container.clone()));
-        assert!(copied.structured_selection().is_none());
-        assert_eq!(copied.container(), container);
-        copied.choose_tab(LaunchTab::Command);
-        assert_eq!(
-            copied.container_refusal(false),
-            None,
-            "dormant agent choices do not block Command"
-        );
-        copied.choose_tab(LaunchTab::Agent);
-        assert!(copied.container_refusal(false).is_some());
-        let mut old = selection;
-        old.container.as_mut().unwrap().image.clear();
-        copied.restore_launch(&old, Some(LaunchHarness::Codex));
-        assert!(copied.container().enabled);
-        assert!(copied.container().image.is_empty());
-        assert!(
-            copied
-                .container_refusal(true)
-                .unwrap()
-                .contains("image is required")
-        );
-        assert!(copied.structured_selection().is_none());
     }
 
     /// Exercise the stored-command comparison without mounting catalog readers.
@@ -8579,5 +8539,82 @@ mod tests {
         draft.restore(before.clone());
         assert_eq!(draft, before);
         assert_eq!(draft.launch_intent(), before.launch_intent());
+    }
+    /// Retired recent choices must preserve the draft and its retry binding.
+    /// Direct and search activation both refuse; search must not turn refusal
+    /// text into a Browse request or promote its historical destination.
+    #[farhelm_testtrace::test]
+    fn retired_recent_is_refused_without_changing_the_draft() {
+        let mut dom = VirtualDom::new(placement_fixture);
+        dom.rebuild_in_place();
+        dom.process_events();
+        let f = PLACEMENT_FIXTURE.with(std::cell::Cell::get).unwrap();
+        let c = FINAL_CONTEXT.with(std::cell::Cell::get).unwrap();
+        let owner = f.system.ordinary.owner;
+        let mut key = owner.intent_key;
+        dom.in_runtime(|| {
+            seed_placement_command(f);
+            let before = owner.snapshot();
+            let pair = Some(("retired-recent-retry".into(), request(&before)));
+            key.set(pair.clone());
+            let attempts = *f.targets.history_activation_attempts.peek();
+            let mut entry = placement_recent("~");
+            entry.selection.container = Some(farhelm_proto::ContainerConfig {
+                engine: farhelm_proto::ContainerEngine::Podman,
+                image: "old-image".into(),
+                api_proxy_port: 43210,
+                github_token_file: None,
+            });
+            assert!(!owner.accept_recent(
+                entry.clone(),
+                &[],
+                None,
+                None,
+                f.targets,
+                f.system.source.permission_escalation,
+                f.system.source.composer_reset_reason
+            ));
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*key.peek(), pair);
+            assert!(
+                f.system
+                    .source
+                    .composer_reset_reason
+                    .peek()
+                    .as_ref()
+                    .unwrap()
+                    .contains("Delete only")
+            );
+            let accepted = owner
+                .accept_search_result(
+                    crate::launch_composer::ComposerSearchResult::Recent(Box::new(entry)),
+                    None,
+                    false,
+                    SearchInputs {
+                        recipes: &[],
+                        templates: &[],
+                        hosts: &[],
+                        catalog: Some(&[]),
+                        host_fixed: false,
+                        history_target: None,
+                        preferences: c.preferences,
+                    },
+                    c.search,
+                )
+                .expect("search activation completes its ordinary interaction");
+            assert!(accepted.browse_path.is_none());
+            assert!(
+                c.search
+                    .template_error
+                    .peek()
+                    .as_ref()
+                    .unwrap()
+                    .contains("Delete only")
+            );
+            assert_eq!(owner.snapshot(), before);
+            assert_eq!(*key.peek(), pair);
+            assert_eq!(*f.targets.history_activation_attempts.peek(), attempts);
+        });
+        PLACEMENT_FIXTURE.with(|slot| slot.set(None));
     }
 }

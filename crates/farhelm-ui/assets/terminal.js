@@ -1209,7 +1209,6 @@
       secret: deviceSecret,
       native,
       isMac: IS_MAC,
-      containerized: spec.containerized === true,
       isClick: (event) => getGrid().isLinkClick(event),
       coveringRects: () => files.markedCoverRects(document),
     });
@@ -1344,7 +1343,7 @@
         // linked half changed. Missing rows count too: history may arrive.
         evidence: Array.from({ length: range.end.abs - range.start.abs + 5 }, (_, i) => range.start.abs - 2 + i),
         // A neighbor redraw that leaves recognition unchanged keeps this
-        // hover, including its host check; container readmission is async.
+        // hover, including its host check.
         revalidateEvidence: () => fileLinks.pathCurrent(path, range),
         decorations: { underline: true, pointerCursor: false },
       };
@@ -1355,37 +1354,13 @@
       };
       return link;
     };
-    /** Grid OSC 8 links as `FileLinks.oscCandidates` takes them. */
-    const oscItems = (links) => links.map((link) => ({ uri: link.uri, range: link.range, link }));
-
     const provider = {
       row(abs, done) {
         const found = getGrid().rowLinks(abs);
         const osc = found.filter((link) => link.kind === "osc").map(oscLink);
         const text = found.filter((link) => link.kind === "text").map(textLink);
-        if (!fileLinks.containerized) {
-          const paths = files.pathLinks(view.lines(), abs).map(pathLink);
-          done([...osc, ...text, ...paths]);
-          return;
-        }
-        // A container's paths name its own filesystem: the host admits each
-        // target before it is offered, for program hyperlinks and printed
-        // paths alike (`FileLinks.checkoutLinks`).
-        let admittedOsc = null;
-        let admittedPaths = null;
-        const finish = () => {
-          if (admittedOsc && admittedPaths) done([...admittedOsc, ...text, ...admittedPaths]);
-        };
-        const oscNow = () => fileLinks.oscCandidates(oscItems(getGrid().rowLinks(abs).filter((link) => link.kind === "osc").map(oscLink)));
-        void fileLinks.checkoutLinks("osc", fileLinks.oscCandidates(oscItems(osc)), oscNow, (admitted) => {
-          admittedOsc = admitted;
-          finish();
-        });
-        const pathsNow = () => fileLinks.proseCandidates(abs, pathLink);
-        void fileLinks.checkoutLinks("prose", pathsNow(), pathsNow, (admitted) => {
-          admittedPaths = admitted;
-          finish();
-        });
+        const paths = files.pathLinks(view.lines(), abs).map(pathLink);
+        done([...osc, ...text, ...paths]);
       },
     };
 
@@ -3854,7 +3829,6 @@
             secret: deviceSecret,
             native: typeof window[WEBVIEW_DEVICE_SECRET] === 'string',
             isMac: IS_MAC,
-            containerized: spec.containerized === true,
             isClick: event => linkGesture.isClick(event),
             coveringRects: linkCoveringRects,
           });
@@ -3976,8 +3950,6 @@
             // opener; files go through host lookup, and other schemes do nothing.
             // OSC spans still take precedence over plain web/path providers.
             linkHandler: {
-              // Container terminals adapt the native OSC provider below so file
-              // targets pass checkout admission before xterm offers their spans.
               allowNonHttpProtocols: true,
               activate(event, uri) {
                 // The gesture gate also covers mouse-reporting programs, which

@@ -43,13 +43,13 @@ host's link permission, an agent on that host can make your browser open a web a
 lets it reach addresses on your own machine and network without asking. The Mac app's optional localhost tunnels also
 let you open a remote development server as a local page, after accepting a separate warning about cookies,
 local-network access and other programs using the tunnel
-([Open a remote localhost link](/docs/using/work-in-a-session/#open-a-remote-localhost-link)). And what a
-[containerized session](/docs/agents/containerized-sessions/) keeps from an agent and what it does not: other host files
-and Farhelm's own credentials stay outside the container, but the network stays open, and Git hooks or settings it
-writes in the checkout can later run with your full access outside the container.
+([Open a remote localhost link](/docs/using/work-in-a-session/#open-a-remote-localhost-link)). It will also cover
+[container session containment](/docs/agents/containerized-sessions/#proxies-and-containment). The checkout and selected
+credentials live inside, with the host's home and checkout kept outside. Rootless Podman supplies containment. Farhelm
+leaves network access, CPU and memory use unrestricted.
 
 It will also cover Tensorlake's API, which the helm calls over HTTPS with your saved API key, Farhelm's own SSH key for
 those sandboxes, and the API key and agent endpoint tokens stored unencrypted on the helm's machine. A recipe's
-[tunnels to your side](/docs/using/tensorlake-sandboxes/#tunnels-to-your-side) let anything in the sandbox reach the
-configured services through the helm's machine. These tunnels use the host's existing connection, including your SSH
-configuration and **ProxyJump**.
+[tunnels to your side](/docs/using/tensorlake-sandboxes/#tunnels-to-your-side) let anything in the sandbox or container
+reach the configured services through the helm's machine. These tunnels use the host's existing connection, including
+your SSH configuration and **ProxyJump**.

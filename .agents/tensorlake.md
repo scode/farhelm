@@ -15,8 +15,9 @@ agent needs to run them, and to rebuild the sandbox template from scratch when t
 ## When and how much
 
 - Only on request. Browser specs run through `sandbox-tests.ts`, Rust tests through `rust-tests.ts` (below). The
-  template carries rootless Podman and its offline image, so the containerized e2e tests run there too. Builds, lints,
-  doctests and the UI's desktop tests stay local: the sandboxes have no Rust toolchain and no WebKitGTK.
+  template carries rootless Podman and the exact cached production base, so the real environment e2e test runs there
+  too. Builds, lints, doctests and the UI's desktop tests stay local: the sandboxes have no Rust toolchain and no
+  WebKitGTK.
 - The maintainer's request states a budget: how many sandboxes may exist at once. Stay at or below it (`--shards`).
 - Name owned sandboxes `farhelm-sbx-<checkout>-<n>` (`--prefix farhelm-sbx-<checkout>-`), where `<checkout>` is the
   checkout directory's name lowercased with everything outside `[a-z0-9]` turned into `-`. A sandbox with that prefix
@@ -72,11 +73,18 @@ was there.
    `cargo build` (the e2e harness needs `target/debug/farhelm-fixtures`, which nextest's setup script would otherwise
    build), then `cargo nextest archive --locked -p <package> ... --archive-file <file>`. If a browser run on the same
    build is also wanted, start it first and wait until it has packed: the test build relinks `target/debug/farhelm` with
-   test features.
+   test features. The Rust packer also prepares this revision's static native-musl CLI and pinned static tmux through
+   `scripts/build-podman-test-payloads.sh`. Install `musl-tools`, `file`, binutils and the tmux builder's prerequisites
+   locally. A matching absolute `FARHELM_HELM_PAYLOAD_DIR` can supply these ordinary installer inputs. The packer stages
+   them once even for a narrow initial filter, because the staging snapshot can later run another selection from the
+   same archive. An intentional `FARHELM_TEST_SKIP_PODMAN=1` avoids this build and is forwarded to every shard. Record
+   the missing real-environment coverage.
 2. `scripts/tensorlake/rust-tests.ts run --scratch <dir> --template <snapshot> --prefix <name-prefix> --shards <n> --archive <file> --out <dir> [-- <nextest filter arguments>]`.
-   It uploads the archive (about a gigabyte) once, to a staging sandbox, snapshots that, and clones the snapshot for
-   every shard. The staging snapshot is kept, so rerunning the same archive (a narrower filter, say) passes
-   `--staged <snapshot>` and uploads nothing; `sandbox-tests.ts sweep` removes it with the rest.
+   It uploads the archive (about a gigabyte), source, tools and static provisioning payloads once, to a staging sandbox,
+   snapshots that, and clones the snapshot for every shard. The staging snapshot is kept, so rerunning the same archive
+   (a narrower filter, say) passes `--staged <snapshot>` to reuse the existing uploads. `sandbox-tests.ts sweep` removes
+   it with the rest. A staged snapshot freezes those inputs and the worker script. Create a fresh stage after changing
+   them, or to enable Podman coverage when the stage was created with the opt-out.
 3. Read each shard's `summary.txt` like a recorded run: the user manager's state, Podman and its image, self-ssh, then
    nextest's summary, failures and any runtime `SKIPPED` lines. A failed shard's run directories come back as
    `runs.tar.gz`; keep them as evidence. Shards run through the recorder's generic mode, because its nextest mode does
@@ -84,10 +92,13 @@ was there.
 
 How it works, and why: the test binaries have absolute paths compiled in (fixture directories, `CARGO_BIN_EXE_*`, the
 target directory), so the staging sandbox unpacks the checkout at this checkout's own absolute path and each shard
-extracts the archive over it, with nothing remapped. Nextest's e2e setup script runs `cargo build -p farhelm-fixtures`,
-which cannot run there, so a shard uses a copy of `.config/nextest.toml` without it. A test that passes locally and
-fails there is still a finding: the sandboxes are less loaded than the shared development machine, so races that the
-slow machine hides show up (on first use, three e2e tests that stopped a session soon after creating it).
+extracts the archive over it, with nothing remapped. Nextest's e2e setup script runs `cargo build -p farhelm-fixtures`.
+Cargo is unavailable on clones, so a shard uses a copy of `.config/nextest.toml` with that fixture-build hook removed.
+The retained Podman setup consumes prebuilt payloads. The worker retains `FARHELM_TEST_PODMAN_PAYLOAD_DIR` through the
+recorder, and setup exposes the normal `FARHELM_HELM_PAYLOAD_DIR` only to matching tests through nextest's setup
+environment. The real Podman fixture reserves all four nextest slots and has a 40-minute limit. A test that passes
+locally and fails there is still a finding: the sandboxes are less loaded than the shared development machine, so races
+that the slow machine hides show up (on first use, three e2e tests that stopped a session soon after creating it).
 
 Give concurrent browser and Rust runs separate `--scratch` directories and name prefixes: each run's sweep terminates
 every live sandbox in its own ledger.
@@ -109,13 +120,19 @@ Observed on fresh sandboxes in October 2026; verify rather than assume, since Te
   `farhelm-fixtures`, and the pinned tmux in `.ci-tmux/`, run there unchanged. Pushing them saves a Rust toolchain and a
   half-hour build on every sandbox. If the development machine moves to a newer Ubuntu, this stops being true: build on
   the sandbox instead, or pick a matching image.
-- Rootless Podman is not in the stock image; the template installs it with the image the containerized tests use
-  (`docker.io/library/ubuntu:24.04`). On clones, `/dev/net/tun` comes up readable by root only and no udevd runs to
-  apply a rule, so `run-rust-shard.sh` opens it up before the tests (without that, Podman's networking fails with
+- The stock image lacks rootless Podman. The template installs it with the production base the environment test uses
+  (`docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`). The production
+  readiness probe requires Podman at least 4.9.3, cgroup v2, the systemd cgroup manager and usable user scopes. The
+  managed-checkout/lifecycle fixture also needs engine events. Its ignored SSH acceptance variant requires explicit
+  selection and the strict passwordless localhost SSH setup described below. Both variants exercise ordinary tab, file,
+  transfer and TCP-relay protocols with a stand-in agent. The shard preflight requires the exact cached base unless the
+  explicit Podman opt-out is set. On clones, `/dev/net/tun` comes up readable by root only and no udevd runs to apply a
+  rule, so `run-rust-shard.sh` opens it up before the tests (without that, Podman's networking fails with
   "open(/dev/net/tun): Permission denied").
 - On clones, systemd-resolved owns `/etc/resolv.conf` and was seen with no upstream server, so nothing resolved; the
-  gateway does not answer DNS either. The template gives resolved public servers. The tests need no DNS; diagnosing on a
-  clone often does.
+  gateway does not answer DNS either. The template gives resolved public servers. The real environment recipe uses the
+  network for apt and both official agent installers, and its managed checkout clones a public GitHub repository, so DNS
+  and outbound access are test prerequisites. Agent turns use a stand-in.
 - Sizes: create with `-c 4 -m 8192`; three stacks fit in 8 GiB. Disk is chosen at creation and a clone cannot be smaller
   than its snapshot, so the template stays at 10 GiB (it uses about 4) and clones get 30 GiB for retained traces and
   screenshots.
@@ -143,7 +160,10 @@ exists:
    clone of the local checkout's HEAD, so the sandbox never contacts the repository's remote.
 4. In `e2e/`, `npm ci`, then `sudo -n env PATH=<path> npx playwright install-deps chromium webkit` and
    `npx playwright install chromium webkit`. `install-deps` needs root and the caller's PATH to find npx.
-5. As `tl-user`, `podman pull docker.io/library/ubuntu:24.04`: the containerized tests never pull images.
+5. As `tl-user`, run
+   `podman pull docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`. The
+   environment fixture requires that prerequisite to be present before it starts. Its recipe build then uses the
+   network.
 6. Give `tl-user` passwordless SSH to itself: an ed25519 key, the public key in `authorized_keys`, and `ssh-keygen -A`
    for host keys. The harness registers its second supervisor as an ssh-to-localhost host; without self-ssh the
    multi-host specs skip. Also create the empty file `/var/lib/systemd/linger/tl-user` (what `loginctl enable-linger`

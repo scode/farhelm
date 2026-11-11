@@ -436,7 +436,6 @@ impl Supervisor {
         scope: Option<&str>,
         preparation: Option<crate::launch::CheckoutPreparation>,
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
-        container_config: Option<&farhelm_proto::ContainerConfig>,
         initial_snapshot: Option<Vec<u8>>,
     ) -> Result<SpawnedInHost, HostSpawnFailure> {
         let PreparedLaunch {
@@ -459,7 +458,6 @@ impl Supervisor {
                 scope,
                 preparation,
                 initial_prompt,
-                container_config,
             )
             .await
             .map_err(HostSpawnFailure::Spec)?;

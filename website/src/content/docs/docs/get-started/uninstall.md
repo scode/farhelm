@@ -45,7 +45,9 @@ installer first to finish it.
 
 To remove your data as well, delete `~/.local/state/farhelm` once the uninstall is done. **Deleting local state does not
 delete Tensorlake resources or stop their charges.** It loses the host records, recipes, API key and SSH key Farhelm
-needs to manage them. Keep this state if you are keeping cloud resources.
+needs to manage them. [Podman containers](/docs/agents/containerized-sessions/) and their images also remain. Delete
+environments you no longer need through Farhelm before removing its state. Keep the state if you are keeping those
+resources.
 
 ## From a remote host
 
@@ -62,6 +64,7 @@ itself, and says why when it does. The one exception is finishing an uninstall t
 Farhelm's service and Farhelm's supervisor there has stopped, the host is expected to look unreachable, and choosing
 **Uninstall** again still finishes the job.
 
+Use **Delete container** to remove [container environments](/docs/agents/containerized-sessions/#stopping-and-deleting).
 Tensorlake hosts have **Delete sandbox** instead. That permanently deletes the whole sandbox, including its files,
 sessions and snapshots, even if sessions are running. Deletion needs the Tensorlake API, not a connection to the host;
 see [Delete a sandbox](/docs/using/tensorlake-sandboxes/#delete-a-sandbox).

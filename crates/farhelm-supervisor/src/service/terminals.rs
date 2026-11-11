@@ -901,12 +901,15 @@ fn no_such_tab(entry: &SessionEntry, id: &str) -> RequestError {
     )
 }
 
+/// Resolve only an active session's terminal. A retired container row remains
+/// listable for Delete but cannot grant access to its outside-host terminal.
 async fn resolve_terminal_inner(
     sup: &Supervisor,
     entry: &SessionEntry,
     terminal: &TerminalId,
     resolution: TabResolution,
 ) -> Result<Terminal, RequestError> {
+    super::core::require_active_launch(&entry.info.launch)?;
     // A tab in a terminal host is the session's own runtime
     // (`SessionCells::host_tabs`), found without asking tmux and whatever
     // the agent terminal: such a tab outlives its agent's terminal as a

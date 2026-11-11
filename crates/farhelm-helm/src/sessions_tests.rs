@@ -12231,3 +12231,133 @@ async fn mutation_replies_qualify_all_session_reference_fields() {
     }
     peer.await.unwrap();
 }
+
+/// A historical selection is still decodable, but every new-work admission must
+/// recognize it before a create or destructive replacement is dispatched.
+fn retired_container_source() -> farhelm_proto::SessionInfo {
+    let selection=serde_json::from_value(serde_json::json!({"harness":"codex","model":null,"effort":null,"permissions":null,"container":{"engine":"podman","image_file":"legacy.tar","api_proxy_port":43210}})).unwrap();
+    farhelm_proto::SessionInfo {
+        launch: farhelm_proto::SessionLaunch::Agent {
+            selection,
+            start: vec!["codex".into(), "{farhelm_args}".into()],
+            resume: None,
+        },
+        ..rest_harness::session("sess-1", 1_700_000_000)
+    }
+}
+
+/// A client bypassing the deleted switch cannot recreate the old model, even
+/// through managed-checkout admission before ordinary launch compilation runs.
+#[farhelm_testtrace::test]
+async fn retired_container_create_refuses_before_target_routing() {
+    let harness = rest_harness::idle_helm().await;
+    let source = retired_container_source();
+    let selection = source.launch.agent_selection().unwrap();
+    for checkout in [None, Some(serde_json::json!({"repo":"acme/project"}))] {
+        let mut body = serde_json::json!({"cwd":"~","launch":selection});
+        if let Some(checkout) = checkout {
+            body["github_checkout"] = checkout;
+        }
+        let (status, text) = post_text(&harness, "/api/sessions", body).await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{text}");
+        assert!(text.contains("Delete only"), "{text}");
+    }
+}
+
+/// Plain, edited and fresh-checkout Replace must inspect the source's stored
+/// launch. Fresh recovery must refuse before its reconciliation lookup, which
+/// can otherwise resume previously accepted creation work.
+#[farhelm_testtrace::test]
+async fn retired_container_plain_and_custom_replace_dispatch_no_create_or_delete() {
+    for variant in 0..3 {
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let (harness, local) =
+            spliced_replace_harness(client, vec![retired_container_source()]).await;
+        let (observe, responder) = silent_supervisor(peer);
+        harness.await_refreshed(local).await;
+        let (claim, _) = super::create_target(&harness.state, Some(local)).unwrap();
+        let body = match variant {
+            0 => serde_json::json!({}),
+            1 => {
+                serde_json::json!({"with":{"cwd":"/work","command":{"command":"echo replacement","yolo":false}}})
+            }
+            2 => {
+                serde_json::json!({"intent_key":"retired-fresh-replace","with":{"cwd":"","command":{"command":"replacement","yolo":false},"github_checkout":{"repo":"acme/project","preview":{"canonical_root":"/work","basename":"project-1","cwd":"/work/project-1","config_revision":1,"host":claim.host.to_string(),"incarnation":claim.incarnation,"installation_identity":"local-identity"}}}})
+            }
+            _ => unreachable!("three explicit replacement variants"),
+        };
+        let (status, text) = post_text(
+            &harness,
+            &harness.local_session_uri("/api/sessions/sess-1/replace"),
+            body,
+        )
+        .await;
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST, "{text}");
+        assert!(text.contains("Delete only"), "{text}");
+        observe
+            .send(())
+            .expect("observe no dispatched work after refusal");
+        responder.await.unwrap();
+    }
+}
+
+/// A known retired row keeps no mutation or terminal convenience through raw
+/// HTTP calls. The connected peer remains alive while the cache fence refuses,
+/// so these errors cannot hide a command dispatched behind the local refusal.
+#[farhelm_testtrace::test]
+async fn retired_container_http_mutations_dispatch_nothing() {
+    use tower::ServiceExt;
+    let (client, peer) = tokio::io::duplex(64 * 1024);
+    let (harness, local) = spliced_replace_harness(client, vec![retired_container_source()]).await;
+    let (observe, responder) = silent_supervisor(peer);
+    harness.await_refreshed(local).await;
+    for (method, suffix, body) in [
+        ("POST", "/stop", serde_json::json!({})),
+        ("POST", "/restart", serde_json::json!({})),
+        ("POST", "/rename", serde_json::json!({"title":"changed"})),
+        ("POST", "/tabs", serde_json::json!({})),
+        ("PUT", "/seen", serde_json::json!({"seen_activity_at":1})),
+        ("PUT", "/pin", serde_json::json!({"pinned":true})),
+        (
+            "PUT",
+            "/notifications/read",
+            serde_json::json!({"through":1}),
+        ),
+        (
+            "PUT",
+            "/notifications/cleared",
+            serde_json::json!({"through":1}),
+        ),
+    ] {
+        let uri = harness.local_session_uri(&format!("/api/sessions/sess-1{suffix}"));
+        let response = harness
+            .router()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("host", "127.0.0.1:7433")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::BAD_REQUEST,
+            "{method} {suffix}"
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024)
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&bytes).contains("Delete only"),
+            "{method} {suffix}: {bytes:?}"
+        );
+    }
+    observe
+        .send(())
+        .expect("peer remains alive through the last refusal");
+    responder.await.unwrap();
+}

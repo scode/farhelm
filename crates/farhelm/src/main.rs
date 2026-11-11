@@ -1416,8 +1416,6 @@ enum InternalCmd {
     /// this exists (zsh terminates on failed exec; a shell-side sentinel
     /// can never fire there).
     Launch { spec: PathBuf },
-    /// Prepare one container while holding its creation fence outside the agent scope.
-    ContainerPrepare { ticket: PathBuf, generation: i64 },
     /// Clone a spare after the user's login shell established its environment.
     BuildSpare { spec: PathBuf },
     /// Bound that shell and ordinary descendants to the supervisor's lifetime.
@@ -1433,13 +1431,7 @@ enum InternalCmd {
     },
     /// Enter the session directory before starting a tab's login shell. This runs
     /// inside the tab scope, so shell startup retains the tab's cleanup contract.
-    TabShell {
-        directory: PathBuf,
-        shell: PathBuf,
-        /// Credential-free container intent; the helper reads the token itself.
-        #[arg(long)]
-        container: Option<String>,
-    },
+    TabShell { directory: PathBuf, shell: PathBuf },
     /// An agent hook adapter: read the vendor's JSON payload from stdin and
     /// drop a report of the conversation identity it names for the
     /// supervisor that launched this session to apply.
@@ -1901,9 +1893,6 @@ fn main() -> anyhow::Result<()> {
                     stdin_idle_limit_secs.map(std::time::Duration::from_secs),
                 ))
             }
-            InternalCmd::ContainerPrepare { ticket, generation } => {
-                farhelm_supervisor::container::prepare(&ticket, generation)
-            }
             InternalCmd::Launch { spec } => {
                 // Holding its own version now, the shim lets the window's
                 // keeper go (farhelm_supervisor::session_hold). Outside the
@@ -1935,14 +1924,9 @@ fn main() -> anyhow::Result<()> {
                 );
                 Ok(())
             }
-            InternalCmd::TabShell {
-                directory,
-                shell,
-                container,
-            } => Err(match container {
-                Some(runtime) => farhelm_supervisor::launch::exec_container_tab_shell(&runtime),
-                None => farhelm_supervisor::launch::exec_tab_shell(&directory, &shell),
-            }),
+            InternalCmd::TabShell { directory, shell } => Err(
+                farhelm_supervisor::launch::exec_tab_shell(&directory, &shell),
+            ),
             InternalCmd::Hold { spec, command } => {
                 let exe =
                     anyhow::Context::context(std::env::current_exe(), "locating this program")?;
@@ -2899,6 +2883,38 @@ fn verified_release_sums(
 
 #[cfg(test)]
 mod tests {
+    /// A delayed helper invocation from the retired container model must fail
+    /// parsing instead of retaining authority to create or enter a container.
+    #[test]
+    fn retired_container_helpers_have_no_cli_entry_point() {
+        use clap::Parser;
+        // This positional argv was valid for the historical creator. Its
+        // refusal must identify removal of the subcommand itself.
+        let prepare = super::Cli::try_parse_from([
+            "farhelm",
+            "internal",
+            "container-prepare",
+            "old.json",
+            "0",
+        ])
+        .err()
+        .expect("the retired container creator is absent");
+        assert_eq!(prepare.kind(), clap::error::ErrorKind::InvalidSubcommand);
+        assert!(prepare.to_string().contains("container-prepare"));
+        let tab = super::Cli::try_parse_from([
+            "farhelm",
+            "internal",
+            "tab-shell",
+            "/",
+            "/bin/sh",
+            "--container",
+            "old.json",
+        ])
+        .err()
+        .expect("the retired container tab option is absent");
+        assert_eq!(tab.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
     /// New helpers cannot impose liveness on old helms. Absence of the
     /// opt-in argument must decode as no deadline, including future changes
     /// to clap defaults that a short process observation could not detect.

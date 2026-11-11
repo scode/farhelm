@@ -146,8 +146,8 @@
 # The release gate, on the x86_64 Linux build job only.
 #
 # One job runs it, and the choice is about COST, not capability. The suite is
-# architecture-independent and takes ten minutes; running it on the arm64 job
-# too would buy a second copy of the same verdict for a second ten minutes.
+# architecture-independent; running it on the arm64 job too would duplicate
+# the same gate, including the real Podman recipe's network bootstrap.
 # (`scripts/build-pinned-tmux-ci.sh` handles `Linux/aarch64` natively, so that
 # job could run it — if arm-specific coverage ever becomes worth paying for,
 # widening the `if` below is the whole change.) macOS is the one that genuinely
@@ -218,10 +218,13 @@
   # a failed premise. Prepare it before the restored release-wide selection.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
-    sudo apt-get install -y podman uidmap slirp4netns fuse-overlayfs
+    # The focused nextest setup builds native musl payloads before cargo-dist
+    # has produced any release artifact. It reuses the pinned static tmux above.
+    sudo apt-get install -y podman uidmap slirp4netns fuse-overlayfs musl-tools
     test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
-    podman pull docker.io/library/ubuntu:24.04
-    podman run --rm docker.io/library/ubuntu:24.04 true
+    base=docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+    podman pull "$base"
+    podman run --rm "$base" true
 
 - name: Run the test suite against the pinned tmux
   # Nextest starts a process per test with four slots shared across binaries.
@@ -249,6 +252,9 @@
   # commands spent about six minutes of every tag build recompiling crates
   # this step had just built. Keep the selection identical when adding a
   # step; narrow with `-E` instead.
+  # The Podman module's scoped setup additionally builds a native musl CLI
+  # payload for the ordinary installer inside its Ubuntu container. That
+  # target cannot reuse the host test executable's dynamic glibc linkage.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: |
     PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \

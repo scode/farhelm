@@ -2,13 +2,14 @@
 # Run one partition of a Rust nextest archive on a Tensorlake clone, inside one attached exec (whatever an exec leaves
 # running is frozen when the sandbox idles). `rust-tests.ts` beside this file stages the archive and calls this on each
 # clone; `.agents/tensorlake.md` says when to use it. The clones come from the template `sandbox-tests.ts make-template`
-# builds, which `bootstrap.sh` gives rootless Podman and the offline docker.io/library/ubuntu:24.04 image, so the
-# containerized e2e tests run here too.
+# builds, which `bootstrap.sh` gives rootless Podman and the exact production Ubuntu base offline, so the real
+# environment e2e test can build its recipe here through the production provider.
 #
 # The checkout is unpacked at the development machine's own absolute path, so every path the test binaries had compiled
 # in (CARGO_MANIFEST_DIR fixtures, CARGO_BIN_EXE_farhelm, the target directory) is valid here without remapping, and the
 # archive is extracted over that same target directory. No cargo exists here, so nextest runs with a copy of the repo's
-# config whose setup script (`cargo build -p farhelm-fixtures`) is removed; the fixtures binary is shipped prebuilt.
+# config with only the local fixture-build setup removed. Static installer payloads arrive prebuilt. The retained
+# Podman setup exposes their staged path only to its matching test.
 #
 # Usage: run-rust-shard.sh <checkout> <archive> <nextest binary, relative to the checkout> <k> <n> [nextest filter args...]
 # Writes /home/tl-user/out/shard<k>/summary.txt and console.log; the recorder's run directory stays under
@@ -43,7 +44,10 @@ case "$state" in running|degraded) ;; *) setup_error=${setup_error:-"the systemd
 # --- rootless Podman needs /dev/net/tun open to the user (no udevd runs on clones to apply a rule) and working DNS.
 sudo -n chmod 0666 /dev/net/tun || setup_error=${setup_error:-"cannot open /dev/net/tun"}
 sudo -n systemctl restart systemd-resolved 2>/dev/null
-if podman image exists docker.io/library/ubuntu:24.04; then
+base=docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+if [ "${FARHELM_TEST_SKIP_PODMAN:-}" = 1 ]; then
+  podman_image=SKIPPED
+elif podman image exists "$base"; then
   podman_image=present
 else
   podman_image=MISSING
@@ -53,7 +57,7 @@ fi
   echo "pid 1: ${pid1:-unreadable}"
   echo "linger: $linger"
   echo "systemd --user: $state"
-  echo "podman: $(podman --version 2>&1); image $podman_image"
+  echo "podman: $(podman --version 2>&1); image $base $podman_image"
 } >"$OUT/summary.txt"
 if [ -n "$setup_error" ]; then
   echo "setup failed: $setup_error; no tests were run" >>"$OUT/summary.txt"
@@ -80,16 +84,24 @@ export PATH="$M/.ci-tmux:$PATH"
 # installs, which the repo's config refuses.
 nextest="$M/$NEXTEST"
 config=/home/tl-user/stage/nextest-no-setup.toml
-python3 - "$M/.config/nextest.toml" "$config" <<'PY'
+python3 - "$M/.config/nextest.toml" "$config" <<'PY' || exit 1
 import re, sys
 text = open(sys.argv[1]).read()
-# Drop the setup script and its profile hook, and the experimental flag that only they need.
+# Drop only the Cargo fixture build. The retained Podman setup consumes staged
+# static payloads and scopes the helm payload variable to that test.
 text = re.sub(r"\[scripts\.setup\.build-fixtures\]\n(?:[^\[\n].*\n|\n)*", "", text)
-text = re.sub(r"\[\[profile\.default\.scripts\]\]\n(?:[^\[\n].*\n|\n)*", "", text)
-text = re.sub(r'^experimental = \["setup-scripts"\]\n', "", text, flags=re.M)
+text = re.sub(r"\[\[profile\.default\.scripts\]\]\n(?:[^\[\n].*\n|\n)*",
+              lambda block: "" if re.search(r'^setup = "build-fixtures"$', block[0], re.M) else block[0], text)
+if "[scripts.setup." not in text:
+    text = re.sub(r'^experimental = \["setup-scripts"\]\n', "", text, flags=re.M)
 open(sys.argv[2], "w").write(text)
 PY
+# This private nextest setup input selects the staged files. The retained setup
+# exports FARHELM_HELM_PAYLOAD_DIR only for podman_environments, after the
+# recorder has scrubbed unrelated ambient Farhelm variables.
+export FARHELM_TEST_PODMAN_PAYLOAD_DIR="$M/target/podman-test-payloads"
 python3 scripts/record-test-run.py --kind development --tmux required \
+  --keep-farhelm-env FARHELM_TEST_PODMAN_PAYLOAD_DIR --keep-farhelm-env FARHELM_TEST_SKIP_PODMAN \
   --selection "sandbox rust shard $K/$N (hash partition): $* " \
   --concurrency '4 nextest slots; retries 0' \
   -- "$nextest" nextest run --archive-file "$ARCHIVE" --extract-to "$M" --extract-overwrite --workspace-remap "$M" \

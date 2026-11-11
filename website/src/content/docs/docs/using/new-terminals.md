@@ -94,14 +94,12 @@ and
 [the second case](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)
 show the behavior Farhelm will revisit.
 
-A new terminal is not tmux and does not claim to be: programs in it see `TERM_PROGRAM=farhelm`, with Farhelm's version
-in `TERM_PROGRAM_VERSION`, and no `TMUX` (inside a [containerized session](/docs/agents/containerized-sessions/)'s
-container, the agent gets `TERM` and `COLORTERM` but no `TERM_PROGRAM`). An agent started, or a tab opened, before you
-upgraded keeps the earlier environment, which claims tmux, until it is restarted or closed. If a startup file of your
-login shell starts tmux whenever it is not already inside tmux, it now does so in a new terminal too, including while
-the agent starts. One that replaces the shell with tmux (`exec tmux`) keeps the agent from starting at all, and the
-session's terminal shows your tmux instead. To leave Farhelm's terminals alone, have the startup file skip tmux when
-`TERM_PROGRAM` is `farhelm`.
+Programs in a new terminal see `TERM_PROGRAM=farhelm`, with Farhelm's version in `TERM_PROGRAM_VERSION`. `TMUX` is
+unset. An agent started, or a tab opened, before you upgraded keeps the earlier environment, which claims tmux, until it
+is restarted or closed. If a startup file of your login shell starts tmux whenever it is not already inside tmux, it now
+does so in a new terminal too, including while the agent starts. One that replaces the shell with tmux (`exec tmux`)
+keeps the agent from starting at all, and the session's terminal shows your tmux instead. To leave Farhelm's terminals
+alone, have the startup file skip tmux when `TERM_PROGRAM` is `farhelm`.
 
 ## tmux is still needed
 

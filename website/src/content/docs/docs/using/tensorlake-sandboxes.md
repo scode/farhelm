@@ -64,30 +64,39 @@ for keeping that use within your provider's terms of service.
 
 ## Make a recipe
 
-Choose **New recipe** in Settings → **Tensorlake**. A recipe keeps the choices for hosts you create from it; it is
-separate from a [launch template](/docs/using/launch-templates/), which keeps choices for starting a session.
+Choose **New recipe** in Settings → **Recipes**. Recipes are shared by Tensorlake sandboxes and
+[Podman container sessions](/docs/agents/containerized-sessions/). A recipe keeps their base, packages, credentials and
+tunnels. A [launch template](/docs/using/launch-templates/) keeps choices for starting a session.
 
-Give the recipe a name and choose **CPUs**, **Memory, GB** and **Disk, GB**. Tensorlake decides what your plan allows
+Settings → **Tensorlake** keeps the account, SSH key, creation confirmation and sandbox leftovers. **Recipes** holds the
+shared recipe catalog.
+
+Give the recipe a name. **CPUs**, **Memory, GB** and **Disk, GB** set the size of Tensorlake sandboxes. Podman
+containers use the host account's Podman configuration for resource limits. Tensorlake decides what your plan allows
 when the sandbox is created. Names use lowercase letters, digits and hyphens, start with a letter, end with a letter or
 digit, and have at most 32 characters. A saved recipe cannot be renamed; create another recipe for a different name.
 
 Under **Software**, choose the base Farhelm builds on:
 
-- **Tensorlake Ubuntu** uses Tensorlake's Ubuntu image with systemd; nothing else needs preparing.
-- **Your image** takes an image name from your Tensorlake project.
-- **Your snapshot** takes a snapshot ID from that project.
+- Managed Ubuntu uses Tensorlake's Ubuntu image with systemd for sandboxes and a pinned Ubuntu image for Podman.
+- **Your image** takes an image name from your Tensorlake project and works only for Tensorlake.
+- **Your snapshot** takes a snapshot ID from that project and works only for Tensorlake.
+- **Container image** takes an image reference and **Container login user** for Podman only.
+
+A recipe's supported destinations and build status appear in the list. An unsupported recipe remains visible in the
+launcher with the reason it cannot be used there.
 
 A custom base must run systemd as its init system, allow sudo without a password, be Ubuntu or Debian with apt, and
 include bash, curl and git. The build checks these first and names the first missing requirement. A base containing an
 existing Farhelm supervisor installation is refused at host setup because it would copy another host's identity. You
 cannot select a snapshot Farhelm manages for a recipe: a later rebuild would delete it.
 
-For any base, enter optional **Ubuntu packages**, separated by spaces or newlines. Farhelm builds a snapshot with those
-packages, Claude Code and Codex from their official installers. Each host gets Farhelm's
-[supervisor](/docs/how-it-works/the-pieces/) when it is set up.
+For any base, enter optional **Ubuntu packages**, separated by spaces or newlines. Farhelm builds a Tensorlake snapshot
+or a Podman image with those packages, Claude Code and Codex from their official installers. Each environment gets
+Farhelm's [supervisor, the program that keeps its sessions running](/docs/how-it-works/the-pieces/).
 
 **Cancel** and **Save** stay at the bottom of the editor while its fields scroll. Saving a recipe does not build a
-snapshot or create a host.
+snapshot or image, or create a host.
 
 Changing the base keeps the previous built snapshot until a successful rebuild replaces it. Hosts already created from
 it keep their software.
@@ -136,9 +145,9 @@ choosing None in the recipe does not sign you out.
 
 ### Tunnels to your side
 
-Each row under **Tunnels to your side** maps a sandbox port to a host and port reachable from the helm's machine. For
-example, sandbox port `8080` → host `127.0.0.1`, port `8080` lets programs in the sandbox use `127.0.0.1:8080` to reach
-a service on the helm's machine. **Anything in the sandbox, agents included, can use these tunnels.**
+Each row under **Tunnels to your side** maps a port inside a sandbox or container to a host and port reachable from the
+helm's machine. For example, port `8080` inside → host `127.0.0.1`, port `8080` lets programs there use `127.0.0.1:8080`
+to reach a service on the helm's machine. **Anything in that environment, agents included, can use these tunnels.**
 
 Tunnels run while Farhelm is connected to the host and stop when it disconnects, suspends or deletes the host. Changes
 to recipe tunnels reach existing hosts at their next connection. Host details show each mapping and its status; a failed
@@ -151,11 +160,12 @@ carries traffic in the other direction.
 
 ## Build or rebuild a snapshot
 
-Every recipe without a built snapshot has **Build snapshot** in its Settings row. You can build it there, or let adding
-the first host build it. The row shows progress and then the build time and installed agents' versions. A failed build
-shows its error and **Retry**.
+In **Settings → Recipes**, each recipe shows build status per place, with **Rebuild** for the Tensorlake account and
+each container host. Use the Tensorlake action to build its first snapshot, or let adding the first ordinary sandbox
+host build it. A session-owned sandbox needs that snapshot before launch. Status shows build progress, age and failure
+reasons. Use Rebuild to try again.
 
-Use **Rebuild snapshot** for fresh packages and agents, or after changing the recipe's base or packages. A rebuild
+Rebuild also picks up fresh packages and agents, or changes to the recipe's base or packages. A Tensorlake rebuild
 replaces the old snapshot and deletes it once the new one is ready. Hosts already created from the old snapshot keep
 running; their software and size do not change. A failed rebuild keeps the previous snapshot available. Size changes
 apply to new hosts, and base or package changes apply to new hosts after a rebuild. If you reduce the disk below the
@@ -167,13 +177,15 @@ recipe.
 
 ## Give each session its own sandbox
 
-In the session launcher's **Host** picker, choose a recipe under **New sandbox for this session**. The recipe needs a
-built snapshot first. You can also choose a recipe in a [launch template](/docs/using/launch-templates/). Farhelm asks
-before creating the billed sandbox unless **Create Tensorlake sandboxes without asking** is on.
+In the session launcher's **Runs on** switch, choose **New sandbox**, then a **Recipe**. The recipe needs a built
+Tensorlake snapshot first. You can also save this destination in a [launch template](/docs/using/launch-templates/).
+Farhelm asks before creating the billed sandbox unless **Create Tensorlake sandboxes without asking** is on.
 
 Choose a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) or start in the sandbox's home
 directory. **Clone** creates another sandbox from the same recipe; it does not copy the original's files. **Restart**
-and **Replace** keep the existing sandbox and its files.
+and **Replace** keep the existing sandbox and its files. Recent setups retain the recipe and home-or-repository choice
+after Delete and create a fresh sandbox when applied. Opening **+** (New session) while one is selected starts from its
+recipe too, ready to create a fresh sandbox.
 
 **Suspend** freezes the entire sandbox with its processes intact; **Resume** continues them. **Stop** ends the agent and
 its terminal tabs while the sandbox keeps running and billing. **Stop and suspend** does both. A session sandbox uses a
@@ -253,9 +265,10 @@ needed to delete it. Agents cannot delete Tensorlake hosts.
 
 ### Sandboxes not on this helm
 
-Settings → **Tensorlake** lists **Sandboxes not on this helm** below your recipes. These Farhelm-created sandboxes have
-no host or snapshot build on this helm. They can remain after interrupted setup, lost helm state, or creation by another
-helm; the latter are marked **from another helm**. Sandboxes you created outside Farhelm do not appear.
+Settings → **Tensorlake** lists **Sandboxes not on this helm** alongside the account settings. The recipe catalog is
+under **Recipes**. These Farhelm-created sandboxes have no host or snapshot build on this helm. They can remain after
+interrupted setup, lost helm state, or creation by another helm; the latter are marked **from another helm**. Sandboxes
+you created outside Farhelm do not appear.
 
 Nothing is deleted automatically. Check the name and state before choosing **Delete**: confirmation deletes that
 sandbox's files, sessions and snapshots too. Failed cleanup stays visible with **Retry cleanup**. **Refresh** beside the

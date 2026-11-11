@@ -2068,6 +2068,9 @@ pub(crate) const REAP_BUDGET_PER_TICK: usize = 4;
 /// marker (`TmuxDriver::pane_states`), so a tab that is its session's only
 /// window (a host agent's last old tab, or a server reduced by hand to
 /// single-window sessions) is still discovered and reaped.
+///
+/// Retired containerized sessions are Delete-only: their tabs stay for
+/// whole-session cleanup rather than repeatedly starting a refused close.
 async fn reap_dead_tabs(
     sup: &Arc<Supervisor>,
     states: &std::collections::HashMap<String, crate::tmux::PaneState>,
@@ -2089,6 +2092,12 @@ async fn reap_dead_tabs(
     }
     let mut budget = REAP_BUDGET_PER_TICK;
     for entry in entries {
+        // Retirement is stored launch intent, not a property of the agent
+        // or the host. Exclude it before discovery and admission so retained
+        // tabs cannot spend the budget ordinary sessions need to make progress.
+        if crate::container::is_retired(&entry.info.launch) {
+            continue;
+        }
         let Some(terminal) = entry.terminal.as_ref() else {
             continue;
         };
@@ -2145,6 +2154,9 @@ async fn reap_dead_tabs(
 /// checks again that the tab's shell exited before it ends anything. Starts
 /// are bounded by [`REAP_BUDGET_PER_TICK`] per pass and re-checked against
 /// `stop`, as for tmux tabs; nothing here waits for a close.
+///
+/// The same Delete-only retirement exclusion as the tmux reap applies
+/// before reading the tab cell or taking any close permit or lifecycle claim.
 fn reap_dead_host_tabs(
     sup: &Arc<Supervisor>,
     entries: &[Arc<SessionEntry>],
@@ -2152,6 +2164,9 @@ fn reap_dead_host_tabs(
 ) {
     let mut budget = REAP_BUDGET_PER_TICK;
     for entry in entries {
+        if crate::container::is_retired(&entry.info.launch) {
+            continue;
+        }
         for tab_id in super::core::reap_due_host_tabs(&entry.session.host_tabs) {
             if stop_requested(stop) {
                 return;
@@ -3119,6 +3134,158 @@ mod tests {
             vec![live_id.as_str()],
             "the live sibling tab must survive the reap untouched"
         );
+    }
+
+    /// Retired sessions retain their dead tabs for Delete without taking
+    /// claims or crowding ordinary sessions out of either automatic reap.
+    ///
+    /// Put a full budget of retired sessions first, then a full budget of
+    /// ordinary ones. The close gate holds ordinary cleanup in flight, making
+    /// admission observable independently of eventual pane/cell removal. The
+    /// current-thread runtime also lets the test inspect claims before any
+    /// spawned close runs: a retired close that would immediately refuse is
+    /// still an attempt, and must not be mistaken for a successful skip.
+    /// Both fixtures use the same agent selection; only the historical
+    /// container choice differs. New recipe-backed environments run ordinary
+    /// supervisor launches and therefore take the ordinary branch too.
+    #[farhelm_testtrace::test(flavor = "current_thread")]
+    async fn automatic_tab_reapers_leave_retired_sessions_out_of_the_budget() {
+        for host_tabs in [false, true] {
+            let state = StateDir::new();
+            let held = HeldTabCloses::new();
+            let sup = supervisor_with(
+                &state,
+                SupervisorSeams {
+                    faults: super::super::core::FaultHooks {
+                        tab_close_gate: Some(held.hook()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .await;
+            let mut entries = Vec::new();
+            let mut panes = Vec::new();
+            for retired in [true, false] {
+                // Distinct sessions keep the lifecycle claim from masking
+                // budget spent by an earlier tab in the same session.
+                for _ in 0..REAP_BUDGET_PER_TICK {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let mut entry = if host_tabs {
+                        let mut entry = entry_with(None, LastOutcome::Running);
+                        let socket = state.path().join("hosts").join(&id);
+                        assert!(!socket.exists(), "premise: this tab's host is gone");
+                        // A gone handle with no adopted process exercises
+                        // host-tab cleanup without a peer whose lifetime
+                        // could obscure the admission boundary being tested.
+                        entry.session.host_tabs =
+                            super::super::core::host_tab_cell(vec![super::super::core::HostTab {
+                                tab_id: uuid::Uuid::new_v4().to_string(),
+                                created_ns: 1,
+                                scoped: false,
+                                host: crate::hosts::HostTerminal::gone(&socket, None),
+                                end_failed: false,
+                                failed_ends: 0,
+                                retry_at: None,
+                            }]);
+                        assert_eq!(
+                            super::super::core::reap_due_host_tabs(&entry.session.host_tabs).len(),
+                            1,
+                            "premise: the gone host tab is eligible for automatic cleanup"
+                        );
+                        entry
+                    } else {
+                        let name = format!("fh-{id}");
+                        let agent = spawn_pane(&sup, &name, "sleep 600").await;
+                        panes.push(dead_tab_in(&sup, &name).await);
+                        entry_with(Some(Terminal::tmux(name, agent)), LastOutcome::Running)
+                    };
+                    entry.info.id = id.clone();
+                    entry.info.launch = farhelm_proto::SessionLaunch::Agent {
+                        selection: farhelm_proto::LaunchSelection {
+                            harness: farhelm_proto::LaunchHarness::Codex,
+                            model: None,
+                            effort: None,
+                            permissions: None,
+                            permission_flags: None,
+                            wrapper_prefix: None,
+                            workspace_trust: None,
+                            container: retired.then(|| farhelm_proto::ContainerConfig {
+                                engine: farhelm_proto::ContainerEngine::Podman,
+                                image: "example.invalid/retired:latest".into(),
+                                api_proxy_port: 42000,
+                                github_token_file: None,
+                            }),
+                        },
+                        start: vec!["agent".into(), "{farhelm_args}".into()],
+                        resume: None,
+                    };
+                    entry.snapshot = IntegrationSnapshot::of(&entry.info.launch);
+                    entry.info.agent_kind = entry.snapshot.kind;
+                    assert_eq!(crate::container::is_retired(&entry.info.launch), retired);
+                    let entry = Arc::new(entry);
+                    sup.sessions.lock().await.insert(id, Arc::clone(&entry));
+                    entries.push(entry);
+                }
+            }
+            let states = sup.tmux.pane_states().await.expect("fixture pane states");
+            for pane in &panes {
+                assert!(states.get(pane).is_some_and(|state| state.dead));
+            }
+            let (retired, ordinary) = entries.split_at(REAP_BUDGET_PER_TICK);
+            let (_stop_tx, mut stop) = oneshot::channel();
+            if host_tabs {
+                reap_dead_host_tabs(&sup, &entries, &mut stop);
+            } else {
+                reap_dead_tabs(&sup, &states, &entries, &mut stop).await;
+            }
+            assert!(
+                retired
+                    .iter()
+                    .all(|entry| !sup.lifecycle_locks.claimed_for_test(&entry.info.id)),
+                "retired tabs must not start even an immediately refused close (host tabs: {host_tabs})"
+            );
+            assert!(
+                ordinary
+                    .iter()
+                    .all(|entry| sup.lifecycle_locks.claimed_for_test(&entry.info.id)),
+                "retired tabs must leave the full admission budget for ordinary tabs (host tabs: {host_tabs})"
+            );
+            wait_until("every ordinary close reached teardown", || {
+                held.entered.load(Ordering::SeqCst) == REAP_BUDGET_PER_TICK
+            })
+            .await;
+            held.release.add_permits(REAP_BUDGET_PER_TICK);
+            let ordinary_panes = if host_tabs {
+                &[][..]
+            } else {
+                &panes[REAP_BUDGET_PER_TICK..]
+            };
+            wait_for_reaped_panes(&sup, ordinary_panes).await;
+            if host_tabs {
+                assert!(
+                    ordinary
+                        .iter()
+                        .all(|entry| { entry.session.host_tabs.lock().unwrap().is_empty() })
+                );
+                assert!(
+                    retired
+                        .iter()
+                        .all(|entry| { entry.session.host_tabs.lock().unwrap().len() == 1 })
+                );
+            } else {
+                let states = sup
+                    .tmux
+                    .pane_states()
+                    .await
+                    .expect("pane states after cleanup");
+                assert!(
+                    panes[..REAP_BUDGET_PER_TICK]
+                        .iter()
+                        .all(|pane| states.get(pane).is_some_and(|state| state.dead))
+                );
+            }
+        }
     }
 
     /// Reaping a dead tab must sweep its detached child as well as its window.

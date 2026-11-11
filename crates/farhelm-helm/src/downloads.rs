@@ -5,7 +5,7 @@
 //! under one shared extension policy. Neither a hover nor a previous successful
 //! read reserves a file.
 
-use crate::sessions::{resolve_session_ref, route_session};
+use crate::sessions::{resolve_session_ref, route_active_session};
 use crate::{AppState, DownloadGuard, http_error};
 use axum::extract::{Path as AxPath, State};
 use axum::response::IntoResponse;
@@ -130,7 +130,7 @@ pub(crate) async fn stat_file(
 ) -> axum::response::Response {
     let result = async {
         let key = resolve_session_ref(&state, &id).await?;
-        let (claim, client) = route_session(&state, &key).await?;
+        let (claim, client) = route_active_session(&state, &key).await?;
         let info = client.stat_file(&key.session_id, &request.path).await?;
         let host = state
             .manager
@@ -193,7 +193,7 @@ pub(crate) async fn download_file(
     }
     let result = async {
         let key = resolve_session_ref(&state, &id).await?;
-        let (_, client) = route_session(&state, &key).await?;
+        let (_, client) = route_active_session(&state, &key).await?;
         client.begin_download(&key.session_id, &request.path).await
     }
     .await;

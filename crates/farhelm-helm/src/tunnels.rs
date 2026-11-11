@@ -300,7 +300,7 @@ async fn accept_loop(
                 let owner = owner.clone();
                 relays.spawn(async move {
                     let Some(state) = state.upgrade() else { return; };
-                    let route = crate::sessions::route_session(&state, &session).await;
+                    let route = crate::sessions::route_active_session(&state, &session).await;
                     drop(state);
                     if let Ok((claim, client)) = route && same_owner(&owner, &claim) {
                         let _ = client.relay_tcp(&session.session_id, target.address, target.port, socket).await;
@@ -358,7 +358,7 @@ async fn open_from(
                 "accept the tunnel security warning before opening a tunnel",
             ));
         }
-        let (owner, client) = crate::sessions::route_session(state, session).await?;
+        let (owner, client) = crate::sessions::route_active_session(state, session).await?;
         if expected.is_some_and(|origin| {
             origin.host != owner.host || origin.connection != client.connection_id()
         }) {

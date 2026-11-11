@@ -48,8 +48,6 @@
 //! - `launch_controls`: the values-in, changes-out structured choice controls
 //!   used by every session-launcher mode and the template editor. Their
 //!   caller owns held-field admission, history, and operation identity.
-//! - `container_controls`: raw, opening-local container inputs shared by the
-//!   launcher and templates; credential contents stay on the session's host.
 //! - `hosts`: the hosts panel (PLAN_M6.md item 6) — the per-host state
 //!   chips SPEC.md requires to be always visible, the add/edit/remove/
 //!   adopt/retry management surface, and the renderer-free wording helpers
@@ -147,7 +145,6 @@ mod checkout_post_clone;
 mod checkout_root;
 mod checkout_spare;
 mod claude_trust;
-mod container_controls;
 mod credentials_settings;
 #[cfg(native_desktop)]
 pub mod desktop;
@@ -689,6 +686,13 @@ impl Session {
             Some(SessionLaunch::Agent { selection, .. }) => Some(selection),
             Some(SessionLaunch::Command(_)) | Some(SessionLaunch::Legacy { .. }) | None => None,
         }
+    }
+
+    /// Only the retired outside-supervisor model stores this choice. New
+    /// provider-backed containers run an ordinary supervisor and leave it absent.
+    pub(crate) fn is_retired_container(&self) -> bool {
+        self.agent_selection()
+            .is_some_and(|selection| selection.container.is_some())
     }
 
     /// The activity stamp to DISPLAY by: [`Session::last_activity_at`] when

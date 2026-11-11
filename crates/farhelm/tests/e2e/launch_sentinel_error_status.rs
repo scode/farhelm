@@ -528,7 +528,24 @@ async fn a_corrupt_sentinel_defers_reconciliation_but_lists_succeed() {
     let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     wait_for_live_status(&h.client, &session.id, 30).await;
-    end_agent_terminal(Some(&h.sup), h.state.path(), &session.id).await;
+    // This fixture needs confirmed absence without reconciling the stored row.
+    // A separate connection can take over the host and leave its old runtime
+    // permanently unavailable instead. Its owning runtime confirms Gone itself;
+    // shutting it down does not consume launch evidence or record an outcome.
+    let host = h
+        .sup
+        .agent_host_for_test(&session.id)
+        .await
+        .expect("the fixture runs its agent in a terminal host");
+    let report = tokio::time::timeout(std::time::Duration::from_secs(30), host.shutdown())
+        .await
+        .expect("the fixture's terminal host shutdown must finish")
+        .expect("the fixture still owns a running terminal host");
+    assert!(
+        report.ended,
+        "fixture terminal host must be gone: {report:?}"
+    );
+    assert_eq!(host.liveness(), farhelm_supervisor::hosts::Liveness::Gone);
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
     std::fs::create_dir_all(status_path.parent().unwrap()).unwrap();
     std::fs::write(&status_path, [0xff, 0xfe, 0xfd]).expect("plant corrupt sentinel");
@@ -593,8 +610,26 @@ async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the
         "an unconsulted sentinel must be left completely untouched"
     );
 
-    // Remove the terminal; the next reconciliation reads the same file.
-    end_agent_terminal(Some(&h.sup), h.state.path(), &session.id).await;
+    // Remove the terminal; the next reconciliation reads the same file. As in
+    // the corrupt-sentinel test above, end it through its owning runtime and
+    // require confirmed absence: ending it through another connection takes
+    // the runtime's connection over and can leave it unavailable for good,
+    // which reconciliation rightly lists as Unknown rather than as the
+    // planted error (seen once on a Tensorlake sandbox, 2026-11-11).
+    let host = h
+        .sup
+        .agent_host_for_test(&session.id)
+        .await
+        .expect("the fixture runs its agent in a terminal host");
+    let report = tokio::time::timeout(std::time::Duration::from_secs(30), host.shutdown())
+        .await
+        .expect("the fixture's terminal host shutdown must finish")
+        .expect("the fixture still owns a running terminal host");
+    assert!(
+        report.ended,
+        "fixture terminal host must be gone: {report:?}"
+    );
+    assert_eq!(host.liveness(), farhelm_supervisor::hosts::Liveness::Gone);
 
     h.sup.reconcile_for_test().await;
     let status = listed(&h.client, &session.id).await.status;

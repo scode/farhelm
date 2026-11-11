@@ -597,8 +597,9 @@ pub struct LaunchSelection {
     /// trust the wrapper's own behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wrapper_prefix: Option<Vec<String>>,
-    /// Optional capability isolation, preserved as launch intent rather than inferred
-    /// from the command. Absence keeps historical launch fingerprints unchanged.
+    /// Decode-only choice from retired supervisor-outside containers. Presence
+    /// identifies a Delete-only session; it must never start a new launch.
+    /// Keep its bytes for stored fingerprints and old session decoding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<ContainerConfig>,
     /// The launch's resolved trust for project-local settings and extensions.
@@ -614,16 +615,21 @@ pub struct LaunchSelection {
     pub workspace_trust: Option<bool>,
 }
 
-/// The deliberately single supported container engine. Unknown engines refuse the
-/// launch instead of silently executing it with different isolation guarantees.
+/// The supervisor-outside container model remains readable for deletion only.
+/// New recipe-backed environments use an ordinary supervisor launch instead.
+pub const RETIRED_CONTAINER_REASON: &str = "Containerized sessions are retired and support Delete only. Create a new container session from a recipe.";
+
+/// The engine spelling retained by historical launch records. Unknown values
+/// still fail decoding rather than changing the meaning of stored work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContainerEngine {
     Podman,
 }
 
-/// A local image and one intentionally exposed loopback port for an isolated agent.
-/// The token's contents never belong here: each exec reads the named file afresh.
+/// Decode-only configuration for retired supervisor-outside containers.
+/// Preserve old rows and fingerprints for confirmed deletion; new environments
+/// carry their container identity in the helm host registry instead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "ContainerConfigWire")]
 pub struct ContainerConfig {
@@ -636,8 +642,8 @@ pub struct ContainerConfig {
 
 /// Read retired archive choices without interpreting or retaining their paths.
 /// All stored surfaces use this decoder. An explicit current image wins if both
-/// keys occur; old-only data keeps containerization enabled but needs an image
-/// before another container can be created. Other unknown fields still refuse.
+/// keys occur; old-only data retains the retired choice without recreating its
+/// archive path. Other unknown fields still refuse.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ContainerConfigWire {
@@ -663,10 +669,9 @@ impl From<ContainerConfigWire> for ContainerConfig {
 }
 
 impl ContainerConfig {
-    /// Check portable intent without looking at the helm's filesystem. Existence,
-    /// executable discovery and token readability belong to the session's host.
-    /// Empty images remain valid stored intent so old sessions and templates load;
-    /// the launcher and host preflight require one before creating a container.
+    /// Validate historical shape without authorizing a new container launch.
+    /// Stored compiler fingerprints still need this structural check; callers
+    /// admitting work must separately refuse any present legacy choice.
     pub fn validate(&self) -> Result<(), String> {
         if self.image.starts_with('-')
             || self

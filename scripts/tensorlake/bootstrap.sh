@@ -19,12 +19,12 @@ if [ "$(cat /proc/1/comm 2>/dev/null)" != systemd ] && ! [ -S /run/systemd/priva
 fi
 sudo -n env DEBIAN_FRONTEND=noninteractive dpkg --configure -a >/dev/null 2>&1
 sudo -n apt-get update -qq || exit 1
-# Podman and its helpers are for the Rust tests (rust-tests.ts): the containerized e2e tests need rootless Podman.
+# Podman and its helpers are for the real environment Rust tests (rust-tests.ts).
 sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential ca-certificates curl git rsync \
   systemd dbus dbus-user-session openssh-server python3 podman uidmap passt slirp4netns fuse-overlayfs >/dev/null || exit 1
 # On clones, which boot systemd, systemd-resolved owns /etc/resolv.conf and was observed (November 2026) with no upstream
-# server at all, so nothing on a clone could resolve a name. The tests need none, but anything installed while
-# diagnosing a clone does; give resolved public servers.
+# server at all, so nothing on a clone could resolve a name. Real recipe builds install packages and agents over the
+# network. Give resolved public servers for those builds and for diagnosis.
 sudo -n install -d -m 755 /etc/systemd/resolved.conf.d || exit 1
 printf '%s\n' '[Resolve]' 'DNS=1.1.1.1 8.8.8.8' 'FallbackDNS=9.9.9.9' \
   | sudo -n tee /etc/systemd/resolved.conf.d/farhelm-dns.conf >/dev/null || exit 1
@@ -43,8 +43,10 @@ step playwright
 sudo -n env "PATH=$PATH" npx playwright install-deps chromium webkit >/dev/null 2>&1 || { echo "install-deps failed"; exit 1; }
 npx playwright install chromium webkit >/dev/null 2>&1 || { echo "browser install failed"; exit 1; }
 step podman
-# The containerized e2e tests never pull images (.agents/validation.md); the template carries the one they use.
-podman pull -q docker.io/library/ubuntu:24.04 >/dev/null || { echo "podman pull failed"; exit 1; }
+# The real environment fixture requires the exact managed-base pin in local storage.
+# Its production recipe build then uses the network for apt and official installers.
+podman pull -q docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852 \
+  >/dev/null || { echo "podman pull failed"; exit 1; }
 step ssh
 install -d -m 700 /home/tl-user/.ssh || exit 1
 test -f /home/tl-user/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N '' -f /home/tl-user/.ssh/id_ed25519 || exit 1

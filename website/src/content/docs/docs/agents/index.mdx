@@ -15,9 +15,8 @@ Some things work the same for every agent and every command, so they have no row
 close the window, [clone and replace with](/docs/using/stop-restart-resume/) carry its setup over, pasting screenshots
 and files [works](/docs/using/work-in-a-session/#copy-paste-and-links), and so do downloads from the terminal.
 
-In a [containerized session](/docs/agents/containerized-sessions/), Farhelm still reads the agent's screen for its
-status, but the Conversation rows below do not apply: the session cannot be restarted, and the agent cannot take
-`$farhelm` requests.
+[Container sessions](/docs/agents/containerized-sessions/) support the same conversation and Restart features as an
+ordinary host. Farhelm refuses `$farhelm` requests from agents in containers and session-owned sandboxes.
 
 export const groups = [
   { name: 'Launch choices', caps: [

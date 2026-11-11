@@ -35,7 +35,7 @@
 //! `UploadStep` is what lets one loop wait on all of those at once
 //! without any of them being able to starve the others.
 
-use crate::sessions::{resolve_session_ref, route_session};
+use crate::sessions::{resolve_session_ref, route_active_session};
 use crate::{AppState, SupervisorError, http_error};
 use axum::extract::{Path as AxPath, Query, State};
 use axum::response::IntoResponse;
@@ -183,7 +183,7 @@ pub(crate) async fn upload_attachment(
         Ok(key) => key,
         Err(error) => return http_error(error),
     };
-    let (_claim, client) = match route_session(&state, &key).await {
+    let (_claim, client) = match route_active_session(&state, &key).await {
         Ok(routed) => routed,
         Err(e) => return http_error(e),
     };

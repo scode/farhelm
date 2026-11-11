@@ -10,7 +10,7 @@ Container hosts require rootless Podman 4.9.3 or newer, cgroup v2 and a working 
 with a recipe on a host builds its image. The checkout lives inside the container, and Delete removes its files,
 including work you have not pushed. Suspend freezes processes while keeping memory in use. SSH hosts usually allow
 about ten simultaneous container connections, subject to that host's SSH session limit. Agents in container and sandbox
-sessions cannot ask Farhelm to act yet. Earlier experimental containerized sessions can now only be deleted.
+sessions cannot ask Farhelm to act yet.
 
 Container sessions support Suspend, Resume, Restart, terminal tabs, file links and localhost tunnels. Settings → Recipes
 shows image preparation for each container host and the Tensorlake account, and Settings → Containers shows each host's

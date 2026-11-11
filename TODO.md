@@ -63,9 +63,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   pointer capture listener. Not diagnosed, and not checked on main; first establish whether it predates that plan. Plan:
   `plans/queue/version-dblclick-flake.md`.
 
-- **Bootstrap a Podman image on a remote host.** Automatically bootstrap a Podman image on a remote host, with some
-  reasonable defaults, as a supported flow. Plan: `plans/queue/podman-environments.md`.
-
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
   that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open
@@ -87,40 +84,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   provider or a documented provider fixture protocol that can ask a real question. Plan:
   `plans/queue/muse-session-tracking.md`.
 
-- **Podman rigor: review findings for containerized sessions.** Future work for the experimental feature, from the
-  2026-11-04 triage; these findings were assessed from source, not reproduced at runtime. Plan:
-  `plans/queue/podman-environments.md` (the two approval-card findings go to
-  `plans/queue/environment-agent-operations.md`).
-  - Launch approval cards must show the container settings, reusing the template card's rows.
-  - Container-bearing approval cards must use a card kind older pages cannot decode, as prompt-bearing and
-    shortcut-moving cards already do, before or together with "Containerized sessions: `farhelm spawn` and CLI flags".
-  - Podman's default detach keys (Ctrl-P then Ctrl-Q) can leave the agent running while Farhelm shows it as exited;
-    later Delete can kill it without the live-agent warning, and tab detachment can end the tab's shell. Disable detach
-    keys for agent and tab connections; first verify the accepted spelling on supported Podman versions.
-  - An optional token file inside the writable checkout can be replaced with a symlink to a readable host file; a later
-    agent start or tab open then receives it as GH_TOKEN. This needs an unusual token-path choice. Refuse paths inside
-    the checkout and read regular files without following links.
-  - Podman inherits host proxy variables by default, including any credentials in them, so the agent and tabs receive
-    them. The maintainer decided on 2026-11-08 that containers should inherit the host's proxy settings; make the
-    environment lists in SPEC.md and SPEC_impl.md and the code comment say so.
-  - A create retry after a crash and reboot can remove an already initialized container if writing its launch spec
-    fails, losing in-container files rather than the checkout. Several rare conditions must coincide; recovery before
-    reboot was not ruled out. The maintainer decided on 2026-11-08 not to accept that loss: such a container counts as
-    launch evidence and is kept.
-  - Account inspection of a checkpoint image may restore its old workload instead of inspecting an ordinary image. The
-    route remains unverified in supported rootless use: restoration is root-only and requires a compatible
-    checkpoint/runtime. Consider refusing checkpoint images and a root supervisor.
+- **Container launch approval cards.** Launch approval cards must show the container settings, reusing the template
+  card's rows. Container-bearing approval cards must use a card kind older pages cannot decode, as prompt-bearing and
+  shortcut-moving cards already do, before or together with "Containerized sessions: `farhelm spawn` and CLI flags".
+  These findings were assessed from source during the 2026-11-04 triage. Plan:
+  `plans/queue/environment-agent-operations.md`.
 
 - **Containerized sessions: Farhelm integration inside the container.** The first, experimental containerized sessions
   (rootless podman) run like a launch with conversation hooks turned off: no hooks, no conversation capture for Restart,
   no `farhelm agent` commands or spawning, no attachments from inside. Add the full integration, restricted so a
   containerized agent cannot ask for a session outside its container. Plan:
   `plans/queue/environment-agent-operations.md`.
-
-- **Containerized sessions: Restart.** Containerized sessions cannot be restarted, because Farhelm captures no
-  conversation inside the container; Replace starts over in a new container instead. Support Restart (and Restart with)
-  by resuming the conversation the agent recorded in the session's container. Needs the conversation capture from the
-  integration entry above. Plan: `plans/queue/podman-environments.md`.
 
 - **Containerized sessions: `farhelm spawn` and CLI flags.** Let `farhelm spawn` and the other CLI entry points request
   a containerized launch directly; today only the launcher, templates and launches copied from another session carry the
@@ -158,17 +132,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     under `sudo` (root's conmon). On a host without a usable systemd user manager there are no scopes; the cheap
     fallback is `podman ps` and checking each listed container's conmon for the session's markers, which costs one read
     per container and covers only podman's default storage.
-  - The experimental containerized sessions stop their own container by name; this entry is about containers an agent
-    starts itself, in any session.
-
-- **Containerized sessions: localhost tunnels and file links.** Make localhost tunnels reach services listening inside a
-  session's container, and make file links in terminal output work for container paths outside the checkout. Until then,
-  a tunnel offered for a localhost URL a containerized agent prints reaches that port on the host, not in the container,
-  and file links are offered only inside the checkout. Plan: `plans/queue/podman-environments.md`.
-
-- **Containerized sessions: plain folders.** Consider allowing the Containerized option for "Where: folder" launches,
-  which only managed checkouts get today. Git breaks inside the container for a folder that is a git worktree or a
-  subfolder of a repository, since only the folder itself is mounted. Plan: `plans/queue/podman-environments.md`.
+  - Farhelm manages a container session's own container. This entry covers containers an agent starts itself, in any
+    session.
 
 - **Release stable from the approved RC without rebuilding.** When an RC has been built and declared correct, releasing
   stable should default to promoting that RC's artifacts, not rebuilding everything for the stable tag. Today a stable
@@ -228,11 +193,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (cache the encoded bytes of history rows and re-encode only the screen and new rows, producing the same v1 blob as
   today). The repository records no reason for the original choice of whole snapshots.
 
-- **Credentials for containerized sessions and ordinary hosts.** The Credentials section of Settings (planned in
-  `plans/queue/settings-credentials.md`) serves only Tensorlake hosts, through their recipes. Extend it so containerized
-  sessions and ordinary SSH hosts can use the same named credentials, for example a GitHub token in place of the
-  containerized sessions' token file. Plan: `plans/queue/podman-environments.md` (the containerized half; ordinary SSH
-  hosts stay).
+- **Credentials for ordinary SSH hosts.** The Credentials section of Settings serves environments through their recipes.
+  Extend it so ordinary SSH hosts can use the same named credentials.
 
 - **After tmux and xterm.js are dropped entirely: simplify terminal kind tracking.** While old terminals (tmux, drawn by
   xterm.js) and new terminals (terminal hosts, drawn by the grid) coexist, every layer tracks which kind each terminal
@@ -876,8 +838,8 @@ are not.
   because GitLab lets the token creation be automated, while GitHub's scoped tokens have to be created by hand in a
   browser.
 
-- Extend containerized sessions to the macOS desktop, help users prepare or obtain images, and consider stronger
-  isolation beyond the experimental Linux rootless Podman support. Plan: `plans/queue/podman-sandbox.md`.
+- Extend container sessions to macOS container hosts, help users prepare or obtain images, and consider stronger
+  isolation beyond the experimental Linux rootless Podman support.
 
 - **"Learn more" links from the GUI to the docs.** Once the official documentation lives at a stable URL, add direct
   "Learn more…" style links in various places in the GUI that point at the relevant documentation page. Which places get

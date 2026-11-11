@@ -83,9 +83,10 @@ pub const PI_REPORTER_EXE_ENV_VAR: &str = "FARHELM_PI_REPORTER_EXE";
 pub const OMP_REPORTER_EXE_ENV_VAR: &str = "FARHELM_OMP_REPORTER_EXE";
 
 /// The environment marker every TERMINAL TAB carries on top of
-/// [`SESSION_ID_ENV_VAR`]: the tab's own id (PLAN_M4.md item 2). Set by
-/// tmux itself (`new-window -e`) rather than by a shim, because a tab has
-/// no shim — its window command IS the user's login shell.
+/// [`SESSION_ID_ENV_VAR`]: the tab's own id (PLAN_M4.md item 2). The
+/// supervisor supplies it in the tab's complete environment, through tmux's
+/// `new-window -e` or the terminal host's child environment. The tab helper
+/// preserves that identity when it execs the user's login shell.
 ///
 /// Its job is SELECTION: closing a tab must reap that tab's shell and
 /// everything it left behind, and nothing else of the session, so the
@@ -161,9 +162,9 @@ pub const PRIVATE_TMUX_ENV_VARS: [&str; 2] = ["TMUX", "TMUX_PANE"];
 pub struct LaunchSpec {
     /// The executable vector prepared by the supervisor: literal agent words,
     /// or `bash -c` with safely filled command text or a raw wrapper followed
-    /// by quoted composed agent words. The shim neither parses
-    /// shell text nor decides hooks; container exec runs this same vector
-    /// inside the container rather than expanding anything on the host.
+    /// by quoted composed agent words. The shim neither parses shell text nor
+    /// decides hooks. A queued spec from the retired container model is refused
+    /// before this vector can run on the outside host.
     pub argv: Vec<String>,
     /// The directory the agent must enter after login-shell initialization and checkout
     /// preparation. tmux's start directory is only a hint: it can silently fall back to
@@ -222,9 +223,11 @@ pub struct LaunchSpec {
     /// [`CheckoutPreparation::state_path`].
     #[serde(default)]
     pub preparation: Option<CheckoutPreparation>,
-    /// Optional outside-scope preparation and inside-container exec for this launch.
-    #[serde(default)]
-    pub container: Option<crate::container::ContainerLaunch>,
+    /// Decode old queued specs only to refuse them before preparation or exec.
+    /// Ignoring this marker could run an old container's argv on the outside
+    /// host after upgrade. New specs never serialize this compatibility field.
+    #[serde(default, skip_serializing)]
+    pub container: Option<serde_json::Value>,
     /// Settings the agent's own conversation reporter reads, added to the
     /// agent's environment and to nothing else the shim runs (git and the
     /// post-clone hook never see them). SPEC.md keeps the environment out
@@ -775,28 +778,6 @@ pub fn tab_window_command(
     argv
 }
 
-/// Run the tab helper directly, with only credential-free launch intent in argv.
-/// A container tab must never enter the host's login shell first. Token contents
-/// are read by the helper at exec time and never travel through tmux options.
-pub(crate) fn container_tab_window_command(
-    runtime: &crate::container::ContainerRuntime,
-    farhelm_exe: &Path,
-    scope_prefix: Vec<String>,
-) -> anyhow::Result<Vec<String>> {
-    let mut argv = scope_prefix;
-    argv.extend([
-        farhelm_exe.to_string_lossy().into_owned(),
-        "internal".into(),
-        "tab-shell".into(),
-        "--container".into(),
-        serde_json::to_string(runtime)?,
-        "--".into(),
-        runtime.cwd.to_string_lossy().into_owned(),
-        "bash".into(),
-    ]);
-    Ok(argv)
-}
-
 /// The files belonging to one launch, independent of its process or durable row.
 ///
 /// The service removes these paths only after preserving the evidence its
@@ -1185,6 +1166,13 @@ pub fn exec_launch_spec_with_seam(
             return anyhow::Error::from(e).context(report);
         }
     };
+    // Deserializing an old spec must not erase its isolation intent and turn
+    // the same argv into an ordinary launch on the outside host.
+    if spec.container.is_some() {
+        let report =
+            record_launch_failure(status_path, crate::container::RETIRED_MESSAGE.into(), seam);
+        return anyhow::anyhow!(report);
+    }
     if spec.argv.is_empty() {
         let report =
             record_launch_failure(status_path, "launch spec has empty argv".to_string(), seam);
@@ -1225,27 +1213,6 @@ pub fn exec_launch_spec_with_seam(
         && let Err(error) = enter_session_directory(directory)
     {
         let report = record_launch_failure(&status_path, format!("{error:#}"), seam);
-        return error.context(report);
-    }
-    if let Some(container) = &spec.container {
-        let result = (|| -> anyhow::Result<()> {
-            container.prepare()?;
-            let mut command = container.runtime.exec_command(&spec.argv)?;
-            command
-                .env(SESSION_ID_ENV_VAR, &spec.session_id)
-                .env(AGENT_ID_ENV_VAR, &spec.session_id)
-                .env_remove(TAB_ID_ENV_VAR);
-            for name in PRIVATE_TMUX_ENV_VARS {
-                command.env_remove(name);
-            }
-            Err(command.exec().into())
-        })();
-        let error = result.expect_err("exec never returns on success");
-        let report = record_launch_failure(
-            &status_path,
-            format!("container launch failed: {error:#}"),
-            seam,
-        );
         return error.context(report);
     }
     // Nothing is written to the terminal before `exec`. The shim once
@@ -1344,27 +1311,6 @@ pub fn exec_tab_shell(directory: &Path, shell: &Path) -> anyhow::Error {
         "could not execute terminal shell {}",
         shell.display()
     ))
-}
-
-/// Enter the container's login shell without running any host startup file.
-/// The serialized value contains paths and settings only; exec_command reads the
-/// optional token file afresh and uses a name-only environment argument. As with
-/// exec_tab_shell, callers must exit when this function returns an exec failure.
-pub fn exec_container_tab_shell(runtime: &str) -> anyhow::Error {
-    use std::os::unix::process::CommandExt;
-    let runtime: crate::container::ContainerRuntime = match serde_json::from_str(runtime) {
-        Ok(runtime) => runtime,
-        Err(error) => return anyhow::Error::from(error).context("invalid container tab settings"),
-    };
-    let mut command = match runtime.exec_command(&["bash".into(), "-l".into(), "-i".into()]) {
-        Ok(command) => command,
-        Err(error) => return error,
-    };
-    command.env_remove(AGENT_ID_ENV_VAR);
-    for name in PRIVATE_TMUX_ENV_VARS {
-        command.env_remove(name);
-    }
-    anyhow::Error::from(command.exec()).context("could not execute the container's terminal shell")
 }
 
 /// BROWSER readers split on colon and whitespace, and substitute percent placeholders.
@@ -2023,7 +1969,7 @@ fn run_checkout_preparation(
     // Setup is already Ready. Trust is deliberately outside its success
     // contract: any vendor/config failure leaves the agent free to ask its
     // ordinary question, and never turns a successful checkout into an error.
-    if preparation.claude_trust && spec.container.is_none() {
+    if preparation.claude_trust {
         let result = (|| -> anyhow::Result<()> {
             use crate::agent_kind::claude::trust;
             let environment = trust::Environment::current()?;
@@ -3297,6 +3243,82 @@ mod tests {
         // Malformed-but-present specs are still unlinked before parsing
         // is attempted — see the function's own docs on why.
         assert!(!spec_path.exists());
+    }
+
+    /// A delayed pre-upgrade shim cannot reinterpret its container argv as a
+    /// host launch. Its rejection precedes checkout preparation and directory
+    /// entry, and leaves the ordinary durable failure evidence for settlement.
+    #[farhelm_testtrace::test]
+    fn a_queued_retired_container_spec_never_executes_on_the_host() {
+        let root = tempfile::tempdir().unwrap();
+        let spec_path = root.path().join("queued.json");
+        let ran = root.path().join("agent-ran");
+        let preparation_state = root.path().join("preparation.json");
+        let spec = LaunchSpec {
+            scope_waypoint_expected: false,
+            working_directory: Some(root.path().join("missing-directory")),
+            argv: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                ": > \"$1\"".into(),
+                "retirement-test".into(),
+                ran.to_string_lossy().into_owned(),
+            ],
+            status_file: status_path_for_spec(&spec_path),
+            session_id: "retired-session".into(),
+            session_token: "retired-token".into(),
+            supervisor_sock: root.path().join("supervisor.sock"),
+            farhelm_bin_dir: root.path().into(),
+            browser_command: None,
+            preparation: Some(CheckoutPreparation {
+                working_copy_id: uuid::Uuid::new_v4().to_string(),
+                clone_url: "https://example.invalid/owner/repo.git".into(),
+                repo_cache_path: root.path().join("cache"),
+                cwd: root
+                    .path()
+                    .join("missing-checkout")
+                    .to_string_lossy()
+                    .into_owned(),
+                directory_device: 0,
+                directory_inode: 0,
+                post_clone: None,
+                claude_trust: false,
+                keep_spare: false,
+                shell: "/bin/sh".into(),
+                state_path: preparation_state.clone(),
+            }),
+            container: None,
+            env: Vec::new(),
+        };
+        let mut queued = serde_json::to_value(&spec).unwrap();
+        queued["container"] =
+            serde_json::json!({ "ticket_path": root.path().join("old-ticket.json") });
+        assert!(
+            serde_json::from_value::<LaunchSpec>(queued.clone())
+                .unwrap()
+                .container
+                .is_some()
+        );
+        std::fs::write(&spec_path, serde_json::to_vec(&queued).unwrap()).unwrap();
+        assert!(!ran.exists() && !preparation_state.exists());
+
+        let report = run_exec_failure_child(&spec_path, "real");
+
+        assert!(
+            report.contains(crate::container::RETIRED_MESSAGE),
+            "{report}"
+        );
+        assert!(!ran.exists());
+        assert!(
+            !preparation_state.exists(),
+            "refusal must precede checkout preparation"
+        );
+        assert!(!spec_path.exists());
+        assert!(
+            std::fs::read_to_string(status_path_for_spec(&spec_path))
+                .unwrap()
+                .contains("retired")
+        );
     }
 
     /// The empty-argv case, the one launch-failure class that was ALREADY

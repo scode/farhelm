@@ -86,7 +86,7 @@
 //! and streams it tmux terminals as bytes as always.
 
 use crate::auth::AuthenticatedSocket;
-use crate::sessions::{default_cols, default_rows, resolve_session_ref, route_session};
+use crate::sessions::{default_cols, default_rows, resolve_session_ref, route_active_session};
 use crate::{AppState, SupervisorClient, SupervisorError, TermEvent, TermStream, ViewerStreams};
 use axum::Extension;
 use axum::extract::{Path as AxPath, Query, State, WebSocketUpgrade, ws};
@@ -325,7 +325,7 @@ async fn attach_from_query(
 ) -> anyhow::Result<(Arc<SupervisorClient>, String, u32, TermStream)> {
     let (terminal, lease) = resolve_attach_request(q)?;
     let key = resolve_session_ref(state, session_id).await?;
-    let (_claim, client) = route_session(state, &key).await?;
+    let (_claim, client) = route_active_session(state, &key).await?;
     // Which of the two attach contracts this socket wants, decided by the
     // query the browser sent: an unattended reconnect refuses rather than
     // displaces (see `TermQuery::if_unowned`), everything else is the

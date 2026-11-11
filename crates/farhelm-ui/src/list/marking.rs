@@ -99,7 +99,11 @@ pub(super) enum MetadataAction {
 
 impl MetadataAction {
     /// Match the row's own menu, including seen capability and live-status checks.
+    /// Delete-only retired rows never enter a metadata batch.
     pub(super) fn applies(self, row: &Session) -> bool {
+        if row.is_retired_container() {
+            return false;
+        }
         match self {
             Self::Pin => !row.pinned,
             Self::Unpin => row.pinned,
@@ -333,15 +337,15 @@ pub(super) fn MarkedBar(
             // This surviving, nonsequential target receives the modal's
             // confirming handback while the admitted work runs independently.
             span { class: "marked-count", tabindex: "-1", "{targets.len()} marked" }
-            button {
+            if targets.iter().any(|row| !row.is_retired_container()) {button {
                 r#type: "button", class: "btn btn-neutral marked-stop", disabled,
                 "data-tooltip": "Stop the agents and close terminal tabs in the marked sessions currently shown",
                 aria_haspopup: "dialog",
-                onclick: { let drawn = targets.clone(); move |_| {
+                onclick: { let drawn: Vec<_> = targets.iter().filter(|row| !row.is_retired_container()).cloned().collect(); move |_| {
                     on_lifecycle.call((LifecycleAction::Stop, drawn.clone()));
                 } },
                 "Stop"
-            }
+            }}
             button {
                 r#type: "button", class: "btn btn-danger marked-delete", disabled,
                 "data-tooltip": "Delete the marked sessions currently shown",
@@ -351,7 +355,7 @@ pub(super) fn MarkedBar(
                 } },
                 "Delete"
             }
-            span { "data-row-menu-key": "list:marked",
+            if order.get(0).is_some() {span { "data-row-menu-key": "list:marked",
                 button {
                     r#type: "button", class: "btn btn-ghost bar-menu-toggle marked-menu-toggle",
                     aria_label: "Marked session actions", "data-tooltip": "Actions for marked sessions",
@@ -382,7 +386,7 @@ pub(super) fn MarkedBar(
                     "data-row-menu": "list:marked", hidden: true, tabindex: "-1",
                     onclick: move |_| open.set(false),
                 }
-            }
+            }}
             button {
                 r#type: "button", class: "btn btn-ghost marked-clear", disabled,
                 aria_label: "Clear marked sessions", "data-tooltip": "Clear marked sessions (Escape in the list)",
@@ -667,8 +671,14 @@ mod tests {
         fn app() -> Element {
             use_context_provider(MovementOwner::default);
             let epoch = use_signal(|| 0);
+            let target = row_specimen("pending");
+            assert!(!target.is_retired_container(), "premise: Stop is offered");
+            assert!(
+                MetadataAction::Pin.applies(&target),
+                "premise: metadata is offered"
+            );
             rsx! { MarkedBar {
-                targets: vec![row_specimen("pending")], disabled: true,
+                targets: vec![target], disabled: true,
                 layout_epoch: epoch, on_action: |_| {}, on_lifecycle: |_| {}, on_clear: |_| {}, on_open: |_| {},
             } }
         }
@@ -704,6 +714,72 @@ mod tests {
             children.iter().any(count_target)
         }
 
+        /// Find each actual toolbar control, including conditional fragments.
+        /// Stop and the metadata toggle are conditional so delete-only retired
+        /// rows cannot offer them. Their attributes belong to nested VNodes,
+        /// not the toolbar's root attribute array; counting only that array
+        /// silently stops checking their lock when the markup becomes conditional.
+        fn locked_controls(
+            dom: &VirtualDom,
+            vnode: &VNode,
+            found: &mut std::collections::BTreeMap<&'static str, bool>,
+        ) {
+            for (index, attrs) in vnode.dynamic_attrs.iter().enumerate() {
+                let Some(disabled) = attrs.iter().find_map(|attr| match &attr.value {
+                    AttributeValue::Bool(value) if attr.name == "disabled" => Some(*value),
+                    _ => None,
+                }) else {
+                    continue;
+                };
+                let path = vnode.template.attr_paths[index];
+                let mut node = &vnode.template.roots[usize::from(path[0])];
+                for &step in &path[1..] {
+                    let TemplateNode::Element { children, .. } = node else {
+                        panic!("control attribute path crosses a non-element");
+                    };
+                    node = &children[usize::from(step)];
+                }
+                let TemplateNode::Element { tag, attrs, .. } = node else {
+                    panic!("disabled control is an element");
+                };
+                let control = attrs.iter().find_map(|attr| match attr {
+                    TemplateAttribute::Static {
+                        name: "class",
+                        value,
+                        ..
+                    } => (*value).split_whitespace().find(|class| {
+                        matches!(
+                            *class,
+                            "marked-stop" | "marked-delete" | "marked-menu-toggle" | "marked-clear"
+                        )
+                    }),
+                    _ => None,
+                });
+                if let Some(control) = control {
+                    assert_eq!(*tag, "button");
+                    assert!(
+                        found.insert(control, disabled).is_none(),
+                        "one {control} control"
+                    );
+                }
+            }
+            for (index, node) in vnode.dynamic_nodes.iter().enumerate() {
+                match node {
+                    DynamicNode::Fragment(children) => {
+                        for child in children {
+                            locked_controls(dom, child, found);
+                        }
+                    }
+                    DynamicNode::Component(component) => {
+                        if let Some(scope) = component.mounted_scope(index, vnode, dom) {
+                            locked_controls(dom, scope.root_node(), found);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         let mut dom = VirtualDom::new(app);
         dom.rebuild_in_place();
         let root = dom.get_scope(ScopeId::APP).unwrap().root_node();
@@ -712,15 +788,16 @@ mod tests {
         };
         let rendered = bar.mounted_scope(0, root, &dom).unwrap().root_node();
         assert!(rendered.template.roots.iter().any(count_target));
+        let mut controls = std::collections::BTreeMap::new();
+        locked_controls(&dom, rendered, &mut controls);
         assert_eq!(
-            rendered
-                .dynamic_attrs
-                .iter()
-                .flat_map(|attrs| attrs.iter())
-                .filter(|attr| attr.name == "disabled"
-                    && matches!(attr.value, AttributeValue::Bool(true)))
-                .count(),
-            4,
+            controls,
+            std::collections::BTreeMap::from([
+                ("marked-stop", true),
+                ("marked-delete", true),
+                ("marked-menu-toggle", true),
+                ("marked-clear", true),
+            ]),
             "Stop, Delete, metadata menu and Clear all obey the same lock"
         );
     }
