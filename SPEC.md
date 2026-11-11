@@ -45,6 +45,10 @@ absolutely catastrophically major mistake with huge user impact."
   conversation identity — is durable and lives with the session's supervisor, so it survives helm loss and
   re-registration. Farhelm avoids storing terminal output except where it directly helps the user, such as a bounded
   excerpt in a startup error (see Terminal experience).
+- **Environment** is a disposable machine Farhelm creates for a session from a shared recipe. A Tensorlake environment
+  is a sandbox, and a Podman environment is a rootless container on a local or ordinary SSH Linux host. Every
+  environment runs its own ordinary supervisor and has a session-owned host entry. A **place** identifies where it is
+  created, either the Tensorlake account or a registered container host. Its checkout and files live inside it.
 - **Launch**: what a session runs, as the user chose it in the launcher. Every launch has one of two launch kinds. An
   **agent launch** names an agent type Farhelm knows (Claude Code, Codex, and the other harnesses under Topology) plus
   that agent type's own choices, such as model and permissions. Custom permission flags replace Farhelm's permission
@@ -230,28 +234,31 @@ able to start, so deleting its plist alone does not permit an offline retry. Lin
 helm's own machine has no uninstall in the panel: Farhelm there is removed with `farhelm uninstall` (see
 [Uninstall scope and interaction](#uninstall-scope-and-interaction)).
 
-Connections are direct: the helm connects straight to each registered supervisor, over the user's own SSH access —
-passwordless SSH from the helm's machine to the host is the requirement, and the helm handles connectivity itself,
-transparently. Supervisors listen on no network port except IPv4 loopback ports claimed by a helm for a Tensorlake
-host's configured recipe tunnels. Those listeners belong to the claiming connection and close when it ends. The helm
-limits these claims to Tensorlake hosts; the supervisor's transport-independent protocol does not know the host kind.
-The helm's own machine is a host without registration: its supervisor (the desktop app's managed local one, or one
-running beside a Linux helm) is reached locally, no SSH-to-self involved. The helm manages it through the same
-discovery-first flow as remote hosts, minus SSH: a supervisor that answers is discovered and registered like any other,
-and the panel never touches the unit file that runs it. What the panel does NOT do on the helm's own machine is install
-one. On Linux that job belongs to `farhelm helm setup`, which writes and owns the helm's and the supervisor's systemd
-user units; the local row says so instead of offering to install, so a machine has exactly one thing writing its units.
-Until a supervisor exists the local host appears with that instruction, not as a phantom unreachable host. There is no
-relay, no supervisor-to-supervisor connection, and no transitive aggregation — the helm sees exactly the hosts in its
-registry, including the session-owned hosts described under [Sandbox sessions](#sandbox-sessions). Those entries
-participate in ordinary host management and session aggregation, with their permanent rail icons hidden. The machine
-running the helm must therefore be able to reach every registered supervisor over the user's network fabric (Tailscale,
-SSH tunnel); a browser only needs to reach the helm — which in v1 means loopback on the helm's machine, tunneled when
-the browser is elsewhere (see Security).
+The helm connects to each registered supervisor through local IPC, the user's own SSH access, or a Podman exec pipe into
+a container. A remote container uses SSH to its container host and Podman exec there. Passwordless SSH from the helm's
+machine remains the prerequisite for remote hosts, and the helm handles connectivity transparently. Supervisors listen
+on no network port except IPv4 loopback ports claimed by a helm for an environment host's configured recipe tunnels.
+Those listeners belong to the claiming connection and close when it ends. The helm limits these claims to environment
+hosts. The supervisor's transport-independent protocol does not know the provider or host kind. The helm's own machine
+is a host without registration: its supervisor (the desktop app's managed local one, or one running beside a Linux helm)
+is reached locally, no SSH-to-self involved. The helm manages it through the same discovery-first flow as remote hosts,
+minus SSH: a supervisor that answers is discovered and registered like any other, and the panel never touches the unit
+file that runs it. What the panel does NOT do on the helm's own machine is install one. On Linux that job belongs to
+`farhelm helm setup`, which writes and owns the helm's and the supervisor's systemd user units; the local row says so
+instead of offering to install, so a machine has exactly one thing writing its units. Until a supervisor exists the
+local host appears with that instruction, not as a phantom unreachable host. There is no supervisor-to-supervisor
+connection or transitive aggregation. A container host's supervisor does not relay the container's protocol. The helm
+sees exactly the hosts in its registry, including the session-owned hosts described under
+[Sandbox sessions](#sandbox-sessions) and [Container sessions](#container-sessions). Those entries participate in
+ordinary host management and session aggregation, with their permanent rail icons hidden. The machine running the helm
+must therefore be able to reach every registered supervisor over the user's network fabric (Tailscale, SSH tunnel); a
+browser only needs to reach the helm — which in v1 means loopback on the helm's machine, tunneled when the browser is
+elsewhere (see Security).
 
-The host registry belongs to the helm: each entry is a host's SSH destination. A host can carry an optional alias, shown
-in place of its destination everywhere except the host details view, which keeps the real destination visible; aliases
-are unique among host display names, and the local host can carry one too.
+The host registry belongs to the helm. An ordinary remote entry carries its SSH destination, and an environment entry
+carries its provider binding and place. A host can carry an optional alias, shown in place of its destination everywhere
+except the host details view, which keeps the real destination visible; aliases are unique among host display names, and
+the local host can carry one too.
 
 Whenever a surface uses a host's **short name**, it derives it from that host alone: an explicit alias exactly as
 stored, otherwise `Local` for the local host, otherwise the first label of its SSH hostname. For that last case it
@@ -268,32 +275,33 @@ exactly as typed, plus the identity check below that refuses a second entry reac
 Hosts carry stable identifiers independent of address: a host's identifier is generated by its supervisor at install
 time, so it survives address changes, while wiping and reinstalling a supervisor produces a new host identity whose
 predecessor's sessions are gone with the old install. Removing a host from the registry merely forgets it — the
-supervisor and its sessions are untouched and reappear on re-registration. Registry entries are editable: an SSH
-destination can be corrected without touching the host's identity or its sessions. Every host, the local one included,
-has a settings dialog in the GUI that holds its destination (SSH hosts), its alias, a chosen icon and color, its
-checkout folder, whether it starts YOLO sessions without asking, whether its sessions manage sessions on this same host
-without asking, whether it runs `farhelm` commands from its sessions without asking, and separate permissions to open
-public and local-network links without asking (see Agent-spawned sessions). The header and footer, including the close
-controls and the note that the checkout folder needs an explicit Save while other changes save as you make them, stay
-visible while only the settings between them scroll. Its **Checkouts** section sits between Appearance and Permissions,
-for every host kind. An empty folder uses the default from Settings → Checkouts, shown as a placeholder; **Use default**
-clears a saved override. Saving checks the path's shape without contacting the host. Changes apply to new checkouts;
-existing ones stay where they are. A remote host offers sixteen icons, with the cloud as the default, and the default
-foreground or one of seven identity colors: lavender, orchid, teal, steel, sand, copper and red. The local host starts
-with the laptop in red, but offers the same choices. The choice is kept by the helm and shared with every client. It
-tints the icon, and the host's terminal frames when **Color terminal frames by host** is on, never a status or the host
-name; red identifies a host and says nothing about its state. Every host except a new Tensorlake host asks before YOLO
-launches, and every host asks before carrying out an acting `farhelm` command from one of its sessions. **Manage
-sessions on this host without asking** and both link permissions start off on every host, Tensorlake sandboxes included,
-until the user explicitly turns them on, including hosts that existed before the settings did. Adopting a new identity
-for a host, described next, resets all five permissions to asking: each is a judgment about the install the user knew,
-and a new identity, whether a reinstall or a different machine, is one they have not judged. If a destination turns out
-to present a different identity than recorded (a wiped and reinstalled host, a recycled address), the helm says so and
-asks whether to adopt the new host or fix the destination — it never silently merges. An entry that reaches a machine
-another entry already holds connects nothing: it says which entry holds the machine, by name, and asks the user to
-remove that entry or change this one's destination and then press Retry. Farhelm never connects two entries to one
-machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed of by
-removing the host from the registry.
+supervisor and its sessions are untouched and reappear on re-registration. Environment removal instead destroys its
+resource, as described below and under Container sessions. Registry entries are editable: an SSH destination can be
+corrected without touching the host's identity or its sessions. Every host, the local one included, has a settings
+dialog in the GUI that holds its destination (SSH hosts), its alias, a chosen icon and color, its checkout folder,
+whether it starts YOLO sessions without asking, whether its sessions manage sessions on this same host without asking,
+whether it runs `farhelm` commands from its sessions without asking, and separate permissions to open public and
+local-network links without asking (see Agent-spawned sessions). The header and footer, including the close controls and
+the note that the checkout folder needs an explicit Save while other changes save as you make them, stay visible while
+only the settings between them scroll. Its **Checkouts** section sits between Appearance and Permissions, for every host
+kind. An empty folder uses the default from Settings → Checkouts, shown as a placeholder; **Use default** clears a saved
+override. Saving checks the path's shape without contacting the host. Changes apply to new checkouts; existing ones stay
+where they are. A remote host offers sixteen icons, with the cloud as the default, and the default foreground or one of
+seven identity colors: lavender, orchid, teal, steel, sand, copper and red. The local host starts with the laptop in
+red, but offers the same choices. The choice is kept by the helm and shared with every client. It tints the icon, and
+the host's terminal frames when **Color terminal frames by host** is on, never a status or the host name. Red identifies
+a host and says nothing about its state. New Tensorlake and container hosts start with YOLO launches allowed without
+asking. Other hosts ask first, and every host asks before carrying out an acting `farhelm` command from one of its
+sessions. **Manage sessions on this host without asking** and both link permissions start off on every host, Tensorlake
+sandboxes included, until the user explicitly turns them on, including hosts that existed before the settings did.
+Adopting a new identity for a host, described next, resets all five permissions to asking: each is a judgment about the
+install the user knew, and a new identity, whether a reinstall or a different machine, is one they have not judged. If a
+destination turns out to present a different identity than recorded (a wiped and reinstalled host, a recycled address),
+the helm says so and asks whether to adopt the new host or fix the destination — it never silently merges. An entry that
+reaches a machine another entry already holds connects nothing: it says which entry holds the machine, by name, and asks
+the user to remove that entry or change this one's destination and then press Retry. Farhelm never connects two entries
+to one machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed
+of by removing the host from the registry.
 
 A host that is a Tensorlake sandbox Farhelm created is the exception to two of those rules, because Farhelm owns the
 machine and not only the entry: removing it is not merely forgetting it, and its destination cannot be corrected. A
@@ -342,26 +350,26 @@ quick launch. Both existing-directory and fresh-checkout launches say the sessio
 failed preparation says the session was not launched, without the uncertain-outcome promise reserved for a create that
 may have been sent. A host another surface is suspending or resuming remains unavailable to this launcher.
 
-Tensorlake supervisor connections opt into a two-minute input-silence limit when the remote helper supports it. The helm
-sends a lightweight heartbeat every 30 seconds independently of session refreshes or storage work. If the helm vanishes
-while the gateway keeps its connection open, the remote helper exits so that its leaked SSH session cannot keep the
-sandbox running indefinitely. Ordinary SSH hosts and connections from older helms have no such deadline.
+Environment supervisor connections use a two-minute input-silence limit. The helm sends a lightweight heartbeat every 30
+seconds independently of session refreshes or storage work. If the helm vanishes while the gateway keeps its connection
+open, the remote helper exits so that its leaked SSH session cannot keep the sandbox running indefinitely. Ordinary SSH
+hosts and connections from older helms have no such deadline.
 
-**Add host** offers **SSH** and **Tensorlake sandbox**. A sandbox needs a Name and a saved recipe; **New recipe…** opens
-the full recipe editor inside the dialog and saves it under its name. Without an API key, the form points to Settings →
-Tensorlake. The inline editor opens at **New recipe**, focuses Name and keeps Cancel / Save in the dialog's pinned
-footer; it has no Recipes back button. Help under Name distinguishes the displayed host name from the generated
-`farhelm-host-…` sandbox name. Recipe uses the same control styling as Name and shows the selected recipe's size, base,
-package count and tunnel count beneath it. Continue opens the standard setup confirmation, titled **Create Tensorlake
-sandbox · &lt;Name&gt;**, with the size beneath the title, numbered setup steps and Copy plan in the body. One callout
-says the sandbox bills while running, links to Tensorlake pricing and explains the 24-hour idle-suspend limit on Usage
-Credits. **Back** returns to Name and Recipe without creating anything; the next Continue obtains a fresh plan. Only
-**Create Tensorlake sandboxes without asking** skips this confirmation, including for setup reruns; the ordinary
-host-setup preference does not, and sandbox confirmation never changes that ordinary preference. Cancelling retires the
-displayed creation offer immediately. The host appears as soon as its setup run is accepted, before a snapshot is built
-or a sandbox is created, and shows progress in the usual setup view. Its details show the sandbox name, recipe, CPU and
-memory. New Tensorlake hosts start with **Start YOLO sessions without asking** on; the other four host permissions
-remain off.
+**Add host** offers **SSH** and **Tensorlake sandbox**. Podman containers are created only for sessions through the
+launcher. A sandbox needs a Name and a saved recipe, and **New recipe…** opens the full recipe editor inside the dialog
+and saves it under its name. Without an API key, the form points to Settings → Tensorlake. The inline editor opens at
+**New recipe**, focuses Name and keeps Cancel / Save in the dialog's pinned footer; it has no Recipes back button. Help
+under Name distinguishes the displayed host name from the generated `farhelm-host-…` sandbox name. Recipe uses the same
+control styling as Name and shows the selected recipe's size, base, package count and tunnel count beneath it. Continue
+opens the standard setup confirmation, titled **Create Tensorlake sandbox · &lt;Name&gt;**, with the size beneath the
+title, numbered setup steps and Copy plan in the body. One callout says the sandbox bills while running, links to
+Tensorlake pricing and explains the 24-hour idle-suspend limit on Usage Credits. **Back** returns to Name and Recipe
+without creating anything; the next Continue obtains a fresh plan. Only **Create Tensorlake sandboxes without asking**
+skips this confirmation, including for setup reruns; the ordinary host-setup preference does not, and sandbox
+confirmation never changes that ordinary preference. Cancelling retires the displayed creation offer immediately. The
+host appears as soon as its setup run is accepted, before a snapshot is built or a sandbox is created, and shows
+progress in the usual setup view. Its details show the sandbox name, recipe, CPU and memory. New Tensorlake hosts start
+with **Start YOLO sessions without asking** on; the other four host permissions remain off.
 
 Setup builds the recipe's snapshot if missing (or joins a build already running), ensures its prepared snapshot, and
 creates the named sandbox from it at the recipe's size with the plan's maximum idle timeout and automatic resume off.
@@ -430,41 +438,45 @@ control characters or invisible formatting characters. Saving such a value is re
 GUI, the CLI or an agent alike, because the template editor's single-line fields can neither show nor keep them. A
 template saved before this rule still launches, but saving any change to it is refused until those fields are fixed.
 
-Tensorlake recipes belong to the helm too: one catalog of named descriptions of the Tensorlake sandboxes Farhelm creates
-as hosts or for individual sessions, kept in Settings → **Tensorlake**. A recipe has a size (CPUs, memory in GB and disk
-in GB, whole numbers), a base, optional Ubuntu packages, Claude Code and Codex authentication choices, an optional named
-GitHub token, and outbound tunnels. The base is **Tensorlake Ubuntu** (`tensorlake/ubuntu-systemd`), **Your image** (an
-image name in the user's Tensorlake project), or **Your snapshot** (a snapshot ID in that project). Farhelm always
-builds on the base, adding the packages, Claude Code and Codex before taking the snapshot used for hosts or sessions.
-Each endpoint is a base URL plus an optional named API endpoint credential from Settings → Credentials; a tunnel makes a
-sandbox loopback port reach a host and port as seen from the helm's machine. A recipe's name is lowercase letters,
-digits and hyphens, starts with a letter, does not end with a hyphen, is at most 32 characters, and never changes: hosts
-refer to their recipe by name, and renaming means creating a new recipe. Creating a recipe under a name that exists is
-refused rather than overwriting it, and deleting a recipe a host uses is refused. Endpoint tokens belong to the
-credential catalog, and recipes store only their names. Create and update refuse missing or wrong-kind credentials;
-deleting a credential a recipe uses is refused. The endpoint picker offers None and endpoint-token names, preserves the
-selected name across URL changes, and points to Settings → Credentials for entering or replacing values. An unavailable
-draft choice stays visible until the user chooses another or None; it cannot be saved as a missing reference. Upgrading
-drops old recipe-embedded tokens rather than importing them; the user re-enters them in Credentials. Edits to size, base
-and packages affect only hosts created afterwards (base and packages after the next snapshot build); tunnels and
-credential selections are read when a host connects or is set up. Replacing a named endpoint token, agent login or
-GitHub token pushes its new value to hosts already using it, including a connection still being acquired. Pending recipe
-edits do not change that connection's selections. Other hosts receive the replacement before their next connection
-becomes usable. Each host serializes these deliveries and remembers successful settings independently, so an unchanged
-reconnect does no remote file work and a later file's failure does not undo an earlier success. Delivery failure leaves
-the connection usable, makes the host's status and navigation mark amber, and shows a sanitized reason in its details.
-The next connection or credential replacement retries; there is no periodic retry. Saving a replacement commits its
-value first, waits at most the usual SSH command timeout for delivery (including lock waits), and reports
+Recipes belong to the helm in one shared catalog under Settings → **Recipes**. They describe the environments Farhelm
+creates for sessions and the Tensorlake sandboxes it adds as ordinary hosts. A recipe has a base, optional Ubuntu
+packages, Claude Code and Codex authentication choices, an optional named GitHub token, and outbound tunnels. Its size
+(CPUs, memory in GB and disk in GB, whole numbers) applies only to Tensorlake. Managed Ubuntu supports both providers,
+using `tensorlake/ubuntu-systemd` for Tensorlake and a digest-pinned, fully qualified Ubuntu image for Podman. A
+Tensorlake image name or snapshot ID supports Tensorlake only. A container image reference and login user support Podman
+only. Unsupported recipes remain visible but disabled with a reason. Farhelm builds on every supported base, adding
+packages, Claude Code and Codex before saving the software snapshot or image used for hosts or sessions. Each endpoint
+is a base URL plus an optional named API endpoint credential from Settings → Credentials. A tunnel makes an environment
+loopback port reach a host and port as seen from the helm's machine. A recipe's name is lowercase letters, digits and
+hyphens, starts with a letter, does not end with a hyphen, is at most 32 characters, and never changes: hosts refer to
+their recipe by name, and renaming means creating a new recipe. Creating a recipe under a name that exists is refused
+rather than overwriting it, and deleting a recipe a host uses is refused. Endpoint tokens belong to the credential
+catalog, and recipes store only their names. Create and update refuse missing or wrong-kind credentials; deleting a
+credential a recipe uses is refused. The endpoint picker offers None and endpoint-token names, preserves the selected
+name across URL changes, and points to Settings → Credentials for entering or replacing values. An unavailable draft
+choice stays visible until the user chooses another or None; it cannot be saved as a missing reference. Upgrading drops
+old recipe-embedded tokens rather than importing them; the user re-enters them in Credentials. Edits to size, base and
+packages affect only hosts created afterwards (base and packages after the next snapshot build); tunnels and credential
+selections are read when a host connects or is set up. Replacing a named endpoint token, agent login or GitHub token
+pushes its new value to hosts already using it, including a connection still being acquired. Pending recipe edits do not
+change that connection's selections. Other hosts receive the replacement before their next connection becomes usable.
+Each host serializes these deliveries and remembers successful settings independently, so an unchanged reconnect does no
+remote file work and a later file's failure does not undo an earlier success. Delivery failure leaves the connection
+usable, makes the host's status and navigation mark amber, and shows a sanitized reason in its details. The next
+connection or credential replacement retries; there is no periodic retry. Saving a replacement commits its value first,
+waits at most the usual SSH command timeout for delivery (including lock waits), and reports
 `Saved; not delivered to <host>: <reason>` for failures. Ending the connected phase cancels its pending pushes before
-further transport work. The list shows each recipe's name, size, base, package count and tunnel count. The editor's
-Software block offers the three base cards, an Image or Snapshot ID field for a custom base, and Ubuntu packages for
-every base. The custom-base note explains that the base must run systemd as its init system, allow passwordless sudo, be
-Ubuntu or Debian with apt, and include bash, curl and git. The build checks these requirements first and stops with the
-missing requirement. Help explains that Farhelm then installs Claude Code and Codex with their official installers and
-takes a snapshot. The editor replaces the list in place; leaving it with unsaved changes, whether by its own Back or
-Cancel or by closing Settings with Escape or a close control, asks whether to save, discard or keep editing, and saving
-or discarding then completes the close. Delete asks for confirmation. A list refresh that fails keeps the rows shown,
-says they may be out of date, and offers **Retry loading**.
+further transport work. The list shows each recipe's name, supported providers, base, package count, tunnel count and
+build status per place, with Rebuild per place. Size is labelled **Tensorlake sandboxes only**. The editor's Software
+block offers managed Ubuntu, Tensorlake image and snapshot bases, and a container image with its login user, each
+stating its supported providers, plus Ubuntu packages for every base. The custom-base note explains that the base must
+run systemd as its init system, allow passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl and git.
+The build checks these requirements first and stops with the missing requirement. Help explains that Farhelm then
+installs Claude Code and Codex with their official installers and saves a snapshot or image at that place. The editor
+replaces the list in place. Leaving it with unsaved changes, whether by its own Back or Cancel or by closing Settings
+with Escape or a close control, asks whether to save, discard or keep editing, and saving or discarding then completes
+the close. Delete asks for confirmation. A list refresh that fails keeps the rows shown, says they may be out of date,
+and offers **Retry loading**.
 
 Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoint requires a base URL and offers named
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft
@@ -518,12 +530,12 @@ time. A failed read shows its reason and keeps earlier rows rather than claiming
 it automatically. The browser-test namespace `farhelm-sbx-` and sandboxes without Farhelm's reserved prefixes never
 appear.
 
-Every recipe supplies a built snapshot and, on first use, a prepared snapshot for new hosts or sessions. The UI calls
-these artifacts snapshots, never templates, a word reserved for launch templates. Saving a recipe never builds one,
-because a build bills: the list offers **Build snapshot** while a recipe has none, **Rebuild snapshot** once it has one,
-and **Retry** after a build failed or was cut short by the helm stopping, all three needing a saved API key and
-Farhelm's registered SSH key. One build per recipe runs at a time; a second click joins it, and different recipes build
-at once. A build creates a builder sandbox named `farhelm-build-<helm tag>-<recipe>` from the recipe's base at the
+For Tensorlake, every recipe supplies a built snapshot and, on first use, a prepared snapshot for new hosts or sessions.
+The UI calls these artifacts snapshots, never templates, a word reserved for launch templates. Saving a recipe never
+builds one, because a build bills: the list offers **Build snapshot** while a recipe has none, **Rebuild snapshot** once
+it has one, and **Retry** after a build failed or was cut short by the helm stopping, all three needing a saved API key
+and Farhelm's registered SSH key. One build per recipe runs at a time; a second click joins it, and different recipes
+build at once. A build creates a builder sandbox named `farhelm-build-<helm tag>-<recipe>` from the recipe's base at the
 recipe's size, which bills while it runs; refuses to go on unless systemd is the sandbox's init, passwordless sudo
 works, apt is available, and bash, curl and git exist, naming the first missing requirement; installs the recipe's
 packages with apt, then Claude Code and Codex with their official installers, each downloaded completely over HTTPS
@@ -936,12 +948,19 @@ shipping uninstall support.
 Session creation is one action, not a wizard. Choose an existing directory or explicitly request a managed checkout; the
 agent choice is independent of that destination:
 
-- Host: The session launcher's host picker shows each host's mark and name in the list's existing order, including
-  unavailable hosts labelled with their phase. It is a single-choice keyboard list: arrows, Home and End browse; Enter
-  or Space chooses; typeahead finds a name; Escape closes without changing the destination. Enter on the closed field
-  launches with the shown target. The picker is disabled for the whole launch round trip, and its value is empty before
-  hosts arrive. The template editor keeps its native host field. Recipe targets extend both choices as described under
-  [Sandbox sessions](#sandbox-sessions).
+- **Runs on** offers a three-way switch above Host with **Existing host**, **New container** and **New sandbox**. A
+  segment with no usable place is hidden, and the switch is hidden when only Existing host remains. Existing host shows
+  the ordinary Host picker. New container shows Recipe and Container host, defaulting to the last container host used.
+  Hosts with unusable Podman are disabled with their reason, and the note says whether the recipe is ready there or
+  builds on first launch. New sandbox shows Recipe and retains its built-snapshot and account prerequisites below.
+  Recipes unsupported by the selected provider are disabled with a reason. Templates, Clone, quick launch and recent
+  setups carry the recipe and place together. Missing recipes or removed place hosts make that placement inapplicable.
+  The template editor offers the same three-way placement choice.
+- Host: The session launcher's host picker shows each ordinary host's mark and name in the list's existing order,
+  including unavailable hosts labelled with their phase. It is a single-choice keyboard list: arrows, Home and End
+  browse; Enter or Space chooses; typeahead finds a name; Escape closes without changing the destination. Enter on the
+  closed field launches with the shown target. The picker is disabled for the whole launch round trip, and its value is
+  empty before hosts arrive. Session-owned environment hosts are omitted from ordinary destination choices.
 
 - Working directory: an existing directory on the target host, named by an absolute path (a relative path would resolve
   against the supervisor process rather than the client, and would shift meaning across supervisor restarts). `~` and
@@ -1046,17 +1065,6 @@ agent choice is independent of that destination:
   keep their normal press. The search box, model field, YOLO confirmation, and save-as-template panel keep their own
   Enter rules. In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with
   no highlighted entry it launches as before. A held Enter never launches.
-- Containerized launches: the Agent tab shows an experimental **Containerized** switch directly after the wrapper
-  prefix. It is available only for a managed checkout; a plain folder destination shows the reason. An unchanged managed
-  directory copied from a session remains eligible on that same confirmed host. Turning it on reveals **Image**, a
-  required image name or ID already in Podman's local storage on the session's host; **API proxy port**, required from
-  1–65535; and **GitHub token file**, an optional absolute host path. Each explains its purpose. Invalid enabled
-  settings block launch with the reason beside the actions, and the footer adds `container`. New starts off with empty
-  fields; nothing is remembered. Recent setups, Clone, Replace with and templates carry the complete choice. Command
-  launches offer no switch. Templates and Save as template include the choice as one field: absent leaves it alone,
-  present settings replace it, and null turns it off. Restart with holds container settings fixed and cannot introduce
-  containerization into an ordinary session. See [Containerized sessions](#containerized-sessions) for the isolation and
-  lifecycle rules.
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for every agent launch. Claude,
   Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP session file.
   Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or the session's
@@ -1124,13 +1132,13 @@ agent choice is independent of that destination:
   template that changes a field the current launcher mode holds fixed, such as the host in Replace with or a field held
   by Restart with (Lifecycle operations below). A template names an ordinary host by its recorded install identity,
   exactly like the host default below, so a registry row retargeted to another install makes the template's host field
-  inapplicable rather than silently aiming at the successor. A sandbox recipe target uses its separate immutable recipe
-  name under Sandbox sessions; it never reinterprets a host identity string. A launch made after applying templates is,
-  for remembered defaults and recent setups, exactly the launch the same hand edits would have made; managed-checkout
-  previews additionally apply a template base name's numbering policy. The resulting choices count as the user's
-  explicit selection, and a template that changes host, installation, destination, title, or agent invalidates a pending
-  checkout preview as the equivalent hand edit does. The last template setting a name decides both its text and kind. In
-  a managed checkout the Name field shows the resolved name and a "From template · numbered if taken" pill; an advanced
+  inapplicable rather than silently aiming at the successor. An environment target uses a separate immutable recipe name
+  and place. It never reinterprets a host identity string. A launch made after applying templates is, for remembered
+  defaults and recent setups, exactly the launch the same hand edits would have made; managed-checkout previews
+  additionally apply a template base name's numbering policy. The resulting choices count as the user's explicit
+  selection, and a template that changes host, installation, destination, title, or agent invalidates a pending checkout
+  preview as the equivalent hand edit does. The last template setting a name decides both its text and kind. In a
+  managed checkout the Name field shows the resolved name and a "From template · numbered if taken" pill; an advanced
   name also shows "(<base> is taken)". Typing in Name or accepting `name:` makes it the user's exact name, removes the
   pill and disables numbering. Because a template pins only what it contains, a field the launch requires and no
   template set still has to be filled in by hand; that friction is accepted. New, Clone and Restart with also offer
@@ -1295,8 +1303,8 @@ agent choice is independent of that destination:
   create at the successor. The comparison is by the registry's recorded install identity, so it protects exactly the
   installs that have one: a host that has never identified itself to the registry is compared by row id alone, and its
   replacement by another identity-less install goes unnoticed — an accepted residual, since absent identities carry no
-  continuity evidence in either direction. When the open session is a sandbox session, New preselects its recipe instead
-  (see [Sandbox sessions](#sandbox-sessions)).
+  continuity evidence in either direction. When the open session owns an environment, New preselects its recipe and
+  place for a new environment, using that environment's home Folder default.
 
 Creation launches an interactive agent. A supported agent can receive a one-time initial prompt as part of its start
 argv, after Farhelm's own arguments have been composed, without waiting for terminal readiness. With no initial prompt,
@@ -1429,18 +1437,17 @@ sessions appear under All. Opening Hosts lists the sandbox with its ordinary dia
 updates, problems and progress also appear in the existing sidebar attention area. Update all and automatic updates
 include it under their ordinary rules. No separate session-only host-management surface is required.
 
-The launcher's host picker lists recipes after ordinary hosts under **New sandbox for this session**, with a cube mark
-and CPU and memory size. A recipe without a built snapshot is disabled with **No snapshot yet**; a missing API key or
-absent or unreadable local Farhelm SSH key also disables it. The selected recipe shows the existing copyable SSH-key
-registration command and explains that Farhelm cannot check account registration. If SSH later refuses the key, launch
-fails with that remedy and attempts to delete the new sandbox and snapshots. Brief billing and visible failed cleanup
-are accepted. Other failures retain their own reason. Launch never starts a missing software snapshot build; Add host
-keeps its existing build-if-missing behavior.
+The launcher's **New sandbox** segment lists recipes with a cube mark and CPU and memory size. A recipe without a built
+snapshot is disabled with **No snapshot yet**. A missing API key or absent or unreadable local Farhelm SSH key also
+disables it. The selected recipe shows the existing copyable SSH-key registration command and explains that Farhelm
+cannot check account registration. If SSH later refuses the key, launch fails with that remedy and attempts to delete
+the new sandbox and snapshots. Brief billing and visible failed cleanup are accepted. Other failures retain their own
+reason. Launch never starts a missing software snapshot build; Add host keeps its existing build-if-missing behavior.
 
-The closed picker reads **New sandbox · &lt;recipe&gt;**. Its note explains that the sandbox is for this session, bills
-while running, Suspend stops CPU and memory billing, and Delete removes the whole sandbox and its files. Managed
-checkout works normally, including the recipe's GitHub token for private clones. Folder is fixed to the new sandbox's
-home, without Browse or recent folders. The footer names the recipe sandbox.
+The footer names **new &lt;recipe&gt; sandbox**. Its note explains that the sandbox is for this session, bills while
+running, Suspend stops CPU and memory billing, and Delete removes the whole sandbox and its files. Managed checkout
+works normally, including the recipe's GitHub token for private clones. Folder is fixed to the new sandbox's home,
+without Browse or recent folders.
 
 Launching asks **Create a sandbox for this session?**, naming recipe, CPU, memory and disk, linking Tensorlake pricing,
 and explaining suspension, the idle timeout and irreversible file deletion. Cancel creates nothing; **Create and
@@ -1467,16 +1474,14 @@ limit ends that connection; Tensorlake's 30-minute idle timeout then suspends th
 Named sandboxes retain files on suspension, and snapshot storage still bills. A helm restart reconnects a running
 sandbox and leaves a suspended one suspended. Farhelm never resumes one automatically.
 
-Templates store an immutable recipe name separately from an installed-host identity; the choices are mutually exclusive.
-Missing recipes are inapplicable. The template editor offers **New sandbox · &lt;recipe&gt;**, grouped as **New sandbox
-for each session**. A recipe with a non-home Folder is inapplicable. Clone targets the recipe for a fresh sandbox with
-the source's launch and repository intent, never a copy of its disk. Restart, Restart with, Replace and Replace with
-stay in the existing sandbox. Recipe recent setups, Save as template from a sandbox launch, and bulk Suspend/Resume/Stop
-and suspend are deferred; template launches and individual lifecycle controls remain supported. Until then, Save as
-template is not offered while the launch target is a recipe or a session-owned host. Sandbox launches record no recent
-setups yet. When a sandbox session is open, New and quick-switcher creation preselect its recipe for a new sandbox and
-use the new sandbox's home Folder default, never the disposable host or its old folder. A missing recipe stays
-unavailable rather than silently choosing another host. The normal creation confirmation still applies.
+Templates store an immutable recipe name and Tensorlake place separately from an installed-host identity. The choices
+are mutually exclusive, and missing recipes are inapplicable. A recipe with a non-home Folder is inapplicable. Clone
+targets the recipe for a fresh sandbox with the source's launch and repository intent, never a copy of its disk.
+Restart, Restart with, Replace and Replace with stay in the existing sandbox. Recent setups restore the recipe and
+place, obtaining a fresh environment. Save as template from an environment launch and bulk Suspend/Resume/Stop and
+suspend remain deferred. When a sandbox session is open, New and quick-switcher creation preselect its recipe for a new
+sandbox and use the new sandbox's home Folder default, never the disposable host or its old folder. A missing recipe
+stays unavailable rather than silently choosing another host. The normal creation confirmation still applies.
 
 Replace creates its replacement before removing the old session. That internal source removal is session-only and never
 destroys the sandbox or files. A failed or ambiguous Replace preserves the existing sandbox, reports what is known, and
@@ -1509,13 +1514,13 @@ or incomplete Stop does not suspend. The row menu always offers Stop and suspend
 confirmations are skipped. Delete's whole-sandbox confirmation is never skipped.
 
 The helm refuses every agent request originating from a session-owned host before approvals or host-permission
-shortcuts, with **Agents in sandbox sessions can't ask Farhelm to act yet.** This adds no notification. Requests still
-use the ordinary relay and fail closed when the owning helm is disconnected; no supervisor-local restriction is stored.
-Local help and conversation reporting remain unchanged; the global prompts-off refusal keeps its existing precedence.
-Recipe templates are GUI-only in this first version: agents cannot list, read, write or launch them, and agent template
-verbs naming one are refused. Agents on other hosts cannot Delete or Clone a sandbox session or launch a recipe target
-directly or through a template. Other supported targeted operations keep ordinary approval. Ordinary creates cannot
-target the disposable host; only its initial launch and internal Restart/Replace paths use it.
+shortcuts, with **Agents in sandbox and container sessions can't ask Farhelm to act yet.** This adds no notification.
+Requests still use the ordinary relay and fail closed when the owning helm is disconnected. No supervisor-local
+restriction is stored. Local help and conversation reporting remain unchanged; the global prompts-off refusal keeps its
+existing precedence. Recipe templates are GUI-only in this first version: agents cannot list, read, write or launch
+them, and agent template verbs naming one are refused. Agents on other hosts cannot Delete or Clone a sandbox session or
+launch a recipe target directly or through a template. Other supported targeted operations keep ordinary approval.
+Ordinary creates cannot target the disposable host; only its initial launch and internal Restart/Replace paths use it.
 
 ### Managed checkouts
 
@@ -1616,14 +1621,14 @@ are an exception: the composer shows no path and says the folder is picked autom
 named after the session when a name is supplied). One press resumes, obtains a fresh preview and creates the session.
 Direct template launching is the other exception: marking a template with ⚡ or giving it a number key is consent to its
 managed-checkout destination, including when combined in a quick-launch sequence, so it obtains the same exact preview
-and launches without showing the path first. A recipe-target sandbox launch is another exception: the user accepts its
-recipe, repository and naming policy before the sandbox exists; after connecting, the helm obtains the ordinary exact
-preview on that new installation and uses the existing admission rules without a second confirmation. It never borrows
-another host's preview or relaxes accepted-preview admission for ordinary installed-host launches. For a recipe target,
-a destination conflict before session acceptance is a failed launch: it cleans up the sandbox and shows **Not
-launched.** with the conflict, rather than offering a preview for the destroyed host. On an existing host, a lost race
-still reveals New with the conflict and new preview rather than submitting again. Preview creates no directory and
-reserves nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session
+and launches without showing the path first. A recipe-target environment launch is another exception. The user accepts
+its recipe, place, repository and naming policy before the environment exists. After connecting, the helm obtains the
+ordinary exact preview on that new installation and uses the existing admission rules without a second confirmation. It
+never borrows another host's preview or relaxes accepted-preview admission for ordinary installed-host launches. For a
+recipe target, a destination conflict before session acceptance is a failed launch. It cleans up the new environment and
+shows **Not launched.** with the conflict, rather than offering a preview for the destroyed host. On an existing host, a
+lost race still reveals New with the conflict and new preview rather than submitting again. Preview creates no directory
+and reserves nothing. An unnamed checkout uses the lowest available positive `repo-N` and that basename as its session
 title. Naming the session after quick launch changes only its title: the checkout keeps its original `repo-N` directory
 name. An explicit title at creation keeps its printable display spelling while the path uses `repo-` followed by its
 lowercase ASCII slug; runs outside letters and digits become hyphens. A title already starting with `repo-` does not
@@ -1834,8 +1839,9 @@ original request.
 ### Lifecycle operations
 
 The client supports: create, open, rename, restart, restart with, clone, replace, replace with, stop, delete. Sandbox
-sessions additionally offer Suspend, Resume and Stop and suspend, with the restrictions under
-[Sandbox sessions](#sandbox-sessions).
+and container sessions additionally offer Suspend, Resume and Stop and suspend, with their environment-wide consequences
+under [Sandbox sessions](#sandbox-sessions) and [Container sessions](#container-sessions). Retired containerized
+sessions support only Delete.
 
 Pending Stop, Restart, Replace and Delete requests do not block opening another session from the sidebar or quick
 switcher, marking rows, clearing marks, or acting on other sessions. Each session excludes its own competing actions: an
@@ -1863,12 +1869,12 @@ unchanged Enter, Escape and Cancel all return to the new session's terminal. Ord
 submission and focus-return behavior.
 
 - **Stop** terminates the agent and its entire process tree — MCP servers, dev servers, and other descendants included.
-  It then closes the session's terminal tabs and their processes, under the same lifecycle claim. A containerized
-  session also stops its whole container. The session remains with its agent terminal still viewable. With tabs open,
-  Stop asks "Stop the agent and close N terminal tabs?", or asks about the tabs alone when the agent has already ended,
-  unless session confirmations are skipped (below). A tab that cannot be closed does not prevent the other tabs from
-  closing; the reply names the failed tabs and the client shows that notice. Restart and an agent exiting on its own
-  leave tabs running. Tabs can be opened after Stop; another Stop closes them too.
+  It then closes the session's terminal tabs and their processes, under the same lifecycle claim. The session remains
+  with its agent terminal still viewable. With tabs open, Stop asks "Stop the agent and close N terminal tabs?", or asks
+  about the tabs alone when the agent has already ended, unless session confirmations are skipped (below). A tab that
+  cannot be closed does not prevent the other tabs from closing; the reply names the failed tabs and the client shows
+  that notice. Restart and an agent exiting on its own leave tabs running. Tabs can be opened after Stop; another Stop
+  closes them too.
 - **Restart** relaunches the agent in the same working directory and resumes the session's own conversation (see
   Durability for the exact promise). Confirmed 2026-10-03: Restart always means the conversation is preserved. It is
   offered only when Farhelm knows the session's agent type, has captured its conversation, and can resume it: an agent
@@ -1995,9 +2001,9 @@ submission and focus-return behavior.
 The off-by-default **Skip session confirmations** switch in Settings skips session row, header and bulk Stop, session
 row and bulk Delete, row Replace, header Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close.
 Each runs on the first click through the ordinary action path, with consent from the state shown by that render. It does
-not skip a sandbox session's Delete (including bulk Delete), YOLO, host or trash questions, nor the Restart with or
-Replace with launcher. Host setup and removal retain their separate choices; sandbox Suspend and Stop and suspend keep
-the host-wide activity confirmation described under Sandbox sessions.
+not skip an environment session's whole-resource Delete (including bulk Delete), YOLO, host or trash questions, nor the
+Restart with or Replace with launcher. Host setup and removal retain their separate choices. Environment Suspend and
+Stop and suspend keep the host-wide activity confirmation described under Sandbox sessions and Container sessions.
 
 Where keyboard focus starts in a confirmation, and how modal dialogs keep it, is under
 [Keyboard focus](#keyboard-focus).
@@ -2083,8 +2089,8 @@ trigger.
 
 ### Session view
 
-Sandbox sessions add their sandbox lifecycle controls and suspended card here, as described under
-[Sandbox sessions](#sandbox-sessions).
+Sandbox and container sessions add their environment lifecycle controls and suspended card here, as described under
+[Sandbox sessions](#sandbox-sessions) and [Container sessions](#container-sessions).
 
 A launch — a new agent, Restart, Replace or a terminal tab — starts in the session's working directory. If it cannot
 enter that directory, it fails clearly with an error naming it, without starting the requested program elsewhere.
@@ -2127,22 +2133,14 @@ completes still refuses the open loudly, with the shell's last words as the erro
 When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
 metadata and says why there is no terminal, rather than an empty pane.
 
-A containerized session should feel like the container is its host. Its tabs run Bash login shells inside that same
-container and checkout, without running the host's shell startup first. Each tab reads the optional token file afresh.
-Opening one after Stop starts the existing container again; a missing container is refused, never a request to create a
-new container. Tabs survive the agent exiting on its own. Closing a tab ends its shell by terminal hangup; an
-in-container process it detached may survive until Stop or Delete stops the whole container. After a host reboot,
-Replace and Delete remain the available session operations.
-
-File links in a containerized session's agent terminal and tabs are offered only for readable regular files inside its
-checkout. A path outside it, including one escaping through `..` or a symlink, is not offered. The actual download
-rechecks this boundary independently. Both printed paths and file hyperlinks supplied by terminal programs use this
-boundary, including hyperlinks to filenames containing spaces. Web hyperlinks remain available.
+Container sessions' tabs, file links and downloads use the ordinary supervisor rules inside their container. Retired
+containerized sessions offer no terminal or tab access.
 
 ### Session list
 
-Sandbox-session marks, metadata, suspended rows and menu actions follow [Sandbox sessions](#sandbox-sessions). Their
-session-owned hosts have no permanent rail entry; their sessions appear under All.
+Environment-session marks, metadata, suspended rows and menu actions follow [Sandbox sessions](#sandbox-sessions) and
+[Container sessions](#container-sessions). Their session-owned hosts have no permanent rail entry. Their sessions appear
+under All, while Hosts and the attention area retain ordinary diagnostics and controls.
 
 When hosts need attention, a compact host list sits below the app bar and above the session list's title and status
 filter. It stays visible while sessions scroll; its own bounded row region scrolls when needed. It is absent when
@@ -2184,19 +2182,19 @@ Automatic selection after Delete waits until every admitted Delete has settled, 
 and never opens a session that is still being deleted. Pending Stop batches do not delay automatic selection.
 
 Bulk Stop and Delete ask once when any target would need its ordinary confirmation, unless **Skip session
-confirmations** is on; a batch containing a sandbox Delete always asks. Their structured modal lists one row per target:
-status, name, full host and what the action will do, with the same conditional managed-checkout consequence for Delete.
-Sandbox rows name continued billing for Stop and the whole-sandbox Delete consequence under Sandbox sessions, including
-when several marked sessions share one sandbox. Stop names the agent and terminal tabs it ends, with a separate no-tabs
-precondition for every target whose displayed state showed no tabs. The answer authorizes only those listed identities
-and drawn consequences. An accepted changed target rewords the question and replaces its opening; authoritative
-disappearance can remove it, while a filtered, partial, failed or non-authoritative omission cannot. An old answer
-cannot authorize a replacement question, and answer-time admission may only remove targets no longer displayed or
-marked. Changed facts or confirmation preferences never dispatch a destructive action by themselves. Cancel, Close and
-Escape dismiss their current question without clearing marks. After confirmation closes the question, keyboard focus
-returns to the marked count, which remains programmatically focusable. Pending launches and actions on other sessions do
-not lock the bulk buttons; each action still refuses its own busy targets. Completion and failures use the ordinary rows
-and open-session surfaces.
+confirmations** is on. A batch containing an environment Delete always asks. Their structured modal lists one row per
+target with status, name, full host and what the action will do, with the same conditional managed-checkout consequence
+for Delete. Environment rows name the whole-resource Delete consequence, including when several marked sessions share a
+resource. Sandbox rows also name continued billing for Stop. Stop names the agent and terminal tabs it ends, with a
+separate no-tabs precondition for every target whose displayed state showed no tabs. The answer authorizes only those
+listed identities and drawn consequences. An accepted changed target rewords the question and replaces its opening;
+authoritative disappearance can remove it, while a filtered, partial, failed or non-authoritative omission cannot. An
+old answer cannot authorize a replacement question, and answer-time admission may only remove targets no longer
+displayed or marked. Changed facts or confirmation preferences never dispatch a destructive action by themselves.
+Cancel, Close and Escape dismiss their current question without clearing marks. After confirmation closes the question,
+keyboard focus returns to the marked count, which remains programmatically focusable. Pending launches and actions on
+other sessions do not lock the bulk buttons; each action still refuses its own busy targets. Completion and failures use
+the ordinary rows and open-session surfaces.
 
 Escape clears marks only from the session list, without preventing default handling, and yields to a menu, dialog or
 terminal that owns the key. Quick switching and shortcuts keep their existing meaning: session shortcuts act only on the
@@ -2255,16 +2253,16 @@ answer; a client that has already loaded its preferences keeps its previous beha
 automatic session selection rereads the shared visits immediately before choosing, template shortcuts read their
 bindings on each invocation and the desktop helm reads the current file-opening list for each hover and open request.
 The gear at the foot of the host rail opens a settings dialog. Its left sidebar lists **Sessions**, **Appearance**,
-**Hosts**, **Tensorlake**, **Credentials**, **Terminal**, **Checkouts**, **Agent trust** and **Notifications**, followed
-by **App** only in a desktop app whose updater is active. Each section has an icon; the selected one uses the solid
-selection fill. One selected section appears beside the list, with a matching heading; notifications keeps **Sounds**
-and **ntfy alerts** sub-headings. The dialog keeps one height across sections, capped by the window; short sections
-leave space below their content, and longer sections scroll inside the pinned header and footer. At 620px wide and
-below, the dialog shows either the selected section or the list; **‹ Settings** returns to the list. The gear always
-opens sessions and focuses its first switch, including at phone width. Trust hints instead open agent trust at the
-relevant switch and scroll its block into view. Section buttons follow the platform's normal Tab rules. Switching
-sections preserves unsaved fields, outcome lines and pending saves; closing discards unsaved fields. Escape and either
-close control return focus to the gear.
+**Hosts**, **Recipes**, **Tensorlake**, **Containers**, **Credentials**, **Terminal**, **Checkouts**, **Agent trust**
+and **Notifications**, followed by **App** only in a desktop app whose updater is active. Each section has an icon; the
+selected one uses the solid selection fill. One selected section appears beside the list, with a matching heading;
+notifications keeps **Sounds** and **ntfy alerts** sub-headings. The dialog keeps one height across sections, capped by
+the window; short sections leave space below their content, and longer sections scroll inside the pinned header and
+footer. At 620px wide and below, the dialog shows either the selected section or the list; **‹ Settings** returns to the
+list. The gear always opens sessions and focuses its first switch, including at phone width. Trust hints instead open
+agent trust at the relevant switch and scroll its block into view. Section buttons follow the platform's normal Tab
+rules. Switching sections preserves unsaved fields, outcome lines and pending saves; closing discards unsaved fields.
+Escape and either close control return focus to the gear.
 
 **Credentials**, with a lock icon, holds named GitHub tokens, agent subscription logins and API endpoint tokens in three
 lists. Names use the recipe-name grammar, are unique across all kinds, and cannot be changed after creation; neither can
@@ -2322,10 +2320,9 @@ it exists, the section shows the one-time command that registers it with the use
 text, so it works on any machine where Tensorlake's `tl` CLI is signed in. The section says that Farhelm cannot check
 the registration, because an API key cannot list SSH keys. `<tag>` is the helm tag: four lowercase letters or digits
 derived from the helm's registry, stable for the life of its state, which the names of the sandboxes this helm creates
-also carry. Below the account, the section lists the helm's Tensorlake recipes with **New recipe** and an editor per
-recipe (see [Topology](#topology)); New recipe takes only the width its label needs. Below the recipes, **Sandboxes not
-on this helm** keeps its heading and Refresh visible even when none are found. The off-by-default **Create Tensorlake
-sandboxes without asking** switch saves only when the helm acknowledges it and shows only the stored choice;
+also carry. Recipes and their editor live in the separate **Recipes** section (see [Topology](#topology)). **Sandboxes
+not on this helm** keeps its heading and Refresh visible even when none are found. The off-by-default **Create
+Tensorlake sandboxes without asking** switch saves only when the helm acknowledges it and shows only the stored choice;
 `Set up new hosts without asking` never covers creating a sandbox. The section also notes that on Tensorlake's Usage
 Credits plan Tensorlake suspends an ordinary host sandbox after 24 hours without a connection from Farhelm. Session
 sandboxes are always created with a fixed 30-minute idle timeout. The creation switch's help covers both hosts and
@@ -2567,9 +2564,9 @@ first, then working hosts, then updates, in rail order within each group.
 
 Problem rows offer **Details**: Unreachable (worded **Unreachable, retrying**), Identity mismatch, Identity unverified,
 Duplicate, Retired, Unrecognized, a protocol skew without an available Update or with the host's higher protocol, a
-Tensorlake resume or tunnel failure, or an unacknowledged setup or Update warning. That last case reads **Setup or
+environment resume or tunnel failure, or an unacknowledged setup or Update warning. That last case reads **Setup or
 update needs attention**. Without another warning, tunnel failure or live work, Connecting, a connected current host, a
-usable connected host running a newer build, and a Tensorlake host ordinarily suspended, suspending or resuming do not
+usable connected host running a newer build, and an environment host ordinarily suspended, suspending or resuming do not
 need a row. A host leaves when its condition clears. **Details**, or choosing a row outside its action button, opens
 Hosts with that host's row in view and its menu button focused, without changing the session filter. This uses the
 existing acknowledgement of warnings when Hosts opens; Hosts never opens by itself.
@@ -2598,16 +2595,17 @@ again. If no undismissed host needs attention, the list disappears. This list re
 optional-update card.
 
 Lifecycle operations against an unreachable host are refused with a clear error; nothing queues for later delivery in
-v1. Sandbox Suspend/Resume and Delete use their explicit Tensorlake exceptions under Sandbox sessions. A session on an
-unreachable host shows one calm accent card naming the cause, with the helm's remedy and smaller diagnostics beneath it.
-Its metadata — title, directory, last-known status — remains available, with last-known status and age in exactly one
-band. A terminal already open keeps its last screen and tab strip dimmed and inert beneath the card, clearly no longer
-live. A session opened while unreachable has no terminal or tab strip. When the host returns, retained terminals retry
-promptly and automatically without displacing another client. A rebooted session still shows its interrupted card.
-Browser transport loss uses the same card with `Session unavailable — reconnecting` and a neutral `Reconnect now`
-button; recoverable drops show no red detach banner. Final takeover and stall decisions retain their explicit banners.
-Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all other connected
-clients automatically; the agent-spawn behavior below is one instance of this general rule, not a special case.
+v1. Environment Suspend/Resume and Delete use their provider paths under Sandbox sessions and Container sessions. A
+session on an unreachable host shows one calm accent card naming the cause, with the helm's remedy and smaller
+diagnostics beneath it. Its metadata — title, directory, last-known status — remains available, with last-known status
+and age in exactly one band. A terminal already open keeps its last screen and tab strip dimmed and inert beneath the
+card, clearly no longer live. A session opened while unreachable has no terminal or tab strip. When the host returns,
+retained terminals retry promptly and automatically without displacing another client. A rebooted session still shows
+its interrupted card. Browser transport loss uses the same card with `Session unavailable — reconnecting` and a neutral
+`Reconnect now` button; recoverable drops show no red detach banner. Final takeover and stall decisions retain their
+explicit banners. Changes made from any client — creates, renames, stops, deletes, status transitions — appear in all
+other connected clients automatically; the agent-spawn behavior below is one instance of this general rule, not a
+special case.
 
 ### Status
 
@@ -2866,18 +2864,17 @@ whatever the agent renders is what you see. There is no composer, no message abs
   terminal are described below). Programs in a new terminal are told it is Farhelm's own: `TERM_PROGRAM=farhelm` with
   Farhelm's version as `TERM_PROGRAM_VERSION` (the version the terminal also reports when a program asks it), with
   `TERM=xterm-256color` and `COLORTERM=truecolor`, all four set whatever the supervisor's own environment holds, and
-  nothing that names tmux: no `TMUX` or `TMUX_PANE`. In a containerized session only `TERM` and `COLORTERM` reach the
-  container, so programs there are told no terminal program at all. A new terminal keeps its scrollback to the same
-  floor as an old one (below), and keeps it across supervisor restarts and updates as well as client disconnects: its
-  terminal host holds the program's output while no supervisor reads it (up to a bound, next), and the next supervisor
-  rebuilds the terminal from it. That output is held in memory only, never on disk. A viewer that attaches or reconnects
-  is sent the current screen and then the whole scrollback once, oldest first; from then on it is sent only what
-  changes: the screen as it is now, and the lines that entered the scrollback, appended. The scrollback stays while a
-  full-screen program shows and is there when the program exits. When the scrollback changes in a way an append cannot
-  show (a resize rewraps it, the program erases it or redefines one of the terminal's palette colors, or lines the
-  viewer was still owed fell off the scrollback's far end), the viewer is sent the whole scrollback again once the
-  change has settled, so a window dragged to a new size sends it once, or for a long drag once during it and once when
-  it stops, not at every step.
+  nothing that names tmux: no `TMUX` or `TMUX_PANE`. Container sessions use this same terminal environment inside their
+  container. A new terminal keeps its scrollback to the same floor as an old one (below), and keeps it across supervisor
+  restarts and updates as well as client disconnects: its terminal host holds the program's output while no supervisor
+  reads it (up to a bound, next), and the next supervisor rebuilds the terminal from it. That output is held in memory
+  only, never on disk. A viewer that attaches or reconnects is sent the current screen and then the whole scrollback
+  once, oldest first; from then on it is sent only what changes: the screen as it is now, and the lines that entered the
+  scrollback, appended. The scrollback stays while a full-screen program shows and is there when the program exits. When
+  the scrollback changes in a way an append cannot show (a resize rewraps it, the program erases it or redefines one of
+  the terminal's palette colors, or lines the viewer was still owed fell off the scrollback's far end), the viewer is
+  sent the whole scrollback again once the change has settled, so a window dragged to a new size sends it once, or for a
+  long drag once during it and once when it stops, not at every step.
 - A terminal host keeps a bounded amount of the program's output beyond the supervisor's latest checkpoint of the
   terminal: 32 MiB by default, a few minutes of an agent redrawing as fast as it can, hours of a shell. When more than
   that arrives while no supervisor reads it (a supervisor that crashed and is not started again soon; the Mac desktop
@@ -3429,9 +3426,10 @@ per feature, as specified in the maintainer-confirmed decisions below; agents mu
 before proceeding with such changes. A schema version bump on its own, where older releases merely refuse the newer data
 and nothing is lost, need not be raised.
 
-Sessions depend on exactly one thing staying up: their host. For sandbox sessions that host is their named sandbox;
-suspension freezes its processes and Resume continues them, whereas Delete ends the host and removes its files. Every
-other component is disposable, with the sandbox idle-timeout exception below:
+Sessions depend on exactly one thing staying up: their host. For environment sessions that host is their sandbox or
+container. Suspension freezes its processes and Resume continues them, whereas Delete ends the environment and removes
+its files. A container host reboot stops its containers, whose automatic start and interrupted sessions follow Container
+sessions. Every other component is disposable, with the sandbox idle-timeout exception below:
 
 - Clients and the helm can close, crash, or restart freely — closing the app, network loss, Mac sleep, a helm upgrade —
   and sessions keep running, local and remote. Sandbox sessions have an explicit exception: after the remote connection
@@ -3760,9 +3758,10 @@ Ordinary session operation is version-control-agnostic. Explicit managed-checkou
 
 ## Agent-spawned sessions
 
-Sandbox sessions are the exception to the agent-operation contracts in this section: every request from their own host
-is refused, agents elsewhere cannot Delete or Clone them, and agents cannot launch recipe targets or target
-session-owned host entries (see [Sandbox sessions](#sandbox-sessions)).
+Sandbox and container sessions are the exception to the agent-operation contracts in this section. Every request from
+their own host is refused, agents elsewhere cannot Delete or Clone them, and agents cannot launch recipe targets or
+target session-owned host entries (see [Sandbox sessions](#sandbox-sessions) and
+[Container sessions](#container-sessions)).
 
 A running agent must be able to create sessions itself, via a stable CLI or local API available inside its session,
 e.g.:
@@ -4400,12 +4399,12 @@ trust between hosts, and the user's approval that agent-requested actions across
 interpreting the transport and credential rules here.
 
 Steady-state operation between Farhelm's own components uses the browser to a standalone helm (token-authenticated) and
-the helm to each supervisor (SSH), plus the desktop app's deliberately local loopback edge. User-opened localhost
-tunnels add a loopback listener on the Mac and a supervisor connection to a loopback service on the session host; the
-bytes between machines still ride the existing helm-to-supervisor connection. Besides provisioning's release downloads
-(see [Topology](#topology)), three more kinds of outbound connection exist. When the user sends feedback, the helm posts
-that submission, and nothing else, to the project's feedback endpoint (see [Feedback](#feedback)); that happens only on
-explicit user action. And the installed desktop app's updater (see
+the helm to each supervisor (local IPC, SSH or Podman exec), plus the desktop app's deliberately local loopback edge.
+User-opened localhost tunnels add a loopback listener on the Mac and a supervisor connection to a loopback service on
+the session host; the bytes between machines still ride the existing helm-to-supervisor connection. Besides
+provisioning's release downloads (see [Topology](#topology)), three more kinds of outbound connection exist. When the
+user sends feedback, the helm posts that submission, and nothing else, to the project's feedback endpoint (see
+[Feedback](#feedback)); that happens only on explicit user action. And the installed desktop app's updater (see
 [Installation and updates](#installation-and-updates)) asks get.farhelm.io which stable release is the latest, reads
 `/advisories` and its signature for release withdrawals, and, when it is newer, verifies that release's signed checksums
 and its installer against the keys compiled into the app before running the installer, which downloads the release's
@@ -4472,12 +4471,12 @@ a known_hosts file in the helm's state directory, never in the user's own.
   goes through that credential. In both modes, a request without an Origin is refused when `Sec-Fetch-Site` says
   `cross-site` or `same-site`: a page on another loopback port has no authority over this helm. This also prevents an
   ordinary link from such a page from opening the standalone helm; address-bar launches and bookmarks still work.
-- **Helm to supervisor**: SSH, and only SSH, for every remote supervisor. Passwordless access from the helm's machine,
-  as the user, is the requirement; authentication is the user's SSH keys. Supervisors listen on no network port except
-  IPv4 loopback listeners claimed for configured Tensorlake recipe tunnels, owned by that full-authority connection. The
-  helm limits claims to Tensorlake hosts; the supervisor does not know its host kind. Registering a host means giving
-  the helm its SSH destination — there is no supervisor token to manage. The helm's own machine's supervisor is reached
-  locally, no SSH involved.
+- **Helm to supervisor**: ordinary remote supervisors use the user's SSH access. Containers use a Podman exec pipe, with
+  SSH to the container host when remote. The helm's own machine's supervisor uses local IPC. These all carry the same
+  supervisor protocol. Passwordless SSH authenticates with the user's keys, with the Tensorlake exception below.
+  Supervisors listen on no network port except IPv4 loopback listeners claimed for configured environment recipe
+  tunnels, owned by that full-authority connection. The helm limits claims to environment hosts. The supervisor does not
+  know its provider or host kind, and there is no supervisor token to manage.
 - **Session to supervisor (spawn)**: the spawn CLI reaches its own supervisor over local IPC only, never the network.
   Its per-session credential identifies the asking session and dies with that session. It does not restrict permitted
   operations to that session: fleet operations follow the Agent-spawned sessions contract and the confirmed trust
@@ -4486,9 +4485,10 @@ a known_hosts file in the helm's state directory, never in the user's own.
 
 Further requirements:
 
-- SSH is Farhelm's one transport integration for reaching hosts: given passwordless SSH access, the helm rides it
-  automatically for provisioning, updates, and all supervisor communication. How the SSH connection itself is possible
-  (a tailnet, a LAN, whatever) is the user's business. No public relay, no third-party rendezvous service.
+- SSH is Farhelm's network transport integration for reaching remote hosts. Provisioning, updates and supervisor
+  communication share the same route, including Podman exec for containers. How SSH itself reaches the host (a tailnet,
+  a LAN, whatever) is the user's business. No public relay or third-party rendezvous service is used. Container traffic
+  passes through the container host's Podman process, with no supervisor-to-supervisor relay.
 - Provisioning rides the user's existing SSH access — their keys, agent, and config, with the Tensorlake identity policy
   above as the exception. Farhelm stores no SSH credentials of its own, with one exception for Tensorlake sandboxes:
   Tensorlake's SSH gateway admits only keys registered with the user's Tensorlake account, and only a user login, not an
@@ -4506,17 +4506,17 @@ Further requirements:
   reopened, or a helm run by hand) can attach to a shared ssh connection the previous version left open, and port
   forwards that connection set up last until it closes.
 
-  Tensorlake recipe tunnels are raw-TCP relays over the host's existing supervisor connection, in the other direction:
-  the supervisor listens on the configured sandbox IPv4 loopback ports, and the helm connects only to destinations in
-  its own recipe snapshot, as reached from the helm's machine. Anything in the sandbox, agents included, can use them.
-  They stop when the host disconnects, is suspended or is removed, and retry with backoff while it stays connected. The
-  host details show their status and each mapping; a failure makes the host's dot amber and shows the reason. Recipe
-  edits take effect on the next connection. If the helm process dies, listeners and held connections close within
-  seconds; if its machine goes silent, the supervisor connection's existing stdin watchdog closes them within about two
-  minutes. Disconnecting leaves no separate tunnel connection that could keep the sandbox awake.
+  Environment recipe tunnels are raw-TCP relays over the host's existing supervisor connection, in the other direction.
+  The supervisor listens on the configured environment IPv4 loopback ports, and the helm connects only to destinations
+  in its own recipe snapshot, as reached from the helm's machine. Anything in the environment, agents included, can use
+  them. They stop when the host disconnects, is suspended or is removed, and retry with backoff while it stays
+  connected. The host details show their status and each mapping; a failure makes the host's dot amber and shows the
+  reason. Recipe edits take effect on the next connection. If the helm process dies, listeners and held connections
+  close within seconds; if its machine goes silent, the supervisor connection's existing stdin watchdog closes them
+  within about two minutes. Disconnecting leaves no separate tunnel connection that could keep the sandbox awake.
 - Agent credentials normally live on the host running the agent, in the agent's own standard configuration. The Settings
   credential catalog is an explicit exception: the helm stores logins and tokens the user enters there, unencrypted, and
-  never returns their saved values. For Tensorlake recipes it sends selected values only to those hosts, into their
+  never returns their saved values. For environment recipes it sends selected values only to those hosts, into their
   usual configuration or Farhelm's own state there. Farhelm never reads credentials out of any machine's agent
   configuration, proxies them, logs them or passes them as command-line arguments. Claude Code authenticates directly
   with a consumer subscription, unmodified.
@@ -4538,6 +4538,7 @@ Further requirements:
 - IDE functionality, diff viewers, code review UI.
 - Built-in Git branch management, stacked-PR tooling, or a `jj` graph editor.
 - Multi-user collaboration and cloud-hosted execution beyond Tensorlake sandboxes used as hosts or individual sessions.
+- Container providers other than rootless Podman on Linux, container resource limits and container network policy.
 - Reimplementing or wrapping agent internals (ACP or structured agent protocols may come later but must never displace
   raw terminal mode).
 
@@ -4733,90 +4734,93 @@ Parent tracking is explicitly optional for now. `farhelm spawn --parent` can rec
 incomplete parent filter is an accepted limitation, not a missing correctness guarantee. Future work should consider
 either removing agent parent/child relationships or making them useful; neither direction is selected or required now.
 
-### Containerized sessions
+### Container sessions
 
-Containerized agent sessions are experimental, Linux-only, and subject to rapid change. A session has one rootless
-Podman container, created from a user-supplied local image name or ID on its host and removed when the session is
-deleted. The user loads or builds the image into that host's Podman storage; Farhelm never imports, pulls, tags or
-removes images. The image supplies the harness and its configuration, using a local API proxy or load balancer on the
-host; subscription login is unsupported. Managed checkouts only: command launches and plain-folder launches cannot
-select this isolation.
+Container sessions are experimental disposable environments built from the shared recipe catalog. Each launch creates a
+rootless Podman container on a registered local or ordinary SSH Linux host. The container boots systemd and runs its own
+Farhelm supervisor under a login user's systemd user manager. The managed checkout is cloned inside it. Folder
+destinations use its home, without Browse or recent folders. Agent and command launches use the ordinary launch rules.
 
-Farhelm chooses the container account to match the host account where the image permits it. The host user name, uid, gid
-and home path come from the host's user database for the supervisor's uid, not environment variables. Before any
-checkout mount, Farhelm reads the image's user and group databases and checks the host home path inside the image. It
-chooses in this order:
+A usable container host runs Podman 4.9.3 or later, rootless, with cgroup v2, the systemd cgroup manager and a working
+`systemd-run --user`. A background probe records Linux, architecture, version and each requirement, with a timestamp.
+Opening the launcher refreshes probes in the background. No per-host opt-in is needed, and an environment host cannot
+itself host containers. The launcher and Settings → Containers show why a host is unusable.
 
-1. If neither the host user name nor the host uid exists in the image, create an account with that name, uid, gid and
-   home path, using Ubuntu's account tools and seeding the home from `/etc/skel`.
-2. Otherwise, if the host home path is a directory in the image owned by a non-root account, use that account and that
-   directory as its home. A root-owned directory or an owner with no account does not select an account.
-3. Otherwise, if the host uid exists in the image, use that account and its home directory.
+Built software and prepared images are kept per recipe and container host. The first launch there builds a missing
+software image and ensures a fresh prepared image. Preparation becomes stale after 24 hours, a Farhelm version change or
+a rebuilt source, as for Tensorlake. Launch progress names **Preparing &lt;recipe&gt; on &lt;host&gt;…**, when needed
+with its first-launch/24-hour/update explanation, **Creating a &lt;recipe&gt; container on &lt;host&gt;…**, **Starting
+Farhelm in the container…**, and the ordinary session launch. Closing the client does not cancel the task.
 
-If these rules select no account, creation refuses rather than falling back to uid 1000. A selected account whose home
-is missing gets a home seeded from `/etc/skel`. Home preparation never seeds into or changes ownership inside the
-checkout bind; the host home is never mounted. Farhelm refuses identities its account tools or rootless uid mapping
-cannot support, unreadable image account facts, and missing tools needed to create an account. Choosing and preparing
-the account are part of container creation under the creation fence; a failure after starting the container removes it,
-with absence confirmed under the same lock, before creation can be retried.
+The helm records the session-owned row and reserved-prefix container name before creation. It connects directly through
+`podman exec -i`, locally or through the container host's SSH connection. Credentials, subscription logins, recipe
+tunnels, updates, hooks, conversation capture, attachments, terminal tabs, file links and downloads use the ordinary
+supervisor paths inside the container. Readable files anywhere in that account's container filesystem are available
+under the ordinary file rules. For localhost tunnels the environment is remote, even on the helm's own machine, and
+loopback means the container's loopback. No host checkout, Farhelm socket or host account home is bind-mounted.
 
-A host account at uid 1000 with a stock Ubuntu image still uses the image's `ubuntu` account and `/home/ubuntu` when the
-host home path is absent. A host account at another uid, when neither its name nor uid exists in the image, gets a new
-account seeded from `/etc/skel`. An image prepared only for its uid-1000 account may then give the new account no
-harness, configuration or `sudo` access. Images can instead install harnesses system-wide, seed configuration through
-`/etc/skel`, or prepare an account and home for the host user. Existing containers retain their account until replaced;
-there is no per-launch account setting.
+Container sessions follow Sandbox sessions' ownership, launch cleanup, Clone, Restart, Replace, Delete and visibility
+contracts. Clone creates a new container from the recipe at its selected place, with repository intent and no disk copy.
+Restart and Replace stay in the existing container. Replace creates first and removes only its source session. Failed or
+ambiguous Replace preserves the container and files, reports what is known and identifies the container. An ordinary
+failed initial launch may discard its newly created container, including after a lost session-create reply. Failed
+cleanup and interrupted launches remain discoverable for explicit deletion through Hosts or **Containers not on this
+helm**. Nothing automatically continues an interrupted launch at helm startup.
 
-Each container creation resolves the name afresh, so rebuilding an image under the same name affects the next New,
-Replace or Replace with. Existing containers keep their original image. A missing image refuses before launch with its
-name and the explanation that it is not in Podman's local storage on this host. Empty images refuse as required input.
-Stored archive-era sessions, templates and recent setups remain containerized but read with an empty image; templates
-still apply, and the user must fill in an image before launch, or use Replace with for an old session.
+User Delete always confirms destruction of the container, every session and process in it, its checkout, files and
+unpushed work, including unlisted leftovers from Replace. It needs no fresh membership listing or final-session proof.
+Delete works while paused or while its supervisor is disconnected when the container host can be reached, without
+Resume. Confirmed container absence precedes forgetting its row and cached sessions. Failure keeps the resource and
+reason visible for retry. Host-level **Delete container** has the same consequence. No checkout moves to the trash.
 
-The container receives the whole managed checkout, read-write at its same canonical absolute path, even when launched
-through an alias or from a subdirectory; one selected host loopback TCP port, reachable as `127.0.0.1:<port>` inside;
-and optionally a GitHub token from a named host file as `GH_TOKEN`. Farhelm checks that file before launch, reads it
-again immediately before agent exec, trims surrounding whitespace, and neither stores its contents nor places them on a
-command line. Changing or removing it after the check can fail the later launch in its terminal. The user's own Podman
-tools can inspect the token while the receiving exec session lives.
+Suspend uses Podman pause, preserving processes and memory. Resume unpauses them. The helm closes its exec connection
+before pausing, since a paused exec pipe can hang. Controls, the suspended card, rows and Stop and suspend follow the
+sandbox pattern, with wording that freezing frees CPU while memory stays in use on the container host. Plain Stop ends
+the selected agent and tabs and leaves the container running. Stop and suspend finishes ordinary Stop before pausing the
+whole container. Suspend and Resume affect any leftover sessions too.
 
-The agent runs inside the container with the image's environment, `HOME` set to the chosen home, terminal type and
-colour capability, and that optional token. The agent, all terminal tabs and other execs inherit the chosen account and
-home from container creation. No Farhelm program, state, socket, session credential, reporter or browser fallback is
-supplied inside. A containerized launch has conversation integration turned off for that launch: status still follows
-the terminal screen, but no conversation is captured and no missing-hook notification fires. Farhelm does not edit the
-host's Claude trust configuration for it. Restart and Restart with are unavailable; the latter explicitly overrides its
-ordinary named-conversation offer. Replace and Replace with create a fresh session and container before deleting the
-source.
+A container host reboot stops the container while retaining its files. Whenever the helm finds a container Stopped while
+connected to its container host, it attempts one automatic start. This also covers an external `podman stop` or
+out-of-memory kill. Stopped has its own state and is never labelled Suspended. While starting, the ordinary unavailable
+card explains that Farhelm is starting the container again. A failed start shows the reason and offers Resume.
+Successful start brings back its supervisor with ordinary session classification. A host reboot interrupts sessions last
+known live, while known exits keep their outcome. A container stopped and started on the same host boot returns ended
+sessions through ordinary exit classification. Captured resumable conversations offer Restart, and agents never restart
+automatically. A helm restart reconnects running containers and leaves paused containers paused.
 
-Container creation diagnostics appear in the session terminal after checkout preparation. The container's idle keeper
-runs under Podman's own init, independently of the agent exec. It stays running when the agent exits on its own. Stop
-first stops the ordinary agent process tree, then the whole container, including any terminal or detached process in it.
-The stopped container and its files remain. Delete removes it only after the ordinary read-only preflights and upload
-cancellation; a refused preflight leaves it intact. Stop and Delete require Podman's actual state to confirm completion:
-a command's successful exit alone proves neither, and a command's failed exit does not override a confirmed stopped or
-absent container. Unconfirmed cleanup fails visibly and keeps the session for retry. Delete's existing confirmation
-follows the agent and terminal-tab state; after they end, Delete can still remove work that detached inside the
-container, just as ordinary Delete reaps leftover descendants after their agent exits.
+Session metadata names **&lt;recipe&gt; container on &lt;host&gt;**, with a container mark distinct from the sandbox
+cube. The footer names the new container and its host. Its session-owned host appears in Hosts, update eligibility and
+the existing attention area, with no permanent rail icon or ordinary launch/template/agent destination choice. A
+container host cannot be removed or retargeted while any environment row references it, including stopped environments
+and cleanup leftovers, or while recipe state records images or helpers there. The refusal names the environments or
+recipes to clean up first. This keeps the route available for confirmed resource cleanup.
 
-Container creation already holding the creation fence can delay cleanup, including while Podman waits on storage. After
-30 seconds waiting for that fence, the operation refuses without cancelling creation or signalling processes and asks
-the user to retry after preparation finishes. Once Stop or Delete revokes creation, an earlier delayed creator cannot
-recreate the container. After a host reboot the session terminal is gone and Restart remains unavailable, so the session
-can only be replaced or deleted.
+Recent setups retain the recipe, container host when applicable, explicit agent selection and repository-or-home intent
+after Delete removes the environment. Applying one creates a fresh environment. A missing recipe or container host stays
+unavailable until the user changes that choice.
 
-This isolates host filesystem capabilities, not memory or CPU use. The checkout is deliberately outside that isolation:
-it is the session's work, shared read-write with the host, and what the agent changes there reaching the host is
-intended behavior, not a gap to close. The agent can write anything in it, including Git hooks and Git configuration
-under `.git` and an agent's own project settings, which can run with the host account's full access when Git or an agent
-later runs in that checkout outside the container (from a terminal or a shell prompt that shows Git status, an editor,
-or a later ordinary session reusing the checkout). Internet access, LAN and tailnet addresses, and cloud metadata remain
-reachable. A localhost tunnel reaches the selected host's port, not an in-container port. The host's `containers.conf`
-still applies. Podman's ordinary privileges, including working sudo inside an appropriately prepared image, remain
-available. Keep-id maps the host account onto the chosen container account's uid and gid, so files it writes in the
-checkout belong to the host user; container-root files belong to a subordinate host uid. The user may need
-`podman unshare` to edit or remove them. A container-root-owned folder can likewise prevent Empty Trash until removed
-with `podman unshare rm -rf`. Delete removes the container and leaves images in the user's Podman storage alone.
+Containers inherit proxy variables from the container host's systemd user manager environment at creation. Farhelm
+disables Podman's implicit HTTP-proxy inheritance and writes those values into the container user's `environment.d`, so
+its user manager and every session inherit the same settings. Later host changes affect newly created containers.
+Rootless Podman supplies the containment. Internet, LAN, tailnet and cloud metadata remain reachable, and this version
+adds no network policy or CPU/memory limits. The container host's Podman configuration still applies. Agents in
+containers follow the same helm-side refusal as sandbox agents, including Delete/Clone requests from other hosts.
+
+Farhelm may pull the recipe's image when missing and the pinned managed Ubuntu base. Superseded Farhelm-built images are
+removed after successful replacement once no container uses them. Rebuild at a place and recipe deletion clean up that
+place's owned images. User-owned base images are retained, and a checkpoint image Farhelm manages cannot be used as a
+recipe base. Settings → Containers shows probe status per host and a refreshable **Containers not on this helm** list
+with confirmed Delete and retryable failure, following the sandbox-leftovers pattern. There is no Add host → Podman,
+Docker support or macOS container host support.
+
+### Retired containerized sessions
+
+The earlier experimental model, whose supervisor stayed outside the container and bind-mounted a host checkout, is
+retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and
+Replace with are refused. Delete retains the legacy container-removal path and confirms absence. Missing Podman counts
+as nothing left to remove. Stored sessions still decode their old container configuration, including `image_file`.
+Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an
+explanation and cannot create another old-style session. The old launcher switch and account-selection flow are gone.
 
 ### Local authority and trust between hosts
 
@@ -4826,8 +4830,8 @@ keep its new terminals), are trusted by this threat model. Farhelm does not prov
 against deliberate interference with agents, that private session or those terminal hosts, and session credentials do
 not provide same-account containment. Running agents without permission checks in disposable remote environments is an
 intended use. Farhelm still keeps simple local guards against accidental interference where their identity is available,
-such as excluding a session's recorded agent pane from tab discovery and destructive tab cleanup. Containerized sessions
-have their own explicit isolation contract above.
+such as excluding a session's recorded agent pane from tab discovery and destructive tab cleanup. Container sessions
+have their own rootless Podman containment contract above.
 
 Farhelm defends against what an attached host or an agent's output can do, and against mistakes a user plausibly makes
 in ordinary use of Farhelm or their machine. The test is whether a reasonable user would hit the trigger by accident.
@@ -4849,11 +4853,12 @@ directional: the helm and GUI must treat remote supervisor messages and agent-co
 host must not gain unauthorized execution or access to secrets on the helm's machine or another host through Farhelm.
 Existing redaction promises remain requirements even where the sender already has local account authority.
 
-Until sandbox-session trust is supported, their agents have no Farhelm request authority. The helm refuses every request
-from a session-owned origin before approval or host-permission shortcuts, through the ordinary owning-helm relay. This
-restriction adds neither a supervisor-local policy nor a notification. Agents on other hosts cannot Delete or Clone a
-sandbox session, launch a recipe target directly or through a template, or target a session-owned host entry. Other
-supported targeted operations keep their existing approval rules. User operations follow Sandbox sessions.
+Until environment-session trust is supported, their agents have no Farhelm request authority. The helm refuses every
+request from a session-owned origin before approval or host-permission shortcuts, through the ordinary owning-helm
+relay. This restriction adds neither a supervisor-local policy nor a notification. Agents on other hosts cannot Delete
+or Clone a sandbox or container session, launch a recipe target directly or through a template, or target a
+session-owned host entry. Other supported targeted operations keep their existing approval rules. User operations follow
+Sandbox sessions and Container sessions.
 
 Confirmed 2026-10-10: text a host supplied that the GUI shows outside a terminal is escaped so invisible and
 direction-changing characters are visible, including in accessible names, wherever it appears and however it reached the
@@ -4928,8 +4933,8 @@ command it carries: an approved spawn that applies a template, or any spawn from
 without asking, delivers those contents to it. Until the read side is closed (TODO.md's
 [Maybe later bucket](TODO.md#maybe-later)), templates are no place for secrets that must stay hidden from an attached
 host. The fleet-wide session and host listings stay readable by every attached host except session-owned origins under
-Sandbox sessions. This acceptance is not a standing grant: it ends when reading other hosts' session and template data
-is limited to explicitly trusted environments.
+Sandbox sessions and Container sessions. This acceptance is not a standing grant: it ends when reading other hosts'
+session and template data is limited to explicitly trusted environments.
 
 Confirmed 2026-09-28, under that same read-side acceptance: command lines are not secret from agents either. An agent
 runs with the same account authority as its host's supervisor, so an agent may obtain any template's command line and
