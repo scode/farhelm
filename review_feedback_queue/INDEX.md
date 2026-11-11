@@ -193,9 +193,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`probe-timeout-discards-parsed-remote-path.md`](probe-timeout-discards-parsed-remote-path.md) — Probe cleanup can
   discard an already parsed executable path; a real escaped-helper trigger is unverified.
 
-- [`guarded-answer-loses-launcher-focus.md`](guarded-answer-loses-launcher-focus.md) — An ordinary Guarded answer
-  removes its focused control during preview refresh without a handoff; browser fallback is untested.
-
 - [`guarded-cancellation-test-lacks-effect-witness.md`](guarded-cancellation-test-lacks-effect-witness.md) — The
   edited-form cancellation test lacks a browser-effect witness before its manual launch clears pending work.
 
