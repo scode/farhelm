@@ -33,7 +33,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   a header Replace refused as a YOLO launch focus was still in the session's terminal and Cancel was left unfocused (7
   of 10 runs). Now the question focuses Cancel outright while the page's key/pointer press count still equals the count
   at the user's Replace click, and keeps the guard otherwise. The alternative was to record which element held focus at
-  the click and let the question take focus only from that element, which needs per-request focus bookkeeping.
+  the click and let the question take focus only from that element, which needs per-request focus bookkeeping. Plan:
+  `plans/queue/yolo-focus-origin.md`.
 
 - **Revisit accepting the agent-only SSH key fix for Tensorlake hosts.** Decided on the maintainer's behalf on
   2026-11-10 when tensorlake-skip-ssh-agent blocked: Tensorlake snapshot builds and sandbox-host connections could offer
@@ -45,6 +46,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   applies to the Tensorlake host), and drop the promise that Farhelm's key is always offered first. The alternative was
   broader identity isolation guaranteeing Farhelm's key goes first in every supported SSH configuration, which needs a
   new design that keeps proxy and jump configuration and the OpenSSH 7.6 floor, and more than the plan's size limit.
+  Plan: `plans/queue/tensorlake-key-order.md`.
 
 - **Revisit keeping a sandbox session's Suspend and Resume exclusive with launches.** Decided on the maintainer's behalf
   on 2026-11-10 when landing nonblocking-session-actions stopped: that plan lets you act on other sessions while a
@@ -52,7 +54,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   top bar run while a launch or a change to the host list was pending, while the Hosts panel's own Suspend and Resume
   still waited. The plan was sent back to keep the session-facing Suspend and Resume waiting as before, since its goal
   file listed relaxing that exclusion as needing reassessment. The alternative was to keep the overlap, after showing
-  that a suspend or resume running beside a launch on the same host cannot leave either in a wrong state.
+  that a suspend or resume running beside a launch on the same host cannot leave either in a wrong state. Plan:
+  `plans/queue/sandbox-suspend-overlap.md`.
 
 - **Revisit the rail bell re-reading every host's Trash on each status change.** Decided on the maintainer's behalf on
   2026-11-09 when landing rail-notification-bell: it landed with each open window re-reading every connected host's
@@ -60,14 +63,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   host's two folder-browsing slots (shared with the launcher's folder picker), a per-host lock on the helm and a
   database transaction, even when nothing is stuck. It is bounded and does not feed on itself. The alternative was to
   change it before landing; the cheap mitigation is to skip the lock and the transaction when nothing is stuck and the
-  host has no unresolved notice, or to read Trash only when a host reports a change.
+  host has no unresolved notice, or to read Trash only when a host reports a change. Plan:
+  `plans/queue/bell-trash-reads.md`.
 
 - **Revisit cutting long connection errors short in the host progress hover card.** Decided on the maintainer's behalf
   on 2026-11-09 when host-progress-hover blocked: when a host's connection detail or a run's message is too long to fit
   beside a readable current step, the hover card for a working host shows a shortened preview and says the full details
   are in Hosts, and stays a plain, non-interactive tooltip. A message that fits is shown whole. The alternative was a
   scrollable area inside the card, which keeps the whole text readable on hover but makes the card interactive (pointer,
-  dismissal and keyboard handling).
+  dismissal and keyboard handling). Plan: `plans/queue/host-progress-card-fixes.md`.
 
 ## Near term
 
@@ -182,41 +186,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and interrupted startups included, without treating old records as trustworthy retroactively), check how commands
   inside sessions select a binary under the new meaning of the record, and then restore the automatic replacement. Start
   with a focused review of supervisor startup and interruption before implementing.
-
-- **Search sessions by content or action.** Let the user find a session by what happened in it — which session ran a
-  certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
-  exposed are TBD.
-
-- **Treat the GUI–helm connection as infallible.** Decided by the maintainer on 2026-10-26 during triage of the review
-  queue's highest bucket (`TRIAGE_OUTCOMES.md`, `template-delete-lost-reply-loses-undo.md`), in their words: "The UI and
-  the Helm fundamentally should have an infallible connection. If the connection in any way fails then (a) for desktop
-  that means the app crashes, and (b) for browser that's a full page reload. We need to stop adding complexity and
-  causing code review feedback on this topic. _Logically speaking_, we should treat messages going between helm and UI
-  as going over an infalliable transport." Nothing the GUI holds survives such a failure; the GUI starts over from what
-  the helm reports, the way the 2026-10-22 browser sign-in-expiry rule already works. The point is to stop review
-  findings about lost replies, transport errors and unknown outcomes between the GUI and the helm, and to remove the
-  complexity that exists only because that link can fail. The work, in order:
-  - Settle the behavior for every case and write it into SPEC.md and SPEC_impl.md. Open questions: whether the desktop
-    app literally crashes or restarts its interface from scratch (same logical effect, friendlier); the browser with the
-    helm down or restarting for an update, and after a laptop sleep, which should show the outage screen and reload once
-    the helm answers rather than loop; terminal and event streams dropping; and the GUI's own request deadlines (10 s
-    reads, 60 s for host operations that work on another machine, 15 min for trash deletes, all in
-    `crates/farhelm-ui/src/api.rs`). Those deadlines either stay only as a watchdog whose expiry means the helm is
-    broken, with the helm always answering promptly (for example "accepted" or "the host timed out"), or go away. The
-    boundaries to state: the helm's links to supervisors stay fallible, and their timeouts are ordinary helm replies the
-    GUI shows; refusals are replies, not failures. Say how this replaces SPEC.md's rule that a desktop action "either
-    completes and reports its outcome, or reports that its outcome is unknown", and how it relates to the 2026-10-22
-    decisions on browser sign-in expiry and failed GUI saves.
-  - Audit the GUI and the helm for complexity that exists only because the GUI–helm link can fail: lost-reply
-    reconciliation (number keys and quick-launch marks, SPEC_impl.md), unknown-outcome reports (including the
-    template-delete "may have happened" report this same triage chose as a stopgap), retry ladders, fences against late
-    replies, and the tests for all of them.
-  - Remove it.
-  - Re-triage the review-queue items that rest on a lost GUI–helm reply under the new rule, starting with
-    `review_feedback_queue/rename-lost-reply-restores-old-shortcut-indication.md` and
-    `review_feedback_queue/failed-test-response-does-not-fence-settings-write.md`.
-- **Make auto-tunneling safe.** Figure out how to make auto-tunneling properly safe: can we use some hostname trick so
-  the service does not present as localhost? TBD. Pinggy? TBD.
 
 - **Recognize Muse Code questions and approvals.** Detect questions and approval dialogs during a conversation from real
   Muse screens. These can currently look idle while Muse waits for an answer. Capturing them needs an authenticated test
@@ -423,7 +392,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Open the host update hover card from the progress bar too.** Hovering a host's update flow in the sidebar shows its
   step list only when the pointer is over the message above the progress bar; make the progress bar itself show the same
-  hover.
+  hover. Plan: `plans/queue/host-progress-card-fixes.md`.
 
 ### Tensorlake
 
@@ -446,6 +415,97 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   home and also checks a separate onboarding-completion setting. The fix the maintainer deferred: have Farhelm write the
   smallest set of non-secret first-run settings Claude needs, found by an isolated probe, keeping the user's other
   settings and the normal agent home, and check it with a valid subscription login.
+
+- **Let agents in sandbox sessions ask Farhelm to act.** The first version of sandbox sessions (a session in a
+  Tensorlake sandbox of its own, `plans/queue/sandbox-sessions.md`) refuses every agent request from such a session:
+  `farhelm spawn` and every `farhelm agent …` verb. The maintainer kept that refusal, without a notification, when
+  simplifying the first version on 2026-11-09. Decide what an agent in a disposable sandbox may ask for. It should not
+  reach the user's other hosts any further than it could from anywhere else (the trust questions in
+  `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md` and SPEC.md's "Local authority and trust between
+  hosts"). Then allow that much. Spawning another sandbox session from the same recipe is the obvious first candidate.
+  Plan: `plans/queue/environment-agent-operations.md`.
+
+- **Deep dive on SQLite compaction settings.** Review how Farhelm's databases handle compaction: WAL checkpointing
+  (nothing sets `wal_autocheckpoint`, so SQLite's default of 1000 pages applies, and the supervisor's database module
+  says there is no checkpoint policy), auto-vacuum, and page size. Decide whether the long-lived stores need explicit
+  settings or a periodic maintenance step as they grow.
+
+### Trivial
+
+## Mid term
+
+- **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
+  the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.
+
+- Initial version of agent2agent comms.
+
+- **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
+  session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
+  request, and the command is hidden from agents. One gap remains where a delivered message could do something the user
+  never agreed to. The "is it waiting on a question?" check uses a status reading up to about two seconds old, so a
+  permission or trust question that appears in that window, or right after the agent starts, can receive the message and
+  its Enter as its answer. Re-enabling means fixing that gap or deciding to accept it, then setting
+  `AGENT_PROMPTS_ENABLED` in `crates/farhelm-helm/src/agent_requests.rs` to true, unhiding the CLI verb, restoring its
+  agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md,
+  Agent-spawned sessions, keeps the design.
+
+- **Support Kimi Code.** Add Moonshot's Kimi Code CLI as an agent type: terminal launches with guarded and YOLO
+  permission flags, model, effort and prompt choices once their command-line contracts are verified, a harness mark and
+  docs page, then session tracking — per-launch hooks/instructions, conversation capture for resume, and waiting/status
+  recognition.
+
+- **Support DeepSeek's coding agent.** DeepSeek publishes models, but no clearly official terminal coding agent was
+  found on 2026-10-28; the DeepSeek CLIs that turn up are third-party. Confirm the product and its binary first, then
+  add it the way Kimi Code is to be added.
+
+- **Consider auto-scaling the transfer window.** Uploads, downloads and tunnel relays between the helm and a supervisor
+  each have a fixed 4 MiB credit window, so one stream's throughput is capped near 4 MiB per round trip whatever the
+  link can carry. Asked for by the maintainer on 2026-11-08 while planning the chunk-size change
+  (`plans/queue/mux-chunk-size.md`): consider sizing the window automatically from bandwidth and round-trip time,
+  bearing in mind that on remote hosts ssh's own channel window, shared by every stream, may be the real cap.
+
+- **Cap the Mac app's own localhost tunnels.** Recipe tunnels are capped at 64 tunneled connections per host, but the
+  relays the helm opens for the desktop app's localhost tunnels take no permit, so their number is unbounded
+  (`crates/farhelm-supervisor/src/service/tcp_relays.rs`, around the relay start). Asked for by the maintainer on
+  2026-11-08 while planning the chunk-size change.
+
+- **Search sessions by content or action.** Let the user find a session by what happened in it — which session ran a
+  certain task, command, or produced a given output — rather than only by name. What gets indexed and how the search is
+  exposed are TBD.
+
+- **Treat the GUI–helm connection as infallible.** Decided by the maintainer on 2026-10-26 during triage of the review
+  queue's highest bucket (`TRIAGE_OUTCOMES.md`, `template-delete-lost-reply-loses-undo.md`), in their words: "The UI and
+  the Helm fundamentally should have an infallible connection. If the connection in any way fails then (a) for desktop
+  that means the app crashes, and (b) for browser that's a full page reload. We need to stop adding complexity and
+  causing code review feedback on this topic. _Logically speaking_, we should treat messages going between helm and UI
+  as going over an infalliable transport." Nothing the GUI holds survives such a failure; the GUI starts over from what
+  the helm reports, the way the 2026-10-22 browser sign-in-expiry rule already works. The point is to stop review
+  findings about lost replies, transport errors and unknown outcomes between the GUI and the helm, and to remove the
+  complexity that exists only because that link can fail. The work, in order:
+  - Settle the behavior for every case and write it into SPEC.md and SPEC_impl.md. Open questions: whether the desktop
+    app literally crashes or restarts its interface from scratch (same logical effect, friendlier); the browser with the
+    helm down or restarting for an update, and after a laptop sleep, which should show the outage screen and reload once
+    the helm answers rather than loop; terminal and event streams dropping; and the GUI's own request deadlines (10 s
+    reads, 60 s for host operations that work on another machine, 15 min for trash deletes, all in
+    `crates/farhelm-ui/src/api.rs`). Those deadlines either stay only as a watchdog whose expiry means the helm is
+    broken, with the helm always answering promptly (for example "accepted" or "the host timed out"), or go away. The
+    boundaries to state: the helm's links to supervisors stay fallible, and their timeouts are ordinary helm replies the
+    GUI shows; refusals are replies, not failures. Say how this replaces SPEC.md's rule that a desktop action "either
+    completes and reports its outcome, or reports that its outcome is unknown", and how it relates to the 2026-10-22
+    decisions on browser sign-in expiry and failed GUI saves.
+  - Audit the GUI and the helm for complexity that exists only because the GUI–helm link can fail: lost-reply
+    reconciliation (number keys and quick-launch marks, SPEC_impl.md), unknown-outcome reports (including the
+    template-delete "may have happened" report this same triage chose as a stopgap), retry ladders, fences against late
+    replies, and the tests for all of them.
+  - Remove it.
+  - Re-triage the review-queue items that rest on a lost GUI–helm reply under the new rule, starting with
+    `review_feedback_queue/rename-lost-reply-restores-old-shortcut-indication.md` and
+    `review_feedback_queue/failed-test-response-does-not-fence-settings-write.md`.
+
+- **Make auto-tunneling safe.** Figure out how to make auto-tunneling properly safe: can we use some hostname trick so
+  the service does not present as localhost? TBD. Pinggy? TBD.
+
+### Tensorlake
 
 - **Live resize of Tensorlake hosts.** A host is created at its recipe's size, and a recipe's size change affects only
   hosts created afterwards. Tensorlake can resize a running sandbox in place (CAS image format only): it takes one to
@@ -474,15 +534,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   launch, and bulk Suspend, Resume and Stop and suspend. The maintainer deferred these when simplifying the first
   version on 2026-11-09. Sandbox launches record no recent setups, and Save as template is unavailable for a recipe or
   session-owned host target; recipe templates and individual lifecycle controls are supported.
-
-- **Let agents in sandbox sessions ask Farhelm to act.** The first version of sandbox sessions (a session in a
-  Tensorlake sandbox of its own, `plans/queue/sandbox-sessions.md`) refuses every agent request from such a session:
-  `farhelm spawn` and every `farhelm agent …` verb. The maintainer kept that refusal, without a notification, when
-  simplifying the first version on 2026-11-09. Decide what an agent in a disposable sandbox may ask for. It should not
-  reach the user's other hosts any further than it could from anywhere else (the trust questions in
-  `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md` and SPEC.md's "Local authority and trust between
-  hosts"). Then allow that much. Spawning another sandbox session from the same recipe is the obvious first candidate.
-  Plan: `plans/queue/environment-agent-operations.md`.
 
 - **Auto-suspend forgotten sandbox sessions.** A sandbox session bills its CPU and memory for as long as its sandbox
   runs. While the helm is connected, Tensorlake's idle timeout never fires, because the helm's connection counts as
@@ -538,50 +589,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - The helm side has no file logging yet (stderr only, per SPEC_impl.md), so helm-side timing for a report would have
     to come from an in-memory buffer as well, or wait for file logging.
   - Browser and desktop both need it; unlike the client-log route, this is not desktop-only.
-
-- **Deep dive on SQLite compaction settings.** Review how Farhelm's databases handle compaction: WAL checkpointing
-  (nothing sets `wal_autocheckpoint`, so SQLite's default of 1000 pages applies, and the supervisor's database module
-  says there is no checkpoint policy), auto-vacuum, and page size. Decide whether the long-lived stores need explicit
-  settings or a periodic maintenance step as they grow.
-
-### Trivial
-
-## Mid term
-
-- **Built-in questions tool.** A built-in questions tool in the style of the interactive artifacts: how an agent asks
-  the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.
-
-- Initial version of agent2agent comms.
-
-- **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
-  session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
-  request, and the command is hidden from agents. One gap remains where a delivered message could do something the user
-  never agreed to. The "is it waiting on a question?" check uses a status reading up to about two seconds old, so a
-  permission or trust question that appears in that window, or right after the agent starts, can receive the message and
-  its Enter as its answer. Re-enabling means fixing that gap or deciding to accept it, then setting
-  `AGENT_PROMPTS_ENABLED` in `crates/farhelm-helm/src/agent_requests.rs` to true, unhiding the CLI verb, restoring its
-  agent instructions and docs, un-ignoring the end-to-end delivery tests, and writing a new changelog fragment. SPEC.md,
-  Agent-spawned sessions, keeps the design.
-
-- **Support Kimi Code.** Add Moonshot's Kimi Code CLI as an agent type: terminal launches with guarded and YOLO
-  permission flags, model, effort and prompt choices once their command-line contracts are verified, a harness mark and
-  docs page, then session tracking — per-launch hooks/instructions, conversation capture for resume, and waiting/status
-  recognition.
-
-- **Support DeepSeek's coding agent.** DeepSeek publishes models, but no clearly official terminal coding agent was
-  found on 2026-10-28; the DeepSeek CLIs that turn up are third-party. Confirm the product and its binary first, then
-  add it the way Kimi Code is to be added.
-
-- **Consider auto-scaling the transfer window.** Uploads, downloads and tunnel relays between the helm and a supervisor
-  each have a fixed 4 MiB credit window, so one stream's throughput is capped near 4 MiB per round trip whatever the
-  link can carry. Asked for by the maintainer on 2026-11-08 while planning the chunk-size change
-  (`plans/queue/mux-chunk-size.md`): consider sizing the window automatically from bandwidth and round-trip time,
-  bearing in mind that on remote hosts ssh's own channel window, shared by every stream, may be the real cap.
-
-- **Cap the Mac app's own localhost tunnels.** Recipe tunnels are capped at 64 tunneled connections per host, but the
-  relays the helm opens for the desktop app's localhost tunnels take no permit, so their number is unbounded
-  (`crates/farhelm-supervisor/src/service/tcp_relays.rs`, around the relay start). Asked for by the maintainer on
-  2026-11-08 while planning the chunk-size change.
 
 ## Doc todo
 
