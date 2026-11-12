@@ -11,7 +11,7 @@
 //! build cannot even ask, because wry's eval channel is dead on
 //! WKWebView (MT-5, `api::mint_lease`'s docs). So the runtime path —
 //! listen, classify, upload, insert — is terminal.js's, next to the
-//! xterm.js island that owns the terminal it happened to.
+//! terminal island that owns the terminal it happened to.
 //!
 //! What is left for Rust is everything that is a DECISION rather than a
 //! DOM call, and that is what this module holds. [`attachment_policy`]
@@ -62,9 +62,8 @@
 //! drag and a real clipboard image have never been exercised anywhere.
 //! What the operator has to do in the self-contained desktop app (a release
 //! bundle, or the development bundle started by `scripts/desktop-smoke.sh`):
-//! run these checks with both old terminals and terminals in terminal hosts.
-//! The browser's shared attachment tests cannot establish that native file
-//! drags reach either terminal surface in the app.
+//! run these checks in a terminal. The browser's shared attachment tests
+//! cannot establish that native file drags reach the terminal in the app.
 //!
 //! 1. Drag a real file from the file manager onto the AGENT terminal of an
 //!    open session. Expect: an "Attaching …" line, then the host path

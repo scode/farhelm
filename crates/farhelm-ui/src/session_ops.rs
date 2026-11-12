@@ -43,9 +43,12 @@ pub(crate) enum HeaderAction {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Lifecycle {
     pub(crate) revision: u32,
-    /// The last finished Restart's outcome, kept so that a view opened later
-    /// can stand in for a listing that has not caught up with the restarted
-    /// run yet (`session_view.rs`, `relaunched` and `restart_terminal_kind`).
+    /// The last finished Restart succeeded and no read has shown its run yet,
+    /// kept so that a view opened later can stand in for a listing that has not
+    /// caught up with the restarted run (`session_view.rs`, `relaunched`): a
+    /// success is what lets the view mount the agent's terminal while the
+    /// listing still describes the run the Restart replaced. A failed Restart
+    /// leaves nothing to stand in for, so it reads as false like no Restart.
     ///
     /// It is forgotten as soon as any read shows the restarted run: the open
     /// view's detail read, or the sidebar's listing (`restarts_retired_by`).
@@ -53,20 +56,8 @@ pub(crate) struct Lifecycle {
     /// every read says Interrupted again, and a view opened then would trust
     /// this old success and attach to a destroyed pane instead of showing the
     /// interrupted card.
-    pub(crate) restart: Option<crate::list::RestartOutcome>,
+    pub(crate) restart_succeeded: bool,
     pub(crate) restart_revision: u32,
-    /// The sidebar's newest listing generation when `restart` was recorded
-    /// (`ops::ReadGate::latest_started`); only a read with a higher generation
-    /// may retire `restart`.
-    ///
-    /// A read already in flight at that moment describes the run the Restart
-    /// replaced, including its terminal kind. For a Restart of a running or
-    /// exited session it is not Interrupted, so `read_confirms_run` alone
-    /// would let it retire the outcome, and a view opened next would take the
-    /// replaced run's terminal kind instead of the reply's (`agent_spec_kind`
-    /// in `session_view.rs`). The helm records the Restart's reply before it
-    /// answers, so any read started after the reply carries the new kind.
-    pub(crate) restart_listing_floor: u64,
 }
 
 /// Whether a read of a session shows a run that a remembered Restart outcome
@@ -79,18 +70,19 @@ pub(crate) struct Lifecycle {
 /// it is what keeps a view from showing the interrupted card for a session
 /// that is in fact running again. Any other status leaves it nothing to stand
 /// in for. A stale session's host is gone, and stale outranks interrupted on
-/// screen. The outcome's other job, the terminal kind, is guarded by
-/// `Lifecycle::restart_listing_floor` instead. Shared by the open view's
-/// detail commit and the sidebar's listing commit, so the two can never
-/// disagree about when to forget.
+/// screen. A read already in flight when the Restart answered describes the
+/// replaced run, but that cannot retire the outcome too early: for an
+/// interrupted session it still says Interrupted, and for any other the
+/// outcome has nothing to stand in for. Shared by the open view's detail
+/// commit and the sidebar's listing commit, so the two can never disagree
+/// about when to forget.
 pub(crate) fn read_confirms_run(session: &Session) -> bool {
     session.stale || !matches!(session.status, crate::SessionStatus::Interrupted)
 }
 
 /// The sessions whose remembered Restart outcome one sidebar listing read
-/// retires: listed, shown by `read_confirms_run` to be past the restart,
-/// with no request pending for them, and read with a `generation` newer than
-/// the outcome's `restart_listing_floor`.
+/// retires: listed, shown by `read_confirms_run` to be past the restart, and
+/// with no request pending for them.
 ///
 /// Only sessions the listing positively shows count. A session the listing
 /// omits (filtered out, past a truncation, or deleted) keeps its outcome here;
@@ -100,7 +92,6 @@ pub(crate) fn restarts_retired_by(
     lifecycle: &HashMap<String, Lifecycle>,
     pending: &HashSet<String>,
     sessions: &[Session],
-    generation: u64,
 ) -> Vec<String> {
     sessions
         .iter()
@@ -108,9 +99,9 @@ pub(crate) fn restarts_retired_by(
         .map(|session| session.id.raw())
         .filter(|id| !pending.contains(*id))
         .filter(|id| {
-            lifecycle.get(*id).is_some_and(|state| {
-                state.restart.is_some() && generation > state.restart_listing_floor
-            })
+            lifecycle
+                .get(*id)
+                .is_some_and(|state| state.restart_succeeded)
         })
         .map(str::to_owned)
         .collect()
@@ -194,34 +185,24 @@ impl SessionOps {
         state.revision = state.revision.wrapping_add(1);
     }
 
-    /// Record a finished Restart POST's outcome behind a closing boundary.
-    ///
-    /// `listing_floor` is the sidebar's `ReadGate::latest_started` at this
-    /// moment; see `Lifecycle::restart_listing_floor` for why the listing
-    /// reads already in flight must not retire the outcome.
-    pub(crate) fn finish_restart(
-        mut self,
-        id: &str,
-        outcome: crate::list::RestartOutcome,
-        listing_floor: u64,
-    ) {
+    /// Record a finished Restart POST's outcome (whether it succeeded) behind a
+    /// closing boundary.
+    pub(crate) fn finish_restart(mut self, id: &str, succeeded: bool) {
         let mut states = self.lifecycle.write();
         let state = states.entry(id.to_owned()).or_default();
         state.revision = state.revision.wrapping_add(1);
-        state.restart = Some(outcome);
+        state.restart_succeeded = succeeded;
         state.restart_revision = state.revision;
-        state.restart_listing_floor = listing_floor;
     }
 
-    /// The remembered successful Restart a newly mounted view seeds itself
-    /// from, if no read has shown the restarted run yet. Untracked: a view
-    /// reads it once, at mount.
-    pub(crate) fn retained_restart(self, id: &str) -> Option<crate::list::RestartOutcome> {
+    /// Whether a remembered successful Restart is there for a newly mounted
+    /// view to seed itself from, because no read has shown the restarted run
+    /// yet. Untracked: a view reads it once, at mount.
+    pub(crate) fn retained_restart(self, id: &str) -> bool {
         self.lifecycle
             .peek()
             .get(id)
-            .and_then(|state| state.restart)
-            .filter(|outcome| outcome.succeeded)
+            .is_some_and(|state| state.restart_succeeded)
     }
 
     /// Forget the remembered Restart outcomes a committed sidebar listing read
@@ -231,20 +212,15 @@ impl SessionOps {
     /// commit calls this, filtered ones included, and an unconditional write
     /// would add a wake of every reader of the map (each open view's Restart
     /// observer) to each of them.
-    pub(crate) fn retire_confirmed_restarts(mut self, sessions: &[Session], generation: u64) {
-        let retired = restarts_retired_by(
-            &self.lifecycle.peek(),
-            &self.pending.peek(),
-            sessions,
-            generation,
-        );
+    pub(crate) fn retire_confirmed_restarts(mut self, sessions: &[Session]) {
+        let retired = restarts_retired_by(&self.lifecycle.peek(), &self.pending.peek(), sessions);
         if retired.is_empty() {
             return;
         }
         let mut states = self.lifecycle.write();
         for id in retired {
             if let Some(state) = states.get_mut(&id) {
-                state.restart = None;
+                state.restart_succeeded = false;
             }
         }
     }
@@ -387,8 +363,8 @@ mod tests {
         });
     }
 
-    /// A reopened view needs both mutation boundaries and the successful reply's
-    /// terminal kind even when no view was mounted when the result arrived.
+    /// A reopened view needs both mutation boundaries and the successful
+    /// reply even when no view was mounted when the result arrived.
     #[farhelm_testtrace::test]
     fn lifecycle_boundaries_and_restart_reply_outlive_the_view() {
         let mut dom = VirtualDom::new(owner);
@@ -398,17 +374,17 @@ mod tests {
             let old_read = operations.revision("a");
             operations.boundary("a");
             let during_read = operations.revision("a");
-            let outcome = crate::list::RestartOutcome {
-                succeeded: true,
-                agent_terminal: None,
-            };
-            operations.finish_restart("a", outcome, 7);
+            operations.finish_restart("a", true);
             let finished = operations.revision("a");
             assert_ne!(old_read, during_read);
             assert_ne!(during_read, finished);
-            assert_eq!(
-                operations.lifecycle.peek().get("a").unwrap().restart,
-                Some(outcome)
+            assert!(
+                operations
+                    .lifecycle
+                    .peek()
+                    .get("a")
+                    .unwrap()
+                    .restart_succeeded
             );
             assert_eq!(
                 operations
@@ -418,16 +394,6 @@ mod tests {
                     .unwrap()
                     .restart_revision,
                 finished
-            );
-            assert_eq!(
-                operations
-                    .lifecycle
-                    .peek()
-                    .get("a")
-                    .unwrap()
-                    .restart_listing_floor,
-                7,
-                "the outcome remembers which listing reads were already in flight"
             );
             assert_eq!(
                 operations.revision("b"),
@@ -469,22 +435,15 @@ mod tests {
             pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         }
     }
 
-    /// A remembered successful Restart, recorded when listing generation
-    /// `floor` was the newest one started.
-    fn remembered(floor: u64) -> Lifecycle {
+    /// A remembered successful Restart.
+    fn remembered() -> Lifecycle {
         Lifecycle {
             revision: 2,
-            restart: Some(crate::list::RestartOutcome {
-                succeeded: true,
-                agent_terminal: None,
-            }),
+            restart_succeeded: true,
             restart_revision: 2,
-            restart_listing_floor: floor,
         }
     }
 
@@ -496,26 +455,24 @@ mod tests {
     ///
     /// What: a listing read retires a session's remembered outcome exactly
     /// when it lists the session as running (any status but Interrupted) or
-    /// stale, no request for it is pending, and the read started after the
-    /// outcome was recorded. A read that still says Interrupted has not
-    /// caught up with the restarted run and keeps it (the window the outcome
-    /// exists for), a read already in flight at the reply may describe the
-    /// replaced run and keeps it, and a session the listing omits keeps it.
+    /// stale and no request for it is pending. A read that still says
+    /// Interrupted has not caught up with the restarted run and keeps it (the
+    /// window the outcome exists for), and a session the listing omits keeps
+    /// it.
     #[farhelm_testtrace::test]
     fn a_listing_retires_a_remembered_restart_only_once_it_shows_the_new_run() {
         use crate::SessionStatus::{Interrupted, Running};
         let lifecycle: HashMap<String, Lifecycle> = [
-            ("caught-up", remembered(3)),
-            ("not-yet", remembered(3)),
-            ("host-gone", remembered(3)),
-            ("in-flight-read", remembered(4)),
-            ("pending", remembered(3)),
-            ("omitted", remembered(3)),
+            ("caught-up", remembered()),
+            ("not-yet", remembered()),
+            ("host-gone", remembered()),
+            ("pending", remembered()),
+            ("omitted", remembered()),
             (
                 "nothing-remembered",
                 Lifecycle {
-                    restart: None,
-                    ..remembered(3)
+                    restart_succeeded: false,
+                    ..remembered()
                 },
             ),
         ]
@@ -527,19 +484,13 @@ mod tests {
             listed("caught-up", Running, false),
             listed("not-yet", Interrupted, false),
             listed("host-gone", Interrupted, true),
-            listed("in-flight-read", Running, false),
             listed("pending", Running, false),
             listed("nothing-remembered", Running, false),
             listed("never-restarted", Running, false),
         ];
-        let mut retired = restarts_retired_by(&lifecycle, &pending, &listing, 4);
+        let mut retired = restarts_retired_by(&lifecycle, &pending, &listing);
         retired.sort();
         assert_eq!(retired, ["caught-up", "host-gone"]);
-        assert!(
-            restarts_retired_by(&lifecycle, &pending, &listing, 5)
-                .contains(&"in-flight-read".to_owned()),
-            "a read started after the reply does retire it"
-        );
     }
 
     /// Why this matters: every listing commit calls this, so it must clear
@@ -553,25 +504,24 @@ mod tests {
         dom.rebuild_in_place();
         dom.in_runtime(|| {
             let operations = OPERATIONS.with(Cell::get).unwrap();
-            let outcome = crate::list::RestartOutcome {
-                succeeded: true,
-                agent_terminal: None,
-            };
-            operations.finish_restart("a", outcome, 0);
-            operations.finish_restart("b", outcome, 0);
+            operations.finish_restart("a", true);
+            operations.finish_restart("b", true);
             let before = *operations.lifecycle.peek().get("a").unwrap();
-            assert_eq!(operations.retained_restart("a"), Some(outcome), "premise");
-            operations
-                .retire_confirmed_restarts(&[listed("a", crate::SessionStatus::Running, false)], 1);
-            assert_eq!(operations.retained_restart("a"), None);
+            assert!(operations.retained_restart("a"), "premise");
+            operations.retire_confirmed_restarts(&[listed(
+                "a",
+                crate::SessionStatus::Running,
+                false,
+            )]);
+            assert!(!operations.retained_restart("a"));
             assert_eq!(
                 *operations.lifecycle.peek().get("a").unwrap(),
                 Lifecycle {
-                    restart: None,
+                    restart_succeeded: false,
                     ..before
                 }
             );
-            assert_eq!(operations.retained_restart("b"), Some(outcome));
+            assert!(operations.retained_restart("b"));
         });
     }
 }

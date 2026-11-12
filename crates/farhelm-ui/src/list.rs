@@ -73,5 +73,5 @@ pub(crate) use shared::{
 pub(crate) use templates::apply_template_bindings;
 pub(crate) use view::{
     DeleteNotice, HeaderPrefillRequest, ListView, ReplaceIntent, ReplaceYoloQuestions,
-    RestartBridge, RestartOutcome, SharedPreferences,
+    RestartBridge, SharedPreferences,
 };

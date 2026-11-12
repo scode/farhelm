@@ -442,7 +442,7 @@ pub(crate) async fn assert_live_exchange(
         .send_keys(channel, format!("{token}\r").into_bytes())
         .await;
     let mut live_bytes = Vec::new();
-    let response = agent_echo(stream, &token);
+    let response = agent_echo(&token);
     let observed = tokio::time::timeout(
         Duration::from_secs(20),
         wait_for(stream, &mut live_bytes, &response, 30),

@@ -893,7 +893,7 @@ into tmux, is refused.
                     self.accept(value, output)
 
     def test_tmux_branch_requires_survival_then_a_move_only_when_the_candidate_creates_hosts(self):
-        """The band and move are conditional on the candidate's observed hosts, never on a release version.
+        """The move is conditional on the candidate's observed hosts, never on a release version.
 
 The old tmux session must first keep its launch generation across the upgrade:
 a candidate that silently relaunched it fails. With hosts created, a pass then

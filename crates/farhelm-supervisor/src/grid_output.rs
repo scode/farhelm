@@ -68,12 +68,13 @@ use farhelm_terminal_emulator::{Emulator, MouseReporting};
 /// to, well below [`GRID_MAX_MESSAGE`].
 ///
 /// The format allows 1 MiB, but the connection's writer queue is bounded by
-/// frame count (64 frames), so message size is what bounds the bytes one
-/// attachment can have queued: at this size about 2 MiB, the same bound an old
-/// terminal's byte stream has with its 32 KiB chunks. It also keeps an ordinary
-/// row's message within the 64 KiB a helm admits per terminal data frame today.
-/// A single row larger than this (a long row of non-ASCII cells, or one with
-/// many links) still goes, alone, in a message of its own.
+/// frame count (64 frames, `CONNECTION_WRITER_QUEUE` in `service::connection`),
+/// so message size is what bounds the bytes one attachment can have queued
+/// there: at this size about 2 MiB for history. The helm admits a data frame
+/// up to [`GRID_MAX_MESSAGE`], so the target is about the writer queue, not
+/// about what a single frame may hold. A single row larger than this (a long
+/// row of non-ASCII cells, or one with many links) still goes, alone, in a
+/// message of its own.
 pub const MESSAGE_TARGET: usize = 32 * 1024;
 
 /// Conservative JSON envelope allowance for clipboard parts. Row messages

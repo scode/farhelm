@@ -30,7 +30,7 @@ async function openLiveSession(page: Page, id: string) {
 
 /** The chord must open the same question as the header without sending bytes.
  * A live echo after Escape proves the handoff returns to the existing agent;
- * binary frames catch a shortcut that opens a question after also reaching xterm.
+ * binary frames catch a shortcut that opens a question after also reaching the terminal.
  */
 test("browser Delete chord shares header confirmation and restores terminal focus without forwarding input", async ({ page, request }) => {
   const previous = await readPreferences(request);

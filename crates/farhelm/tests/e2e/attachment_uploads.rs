@@ -1122,7 +1122,6 @@ async fn a_finished_upload_channel_can_be_attached_as_a_terminal() {
         terminal: TerminalSelector::default(),
         lease: "after-upload".to_string(),
         if_unowned: false,
-        grid: true,
     };
     peer.control(&attach).await;
     let refused = peer.next_outcome(20).await;

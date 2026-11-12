@@ -412,11 +412,10 @@ repairs residue to manufacture a clean fixture.
 `update-discovery` requires the old app's actual in-app check to discover and install the candidate. It cannot pass on a
 manual installer path. The two supervisor/agent checks require connected candidate supervisors, version evidence and a
 meaningful response from a genuine agent launched through Farhelm on the corresponding host. A plain command or CLI
-version alone cannot satisfy them. They also record the new session's terminal kind from its session details and a fixed
-terminal-host sample taken once the new session exists; where the database stores `terminal_kind`, the import requires
-the stored kind to agree with that sample, and the tester compares the session details with it. Either kind passes
-there. The new session must keep running: the old-session check samples its terminal to decide whether the candidate
-creates terminal hosts.
+version alone cannot satisfy them. They also record a fixed terminal-host sample taken once the new session exists;
+where the database stores `terminal_kind`, the import requires the stored kind to agree with that sample (the
+candidate's session details name no terminal kind for the tester to read). Either kind passes there. The new session
+must keep running: the old-session check samples its terminal to decide whether the candidate creates terminal hosts.
 
 P0 requires no template, changed setting or counter continuity workload. Its one old conversation and resume test is a
 deliberate exception the maintainer asked for, because terminals are moving from tmux to terminal hosts and P0 must show
@@ -430,13 +429,12 @@ observed the captured session. The later checks branch on the terminal kind obse
   (`host_survival` or `remote_host_survival`), which takes its own samples before the session is touched and compares
   them with the old fixture's receipts. It also decides whether the candidate creates terminal hosts, from hosts running
   then that the old fixture did not have (the new agent session must still exist). Each check ends with a final sample
-  (`old_session_after` or `remote_old_session_after`), refused unless the comparison ran first. Session details must
-  show the observed kind.
+  (`old_session_after` or `remote_old_session_after`), refused unless the comparison ran first.
 - In both branches the old session must survive the upgrade: same session, same launch generation, still captured.
 - Old session in tmux: it must answer a new typed question (whose answer, 48, is not the earlier turn's 42 already on
-  screen). If the candidate creates terminal hosts, the migration band must show on it, offering Restart; Restart must
-  move it to a host terminal and the resumed agent must name the word from the earlier turn. If the candidate creates
-  none, no band or Restart is expected and its launch generation must stay unchanged.
+  screen). If the candidate creates terminal hosts, it must offer Restart; Restart must move it to a host terminal and
+  the resumed agent must name the word from the earlier turn. If the candidate creates none, no Restart is expected and
+  its launch generation must stay unchanged.
 - Old session in a terminal host: the host and its child must be the same processes (pid and start identity) as at the
   old fixture, so a replacement that restores the screen and resumes the conversation fails. The rediscovered terminal
   must show its earlier screen and answer the new question; then Restart, which must land on a new terminal host, not

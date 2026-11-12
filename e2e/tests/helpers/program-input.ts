@@ -4,50 +4,29 @@
 // decoding has unit tests of its own (program-input.test.ts, run with
 // `node --test` in e2e/harness-tests' way).
 //
-// Which protocol a frame speaks is the attachment's, never guessed from the
-// bytes: a socket's kind is the helm's stream notice on it (`{"type":
-// "stream","kind":...}`, terminal.js's `noteStreamKind`), and a socket that
-// sent no notice speaks bytes, as terminal.js reads it.
+// Every terminal socket carries a grid stream, so every binary frame a page
+// sends on one is a grid input message (crates/farhelm-proto's `GridInput`),
+// which the supervisor encodes into the bytes the program reads.
 
-/** One socket's stream kind as its notice set it; null until a notice arrives. */
-export interface SocketKind {
-  kind: "bytes" | "grid" | null;
-}
-
-/** One binary frame a page sent, with its socket's stream kind when it went out. */
+/** One binary frame a page sent on a terminal socket. */
 export interface InputFrame {
   payload: Buffer;
-  socket: SocketKind;
 }
 
-/** The parts of Playwright's WebSocket this needs, so tests can pass a stand-in. */
+/** The part of Playwright's WebSocket this needs, so tests can pass a stand-in. */
 interface FrameSource {
-  on(event: "framesent" | "framereceived", listener: (frame: { payload: string | Buffer }) => void): unknown;
+  on(event: "framesent", listener: (frame: { payload: string | Buffer }) => void): unknown;
 }
 
 /**
- * Collect every binary frame `socket` sends into `frames`, tagged with the
- * socket's stream kind (learned from the notice it receives), for
- * `programInput`. Callers keep `frames` as their own array and may empty it
+ * Collect every binary frame `socket` sends into `frames`, for
+ * `programInput`. Text frames are the page's own controls (resize, ping),
+ * never input. Callers keep `frames` as their own array and may empty it
  * (`frames.length = 0`) to start a new observation.
  */
 export function recordInput(socket: FrameSource, frames: InputFrame[]): void {
-  const state: SocketKind = { kind: null };
-  socket.on("framereceived", ({ payload }) => {
-    if (typeof payload !== "string") return;
-    try {
-      const message = JSON.parse(payload);
-      if (message && message.type === "stream" && (message.kind === "bytes" || message.kind === "grid")) {
-        state.kind = message.kind;
-      }
-    } catch {
-      // Not a control message this needs.
-    }
-  });
   socket.on("framesent", ({ payload }) => {
-    // The kind as it stands when the frame goes out (the notice precedes any
-    // input, so it is already known then).
-    if (Buffer.isBuffer(payload)) frames.push({ payload, socket: { kind: state.kind } });
+    if (Buffer.isBuffer(payload)) frames.push({ payload });
   });
 }
 
@@ -117,28 +96,11 @@ function gridMessageInput(payload: Buffer): string {
 }
 
 /**
- * What the programs read from `frames`, in order: a byte stream's frames as
- * the bytes they are (consecutive ones decoded together, as the specs always
- * read them), a grid stream's input messages the way the supervisor encodes
- * the ones these specs produce (`keyMessageInput`). Anything else in a
- * grid stream reads as a `‹…›` token, which no typed text contains, so an
- * unexpected message fails an exact comparison.
+ * What the programs read from `frames`, in order: each grid input message
+ * the way the supervisor encodes the ones these specs produce
+ * (`keyMessageInput`). Anything else reads as a `‹…›` token, which no typed
+ * text contains, so an unexpected message fails an exact comparison.
  */
 export function programInput(frames: InputFrame[]): string {
-  let out = "";
-  let bytes: Buffer[] = [];
-  const flush = () => {
-    if (bytes.length) out += Buffer.concat(bytes).toString();
-    bytes = [];
-  };
-  for (const frame of frames) {
-    if (frame.socket.kind === "grid") {
-      flush();
-      out += gridMessageInput(frame.payload);
-    } else {
-      bytes.push(frame.payload);
-    }
-  }
-  flush();
-  return out;
+  return frames.map((frame) => gridMessageInput(frame.payload)).join("");
 }

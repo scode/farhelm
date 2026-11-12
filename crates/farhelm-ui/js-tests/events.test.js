@@ -1,6 +1,6 @@
 // Unit coverage for events.js — the invalidation feed's socket (PLAN_M6_75.md
 // item 6), run with node's built-in test runner for the reasons
-// term-bytes.test.js's header gives (node is already a CI requirement for
+// paste-sanitizer.test.js's header gives (node is already a CI requirement for
 // Playwright; one asset file does not earn a bundler).
 //
 // ## Why this file exists at all
@@ -142,7 +142,7 @@ function loadIsland(options) {
   // own built-ins), so `assert/strict`'s reference check on the prototype
   // chain would reject a byte-identical report — a realm mismatch, not a
   // difference in what was sent. The spread rebuilds each report locally,
-  // which is the same dodge term-bytes.test.js makes with `Array.from`.
+  // which is the same dodge paste-sanitizer.test.js makes with `Array.from`.
   const reports = [];
   const parked = sandbox.window.farhelmEvents.subscribe(
     "http://127.0.0.1:7433",

@@ -1,20 +1,18 @@
-// Byte-level proof for the Shift+Enter "insert a newline" chord
-// (shift-enter-key.js, wired into terminal.js's `attachCustomKeyEventHandler`
-// — see that module's own header for the ESC-prefix design and why it
-// PREFIXES rather than replaces xterm's own `\r`).
+// Byte-level proof for the Shift+Enter "insert a newline" chord (SPEC.md,
+// "Terminal experience": ESC CR in a single write). The grid sends Enter
+// with Shift held as one key message (grid-input.js), and the supervisor's
+// input encoder writes ESC CR for it (grid_input.rs, whose key table pins
+// the bytes of every key).
 //
-// `js-tests/shift-enter-key.test.js` already pins the pure decision function
-// exhaustively — each modifier boundary the decision uses, IME composition,
-// the `keyCode === 229` sentinel. What that unit suite cannot see is the
-// browser-level wiring: a real `KeyboardEvent` reaching xterm's
-// `attachCustomKeyEventHandler` through a real DOM, encoded and written down
-// a real WebSocket, landing as real bytes in a real pty. This file is that
-// proof, end to end, for the three chords that matter: Shift+Enter (must
-// send `\x1b\r`, nothing else), plain Enter (must send bare `\r`, no leading
-// ESC), and Ctrl+Shift+Enter — the actual boundary the fix's modifier check
-// claims (shift held, but disqualified by a second modifier) — which must
-// NOT trigger this file's own ESC injection, whatever xterm sends for it
-// natively.
+// The JS harness pins which keydowns become key messages, and the Rust
+// selection pins the encoder's bytes. What neither can see is the
+// browser-level wiring: a real `KeyboardEvent` reaching the grid through a
+// real DOM, sent down a real WebSocket, encoded by the supervisor and
+// landing as real bytes in a real pty. This file is that proof, end to end,
+// for the three chords that matter: Shift+Enter (must send `\x1b\r`,
+// nothing else), plain Enter (must send bare `\r`, no leading ESC), and
+// Ctrl+Shift+Enter — shift held, but with a second modifier — which must
+// NOT produce the chord's ESC CR, whatever it sends otherwise.
 //
 // ## Why a raw-mode `od` dump, not a WebSocket `send` patch
 //
@@ -56,8 +54,8 @@
 // immediately), but introduces a second trap: `od` silently collapses a run
 // of IDENTICAL consecutive lines into a bare `*`, which would make "exactly
 // one `\r` arrived" indistinguishable from "several arrived, collapsed to
-// one glyph" — exactly the ambiguity the shift-enter fix's whole promise
-// (one `\r`, not a duplicate) has to rule out. `-v` (`--output-duplicates`)
+// one glyph" — exactly the ambiguity the chord's whole promise (one `\r`,
+// not a duplicate) has to rule out. `-v` (`--output-duplicates`)
 // disables that collapsing. All four flags were confirmed against a real
 // pty pair (a Python `pty.openpty()` harness) before writing this file.
 //
@@ -79,9 +77,9 @@
 //
 // An early version of this file computed a "before" snapshot as the
 // buffer's own STRING LENGTH and looked for new content past that offset —
-// which is wrong, and confirmed wrong against a real browser run: xterm's
-// buffer reports `buf.length` rows for the WHOLE viewport, not just the
-// rows actually written to, so a freshly attached terminal already carries
+// which is wrong, and confirmed wrong against a real browser run: the
+// terminal's text holds a row for the WHOLE screen, not just the rows
+// actually written to, so a freshly attached terminal already carries
 // dozens of blank trailing rows before a single keystroke is sent. Their
 // length is real length, so "before" already points near the tail of a
 // mostly-empty buffer — and a keystroke's own dump lands a couple of rows
@@ -107,7 +105,7 @@
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
-import { attachSession, termText, waitForTermText, terminalKind } from "./helpers/term";
+import { attachSession, termText, waitForTermText } from "./helpers/term";
 
 /**
  * Every hex byte VALUE the raw dumper has printed so far, in order, read
@@ -136,7 +134,7 @@ function bytesIn(text: string): string[] {
 }
 
 /** Whether `bytes` contains an ESC (`1b`) immediately followed by a CR
- * (`0d`) anywhere — this file's own injected prefix's exact shape, checked
+ * (`0d`) anywhere — the chord's own exact shape, checked
  * as a SUBSEQUENCE-of-two rather than requiring it to start at index 0, so
  * it can be asked of a delta that also carries a sentinel byte after it. */
 function hasEscCrPair(bytes: string[]): boolean {
@@ -180,14 +178,14 @@ const RAW_DUMP_INVOCATION =
  * This is the fixture for the single-write delivery claim: `od` alone can
  * never show where one pty write ended and the next began, and the whole
  * Shift+Enter bug was ABOUT that boundary (a split pair reads as
- * Escape-then-Enter to boundary-sensitive line editors; see
- * shift-enter-key.js's header). One caveat keeps this observation honest
+ * Escape-then-Enter to boundary-sensitive line editors; see SPEC.md,
+ * "Terminal experience"). One caveat keeps this observation honest
  * in one direction only: bytes arriving while `dd` is between reads
  * coalesce in the pty buffer, so a split COULD read as one line on a slow
  * machine — but a genuinely single write can never read as two. The
  * DETERMINISTIC half of the claim therefore lives beside it in the same
  * test: a websocket-frame capture asserting the chord leaves the browser
- * as exactly one two-byte frame, which no pty timing can blur.
+ * as exactly one input message, which no pty timing can blur.
  */
 const READ_GROUPED_DUMP_INVOCATION =
   "sh -c 'read _gate && stty -echo -icanon -icrnl -inlcr -igncr min 1 time 0 && " +
@@ -223,11 +221,9 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
 
       const before = bytesIn(await termText(page));
       await page.keyboard.press("Shift+Enter");
-      // `shiftEnterKeyAction` returns "arm" for this chord and
-      // `mergeArmedPrefix` glues the `\x1b` onto xterm's own ordinary `\r`
-      // (see shift-enter-key.js's docs): one message carrying both bytes,
-      // down the same path as ordinary input. This test pins the byte
-      // VALUES; the read-boundary test below pins the one-write shape.
+      // The grid sends Enter with Shift held as one key message and the
+      // supervisor encodes it as ESC CR. This test pins the byte VALUES;
+      // the read-boundary test below pins the one-write shape.
       await page.keyboard.press("z");
       await waitForTermText(page, "7a");
 
@@ -254,10 +250,8 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
 
       const before = bytesIn(await termText(page));
       await page.keyboard.press("Enter");
-      // `shiftEnterKeyAction` returns "pass" for a plain Enter and the
-      // unarmed merge is byte-transparent — see shift-enter-key.js's docs —
-      // so nothing here should ever send a leading ESC; only xterm's own
-      // ordinary `\r` should land.
+      // A plain Enter is Enter with no modifier, so nothing here should
+      // ever send a leading ESC; only the ordinary `\r` should land.
       await page.keyboard.press("z");
       await waitForTermText(page, "7a");
 
@@ -268,7 +262,7 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
     }
   });
 
-  test("Ctrl+Shift+Enter does not trigger this fix's own ESC injection", async ({
+  test("Ctrl+Shift+Enter does not send the chord's ESC CR", async ({
     page,
     request,
   }) => {
@@ -282,17 +276,15 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
       await attachRawDumpSession(page, session.id);
 
       const before = bytesIn(await termText(page));
-      // The actual boundary the fix's modifier check claims — shift IS
-      // held, but a second modifier disqualifies it (shift-enter-key.js's
-      // exact-match check, `!ev.ctrlKey`) — unlike plain Ctrl+Enter, which
-      // never has `shiftKey` true in the first place and so never reaches
-      // that check at all.
+      // The chord's boundary — shift IS held, but a second modifier makes it
+      // another chord (SPEC.md: "the exact chord — no other modifier
+      // held") — unlike plain Ctrl+Enter, which never has Shift held in
+      // the first place.
       await page.keyboard.press("Control+Shift+Enter");
-      // A NEGATIVE claim, unlike the two tests above: this chord must fall
-      // straight through to whatever xterm does with it natively — nothing,
-      // its own default `\r`, or an application-mode sequence (which MAY
-      // legitimately contain an ESC byte of xterm's own, unrelated to this
-      // fix) are all fine; only OUR ESC-then-CR pair is not, which is why
+      // A NEGATIVE claim, unlike the two tests above: whatever the encoder
+      // sends for this chord — nothing, a bare `\r`, or a modified-key
+      // sequence (which MAY legitimately contain an ESC byte of its own) —
+      // is fine; only the Shift+Enter chord's ESC-then-CR pair is not, which is why
       // this checks for that adjacent PAIR specifically rather than the
       // mere presence of `1b` anywhere.
       await page.keyboard.press("z");
@@ -305,7 +297,7 @@ test.describe("Shift+Enter's ESC-prefix reaches the pty as exact bytes", () => {
       // forms the pair" rather than "nothing anywhere in the delta does".
       expect(
         hasEscCrPair(delta.slice(0, -1)),
-        "no keystroke here should ever produce this fix's ESC-then-CR pair",
+        "no keystroke here should ever produce the chord's ESC-then-CR pair",
       ).toBe(false);
       expect(
         delta[delta.length - 1],
@@ -332,9 +324,9 @@ test.describe("Shift+Enter's ESC CR reaches the pane as one write", () => {
       // actually sends. Read-boundary observation below is inherently
       // one-sided (bytes can coalesce in the pty buffer between the
       // fixture's reads), but the frame boundary is not — one websocket
-      // frame carrying both bytes IS the single-write contract at its
-      // source, and a regression back to the two-producer design shows up
-      // here as two frames no matter how the pty timing falls.
+      // frame carrying the whole chord IS the single-write contract at its
+      // source, and a regression to two producers shows up here as two
+      // frames no matter how the pty timing falls.
       await page.evaluate(() => {
         const ws = (window as any).__farhelmWs;
         (window as any).__sentFrames = [];
@@ -350,21 +342,14 @@ test.describe("Shift+Enter's ESC CR reaches the pane as one write", () => {
       });
       await page.keyboard.press("Shift+Enter");
       const chordFrames = await page.evaluate(() => (window as any).__sentFrames);
-      if ((await terminalKind(page)) === "grid") {
-        // A grid terminal sends the key itself, one input message, and the
-        // supervisor encodes it as ESC CR in one write (grid-input.js and
-        // the supervisor's grid input encoder, whose key table pins the
-        // bytes). One message, Enter with Shift held, is still the
-        // single-producer contract here.
-        expect(chordFrames, "the chord must leave the browser as exactly one input message").toHaveLength(1);
-        const message = JSON.parse(Buffer.from(chordFrames[0], "hex").toString());
-        expect(message, "the message is Enter with Shift alone").toMatchObject({ t: "key", key: "Enter", mods: 1 });
-      } else {
-        expect(
-          chordFrames,
-          "the chord must leave the browser as exactly one two-byte frame",
-        ).toEqual(["1b0d"]);
-      }
+      // The grid sends the key itself, one input message, and the
+      // supervisor encodes it as ESC CR in one write (grid-input.js and the
+      // supervisor's grid input encoder, whose key table pins the bytes).
+      // One message, Enter with Shift held, is the single-producer contract
+      // here.
+      expect(chordFrames, "the chord must leave the browser as exactly one input message").toHaveLength(1);
+      const message = JSON.parse(Buffer.from(chordFrames[0], "hex").toString());
+      expect(message, "the message is Enter with Shift alone").toMatchObject({ t: "key", key: "Enter", mods: 1 });
 
       await page.keyboard.press("z");
       await waitForTermText(page, "7a|");
@@ -391,7 +376,7 @@ test.describe("Shift+Enter's ESC CR reaches the pane as one write", () => {
     }
   });
 
-  test("a plain Enter after the chord stays bare — the arm does not linger", async ({
+  test("a plain Enter after the chord stays bare", async ({
     page,
     request,
   }) => {
@@ -406,10 +391,9 @@ test.describe("Shift+Enter's ESC CR reaches the pane as one write", () => {
 
       const before = bytesIn(await termText(page));
       // Same terminal, chord then plain Enter: the regression this pins is
-      // wiring-level, not merge-level — an arm that survived its dispatch
-      // (the microtask expiry in terminal.js dropped, or `merged.armed` no
-      // longer assigned back) would ESC-prefix the SECOND Enter too, and
-      // no fresh-terminal test can see that.
+      // state carried from one key to the next — a modifier remembered past
+      // its keyup would ESC-prefix the SECOND Enter too, and no
+      // fresh-terminal test can see that.
       await page.keyboard.press("Shift+Enter");
       await page.keyboard.press("Enter");
       await page.keyboard.press("z");
@@ -418,7 +402,7 @@ test.describe("Shift+Enter's ESC CR reaches the pane as one write", () => {
       const delta = bytesIn(await termText(page)).slice(before.length);
       expect(
         delta,
-        "one prefixed pair, then a bare CR — a phantom second ESC means a stale arm",
+        "one ESC CR pair, then a bare CR — a phantom second ESC means carried state",
       ).toEqual(["1b", "0d", "0d", "7a"]);
     } finally {
       await cleanupSession(request, session.id);

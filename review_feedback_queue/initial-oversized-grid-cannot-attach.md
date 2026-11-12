@@ -1,11 +1,22 @@
-# An initial terminal size above 1000 cells cannot be streamed
+# An attach size above 1000 cells is accepted and then fails the grid stream
 
 Reviewed commit: ca9b0a19856dc136f63ad2d14f1076027edce1eb
 
 ## TLDR
 
-A terminal fitted to over1000 cells can fail to open repeatedly because its initial dimensions exceed the grid stream's
-bound.
+The supervisor accepts an attach size above the grid stream's 1000-cell bound and then ends the attachment when it
+cannot encode the first `hello`. The page no longer sends such a size; any other client that does gets a terminal that
+fails to open rather than a refusal or a clamp.
+
+## Narrowed in plan `tmux-end-old-terminals`, PR `05-grid-only`
+
+The original finding had two halves. The page half is gone: the page now builds only the grid component, whose first fit
+(`grid-terminal.js`, clamped to 1000 x 1000) gives the size in the socket URL, so the uncapped xterm.js fit and the
+inherited-size handoff the details below cite no longer exist. What remains is the supervisor half: the helm forwards
+the requested size unchanged, the supervisor resizes the host to it (host admission allows up to 10000 per dimension),
+and `grid_output`'s screen copies the emulator's size into `hello`, which the grid format refuses above 1000, ending the
+attachment. Whether the supervisor should clamp or refuse such a size up front is the open question. The citations below
+are to the reviewed revisions, including files since removed.
 
 ## Details
 

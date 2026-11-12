@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DEVICE_SECRET_KEY, requireProductPageAuth } from "./helpers/device-auth";
-import { attachSession, cleanupSession, termText, terminalKind, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, termText, waitForTermText } from "./helpers/term";
 import { stackScratchDir } from "./helpers/scratch";
 import { installTerminalSuiteHooks, sharedSessionRow } from "./helpers/terminal-suite";
 
@@ -123,7 +123,6 @@ test("a paste of more than one megabyte into a grid terminal arrives whole and k
     await page.goto("/");
     await attachSession(page, id);
     await waitForTermText(page, "PASTE-RECEIVER-READY");
-    expect(await terminalKind(page), "premise: this session's terminal is a grid").toBe("grid");
     await page.evaluate((text) => {
       const w = window as any;
       w.__farhelmPasteSocket = w.__farhelmWs;
@@ -153,14 +152,14 @@ test("a paste of more than one megabyte into a grid terminal arrives whole and k
   }
 });
 
-// Regression test for the tmux paste-buffer input-mangling bug at the
-// browser level: real Backspace and Ctrl+C keypresses go through xterm.js's
-// own key handling (DEL, ETX — no custom key binding intercepts them, see
-// terminal.js), the WebSocket, and the framing protocol exactly like any
-// other keystroke, landing on `basic`'s pty in its ordinary canonical/cooked
-// mode (nothing here puts it in raw mode, unlike the `hexecho` fixture a
-// Rust e2e test once used for byte-exact coverage of every mangled control
-// byte, including ESC/arrow-up).
+// Regression test for the tmux paste-buffer input-mangling bug at the browser
+// level: real Backspace and Ctrl+C keypresses go through the grid's own key
+// handling (grid key messages the supervisor encodes as DEL and ETX — no custom
+// key binding intercepts them, see terminal.js), the WebSocket, and the framing
+// protocol exactly like any other keystroke, landing on `basic`'s pty in its
+// ordinary canonical/cooked mode (nothing here puts it in raw mode, unlike the
+// `hexecho` fixture a Rust e2e test once used for byte-exact coverage of every
+// mangled control byte, including ESC/arrow-up).
 //
 // ArrowUp is deliberately NOT exercised here, after checking what a
 // canonical-mode pty actually does with it: Linux's ECHOCTL local-echo

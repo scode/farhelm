@@ -5,7 +5,7 @@
 
 import { type APIRequestContext, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
-import { attachSession, cleanupSession, sendTerminalInput, terminalKind, terminalSize, waitForTermText } from "./helpers/term";
+import { attachSession, cleanupSession, sendTerminalInput, terminalSize, waitForTermText } from "./helpers/term";
 import { installTerminalSuiteHooks, reconnectTimingsFromNextLoad } from "./helpers/terminal-suite";
 import { waitForReplayReveal, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
@@ -76,23 +76,12 @@ async function sendCommand(page: Page, id: string, command: string): Promise<voi
 async function expectRows(page: Page, expected: string[]): Promise<void> {
   await expect.poll(() => page.evaluate((count) => {
     const grid = (window as any).__farhelmIslands?.terminal?.grid;
-    if (grid) {
-      const snapshot = grid.snapshot();
-      const drawn = document.querySelectorAll("#terminal .grid-terminal-row");
-      return {
-        buffer: Array.from({ length: count }, (_, row) => (snapshot.lines[row] ?? "").trimEnd()),
-        rendered: Array.from({ length: count }, (_, row) => drawn[row]?.textContent?.trimEnd() ?? ""),
-        atTail: grid.viewport().following,
-      };
-    }
-    const term = (window as any).__farhelmIslands?.terminal?.term;
-    const buffer = term?.buffer.active;
-    const rows = document.querySelector("#terminal .xterm-rows");
+    const snapshot = grid?.snapshot();
+    const drawn = document.querySelectorAll("#terminal .grid-terminal-row");
     return {
-      buffer: Array.from({ length: count }, (_, row) =>
-        (buffer?.getLine(buffer.baseY + row)?.translateToString(true) ?? "").trimEnd()),
-      rendered: Array.from({ length: count }, (_, row) => rows?.children[row]?.textContent?.trimEnd() ?? ""),
-      atTail: !!buffer && buffer.viewportY === buffer.baseY,
+      buffer: Array.from({ length: count }, (_, row) => (snapshot?.lines[row] ?? "").trimEnd()),
+      rendered: Array.from({ length: count }, (_, row) => drawn[row]?.textContent?.trimEnd() ?? ""),
+      atTail: !!grid && grid.viewport().following,
     };
   }, expected.length), { timeout: 10_000, message: "the buffer and painted emoji rows must agree" }).toEqual({
     buffer: expected,
@@ -167,8 +156,6 @@ test("tmux reconnect replay restores emoji rows and the cursor column", async ({
     }), { timeout: 20_000, message: "reconnect must replace the original terminal attachment" }).toBe(true);
     await waitForSessionRevealed(page, id);
     const replay = await waitForReplayReveal(page, "terminal");
-    // Premise: the reattached terminal is the grid this run creates.
-    expect(await terminalKind(page)).toBe("grid");
     // The catch-up ends at the replay's end marker; a grid replay is frames
     // the component applies as they arrive.
     expect(replay.revealReason).toBe("marker");

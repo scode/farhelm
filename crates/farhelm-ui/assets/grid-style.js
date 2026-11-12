@@ -8,12 +8,11 @@
 // direct color. Because every value comes from those tables or from a
 // validated integer, no wire string can reach CSS.
 //
-// ## Matching old terminals
+// ## The style rules
 //
-// A new terminal draws styles by the same rules as an old one, so a
-// session looks the same whichever kind of terminal shows it. The rules
-// were read from the vendored xterm.js bundle's `DomRendererRowFactory`,
-// as Farhelm configures it:
+// The rules are Farhelm's own; they were first read from xterm.js 6.0.0's
+// `DomRendererRowFactory`, as Farhelm configured it while xterm.js drew its
+// terminals, so sessions kept their look when the grid replaced it:
 //
 // - Inverse swaps foreground and background first; a default color that
 //   gets swapped becomes the other default.
@@ -23,10 +22,10 @@
 // - Dim is the foreground at half opacity.
 // - Hidden text keeps its background and decorations; the renderer swaps
 //   its characters for spaces, so the text is not in the page at all.
-// - Blink (SGR 5) is not drawn, as old terminals draw no text blink.
+// - Blink (SGR 5) is not drawn: no text blinks.
 //
-// Two deliberate departures, both where the old terminal's CSS loses a
-// declaration to the cascade rather than choosing a look: a dim direct
+// Two deliberate departures from that origin, both where xterm.js's CSS
+// lost a declaration to the cascade rather than choosing a look: a dim direct
 // color is dimmed (there, the inline color overrides the dim rule), and an
 // underlined, struck-through cell shows both lines (there, two classes
 // both set `text-decoration` and the later one wins).
@@ -95,7 +94,7 @@
 
   /**
    * The 256-color palette: the theme's 16 named colors, then xterm's
-   * standard 6x6x6 cube and 24-step gray ramp (the same table old terminals
+   * standard 6x6x6 cube and 24-step gray ramp (the same table xterm.js
    * compute for indices the theme does not name).
    */
   function buildPalette(theme) {
@@ -118,7 +117,7 @@
     return `#${(value - DIRECT_COLOR_BASE).toString(16).padStart(6, "0")}`;
   }
 
-  /** `#rrggbb` at half opacity, the dim text color (as in old terminals). */
+  /** `#rrggbb` at half opacity, the dim text color (as in xterm.js). */
   function halfOpacity(color) {
     const n = parseInt(color.slice(1), 16);
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},0.5)`;

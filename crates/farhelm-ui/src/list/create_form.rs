@@ -6574,7 +6574,7 @@ pub(super) fn CreateSessionForm(
                                 refusal.text.clone()
                             });
                         }
-                        bridge.finish(crate::list::RestartOutcome::of(&result));
+                        bridge.finish(result.is_ok());
                         let admitted =
                             result.is_ok() || admit_composer_return(mounted_opening, None).await;
                         pending_launch.set(None);
@@ -11839,10 +11839,7 @@ mod tests {
     fn marking_a_replace_with_records_the_source_and_its_state() {
         let session = Session {
             status: SessionStatus::Exited { exit_code: Some(1) },
-            tabs: vec![crate::Tab {
-                id: "t1".into(),
-                kind: None,
-            }],
+            tabs: vec![crate::Tab { id: "t1".into() }],
             ..row_specimen("s1")
         };
         let clone = prefill_from(&session, 4);

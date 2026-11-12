@@ -1541,19 +1541,6 @@ async fn handle_delete_session_or_seal(
 /// lifecycle claim.
 pub(crate) const HOST_EXIT_RECORD_WAIT: Duration = Duration::from_secs(2);
 
-/// The refusal of an `Attach` without `grid` to a terminal that runs in a
-/// terminal host.
-///
-/// A host terminal's screen is the supervisor's emulator, so a viewer needs
-/// a client that renders the terminal from the supervisor's grid rather than
-/// from the program's own output bytes (`farhelm_proto::grid`, "Attach and
-/// the stream kind"). The refusal is `InvalidRequest`: sending the same
-/// request again never works, and a client that can show a grid sends a
-/// different one. It is permanent behavior: a client that cannot show grids
-/// always gets it.
-pub(crate) const ATTACH_NEEDS_GRID_CLIENT: &str =
-    "this terminal runs in a terminal host and needs a client that can show grid terminals";
-
 /// Why an attach to `host` is refused, if it is: the host cannot be read
 /// ([`crate::hosts::Liveness::Unavailable`]). Refused before the takeover,
 /// the attach costs the session's current client nothing. The refusal is
@@ -1612,7 +1599,6 @@ async fn handle_attach(
     selector: TerminalSelector,
     lease: String,
     if_unowned: bool,
-    grid: bool,
 ) {
     if !channels.can_begin_stream(channel) || lease.len() > MAX_LEASE_BYTES {
         let message = if channel == 0 {
@@ -1696,21 +1682,10 @@ async fn handle_attach(
     // A terminal's screen lives in the supervisor's emulator, and reaches a
     // viewer only as a grid (`farhelm_proto::grid`), from a grid sender of
     // its own (`super::grid_stream::GridSender`) and an input side
-    // (`super::grid_stream::HostAttach`). A client that cannot show grids
-    // is refused, permanently (`ATTACH_NEEDS_GRID_CLIENT`), before the
-    // attach takes anything over or opens anything, so the session's
-    // current client keeps its attachments. So is an attach to a host that
-    // cannot be read (`host_attach_refusal`), for now.
-    if !grid {
-        reply_error(
-            tx,
-            req_id,
-            ErrorKind::InvalidRequest,
-            ATTACH_NEEDS_GRID_CLIENT.to_string(),
-        )
-        .await;
-        return;
-    }
+    // (`super::grid_stream::HostAttach`). An attach to a host that cannot be
+    // read is refused (`host_attach_refusal`), for now, before the attach
+    // takes anything over or opens anything, so the session's current client
+    // keeps its attachments.
     if let Some(refusal) = host_attach_refusal(&terminal) {
         reply_error(tx, req_id, ErrorKind::Unavailable, refusal).await;
         return;
@@ -1925,11 +1900,7 @@ async fn handle_attach(
     // any lock: it must precede the catch-up so the client's `attach()` can
     // return and its consumer can start draining, and it must not AWAIT
     // here, because `attachments` is held.
-    permit.send(reply_frame(&ControlMsg::Attached {
-        req_id,
-        channel,
-        stream: farhelm_proto::StreamKind::Grid,
-    }));
+    permit.send(reply_frame(&ControlMsg::Attached { req_id, channel }));
     let (pause_tx, pause_rx) = watch::channel(None);
     let (forwarder_shutdown, shutdown_rx) = watch::channel(false);
     let (input, input_failure) = super::grid_stream::HostAttach::new(terminal.clone());
@@ -3026,9 +2997,6 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             terminal: selector,
             lease,
             if_unowned,
-            // A host terminal streams only to a grid-capable client
-            // (`handle_attach`); a bytes-only attach is refused.
-            grid,
         } => {
             handle_attach(
                 sup,
@@ -3042,7 +3010,6 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 selector,
                 lease,
                 if_unowned,
-                grid,
             )
             .await
         }
@@ -7472,7 +7439,6 @@ mod tests {
                         terminal: TerminalSelector::default(),
                         lease: "stop-test".to_string(),
                         if_unowned: false,
-                        grid: true,
                     },
                     ConnectionCtx {
                         panics: &mpsc::channel(1).0,
@@ -7551,7 +7517,6 @@ mod tests {
                         },
                         lease: "timeout-test".to_string(),
                         if_unowned: false,
-                        grid: false,
                     },
                     ConnectionCtx {
                         panics: &mpsc::channel(1).0,
@@ -10032,8 +9997,6 @@ mod tests {
                     github_repo: None,
                     working_copy: None,
                     notifications: Vec::new(),
-                    agent_terminal: None,
-                    supervisor_creates_host_terminals: false,
                 },
                 terminal: Some(super::super::core::tests::a_terminal()),
                 run: RunCells {
@@ -10222,8 +10185,6 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             },
             terminal: None,
             run: RunCells {
@@ -10511,7 +10472,6 @@ mod tests {
                 terminal: TerminalSelector::default(),
                 lease: "busy-host".into(),
                 if_unowned: false,
-                grid: true,
             })
             .await;
             let attached = self.reply(1).await;
@@ -10953,7 +10913,6 @@ mod tests {
                             terminal: TerminalSelector::Agent,
                             lease: "conformance-target".into(),
                             if_unowned: false,
-                            grid: true,
                         })
                         .await;
                         let attached = host.reply(10).await;

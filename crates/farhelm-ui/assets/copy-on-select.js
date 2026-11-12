@@ -1,11 +1,11 @@
-// Decisions and notice presentation behind terminal.js's mouse-gesture copying: when a
-// completed mouse gesture on the terminal should push the current LOCAL
-// xterm selection to the system clipboard (herdr-style copy-on-select), and,
-// for a drag a mouse-reporting program took for itself, when to tell the
-// user it copied nothing (see "The drag that copies nothing" below). Split out on its own for the
-// same reason shift-enter-key.js is (see that file's header) — `node
-// --test` runs the EXACT function terminal.js calls, not a hand-copied
-// double that could silently drift from what ships.
+// Decisions and notice presentation behind the terminal's mouse-gesture
+// copying: when a completed mouse gesture should push the current LOCAL
+// selection to the system clipboard (herdr-style copy-on-select), and, for a
+// drag a mouse-reporting program took for itself, when to tell the user it
+// copied nothing (see "The drag that copies nothing" below). Split out on
+// its own so `node --test` runs the EXACT functions the grid component
+// (grid-terminal.js) and terminal.js call, not a hand-copied double that
+// could silently drift from what ships.
 //
 // ## Which selection this covers
 //
@@ -13,25 +13,16 @@
 // `copySelectionOnMouseUp` is about only the second one below; the notice
 // functions further down exist because of the first.
 //
-// - An agent TUI (Claude Code, Codex) that has turned mouse reporting on
-//   handles a plain drag ITSELF: xterm.js's SelectionService is disabled
-//   for as long as mouse tracking is active (confirmed against the
-//   vendored xterm.js — `CoreBrowserTerminal.bindMouse`'s
-//   `onProtocolChange` handler calls `this._selectionService.disable()`
-//   the moment an app requests mouse events), so a plain drag never becomes
-//   a LOCAL selection at all — this page's own selection handlers never
-//   fire, and OSC 52 (the vendored `@xterm/addon-clipboard`, wired in
-//   terminal.js's `mount()`) is the only path that can reach the system
-//   clipboard for it.
-// - Holding Shift while dragging FORCES a local xterm selection even with
-//   mouse reporting on (`SelectionService.shouldForceSelection` returns
-//   `event.shiftKey` on every platform but macOS, checked before the
-//   disabled-selection early return; on macOS the same function reads
-//   Option instead — see terminal.js's `macOptionClickForcesSelection`
-//   comment), exactly like double-click word-select and triple-click
-//   line-select, and exactly like ordinary dragging once nothing has mouse
-//   reporting on at all. THIS is the selection this module's decision is
-//   about.
+// - A program (Claude Code, Codex) that has turned mouse reporting on
+//   handles a plain drag ITSELF: the drag is reported to the program and no
+//   local selection is made, so the program's own OSC 52 write (which the
+//   supervisor's emulator turns into a grid clipboard message) is the only
+//   path that can reach the system clipboard for it.
+// - Holding Shift while dragging (Option on a Mac, see `MAC_PLATFORMS`)
+//   FORCES a local selection even with mouse reporting on, exactly like
+//   double-click word-select and triple-click line-select, and exactly like
+//   ordinary dragging once nothing has mouse reporting on at all. THIS is
+//   the selection this module's decision is about.
 //
 // Both paths are real and neither subsumes the other, which is why this
 // fix has two halves living side by side rather than one.
@@ -51,21 +42,19 @@
 // is.
 //
 // A plain click must not clobber the clipboard. Without mouse tracking,
-// xterm clears the old selection on the press, so no selection remains to
-// copy. With tracking, an unforced press belongs to the program and can
+// the grid clears the old selection on the press, so no selection remains
+// to copy. With tracking, an unforced press belongs to the program and can
 // leave an earlier forced selection intact. Its non-empty text is not a
 // new copy request: the press must also have allowed local selection.
 (function () {
   /**
    * Whether a completed mouse gesture on the terminal should push the
-   * current LOCAL xterm selection to the system clipboard.
+   * current LOCAL selection to the system clipboard.
    *
-   * `hasSelection` is `term.hasSelection()` and `selectionText` is
-   * `term.getSelection()` — passed separately, rather than inferring
-   * "selected" from a non-empty string, because they are xterm's own two
-   * independent signals (see its `hasSelection` getter) and this stays a
-   * thin decision over both rather than a second guess about their
-   * relationship.
+   * `hasSelection` and `selectionText` are the grid component's own two
+   * signals, passed separately rather than inferring "selected" from a
+   * non-empty string, so this stays a thin decision over both rather than
+   * a second guess about their relationship.
    *
    * `trackingAtPress` and `forced` describe the press, not the release:
    * a program can change mouse tracking during the gesture. An unforced
@@ -86,8 +75,8 @@
   //
   // The other half of the split described above has a gap of its own. When
   // a program in the pane has turned mouse reporting on, a plain drag goes
-  // to that program; xterm makes no selection and this page has nothing to
-  // copy. Programs that copy by themselves answer with an OSC 52 write,
+  // to that program; no local selection is made and this page has nothing
+  // to copy. Programs that copy by themselves answer with an OSC 52 write,
   // which terminal.js forwards to the clipboard. Programs that only draw a
   // highlight (Codex's prompt box, vim with `mouse=a`) leave the user
   // looking at highlighted text and an unchanged clipboard, with no clue
@@ -98,12 +87,9 @@
 
   /**
    * The platforms on which a local selection is forced with Option rather
-   * than Shift: exactly these `navigator.platform` values. Both kinds of
-   * terminal follow this rule: the grid component reads it from here
-   * (grid-input.js's `platformOf` has the same list), and old terminals'
-   * xterm.js applies the same list itself (`isMac` in its platform module,
-   * read by `SelectionService.shouldForceSelection` with
-   * `macOptionClickForcesSelection`, which terminal.js sets). The notice
+   * than Shift: exactly these `navigator.platform` values. The grid
+   * component reads it from here (grid-input.js's `platformOf` has the same
+   * list, so the terminal and its forcing modifier agree). The notice
    * must name the key that actually works, so this is an exact list rather
    * than a guess from the user agent.
    */
@@ -185,18 +171,6 @@
    */
   function pressForcesSelection(ev, platform) {
     return forcingModifier(platform) === "Option" ? !!ev.altKey : !!ev.shiftKey;
-  }
-
-  /**
-   * Whether an OSC 52 payload is a clipboard WRITE, as opposed to a read
-   * query (`c;?`). Only writes mean the program copied; a program that
-   * polls the clipboard during the grace period has still copied nothing.
-   *
-   * @param {string} data the OSC 52 payload after `52;`
-   * @returns {boolean}
-   */
-  function isOsc52Write(data) {
-    return !/(^|;)\?$/.test(String(data));
   }
 
   /**
@@ -322,7 +296,6 @@
     forcingModifier,
     dragMayHaveCopiedNothing,
     pressForcesSelection,
-    isOsc52Write,
     dragCopyNoticeText,
     createDragCopyNotice,
     DRAG_NOTICE_MS,

@@ -38,37 +38,37 @@ use tracing::{debug, warn};
 /// panes it was watching grew this process's memory with no ceiling at
 /// all — the debt this milestone exists to close.
 ///
-/// What the number buys: a bound at all, expressed in the only unit
-/// `mpsc` offers. It counts FRAMES, and frame sizes vary by two orders of
-/// magnitude, so it is a ceiling rather than a size. Terminal data frames
-/// are chunked at [`REPLAY_CHUNK`] (32 KiB), which puts the worst case for
-/// a data-only backlog at 2 MiB per connection; live pane output usually
-/// arrives in far smaller notifications, so the typical backlog is a
-/// fraction of that. Control frames are capped only by `MAX_FRAME_LEN`,
-/// and large replies CAN queue back to back: `ListSessions` handlers are
-/// spawned tasks (up to `LIST_ADMISSION_PERMITS` of them building
-/// concurrently), and a helm's refresh drain, a live detail read, and
-/// agent verbs can each enqueue a whole-list reply on one connection. The
-/// paper worst case is therefore this bound times `MAX_FRAME_LEN` — half
-/// a gigabyte — and nothing structural here bounds it lower; what keeps
-/// the realistic case small is that the peer is the single helm, which
-/// sends one refresh drain at a time per host and a handful of agent
-/// requests, and that the session-list cap
-/// (`farhelm_proto::LIST_SESSIONS_CAP`) keeps each such reply small for
-/// any ordinary fleet. Bounding by count is kept anyway as the one
-/// legible rule, with that worst case stated rather than denied; a
-/// byte-accounting scheme layered over the frame layer is the upgrade if
-/// it ever stops being acceptable.
+/// What the number buys: a bound at all, expressed in the only unit `mpsc`
+/// offers. It counts FRAMES, and frame sizes vary by two orders of magnitude,
+/// so it is a ceiling rather than a size. Terminal data frames are grid
+/// messages: history goes out in messages of about 32 KiB, which puts a
+/// history-only backlog near 2 MiB per connection, and no grid message exceeds
+/// `farhelm_proto::grid::GRID_MAX_MESSAGE` (1 MiB), which puts the paper worst
+/// case for data at 64 MiB; live updates are usually far smaller, so the
+/// typical backlog is a fraction of that. Control frames are capped only by
+/// `MAX_FRAME_LEN`, and large replies CAN queue back to back: `ListSessions`
+/// handlers are spawned tasks (up to `LIST_ADMISSION_PERMITS` of them building
+/// concurrently), and a helm's refresh drain, a live detail read, and agent
+/// verbs can each enqueue a whole-list reply on one connection. The paper worst
+/// case is therefore this bound times `MAX_FRAME_LEN` — half a gigabyte — and
+/// nothing structural here bounds it lower; what keeps the realistic case small
+/// is that the peer is the single helm, which sends one refresh drain at a time
+/// per host and a handful of agent requests, and that the session-list cap
+/// (`farhelm_proto::LIST_SESSIONS_CAP`) keeps each such reply small for any
+/// ordinary fleet. Bounding by count is kept anyway as the one legible rule,
+/// with that worst case stated rather than denied; a byte-accounting scheme
+/// layered over the frame layer is the upgrade if it ever stops being
+/// acceptable.
 ///
 /// The accepted consequence, stated plainly: when the single multiplexed
-/// consumer (the helm) is slow, control REPLIES queue behind terminal
-/// DATA at this bound, so a request can wait on a busy terminal's
-/// backlog. That is acceptable because the alternative — unbounded — is
-/// exactly the debt being closed, and because a client that reaches this
-/// bound repeatedly is one the browser's watermark should already be
-/// pausing. Nothing that holds a supervisor mutex may block on this
-/// queue; see [`notify_detached`] for the one shape that would otherwise
-/// want to, and the `Attach` handler's reserved permit for the other.
+/// consumer (the helm) is slow, control REPLIES queue behind terminal DATA at
+/// this bound, so a request can wait on a busy terminal's backlog. That is
+/// acceptable because the alternative — unbounded — is exactly the debt being
+/// closed, and because a client that reaches this bound repeatedly is one the
+/// helm's own pause (`PauseOutput`, sent from its queue for that attachment)
+/// should already be holding back. Nothing that holds a supervisor mutex may
+/// block on this queue; see [`notify_detached`] for the one shape that would
+/// otherwise want to, and the `Attach` handler's reserved permit for the other.
 pub(crate) const CONNECTION_WRITER_QUEUE: usize = 64;
 
 /// The no-progress window `handle_connection`'s shutdown tail allows the
@@ -863,8 +863,8 @@ where
 /// Honest residual: progress is observed at frame granularity via
 /// `frames_written`, not at the byte level. A single frame whose own
 /// write spans the entire window with nothing else completing — i.e. a
-/// link slower than the frame size divided by `window` (for the 32 KiB
-/// `REPLAY_CHUNK` and the default 5s window, under roughly 6.4 KB/s) —
+/// link slower than the frame size divided by `window` (for a 32 KiB grid
+/// history message and the default 5s window, under roughly 6.4 KB/s) —
 /// is indistinguishable here from a peer that is truly gone, and gets
 /// aborted. That is accepted, not accidental: catching it would need
 /// sub-frame progress reporting, which `FrameWriter` does not have.
@@ -1639,8 +1639,6 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             }],
             truncated: false,
         };
@@ -1711,8 +1709,6 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
@@ -1752,8 +1748,6 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             },
         };
         assert_eq!(reply_frame(&msg), Frame::control(&msg));
@@ -1777,7 +1771,6 @@ mod tests {
                 req_id: 10,
                 tab: farhelm_proto::TabInfo {
                     id: "t1".to_string(),
-                    kind: None,
                 },
             },
             ControlMsg::TabClosed { req_id: 11 },

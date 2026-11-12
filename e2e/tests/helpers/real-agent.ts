@@ -108,21 +108,18 @@ export const CLAUDE_CODE_MARKERS: AgentMarkers = {
 };
 
 /**
- * Read xterm's buffer over `[start, end)` (full buffer when `mode` is
- * `"full"`, the current screenful alone when `"viewport"`) and
- * reconstruct LOGICAL lines from it, joining a soft-wrapped row onto its
- * predecessor rather than treating the wrap as a line break.
+ * Read the agent terminal's grid over its whole text (`"full"`: history,
+ * then the screen) or the current screenful alone (`"viewport"`), and
+ * reconstruct LOGICAL lines from it, joining a soft-wrapped row onto the
+ * next rather than treating the wrap as a line break.
  *
- * That reconstruction is not cosmetic. xterm splits a paragraph into
- * several buffer ROWS purely because of the terminal's column width,
- * flagging each continuation row `isWrapped`; a naive `\n`-join of every
- * row (an earlier version of this module did exactly that) turns each
- * wrap point into an invisible line break wherever the terminal happened
- * to be narrow that run — which can slice a marker in half across the
- * two halves and leave it unmatchable by either mode. `translateToString`
- * strips formatting (color codes, etc.) without consuming columns, so
- * wrap points land purely on VISIBLE character count, matching what a
- * person looking at the pane would actually see wrap.
+ * That reconstruction is not cosmetic. The terminal splits a paragraph into
+ * several ROWS purely because of its column width, flagging each row that
+ * continues onto the next as `wrapped`; a naive `\n`-join of every row (an
+ * earlier version of this module did exactly that) turns each wrap point
+ * into an invisible line break wherever the terminal happened to be narrow
+ * that run — which can slice a marker in half across the two halves and
+ * leave it unmatchable by either mode.
  *
  * The single shared implementation (rather than one copy per mode) is
  * what keeps `termText` and `viewportText` from silently drifting apart
@@ -134,64 +131,39 @@ export const CLAUDE_CODE_MARKERS: AgentMarkers = {
 async function bufferText(page: Page, mode: "full" | "viewport"): Promise<string> {
   return page.evaluate((mode) => {
     const grid = (window as any).__farhelmGrid;
-    if (grid) {
-      // A terminal in a terminal host, drawn by the grid component: the
-      // same reconstruction over its model's rows, history then screen,
-      // whose `wrapped` flag marks a row that continues onto the next
-      // (where xterm.js flags the continuation row instead). The viewport
-      // is the component's view.
-      const model = grid.model;
-      const gridBuffer = (window as any).farhelmGridBuffer;
-      // History then screen, with no history on the alternate screen (as
-      // xterm.js's active alternate buffer has none); the view counts a
-      // notice line above the oldest history line when lost history is
-      // marked, which is not text and is left out here.
-      const historyShown = !model.state.altScreen;
-      const rows: { text: string; wrapped: boolean }[] = [];
-      if (historyShown) {
-        for (let i = 0; i < model.historyLength; i++) {
-          const row = model.historyLine(i);
-          rows.push({ text: gridBuffer.rowText(row, row.cols).replace(/ +$/, ""), wrapped: !!row.wrapped });
-        }
+    if (!grid) return "";
+    const model = grid.model;
+    const gridBuffer = (window as any).farhelmGridBuffer;
+    // History then screen, with no history on the alternate screen, which
+    // has none of its own; the view counts a notice line above the oldest
+    // history line when lost history is marked, which is not text and is
+    // left out here.
+    const historyShown = !model.state.altScreen;
+    const rows: { text: string; wrapped: boolean }[] = [];
+    if (historyShown) {
+      for (let i = 0; i < model.historyLength; i++) {
+        const row = model.historyLine(i);
+        rows.push({ text: gridBuffer.rowText(row, row.cols).replace(/ +$/, ""), wrapped: !!row.wrapped });
       }
-      for (const row of model.screen) {
-        rows.push({ text: gridBuffer.rowText(row, model.cols).replace(/ +$/, ""), wrapped: !!row.wrapped });
-      }
-      const view = grid.viewport();
-      const notice = historyShown && model.state.historyTrimmed ? 1 : 0;
-      // The view's rows over `rows`: its top line less the notice, and, with
-      // the notice itself on screen, one row fewer.
-      const start = mode === "viewport" ? Math.max(0, view.top - notice) : 0;
-      const shown = mode === "viewport" ? view.rows - Math.max(0, notice - view.top) : rows.length;
-      const end = Math.min(rows.length, start + shown);
-      const gridLines: string[] = [];
-      let continues = false;
-      for (let i = start; i < end; i++) {
-        if (continues && gridLines.length > 0) gridLines[gridLines.length - 1] += rows[i].text;
-        else gridLines.push(rows[i].text);
-        continues = rows[i].wrapped;
-      }
-      return gridLines.join("\n");
     }
-    const term = (window as any).__farhelmTerm;
-    if (!term) return "";
-    const buf = term.buffer.active;
-    const start = mode === "viewport" ? buf.viewportY : 0;
-    const end = mode === "viewport" ? buf.viewportY + term.rows : buf.length;
-    const logicalLines: string[] = [];
+    for (const row of model.screen) {
+      rows.push({ text: gridBuffer.rowText(row, model.cols).replace(/ +$/, ""), wrapped: !!row.wrapped });
+    }
+    const view = grid.viewport();
+    const notice = historyShown && model.state.historyTrimmed ? 1 : 0;
+    // The view's rows over `rows`: its top line less the notice, and, with
+    // the notice itself on screen, one row fewer.
+    const start = mode === "viewport" ? Math.max(0, view.top - notice) : 0;
+    const shown = mode === "viewport" ? view.rows - Math.max(0, notice - view.top) : rows.length;
+    const end = Math.min(rows.length, start + shown);
+    const lines: string[] = [];
+    let continues = false;
     for (let i = start; i < end; i++) {
-      const line = buf.getLine(i);
-      const text = line?.translateToString(true) ?? "";
-      if (line?.isWrapped && logicalLines.length > 0) {
-        // A continuation of the previous ROW's own line, not a new one:
-        // append onto what is already there instead of starting a fresh
-        // entry.
-        logicalLines[logicalLines.length - 1] += text;
-      } else {
-        logicalLines.push(text);
-      }
+      if (continues && lines.length > 0) lines[lines.length - 1] += rows[i].text;
+      else lines.push(rows[i].text);
+      continues = rows[i].wrapped;
     }
-    return logicalLines.join("\n");
+    return lines.join("\n");
   }, mode);
 }
 
@@ -219,8 +191,8 @@ async function termText(page: Page): Promise<string> {
 }
 
 /**
- * The currently VISIBLE screenful only — `term.rows` lines starting at
- * `buffer.viewportY` — as opposed to `termText`'s full scrollback.
+ * The currently VISIBLE screenful only — the grid's view, its rows from the
+ * line it is scrolled to — as opposed to `termText`'s full scrollback.
  *
  * NOT used for matching anymore (`waitUntilAgentReady` polls the full
  * buffer for both its dialog and ready markers — see that function's own
@@ -261,14 +233,14 @@ async function viewportText(page: Page): Promise<string> {
  * function, and changed for a real, CI-observed reason: at the time, EVERY
  * mount re-fit the terminal once JetBrains Mono actually loaded, and that
  * `fit.fit()` re-measured the cell size and could change `cols`, which
- * makes xterm RE-WRAP every row already printed to the new column width.
+ * made the terminal RE-WRAP every row already printed to the new column width.
  * terminal.js now gates mounts on the font BEFORE constructing a terminal
  * (its own "## Font settling before mount" header), so a font-driven
  * reflow no longer exists — but the SAME re-wrap still follows any other
  * resize (a window resize, a user font-size step), and content printed
  * early — a startup banner, a ready marker — can come out of that reflow
  * at a different row than it went in at, with no guarantee it stays inside
- * the CURRENT `[viewportY, viewportY + rows)` window. This is exactly what
+ * the CURRENT screenful. This is exactly what
  * timed out `spawn.spec.ts`'s own ready-marker wait on both engines,
  * before the pre-mount settling existed, with an effectively blank
  * rendered viewport and the marker sitting in scrollback above it. Reading

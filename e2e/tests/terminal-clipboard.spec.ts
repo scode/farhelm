@@ -5,8 +5,8 @@
 // selection can be. terminal.js's own module header ("Copy to the system
 // clipboard: two selections, two mechanisms") has the full diagnosis; this
 // file is the browser-level proof that both mechanisms actually work end to
-// end, through the real webview APIs neither a `node --test` unit nor a
-// unit test of the vendored addon in isolation can exercise — OSC 52
+// end, through the real webview APIs neither a `node --test` unit nor the
+// grid component's static suite can exercise — OSC 52
 // (write-only; a read/query must never see real clipboard contents) and
 // copy-on-select (every completed local selection, wherever the gesture
 // ends, with no "already copied this" cache to silently suppress a
@@ -24,15 +24,15 @@
 // those two permissions in Chromium — WebKit has no such permission to
 // grant at all, so a WebKit project would either hang waiting for a grant
 // that never resolves or throw immediately, neither of which says anything
-// about this fix. The MECHANISM under test is engine-neutral (xterm.js's
-// OSC 52 parsing and its own `SelectionService`/mouse-tracking duality,
-// both confirmed directly against the vendored source when this fix was
-// written — see terminal.js's header again), so a WebKit-shaped false red
+// about this fix. The MECHANISM under test is engine-neutral (the
+// supervisor's OSC 52 parsing, sent to the page as grid clipboard messages,
+// and the grid's own selection and mouse-reporting duality — see
+// terminal.js's header again), so a WebKit-shaped false red
 // here would cost real signal for zero real coverage: this suite's WebKit
 // projects exist to catch engine-family rendering/input differences (the
 // desktop app's WKWebView/WebKitGTK — see playwright.config.ts's own
-// header), and neither xterm.js's parser nor its mouse-mode bookkeeping
-// varies by engine in a way this addition could catch that the rest of the
+// header), and neither the supervisor's parser nor the grid's mouse-mode
+// bookkeeping varies by engine in a way this addition could catch that the rest of the
 // WebKit suite would not already catch first. `test.beforeEach` below
 // skips WebKit LOUDLY (a `console.log` line, since `test.skip`'s own reason
 // is invisible under CI's default reporter — the same discipline
@@ -68,25 +68,21 @@ import { cleanupSession, createSession } from "./helpers/fleet";
 import { attachSession, termText, terminalScreen, terminalViewport, waitForTermText } from "./helpers/term";
 
 /**
- * The agent terminal's local selection as text, run in the page: xterm.js's
- * `getSelection()`, or the grid's `selectionText()`, both what a copy of the
- * selection would put on the clipboard.
+ * The agent terminal's local selection as text, run in the page: the grid's
+ * `selectionText()`, what a copy of the selection would put on the
+ * clipboard.
  */
 function terminalSelectionInPage(): string {
-  const w = window as any;
-  return w.__farhelmTerm ? w.__farhelmTerm.getSelection() : w.__farhelmGrid.selectionText();
+  return (window as any).__farhelmGrid.selectionText();
 }
 
 /**
- * The agent terminal's mouse-reporting mode, run in the page: xterm.js's
- * `modes.mouseTrackingMode`, or the grid model's `mouse` state (whose `off`
- * is xterm.js's `none`). Only "is it on" matters to the callers.
+ * The agent terminal's mouse-reporting mode, run in the page: the grid
+ * model's `mouse` state, `off` while no program asked for mouse reports.
+ * Only "is it on" matters to the callers.
  */
 function mouseTrackingInPage(): string {
-  const w = window as any;
-  if (w.__farhelmTerm) return w.__farhelmTerm.modes.mouseTrackingMode;
-  const mouse = w.__farhelmGrid.model.state.mouse;
-  return mouse === "off" ? "none" : mouse;
+  return (window as any).__farhelmGrid.model.state.mouse;
 }
 
 /**
@@ -111,8 +107,8 @@ function gatedShellInvocation(script: string): string {
  * the invocation through a login shell, which is free to print above it, so
  * "the marker is on a specific fixed row" is exactly the kind of guess that
  * made an early version of this file's drag tests select a blank row
- * (xterm trims a blank-cells selection to `""`, so `hasSelection()` was
- * true while `getSelection()` had nothing to copy). And the search is
+ * (a blank-cells selection trims to `""`, so `hasSelection()` was true
+ * while the selection's text had nothing to copy). And the search is
  * POLLED, not single-shot: a one-time scan can land mid-redraw and see a
  * buffer that briefly lacks the marker even though a text-wait already saw
  * it rendered. (A post-mount font reflow used to be an extra reason to
@@ -142,14 +138,13 @@ async function findViewportRow(
 /**
  * Perform a real mouse drag starting just inside the row containing
  * `needle`, ending wherever `endpoint` says — real pixel coordinates
- * derived from `.xterm-screen`'s live bounding box and xterm's own
+ * derived from the grid screen's live bounding box and the terminal's own
  * `rows`, the same geometry-from-live-layout approach mouse-modes.spec.ts's
  * `clickTerminalCell` uses, and for the same reason: the terminal's
  * on-screen size depends on viewport and font metrics this test does not
  * control directly.
  *
- * `.xterm-screen`, not `#terminal` itself: xterm registers its selection
- * mouse handlers against the screen layer, and the container's box includes
+ * The screen, not `#terminal` itself: the container's box includes
  * padding/border the screen does not occupy — a mousedown a couple of
  * pixels inside the CONTAINER can land outside the screen entirely and
  * never start a selection (observed as `hasSelection()` staying false on
@@ -159,7 +154,7 @@ async function findViewportRow(
  * redraws or resizes between the two reads.
  *
  * The two-stage move on the way out of mousedown (a short hop, then the
- * long sweep to `endpoint`) makes xterm register the drag as a selection
+ * long sweep to `endpoint`) makes the terminal register the drag as a selection
  * START before anything else happens, guarding against a threshold or
  * coalescing quirk swallowing a single large jump — found necessary on
  * this suite's own early runs, not defensive guessing.
@@ -210,8 +205,8 @@ async function dragAcrossRowContaining(
  * own bottom edge (F1), still within its horizontal span.
  *
  * The direction is deliberate, and two other directions were tried first —
- * on this test's own real runs, not guessed. xterm's own coordinate mapping
- * (`Mouse.ts`'s `getCoords`) CLAMPS an out-of-bounds release into the
+ * on this test's own real runs, not guessed. The terminal's coordinate
+ * mapping CLAMPS an out-of-bounds release into the
  * nearest valid row/column rather than leaving the selection open-ended, so
  * where a release lands relative to the terminal decides which row it
  * clamps to:
@@ -219,7 +214,7 @@ async function dragAcrossRowContaining(
  * - Landing ABOVE the terminal clamps to viewport row 1 — which, unless the
  *   marker happens to already be that row, drags the selection UPWARD
  *   across the blank rows before it instead of across the marker, proving
- *   only that xterm can select blank space.
+ *   only that the terminal can select blank space.
  * - Landing to the LEFT, at the SAME row's `y`, clamps the COLUMN back to 1
  *   — the same column the drag's own mousedown started at, on the left
  *   edge of the same row — collapsing the whole gesture to a near
@@ -301,7 +296,7 @@ test.beforeEach(async ({ context, browserName, baseURL }) => {
   test.skip(
     browserName === "webkit",
     "Playwright has no clipboard permission grant for WebKit, and the mechanism under test " +
-      "(xterm.js OSC 52 parsing, its SelectionService/mouse-tracking duality) is engine-neutral " +
+      "(OSC 52 clipboard writes, the grid's selection/mouse-reporting duality) is engine-neutral " +
       "— a WebKit run here would be a false red, not real coverage.",
   );
   // Every test in this file reads or seeds `navigator.clipboard` from
@@ -484,14 +479,14 @@ test("a real drag-select copies the local selection to the system clipboard exac
     await waitForTermText(page, marker);
 
     await dragAcrossRowContaining(page, marker);
-    // Confirms the drag itself produced a LOCAL xterm selection before
+    // Confirms the drag itself produced a LOCAL selection before
     // trusting anything below — without this, a failure could mean either
     // "the drag selected nothing" or "the selection was never copied", and
     // only one of those is this fix's own bug.
     await expect
-      .poll(() => page.evaluate(() => !!((window as any).__farhelmTerm ?? (window as any).__farhelmGrid)?.hasSelection()), {
+      .poll(() => page.evaluate(() => !!(window as any).__farhelmGrid?.hasSelection()), {
         timeout: 5_000,
-        message: "the drag must produce a local xterm selection before any copy can be asserted",
+        message: "the drag must produce a local selection before any copy can be asserted",
       })
       .toBe(true);
     // Captured HERE, immediately after the drag settles, so the equality
@@ -515,7 +510,7 @@ test("a real drag-select copies the local selection to the system clipboard exac
     // just proved landed in the clipboard must still be exactly what it
     // was, on screen, after the copy resolved.
     expect(
-      await page.evaluate(() => ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).hasSelection()),
+      await page.evaluate(() => (window as any).__farhelmGrid.hasSelection()),
       "the selection must still be present after copying",
     ).toBe(true);
     expect(
@@ -546,12 +541,12 @@ test("a drag released outside the terminal element still copies (F1)", async ({
 
     await dragFromRowToOutsideTerminal(page, marker);
     await expect
-      .poll(() => page.evaluate(() => !!((window as any).__farhelmTerm ?? (window as any).__farhelmGrid)?.hasSelection()), {
+      .poll(() => page.evaluate(() => !!(window as any).__farhelmGrid?.hasSelection()), {
         timeout: 5_000,
         message:
-          "a drag released outside the terminal must still finalize a local xterm selection " +
-          "(xterm's own document-level mouseup listener does this regardless of where this " +
-          "file's copy-on-select listener lives)",
+          "a drag released outside the terminal must still finalize a local selection " +
+          "(the terminal's own document-level mouseup handling does this regardless of where " +
+          "this file's copy-on-select listener lives)",
       })
       .toBe(true);
     const selected = await page.evaluate(terminalSelectionInPage);
@@ -626,8 +621,8 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
 }) => {
   const marker = `mousereport-e2e-${Date.now()}`;
   // DECSET 1000 (X10/normal mouse tracking) right after the marker line —
-  // enough to disable xterm's own `SelectionService` (`bindMouse`'s
-  // `onProtocolChange`) for the plain-drag leg below.
+  // enough to hand a plain drag to the program instead of the grid's own
+  // selection for the plain-drag leg below.
   const session = await createSession(request, {
     title: `mousereport-e2e-${Date.now()}`,
     cwd: "/tmp",
@@ -639,8 +634,8 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
     await page.locator("#terminal").click();
     await page.keyboard.press("Enter");
     await waitForTermText(page, marker);
-    // `Terminal.modes.mouseTrackingMode` is xterm's own PUBLIC readout of
-    // what DECSET 1000 just did — waited on directly rather than inferred
+    // The grid model's mouse state is the page's own readout of what
+    // DECSET 1000 just did — waited on directly rather than inferred
     // from a settle delay, so this leg cannot start before mouse reporting
     // is actually live.
     await expect
@@ -648,7 +643,7 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
         timeout: 10_000,
         message: "waiting for DECSET 1000 to take effect",
       })
-      .not.toBe("none");
+      .not.toBe("off");
 
     // Leg 1: a PLAIN drag under mouse reporting must not create a local
     // selection, and must leave the clipboard exactly as it found it — the
@@ -661,8 +656,8 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
       .toBe(baseline);
     await dragAcrossRowContaining(page, marker);
     expect(
-      await page.evaluate(() => !!((window as any).__farhelmTerm ?? (window as any).__farhelmGrid)?.hasSelection()),
-      "a plain drag while mouse reporting is on must not make a local xterm selection",
+      await page.evaluate(() => !!(window as any).__farhelmGrid?.hasSelection()),
+      "a plain drag while mouse reporting is on must not make a local selection",
     ).toBe(false);
     // No poll here on purpose, matching the no-clobber test's own
     // reasoning: the claim is that nothing happens, and polling for
@@ -675,7 +670,7 @@ test("under mouse reporting: a plain drag copies nothing, Shift+drag copies exac
     // on, and it must copy exactly like any other local selection.
     await dragAcrossRowContaining(page, marker, "Shift");
     await expect
-      .poll(() => page.evaluate(() => !!((window as any).__farhelmTerm ?? (window as any).__farhelmGrid)?.hasSelection()), {
+      .poll(() => page.evaluate(() => !!(window as any).__farhelmGrid?.hasSelection()), {
         timeout: 5_000,
       })
       .toBe(true);
@@ -727,9 +722,9 @@ test("a click without a drag does not clobber the system clipboard (F19: zero wr
     });
 
     // Real mousedown then mouseup at the SAME point — no `mouse.move`
-    // between them — is what makes this a click rather than a drag: xterm
-    // never sets a selection end for a click with no movement (its
-    // `_handleSingleClick`), so `term.hasSelection()` stays false and
+    // between them — is what makes this a click rather than a drag: the
+    // grid sets no selection for a click with no movement, so its
+    // `hasSelection()` stays false and
     // copy-on-select's own guard skips it (see copy-on-select.js).
     const box = (await page.locator("#terminal").boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);

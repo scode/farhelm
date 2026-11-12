@@ -19,9 +19,9 @@ import { setCompact } from "./helpers/list-header";
 // Direct fixture Stop requests explicitly authorize their owned agent and
 // tabs. Bodyless HTTP Stop instead protects callers that never authorized tabs.
 //
-// Assertions read the xterm.js BUFFER, not the DOM: the DOM renderer
-// materializes only viewport rows, so scrolled-off content never appears in
-// .xterm-rows. The buffer is the semantic truth of what the terminal holds.
+// Assertions read the grid's MODEL, not the DOM: the grid draws only the
+// rows in view, so scrolled-off content never appears in its row elements.
+// The model is the semantic truth of what the terminal holds.
 //
 // ## Tests that used to wait for a poll
 //
@@ -38,7 +38,7 @@ import { setCompact } from "./helpers/list-header";
 //
 // The feed stub and terminal-buffer helpers are imported because both are
 // contracts: the former defines "the feed is healthy"; the latter owns
-// `window.__farhelmTerm`, `term.buffer.active`, and readiness globals. A
+// `window.__farhelmGrid`, the island registry, and readiness records. A
 // genuinely one-off snippet still stays local with the test that needs it.
 import { expect, newObservedContext, test } from "./helpers/evidence";
 import { type APIRequestContext, type Locator } from "@playwright/test";
@@ -103,37 +103,35 @@ test("renders the session and the agent's TUI output", async ({ page }) => {
 });
 
 /**
- * The terminal's effective surface must be continuous from the xterm canvas
- * through its application-owned wrapper. A theme option alone would leave
- * the vendored viewport black, while a CSS-only assertion would miss a
- * palette regression inside xterm.js.
+ * The terminal's effective surface must be continuous from the grid's own
+ * element through its application-owned wrapper. The grid's painted default
+ * background alone would leave a gap around it if the wrapper drew another
+ * color, while a CSS-only assertion would miss a palette regression in the
+ * grid itself.
  */
 test("matches Ghostty's terminal theme and surface", async ({ page }) => {
   await openTerminal(page);
   await waitForTermText(page, "fake-agent starting");
   const colors = await page.evaluate(() => {
     const terminal = document.querySelector(".terminal");
-    // The component's own surface: xterm.js's viewport, or the grid's
-    // element, which paints the theme's background itself.
-    const viewport = document.querySelector(".xterm-viewport, .grid-terminal");
+    // The grid's own element, which paints the theme's background itself.
+    const viewport = document.querySelector(".grid-terminal");
     const w = window as any;
     return {
-      // The background the component draws with: xterm.js's theme option,
-      // or the default background the grid painted on its own element.
-      themeBackground: w.__farhelmTerm ? w.__farhelmTerm.options.theme.background : w.__farhelmGrid.element.style.backgroundColor,
-      grid: !w.__farhelmTerm,
+      // The default background the grid painted on its own element.
+      themeBackground: w.__farhelmGrid.element.style.backgroundColor,
       terminalBackground: getComputedStyle(terminal!).backgroundColor,
       viewportBackground: getComputedStyle(viewport!).backgroundColor,
     };
   });
-  expect(colors.themeBackground.toLowerCase()).toBe(colors.grid ? "rgb(40, 44, 52)" : "#282c34");
-  expect(colors.viewportBackground, "the vendored #000 viewport rule must lose to the app override").toBe("rgb(40, 44, 52)");
+  expect(colors.themeBackground.toLowerCase()).toBe("rgb(40, 44, 52)");
+  expect(colors.viewportBackground, "the grid's surface draws the theme's background").toBe("rgb(40, 44, 52)");
   expect(colors.terminalBackground).toBe(colors.viewportBackground);
 });
 
 /**
- * The opt-in frame must be a host identity cue without recoloring xterm's
- * theme or resizing its viewport. Changing the local host's color in its
+ * The opt-in frame must be a host identity cue without recoloring the
+ * terminal's theme or resizing its surface. Changing the local host's color in its
  * dialog must repaint an already-open session through the hosts feed, and
  * turning the shared switch off must restore the original surface at once.
  */
@@ -149,11 +147,10 @@ test("host-colored terminal frame follows local appearance and Settings", async 
   try {
     await openTerminal(page);
     const panes = page.locator(".terminal-panes");
-    // xterm also uses the class name `terminal`; the frame belongs to the
-    // outer island whose padding surrounds it. The viewport is the
-    // component's own surface: xterm.js's viewport or the grid's element.
+    // The frame belongs to the outer island whose padding surrounds the
+    // grid; the viewport is the grid's own element.
     const terminal = page.locator(".terminal-pane.selected > .terminal");
-    const viewport = terminal.locator(".xterm-viewport, .grid-terminal");
+    const viewport = terminal.locator(".grid-terminal");
     const surface = await terminal.evaluate((element) => getComputedStyle(element).backgroundColor);
     const viewportSize = await viewport.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }));
     await expect(panes).toHaveAttribute("data-colored-frame", "false");
@@ -173,7 +170,7 @@ test("host-colored terminal frame follows local appearance and Settings", async 
     const initialFrame = await terminal.evaluate((element) => getComputedStyle(element).boxShadow);
     expect(initialFrame).toContain(red);
     expect(initialFrame).toContain("4px");
-    await expect(terminal.locator(".xterm, .grid-terminal")).toHaveCSS("box-shadow", "none");
+    await expect(terminal.locator(".grid-terminal")).toHaveCSS("box-shadow", "none");
     await expect(terminal).toHaveCSS("background-color", surface);
     await expect(viewport).toHaveCSS("background-color", surface);
     expect(await viewport.evaluate((element) => ({ width: element.clientWidth, height: element.clientHeight }))).toEqual(viewportSize);
@@ -389,7 +386,7 @@ test("keyboard activation opens the session, matching a real click", async ({
     // title then never changes, which is how this test failed on two
     // loaded CI runs. Wait until that known attachment has revealed, then
     // prove the button focus held. Reveal settles the mount's synchronous
-    // focus decision without requiring focus to remain in xterm.
+    // focus decision without requiring focus to remain in the terminal.
     await waitForSessionRevealed(page, bounce.id);
     // That wait only rules out the FIRST steal, and the window between the
     // focus and the keypress is stealable by the same mechanism: `reveal()`
@@ -443,7 +440,7 @@ test("keyboard activation opens the session, matching a real click", async ({
 // instance — replay alone cannot distinguish "correctly reattached" from
 // "never actually left", since replaying scrollback from a still-open
 // socket would look identical to a correct fresh reattach. Stamping the
-// live xterm instance before leaving, and asserting a DIFFERENT instance
+// live grid instance before leaving, and asserting a DIFFERENT instance
 // exists after reopening, is what closes that gap.
 test("switching sessions tears down the mounted terminal; reselecting mounts a fresh one", async ({
   page,
@@ -463,9 +460,8 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
   await waitForTermText(page, "echo:marker-before-back");
 
   await page.evaluate(() => {
-    // The agent terminal's component, whichever kind it is: xterm.js, or
-    // the grid that replaced it for a terminal in a terminal host.
-    ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).__testMarker = "before-back";
+    // The agent terminal's grid component.
+    (window as any).__farhelmGrid.__testMarker = "before-back";
     // Stashed under different names so they survive terminal.js's own
     // deletes on unmount — the actual WebSocket object and test hook the
     // mount owned, kept around purely so the assertions below can check
@@ -477,7 +473,7 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
 
   // There is no back: leaving means selecting another session, whose
   // own mount immediately REPLACES the globals — so the teardown is
-  // observed through replacement (a different xterm instance owns the
+  // observed through replacement (a different grid instance owns the
   // globals) plus the stashed socket's closure below, rather than
   // through a gone-entirely window that no longer exists.
   await page.locator(`[data-session-id="${bounce.id}"]`).click();
@@ -489,8 +485,8 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
         // teardown deletes the global, and `undefined !== marker` would
         // declare victory over a blank pane.
         () =>
-          Boolean((window as any).__farhelmTerm ?? (window as any).__farhelmGrid) &&
-          ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).__testMarker !== "before-back",
+          Boolean((window as any).__farhelmGrid) &&
+          (window as any).__farhelmGrid.__testMarker !== "before-back",
       ),
     )
     .toBe(true);
@@ -533,35 +529,21 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
   await waitForTermText(page, "FAKE-AGENT READY");
 
   const isFreshInstance = await page.evaluate(
-    () => ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).__testMarker !== "before-back",
+    () => (window as any).__farhelmGrid.__testMarker !== "before-back",
   );
   expect(isFreshInstance).toBe(true);
 
   // The reopened attachment's test hook must be a genuinely NEW object
   // (not the old one somehow surviving unmount, and not a stale reference
-  // reused) with a freshly-zeroed watermark state — the same "fresh, not
-  // reused" property `isFreshInstance` above pins for the xterm instance,
-  // extended to the hook PLAN_M2_5.md step 4 added.
-  const hookState = await page.evaluate(() => {
+  // reused) — the same "fresh, not reused" property `isFreshInstance` above
+  // pins for the grid instance, extended to the hook PLAN_M2_5.md step 4
+  // added. Its catch-up record races this read by design and is pinned by
+  // the reattach-lands-at-tail specs in terminal-replay-rename.spec.ts.
+  const hookIsNew = await page.evaluate(() => {
     const hook = (window as any).__farhelmTest;
-    const before = (window as any).__testHookBeforeBack;
-    return { isDifferentObject: hook !== before, hook };
+    return !!hook && hook !== (window as any).__testHookBeforeBack;
   });
-  expect(hookState.isDifferentObject).toBe(true);
-  // The WATERMARK half of the hook, asserted exactly: a reused or leaked
-  // counter is precisely what this test exists to catch.
-  //
-  // Partial rather than an exact `toEqual` over the whole object, because
-  // the hook also carries the catch-up record (PLAN_M5.md item 5), and
-  // that half is racing this read by design — the reattach's replay may or
-  // may not have landed by now (the assertion below is what waits for it),
-  // so its fields have no stable value HERE. They are pinned by the
-  // reattach-lands-at-tail specs in terminal-replay-rename.spec.ts instead.
-  expect(hookState.hook).toMatchObject({
-    paused: false,
-    pauseCount: 0,
-    resumeCount: 0,
-  });
+  expect(hookIsNew).toBe(true);
 
   // Replay must bring back output produced before THIS attachment
   // existed, exactly like the reload test below — the only difference
@@ -581,7 +563,7 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
 });
 
 // Regression test for the "stale mount retry" bug: terminal.js's wait for
-// xterm's globals used to live entirely in a bare `setTimeout` chain
+// the terminal component's globals used to live entirely in a bare `setTimeout` chain
 // inside the eval'd JS, with nothing SessionView's teardown could reach
 // in and cancel. Backing out of a session before that wait resolved left
 // it running; if the user then opened a DIFFERENT session, the stale
@@ -602,8 +584,7 @@ test("switching sessions tears down the mounted terminal; reselecting mounts a f
 //
 // This version forces the pending state for real (withholding
 // `window.farhelmGridTerminal`, the grid component, which `mountWhenReady`
-// waits for on both kinds of terminal: a new terminal's mount waits for
-// nothing of xterm.js, so withholding xterm.js's globals would not hold it) and
+// waits for) and
 // makes the resulting race deterministic with Playwright's fake clock
 // instead of hoping real wall-clock timing falls out favorably: with the
 // clock frozen, session A's retry and session B's retry are scheduled
@@ -681,7 +662,7 @@ test("switching sessions before the first terminal is ready mounts the second se
     await page.clock.pauseAt(new Date(Date.now() + 5_000));
 
     // Withhold a global `mountWhenReady` genuinely cannot proceed
-    // without, whichever kind of terminal A is, so opening session A puts
+    // without, so opening session A puts
     // a REAL pending retry into
     // flight (rather than resolving on its first synchronous check, as
     // it almost always would on an unloaded box).
@@ -803,9 +784,9 @@ test("terminal mounting waits for the clipboard naming helper", async ({ page, r
 // must leave `active` exactly as it was before the attempt — not stuck
 // in a state that wedges every later mount shut. Monkeypatching
 // `window.WebSocket` to throw is the cleanest deterministic way to break
-// mount() partway through: it is the very next thing mount() does after
-// constructing the xterm.js `Terminal` (already-real work that must
-// itself be rolled back — the terminal.js catch block disposes it),
+// mount() partway through: it comes after the terminal component is built
+// (already-real work that must itself be rolled back — the terminal.js
+// catch block disposes it),
 // requires no changes to production code to trigger, and — restored
 // before the second attempt — reproduces the exact "mount, fail, mount
 // the SAME session again" sequence a real transient failure would leave
@@ -847,11 +828,8 @@ test("a failed mount rolls back cleanly; the same session can be mounted again",
   await expect(page.locator("#term-banner")).toContainText(
     "Failed to start terminal",
   );
-  // The failed attempt must not have left anything looking mounted, with
-  // either component's handle.
-  expect(
-    await page.evaluate(() => (window as any).__farhelmTerm === undefined && (window as any).__farhelmGrid === undefined),
-  ).toBe(true);
+  // The failed attempt must not have left anything looking mounted.
+  expect(await page.evaluate(() => (window as any).__farhelmGrid === undefined)).toBe(true);
 
   await page.evaluate(() => {
     window.WebSocket = (window as any).__testRealWebSocket;
@@ -883,9 +861,9 @@ test("a failed mount rolls back cleanly; the same session can be mounted again",
   }
 });
 
-// Real keystrokes through the whole chain: xterm's onData, the WebSocket,
-// the framing protocol, tmux send-keys on the dedicated input control
-// client, and back out as pane output. This is the one test that would
+// Real keystrokes through the whole chain: the grid's key messages, the
+// WebSocket, the framing protocol, the supervisor's input encoder and the
+// terminal host, and back out as terminal output. This is the one test that would
 // catch an input path wired up but dead — the failure a user would
 // describe as "typing goes nowhere".
 test("input round-trips through the real terminal path", async ({ page }) => {
@@ -948,7 +926,7 @@ test("session readiness rejects a reused primary island until the requested sess
 
 // SPEC.md's core durability promise seen from the browser: close the tab,
 // come back, and the session looks as if you had never left. A reload is
-// the harshest form of it — a brand-new xterm.js with an empty buffer, so
+// the harshest form of it — a brand-new grid with an empty model, so
 // everything on screen afterwards came from replay.
 test("reload reattaches with replayed scrollback", async ({ page }) => {
   await openTerminal(page);
@@ -973,9 +951,9 @@ test("reload reattaches with replayed scrollback", async ({ page }) => {
   await waitForTermText(page, "FAKE-AGENT READY");
 });
 
-// Exercise the complete browser-to-PTY resize chain. Xterm's local
-// dimensions are only the requested geometry; the fake agent's `stty`
-// result proves the WebSocket message reached tmux before later input.
+// Exercise the complete browser-to-PTY resize chain. The grid's own fit is
+// only the requested geometry; the fake agent's `stty` result proves the
+// WebSocket message reached the program's terminal before later input.
 test("resize reaches the real terminal", async ({ page }) => {
   await openTerminal(page);
   const before = await terminalFit(page);
@@ -984,8 +962,8 @@ test("resize reaches the real terminal", async ({ page }) => {
     .poll(() => terminalFit(page), { message: "viewport change must reflow the terminal via fit()" })
     .not.toEqual(before);
   const geometry = (await terminalFit(page))!;
-  // A grid draws the size the supervisor committed; wait until that is the
-  // page's fit, as xterm.js's own size already is.
+  // The grid draws the size the supervisor committed; wait until that is
+  // the page's fit.
   await expect.poll(() => terminalSize(page), { message: "the terminal must take the fitted size" }).toEqual(geometry);
   await page.locator("#terminal").click();
   await page.keyboard.type("size");
@@ -2692,8 +2670,7 @@ test("submitting the create form twice while one create is in flight produces ex
     release(true);
 
     // Auto-select means the page attached a session at load, so a
-    // readiness flag (__farhelmTermReady, which only an old terminal sets)
-    // cannot gate on the create any more; the created session's own title
+    // readiness flag cannot gate on the create; the created session's own title
     // taking the pane is what
     // proves the POST completed and creation selected it.
     await expect(page.locator(".session-details .title")).toHaveText(title, { timeout: 15_000 });

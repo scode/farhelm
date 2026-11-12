@@ -2973,33 +2973,32 @@ whatever the agent renders is what you see. There is no composer, no message abs
   Delete and the tunnel pill remain fully visible and keyboard reachable from a 650px main pane; only the tab strip
   takes the remaining width and scrolls horizontally when needed. Narrower panes may clip the row, which never wraps.
   The bottom bar is about one tab-strip row high and shows, in order, status, session name, host, age, the
-  managed-checkout branch mark when present, the session's terminal kinds when shown (below), directory, and command
-  line. The host's icon follows the session list's rules; its name is the full display name, prominent beside the
-  session name. A missing host name omits the host rather than inventing one. Directory display still abbreviates the
-  home directory to `~`. Keyboard order follows the top row, terminal, then bottom bar. The terminal loses no height in
-  the steady state. Conditional notices stay between the top row and terminal; a stale session's status appears only in
-  its stale notice, not again in the bottom bar. Restart and its menu's matching entries are greyed out when the session
-  cannot resume its conversation (see Lifecycle operations); their tooltips and accessible descriptions explain the
-  specific reason, such as an agent type without conversation reporting, a command launch that declared no agent type or
-  did not opt into Resume, or a conversation not captured yet. For an agent that reports conversations, a running
-  session's explanation says, naming the agent, when Restart normally becomes available for it (Codex, for instance,
-  once the first prompt is submitted), and an ended session's says its conversation was never captured; both invite the
-  user to send feedback if that is not what happened, since Farhelm cannot tell a report still to come from one that
-  never will. The supervisor's refusal of such a restart and the agent instructions state the same timing, without the
-  invitation. Directory and command line are muted click-to-copy buttons that take the width their values need and
-  ellipsize before the session name or host when the bar runs out of room; a click confirms locally for about 1.5
-  seconds. A hidden-characters copy warning opens upward from the bar and stays within the window. Clipboard writes use
-  the native bridge first and `navigator.clipboard` second, with JSON serialization and silent failures. Replace has its
-  own anchored danger confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the
-  same anchored way, even for a session that has ended, with the same consequence text the row's delete prompt shows.
-  Restart's confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus
-  to the terminal. The session-confirmation setting skips the top row's Stop, Delete, Replace and Restart questions, the
-  interrupted-card Replace question, and tab Close, using the screen's consent and existing guards. Split menus follow
-  the app's shared keyboard rules: mouse or pen movement focuses the hovered choice without scrolling, arrows and
-  Home/End move between choices, and only the focused enabled choice has the highlight fill. Leaving the menu keeps that
-  focus; Escape or Tab closes the menu and returns focus to its caret. Cancelling Restart with returns to that
-  persistent caret. An unavailable plain Restart does not hide an independently available Restart with; the menu remains
-  available to inspect reasons.
+  managed-checkout branch mark when present, directory, and command line. The host's icon follows the session list's
+  rules; its name is the full display name, prominent beside the session name. A missing host name omits the host rather
+  than inventing one. Directory display still abbreviates the home directory to `~`. Keyboard order follows the top row,
+  terminal, then bottom bar. The terminal loses no height in the steady state. Conditional notices stay between the top
+  row and terminal; a stale session's status appears only in its stale notice, not again in the bottom bar. Restart and
+  its menu's matching entries are greyed out when the session cannot resume its conversation (see Lifecycle operations);
+  their tooltips and accessible descriptions explain the specific reason, such as an agent type without conversation
+  reporting, a command launch that declared no agent type or did not opt into Resume, or a conversation not captured
+  yet. For an agent that reports conversations, a running session's explanation says, naming the agent, when Restart
+  normally becomes available for it (Codex, for instance, once the first prompt is submitted), and an ended session's
+  says its conversation was never captured; both invite the user to send feedback if that is not what happened, since
+  Farhelm cannot tell a report still to come from one that never will. The supervisor's refusal of such a restart and
+  the agent instructions state the same timing, without the invitation. Directory and command line are muted
+  click-to-copy buttons that take the width their values need and ellipsize before the session name or host when the bar
+  runs out of room; a click confirms locally for about 1.5 seconds. A hidden-characters copy warning opens upward from
+  the bar and stays within the window. Clipboard writes use the native bridge first and `navigator.clipboard` second,
+  with JSON serialization and silent failures. Replace has its own anchored danger confirmation and neutral
+  cancellation. Delete is styled as the danger action and asks first in the same anchored way, even for a session that
+  has ended, with the same consequence text the row's delete prompt shows. Restart's confirmation is likewise anchored
+  under its top-row button; Escape cancels these questions and returns focus to the terminal. The session-confirmation
+  setting skips the top row's Stop, Delete, Replace and Restart questions, the interrupted-card Replace question, and
+  tab Close, using the screen's consent and existing guards. Split menus follow the app's shared keyboard rules: mouse
+  or pen movement focuses the hovered choice without scrolling, arrows and Home/End move between choices, and only the
+  focused enabled choice has the highlight fill. Leaving the menu keeps that focus; Escape or Tab closes the menu and
+  returns focus to its caret. Cancelling Restart with returns to that persistent caret. An unavailable plain Restart
+  does not hide an independently available Restart with; the menu remains available to inspect reasons.
 - Every terminal is new: it runs in a terminal host of its own (above). Releases from before terminal hosts ran each
   terminal (the agent's and each tab's) in the host's private tmux server instead, and later ones kept those old
   terminals running beside new ones, with a loud band on such a session and the old-terminal warning (see Status) asking
@@ -3015,36 +3014,28 @@ whatever the agent renders is what you see. There is no composer, no message abs
   sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still
   running. After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.
   Installing Farhelm still requires a supported tmux, except on a remote Mac set up over SSH, which never uses tmux (see
-  Topology). The bottom bar names the session's terminal kinds (with each terminal listed in its tooltip and accessible
-  text).
+  Topology).
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a
-  session's work outright, and no viewer can slow one it is not attached to. The stall timeout is about a minute,
-  counted from the moment output to the viewer paused. The two kinds of terminal differ (SPEC_impl.md, "Helm ↔
-  supervisor transport: system ssh + stdio protocol", has the arithmetic):
-  - In an old terminal, honoring a slow viewer can briefly slow the agent's OUTPUT — a paused viewer may leave the
-    agent's writes blocking for as long as the flow-control window allows — but never indefinitely and never silently:
-    the delay is bounded by that window and, in the limit, by the stall timeout, after which the viewer is detached and
-    the agent runs unimpeded. Output to a viewer pauses only when its browser falls behind in drawing it, and a paused
-    viewer must then draw at least about 50 KB/s to stay attached. A viewer that is slow on the network is not paused at
-    all: once the output waiting for it at the helm fills a fixed backlog, it is detached as stalled at once.
-  - In a new terminal no viewer slows the agent at all: the terminal takes in everything the program writes whatever its
-    viewers do, and a viewer that falls behind is sent the screen as it is when it can take more, skipping the screens
-    in between, while every line that entered the scrollback meanwhile is still sent, appended. Output to a viewer
-    pauses when a backlog builds up for it at the helm, wherever it is slow (sooner when the backlog is many small
-    messages), and one that has not caught up within the stall timeout is detached as stalled. In practice a paused
-    viewer must take in a full scrollback at about 50 KB/s locally, or about 110 KB/s over ssh (the figure moves with
-    how much the link holds), and live output that falls behind slowly at about 10 KB/s.
+  session's work outright, and no viewer can slow one it is not attached to; no viewer slows the agent at all. The
+  terminal takes in everything the program writes whatever its viewers do, and a viewer that falls behind is sent the
+  screen as it is when it can take more, skipping the screens in between, while every line that entered the scrollback
+  meanwhile is still sent, appended. Output to a viewer pauses when a backlog builds up for it at the helm, wherever it
+  is slow (sooner when the backlog is many small messages), and one that has not caught up within the stall timeout,
+  about a minute counted from the moment output to the viewer paused, is detached as stalled. In practice a paused
+  viewer must take in a full scrollback at about 50 KB/s locally, or about 110 KB/s over ssh (the figure moves with how
+  much the link holds), and live output that falls behind slowly at about 10 KB/s (SPEC_impl.md, "Helm ↔ supervisor
+  transport: system ssh + stdio protocol", has the arithmetic).
 - A viewer that stops consuming output entirely (a wedged tab, a machine asleep past its connection's lifetime) is
   detached with a visible stall reason rather than honored forever, as the floors above describe — the same surface as a
   takeover detach, with reattach behaving exactly as any reconnect does. Flow control never drops terminal output:
-  whatever bound it degrades to is the same replay floor above, never a silent gap. A new terminal's skipped screens are
-  no exception, since the screen a viewer is sent is the program's current one and the scrollback arrives whole, and no
-  viewer can cause a new terminal's gap (above): those come only from the supervisor falling behind the program. One
-  exception, accepted 2026-11-04, is extreme cumulative applied resizes on a quiet terminal: they can exhaust its
-  recovery journal without triggering a save, so a later crash or an orderly stop that skips its save can lose terminal
-  history (SPEC_impl.md, "Across supervisor restarts"). This does not relax the slow-viewer or flow-control guarantees.
+  whatever bound it degrades to is the same replay floor above, never a silent gap. Skipped screens are no exception,
+  since the screen a viewer is sent is the program's current one and the scrollback arrives whole, and no viewer can
+  cause a gap (above): those come only from the supervisor falling behind the program. One exception, accepted
+  2026-11-04, is extreme cumulative applied resizes on a quiet terminal: they can exhaust its recovery journal without
+  triggering a save, so a later crash or an orderly stop that skips its save can lose terminal history (SPEC_impl.md,
+  "Across supervisor restarts"). This does not relax the slow-viewer or flow-control guarantees.
 - A terminal that loses its CONNECTION recovers by itself, without the session ever being closed and reopened by hand.
   That covers the connection dropping visibly and the connection dying silently — a sleeping laptop or a timed-out
   network path leaves a terminal that looks connected and carries nothing, which is checked for rather than left for the
@@ -3080,13 +3071,13 @@ whatever the agent renders is what you see. There is no composer, no message abs
   window. It stays centred horizontally on the pointer, clamped inside the window. It stays for 30 seconds, or until its
   × is clicked or the next mouse press in that terminal. Dismissal preserves terminal focus and sends no input to the
   program; the rest of the notice is pointer-transparent. For a Codex session's agent terminal the notice names Codex's
-  own copy key instead. It is guidance about the program, not a report of a clipboard failure. Both kinds of terminal
-  show it; any completed program clipboard write, including a primary-selection write, suppresses it during the grace
-  window. Clipboard operations are explicitly best-effort and silent on failure — permission policy, secure-context
-  requirements, and an engine's own clipboard behavior are outside this system's control — a deliberate, named exception
-  to the Errors and diagnostics section's surface-every-error rule below, not a lapse in it. Farhelm assumes the host's
-  system clipboard works. A broken, hung or slow clipboard is not something Farhelm adds complexity to support well:
-  copies may be dropped while it is in that state, but nothing else in Farhelm may stall because of it.
+  own copy key instead. It is guidance about the program, not a report of a clipboard failure. Any completed program
+  clipboard write, including a primary-selection write, suppresses it during the grace window. Clipboard operations are
+  explicitly best-effort and silent on failure — permission policy, secure-context requirements, and an engine's own
+  clipboard behavior are outside this system's control — a deliberate, named exception to the Errors and diagnostics
+  section's surface-every-error rule below, not a lapse in it. Farhelm assumes the host's system clipboard works. A
+  broken, hung or slow clipboard is not something Farhelm adds complexity to support well: copies may be dropped while
+  it is in that state, but nothing else in Farhelm may stall because of it.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the
@@ -3103,21 +3094,20 @@ whatever the agent renders is what you see. There is no composer, no message abs
   followed by `/`) and names a different place, ignoring only a trailing slash, the display becomes a prominent warning
   that shows the text beside the real target. Link text that is not a web address, such as a file name or "click here",
   keeps the ordinary display. Consecutive rows of the same hyperlink are compared together, including links an agent
-  continues after indentation with cursor movement. In new terminals (those in a terminal host), restarting a hyperlink
-  without an explicit id right where its previous piece ended, with the same target, continues that hyperlink, across
-  soft wraps too. An honest wrapped web address keeps the ordinary display, and a lookalike split across rows of one
-  hyperlink is judged on its whole text. Repeated complete addresses that each independently match the target keep the
-  ordinary display. If an adjacent continuation cannot be joined unambiguously within the bounds, a piece that looks
-  like a web address warns rather than counting as a match. If the terminal library's link tag cannot be read, the
-  previous hovered-line comparison applies (see SPEC_impl.md). The warning is judged when the hover starts and need not
-  follow later redraws of other rows while the pointer rests; the destination display stays authoritative. The warning
-  is an aid, not a guarantee: unlinked text around the hyperlink is outside the comparison, a program that chooses its
-  own line breaks can still split a lookalike into pieces that are not joined (separate hyperlinks, say) and that do not
-  look like web addresses on their own, and the ordinary display, which always names the real host, is what remains. The
-  hover display is the whole safeguard: it counts as disclosing the target only while fully visible, inside the window
-  and not covered by another Farhelm surface such as an approval card or tunnel-error notice. A click whose hover is not
-  fully visible is refused with an explanation; this also applies to Cmd-click tunnel opens. Plain URLs printed as text
-  need no such display, because what is shown is what opens, apart from the remote-localhost tunnel hint below.
+  continues after indentation with cursor movement. Restarting a hyperlink without an explicit id right where its
+  previous piece ended, with the same target, continues that hyperlink, across soft wraps too. An honest wrapped web
+  address keeps the ordinary display, and a lookalike split across rows of one hyperlink is judged on its whole text.
+  Repeated complete addresses that each independently match the target keep the ordinary display. If an adjacent
+  continuation cannot be joined unambiguously within the bounds, a piece that looks like a web address warns rather than
+  counting as a match. The warning is judged when the hover starts and need not follow later redraws of other rows while
+  the pointer rests; the destination display stays authoritative. The warning is an aid, not a guarantee: unlinked text
+  around the hyperlink is outside the comparison, a program that chooses its own line breaks can still split a lookalike
+  into pieces that are not joined (separate hyperlinks, say) and that do not look like web addresses on their own, and
+  the ordinary display, which always names the real host, is what remains. The hover display is the whole safeguard: it
+  counts as disclosing the target only while fully visible, inside the window and not covered by another Farhelm surface
+  such as an approval card or tunnel-error notice. A click whose hover is not fully visible is refused with an
+  explanation; this also applies to Cmd-click tunnel opens. Plain URLs printed as text need no such display, because
+  what is shown is what opens, apart from the remote-localhost tunnel hint below.
 
 - In the Mac app, a loopback link in a remote session's terminal offers Cmd-click to tunnel and open it in the browser.
   Its hover names the host and port, explains that a plain click still opens on the Mac, and preserves any OSC hyperlink

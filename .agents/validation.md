@@ -257,36 +257,36 @@ that its required systemd or SSH substrate ran.
   probe authorized refused, refused verbs and prompt), the ticker recording a host exit on the liveness notifier's wake
   with the tick far away, the hook anchor (and the publication gap's retry), the orderly stop's hold wait, prompt
   delivery gated on the emulator's paste mode, at one part and at the prompt cap's two, and grid attaches over the
-  supervisor's own connection handling (a bytes-only attach refused, a grid attach catching up and typing into the host,
-  a takeover displacing a grid attachment, a paused grid viewer detached as stalled, an attach to a startup placeholder
-  refused with an incumbent kept). Delete's handling of hosts (`service::session_hosts`) against stand-ins, some in the
-  state directory's socket directory named by a launch record the test writes: an unconditional Delete of an unreadable
-  agent host killing its child from the identity pinned at adoption and keeping the session when its adopted process
-  cannot be confirmed ended (the stand-in's process is the test runner, which the verified signal never signals); a
-  recorded host that answers only with a foreign protocol refused by the agent guard and signalled, never reconnected
-  to, by an unconditional Delete (the stand-in counts two connections, one per settling); a record naming another
-  session's host refusing and touching nothing; the record of the host the agent's runtime holds left to the runtime
-  (the stand-in counts only the adoption's connection); a gone record's leftover socket file removed with the session
-  deleted; and the overall deadline for settling and ending hosts (a gate holding each end before it starts, not a stuck
-  process read, and a one-second budget) returning a retryable refusal and releasing the directory admission and the
-  lifecycle claim. Pure unit tests cover the bounded join and the startup sweep keeping every launch host record. The
-  e2e tests (`crates/farhelm/tests/e2e/host_terminals.rs`) give a created session's agent a real host the test started
-  from the built `farhelm`, in place of the host its create started (`Supervisor::install_host_agent_for_test`), and
-  check the exit stored with its code, Stop and Delete killing an unmarked process tree from the host's child (Stop
-  leaving the host's process running with its final screen), Restart stopping that tree before its new host starts, the
-  delete guard, a bytes-only attach refused and a grid attach showing the host child's output; and Delete ending hosts,
-  every test's grandchild ignoring SIGHUP (it publishes its pid only after its trap; disposition and ancestry checked
-  first) so that only a sweep rooted at the host's child reaches it: a host agent guarded and then ended (gone at
-  Delete's return) beside a record naming the host its runtime holds, a recorded host of another generation refused by
-  the agent guard beside an ended agent and then ended while another session's recorded host is never touched, a
-  terminal-less session's recorded agent host, a SIGSTOPped host agent ended by the verified signal, a SIGSTOPped
-  recorded host refused by the guard and then signalled, and a host renamed over the agent's socket neither shut down
-  nor signalled while Delete ends the host the runtime adopted and deletes the session. In `host_creates.rs` (the
-  selection below): the unbound recorded start an interrupted create leaves fenced by an unconditional Delete, and
-  Delete of a session whose runtime is held in a snapshot encode ending the adopted host by its process after another
-  host was renamed over its socket, which is left running. Linux only (the e2e suite), a few minutes (several tests wait
-  out a stopped host's connect deadline); part of the workspace nextest run. Run it when a switch point, the host
-  runtime's adapters, the status evidence, the grid attach path or Delete's handling of hosts change.
+  supervisor's own connection handling (a grid attach catching up and typing into the host, a takeover displacing a grid
+  attachment, a paused grid viewer detached as stalled, an attach to a startup placeholder refused with an incumbent
+  kept). Delete's handling of hosts (`service::session_hosts`) against stand-ins, some in the state directory's socket
+  directory named by a launch record the test writes: an unconditional Delete of an unreadable agent host killing its
+  child from the identity pinned at adoption and keeping the session when its adopted process cannot be confirmed ended
+  (the stand-in's process is the test runner, which the verified signal never signals); a recorded host that answers
+  only with a foreign protocol refused by the agent guard and signalled, never reconnected to, by an unconditional
+  Delete (the stand-in counts two connections, one per settling); a record naming another session's host refusing and
+  touching nothing; the record of the host the agent's runtime holds left to the runtime (the stand-in counts only the
+  adoption's connection); a gone record's leftover socket file removed with the session deleted; and the overall
+  deadline for settling and ending hosts (a gate holding each end before it starts, not a stuck process read, and a
+  one-second budget) returning a retryable refusal and releasing the directory admission and the lifecycle claim. Pure
+  unit tests cover the bounded join and the startup sweep keeping every launch host record. The e2e tests
+  (`crates/farhelm/tests/e2e/host_terminals.rs`) give a created session's agent a real host the test started from the
+  built `farhelm`, in place of the host its create started (`Supervisor::install_host_agent_for_test`), and check the
+  exit stored with its code, Stop and Delete killing an unmarked process tree from the host's child (Stop leaving the
+  host's process running with its final screen), Restart stopping that tree before its new host starts, the delete
+  guard, and a grid attach showing the host child's output; and Delete ending hosts, every test's grandchild ignoring
+  SIGHUP (it publishes its pid only after its trap; disposition and ancestry checked first) so that only a sweep rooted
+  at the host's child reaches it: a host agent guarded and then ended (gone at Delete's return) beside a record naming
+  the host its runtime holds, a recorded host of another generation refused by the agent guard beside an ended agent and
+  then ended while another session's recorded host is never touched, a terminal-less session's recorded agent host, a
+  SIGSTOPped host agent ended by the verified signal, a SIGSTOPped recorded host refused by the guard and then
+  signalled, and a host renamed over the agent's socket neither shut down nor signalled while Delete ends the host the
+  runtime adopted and deletes the session. In `host_creates.rs` (the selection below): the unbound recorded start an
+  interrupted create leaves fenced by an unconditional Delete, and Delete of a session whose runtime is held in a
+  snapshot encode ending the adopted host by its process after another host was renamed over its socket, which is left
+  running. Linux only (the e2e suite), a few minutes (several tests wait out a stopped host's connect deadline); part of
+  the workspace nextest run. Run it when a switch point, the host runtime's adapters, the status evidence, the grid
+  attach path or Delete's handling of hosts change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'creating agents in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::host_launch::/) | test(/a_retry_finds_the_sessions_own_published_host/) | test(/^hosts::spawn::/) | test(/^host_creates::/)'`
   — a create starting its agent in a terminal host, where every create starts it
   (`crates/farhelm-supervisor/src/service/core/host_launch.rs`). The unit tests pin the host child's environment as a
@@ -296,30 +296,28 @@ that its required systemd or SSH substrate ran.
   given nothing until finished, killed having read nothing when dropped, a taken name refused), a retry that finds the
   session's own published host with no other evidence. The e2e tests (`crates/farhelm/tests/e2e/host_creates.rs`) run
   in-process supervisors starting hosts from the built `farhelm`: the row recorded as a host row with the socket's name,
-  no tmux session, Stop ending the agent and sparing the host; the create reply, its keyed replay and the listing naming
-  the agent's terminal as a host and reporting that the supervisor creates host terminals (what the client's migration
-  band and session details read); the host's command line and empty environment holding no credential or marker while
-  its child has the markers; the agent in its launch scope with the host outside it (with a user manager, else
-  `SKIPPED`); the login shell's environment (Farhelm's terminal variables, the supervisor's `PATH`, the launch
-  environment's `HOME`, no `TMUX` or `TMUX_PANE`) and a startup file's tmux autostart guarded by `TMUX` running; a
-  wrapper prefix running in the host; a create interrupted after its host started retried without a second agent; a
-  first stage that outlived an interrupted create (holding its spec, before binding) waited for by the retry, which then
-  finds its host, or ended by the verified signal when it does not finish, with one host and one agent either way, and
-  fenced the same way by an unconditional Delete of that session after a restart, which then leaves no host and no
-  agent; a process the interrupted first stage forked that still names the socket (a stand-in second stage) leaving the
-  retry unresolved while it stays, and letting the same retry relaunch when it ends during the retry's wait; a launch
-  error's cleanup after a restart keeping the host record of a host that still runs; a cleanup whose runtime is held by
-  a snapshot encode (an encode gate) falling back to ending the host by its socket after the runtime's 15 s bound, while
-  the encode is still held (the gate shows no encode passed or expired); a create that lost to Delete ending its host; a
-  start whose first stage dies after readiness leaving nothing, and one the spawn reports may have left a host, which
-  the create ends and removes the socket of; stand-in hosts that cannot be used, ended by the verified signal and rolled
-  back, or kept as a launching record when the signal must not touch them; and a keyed create an older supervisor
-  started in tmux and was interrupted after its launching row (made by writing the row's kind) refused when retried, its
-  row rolled back, no host started, and a second retry refused the same way. Needs the pinned tmux first on `PATH` and
-  Python 3 at `/usr/bin/python3` (the stand-in hosts). Linux only, two or three minutes (several tests wait out client
-  deadlines); part of the workspace nextest run. Environment supervisors use the same ordinary host launch path,
-  exercised by the real Podman suite above. Run this selection when the create path, the launch spec's composition, the
-  host spawn or the launch identity's rollback or evidence changes.
+  no tmux session, Stop ending the agent and sparing the host; the host's command line and empty environment holding no
+  credential or marker while its child has the markers; the agent in its launch scope with the host outside it (with a
+  user manager, else `SKIPPED`); the login shell's environment (Farhelm's terminal variables, the supervisor's `PATH`,
+  the launch environment's `HOME`, no `TMUX` or `TMUX_PANE`) and a startup file's tmux autostart guarded by `TMUX`
+  running; a wrapper prefix running in the host; a create interrupted after its host started retried without a second
+  agent; a first stage that outlived an interrupted create (holding its spec, before binding) waited for by the retry,
+  which then finds its host, or ended by the verified signal when it does not finish, with one host and one agent either
+  way, and fenced the same way by an unconditional Delete of that session after a restart, which then leaves no host and
+  no agent; a process the interrupted first stage forked that still names the socket (a stand-in second stage) leaving
+  the retry unresolved while it stays, and letting the same retry relaunch when it ends during the retry's wait; a
+  launch error's cleanup after a restart keeping the host record of a host that still runs; a cleanup whose runtime is
+  held by a snapshot encode (an encode gate) falling back to ending the host by its socket after the runtime's 15 s
+  bound, while the encode is still held (the gate shows no encode passed or expired); a create that lost to Delete
+  ending its host; a start whose first stage dies after readiness leaving nothing, and one the spawn reports may have
+  left a host, which the create ends and removes the socket of; stand-in hosts that cannot be used, ended by the
+  verified signal and rolled back, or kept as a launching record when the signal must not touch them; and a keyed create
+  an older supervisor started in tmux and was interrupted after its launching row (made by writing the row's kind)
+  refused when retried, its row rolled back, no host started, and a second retry refused the same way. Needs the pinned
+  tmux first on `PATH` and Python 3 at `/usr/bin/python3` (the stand-in hosts). Linux only, two or three minutes
+  (several tests wait out client deadlines); part of the workspace nextest run. Environment supervisors use the same
+  ordinary host launch path, exercised by the real Podman suite above. Run this selection when the create path, the
+  launch spec's composition, the host spawn or the launch identity's rollback or evidence changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'restarting host agents' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/host_handover::tests::/) | test(a_terminal_less_host_row_restarts_in_a_host_never_in_tmux) | test(/a_restart_seed_|_seed_of_an?_|a_seed_whose_runtime|a_stop_during_a_restarts_seed|a_restart_without_consent_touches_no_program|a_restart_asks_again_for_consent/) | test(a_failed_host_restart_after_a_stop_began_restores_a_placeholder) | test(restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts) | test(/^host_relaunches::/)'`
   — Restart of an agent in a terminal host (`crates/farhelm-supervisor/src/service/core/host_restart.rs`) and the
   startup rules for the hosts a restart left (`host_handover`, "Superseded agent hosts" and a restart that never started
@@ -471,13 +469,12 @@ that its required systemd or SSH substrate ran.
   supervisor process with the same host process, its screen (the ready line and a line echoed before) and its input; a
   state directory whose `supervisor.sock` path is 103 bytes, macOS's longest, holds its host sockets (each path shorter
   than the supervisor's) and the terminal works; with a real helm on the same state directory, a session created through
-  the helm's API reaches a hand-rolled browser WebSocket with `?grid=1` as a `grid` stream notice and then grid messages
-  showing the agent's screen, and `text` and `key` messages sent up the socket reach the program; and a bare supervisor
-  given a recording `FARHELM_TMUX` running no tmux at all through a host session's create, attach, tab, listing, rename,
-  several ticker intervals, Delete and SIGTERM, with no tmux socket left. Needs the pinned tmux first on `PATH`. Linux
-  only (the e2e suite), a minute or two; part of the workspace nextest run. Run it when the startup, the schema, the
-  orderly stop, reload, the host socket's path, the helm's grid relay, or when and whether the supervisor uses tmux
-  changes.
+  the helm's API reaches a hand-rolled browser WebSocket as grid messages showing the agent's screen, and `text` and
+  `key` messages sent up the socket reach the program; and a bare supervisor given a recording `FARHELM_TMUX` running no
+  tmux at all through a host session's create, attach, tab, listing, rename, several ticker intervals, Delete and
+  SIGTERM, with no tmux socket left. Needs the pinned tmux first on `PATH`. Linux only (the e2e suite), a minute or two;
+  part of the workspace nextest run. Run it when the startup, the schema, the orderly stop, reload, the host socket's
+  path, the helm's grid relay, or when and whether the supervisor uses tmux changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'ending old terminals' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::old_terminals::/) | test(/^hosts::process::/) | test(the_child_gets_the_supervisors_environment_in_farhelms_terminal) | test(/^old_terminals::/) | test(a_retry_of_a_create_interrupted_in_tmux_is_refused)'`
   — the startup step that ends the old terminals, the private tmux server earlier releases ran sessions in
   (`crates/farhelm-supervisor/src/service/core/old_terminals.rs`). The unit tests pin how a pane of that server is
@@ -595,13 +592,13 @@ that its required systemd or SSH substrate ran.
   mouse coordinates, focus reports, the wheel on the alternate screen, and `Input` framing. Seconds, in-process. Part of
   the workspace nextest run. Which keydowns become key messages at all (third-level shift, lone capitals, the key after
   a dead key) and mouse motion de-duplication are the grid client's, pinned by its own tests, not this selection. Both
-  tables are checked-in contract data, first computed by the vendored xterm.js and read by no test from it now. The key
-  table is rendered from the grid client's keyboard rules: after a deliberate change to them (`grid-input.js`, or
-  `shift-enter-key.js`), run `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` from the repository root,
-  review the diff (a changed row is a key a program will read differently), and run this selection; the JS harness's
-  `grid-input-tables.test.js` fails while a checked-in table differs from what the client computes, and it also holds
-  the client's keydown and Alt-click tables (`crates/farhelm-ui/js-tests/fixtures/input/`). The mouse table is edited by
-  hand, together with the encoder.
+  tables are checked-in contract data, first computed by the xterm.js Farhelm then vendored. The key table is rendered
+  from the grid client's keyboard rules: after a deliberate change to them (`grid-input.js`), run
+  `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` from the repository root, review the diff (a changed
+  row is a key a program will read differently), and run this selection; the JS harness's `grid-input-tables.test.js`
+  fails while a checked-in table differs from what the client computes, and it also holds the client's keydown and
+  Alt-click tables (`crates/farhelm-ui/js-tests/fixtures/input/`). The mouse table is edited by hand, together with the
+  encoder.
 - `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' --tmux none -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
   `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
   and
@@ -622,25 +619,22 @@ that its required systemd or SSH substrate ran.
   holds the grid client to those files and fails on a fixture it has no entry for, which `farhelm-proto`'s own tests
   cannot show.
 - `node --test e2e/tests/helpers/program-input.test.ts` — the decoding the shortcut and dialog specs use to say what a
-  program read from a page's terminal input frames (`e2e/tests/helpers/program-input.ts`): a byte stream's frames as
-  their bytes even when JSON-shaped, grid keys as the supervisor encodes them by their numeric codes (Shift kept on
-  Enter and Tab; a missing code, or one that disagrees with the key, a token), anything else as a token that fails an
-  exact comparison, and the frames tagged with their socket's stream notice. Seconds, no browser. Run it when that
-  module changes.
+  program read from a page's terminal input frames (`e2e/tests/helpers/program-input.ts`): grid keys as the supervisor
+  encodes them by their numeric codes (Shift kept on Enter and Tab; a missing code, or one that disagrees with the key,
+  a token), text messages as their text, anything else as a token that fails an exact comparison, and only the binary
+  frames a page sends recorded. Seconds, no browser. Run it when that module changes.
 - `cd e2e && npx playwright test --config grid-client/playwright.config.ts` — the grid terminal component
   (`crates/farhelm-ui/assets/grid-*.js`) on a static page fed recorded grid streams (display, input, scrollback,
   selection and copy, links, paste, history applied in slices), its fit held to the documented formula over the measured
-  character across text sizes and pixel ratios (and, for old terminals only, xterm.js's own legacy fit formula),
-  inherited dimensions preserved through a compatibility swap until an effective sizing input changes, its copy across a
-  wide character's wrap leaving out the empty edge cell, and `terminal.js`'s plumbing for grid streams against a fake
-  socket (a new terminal's grid mounted with no xterm.js built or waited for, a byte stream on its attachment refused, a
-  pending kind held until named, the swap from xterm.js for an old or unknown kind, attach, paste and drop interception,
-  link opening, the hyperlink mismatch warning, file-path hovers and downloads, tunnels, reconnect and takeover
-  snapshots, a catch-up ended by a takeover or a close before its marker, a stalled detach that does not reconnect, and
-  typing and pasting clearing the selection), in Chromium and WebKit. No stack and no build: the page and the shipped
-  assets are served through request routing. Needs `npm install` and the browsers from the browser suite's setup below;
-  a few minutes. Not in CI. Run it when the grid assets, `terminal.js`'s grid handling or the fixtures under
-  `crates/farhelm-ui/js-tests/fixtures/grid/` change.
+  character across text sizes and pixel ratios, an unchanged pane keeping its first fit, its copy across a wide
+  character's wrap leaving out the empty edge cell, and `terminal.js`'s plumbing for grid streams against a fake socket
+  (the grid mounted at its own fitted size, the socket URL carrying only that size, the island's test record, page-level
+  listeners removed at unmount, attach, paste and drop interception, link opening, the hyperlink mismatch warning,
+  file-path hovers and downloads, tunnels, reconnect and takeover snapshots, a catch-up ended by a takeover or a close
+  before its marker, a stalled detach that does not reconnect, and typing and pasting clearing the selection), in
+  Chromium and WebKit. No stack and no build: the page and the shipped assets are served through request routing. Needs
+  `npm install` and the browsers from the browser suite's setup below; a few minutes. Not in CI. Run it when the grid
+  assets, `terminal.js`'s grid handling or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
 - `node --experimental-strip-types --test e2e/grid-client/benchmark.test.mts` — the opt-in grid benchmark's frame and
   Linux process-accounting helpers. Run it when the benchmark changes; it starts no browser. The measurement itself
   (`e2e/grid-client/BENCHMARK.md`) uses the production Rust grid encoder and shipped grid component, one fresh Chromium
@@ -651,20 +645,20 @@ that its required systemd or SSH substrate ran.
   medians. These static-page measurements establish no helm, SSH or live terminal-host coverage.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
-  (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, the stream
-  notice, replay-complete ordering, heartbeat, pause and resume, frame and queue bounds, the stall detach, teardown, and
-  the client's requests, uploads and relays, and the attachment trace (the `farhelm_helm::terminal_attachments` debug
-  events the desktop smoke reads) reporting each attachment's start and end once. For grid streams: only `grid=1` asking
-  for them on both routes, a grid stream relayed unread both ways (a 200 KiB frame sent before the reply, a browser
-  message of exactly the 64 KiB input bound arriving as one frame, resize, pause and resume after it), a message over
-  that bound ending the attachment with nothing forwarded after it (on the socket, and in the client whoever sends
-  next), a slow browser pausing its grid stream and resuming it once it catches up with no frame lost, at 32 KiB
-  messages with a writer queue's worth arriving after the pause and at 1 MiB rows with 8 arriving after it, the queue's
-  pause and resume marks, event and byte bounds and frame bounds, an ended attachment never paused again, a grid-capable
-  attach answered with bytes keeping a byte stream's bounds and never paused by the helm, and a wedged browser's handler
-  ended by the stall detach for a bytes-only and a grid attach (premise: parked mid-send with the attachment live;
-  oracle: the handler's own teardown `Detach` and the socket's close). Under a minute. Part of the workspace nextest
-  run. Run it when the helm's terminal relay, its client's terminal queue or the protocol's attach fields change.
+  (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, data that
+  beat the attach reply reaching the browser first, replay-complete ordering, heartbeat, frame and queue bounds, the
+  stall detach, teardown, and the client's requests, uploads and relays, and the attachment trace (the
+  `farhelm_helm::terminal_attachments` debug events the desktop smoke reads) reporting each attachment's start and end
+  once. The grid stream: relayed unread both ways (a 200 KiB frame sent before the reply, a browser message of exactly
+  the 64 KiB input bound arriving as one frame, resize, and a browser's pause and resume dropped after it), a message
+  over that bound ending the attachment with nothing forwarded after it (on the socket, and in the client whoever sends
+  next), a slow browser paused by the helm and resumed once it catches up with no frame lost, at 32 KiB messages with a
+  writer queue's worth arriving after the pause and at 1 MiB rows with 8 arriving after it, a browser's own pause and
+  resume never touching that flow, the queue's pause and resume marks, event and byte bounds and frame bounds, an ended
+  attachment never paused again, and a wedged browser's handler ended by the stall detach (premise: parked mid-send with
+  the attachment live; oracle: the handler's own teardown `Detach` and the socket's close). Under a minute. Part of the
+  workspace nextest run. Run it when the helm's terminal relay, its client's terminal queue or the protocol's attach
+  messages change.
 - `cd crates/farhelm-supervisor/asset-js-tests && node --test` — the OMP conversation-reporter asset's own execution
   proof: dispatch ordering against a controlled subprocess mock (including a deliberately nonserialized variant the
   proof must reject), stale-id cancellation, execution-time file recheck, the subscribed transition events, and the
@@ -716,11 +710,10 @@ that its required systemd or SSH substrate ran.
   same live terminal attachment's input and ordered output. The session's terminal is a grid terminal (every session the
   app creates runs in a terminal host), and the in-page probe reads it as the browser suite's terminal helpers do: the
   grid's painted background, its input field for focus, its own paste and grid text messages for typing, and its model
-  for the 512-line burst; a terminal that is not a grid, a stream the helm did not announce as grid, or any xterm.js
-  surface added to the page during the case (recorded from the page's start) fails it. Retains bounded JSON and one
-  final client screenshot per case. DOM assertions do not prove transient paint correctness; normal appshots provide
-  visual review. No live native system-appearance event, physical keyboard dispatch, throughput or macOS claim. Run
-  through the recorder; the script supplies its own private profile and closed scenario inputs.
+  for the 512-line burst; a terminal that is not a grid fails it. Retains bounded JSON and one final client screenshot
+  per case. DOM assertions do not prove transient paint correctness; normal appshots provide visual review. No live
+  native system-appearance event, physical keyboard dispatch, throughput or macOS claim. Run through the recorder; the
+  script supplies its own private profile and closed scenario inputs.
 - `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` — one optional Linux missing-initialize leg using
   the same builds and owned display. A fixed valid rootless index exercises the creation-time startup deadline before
   App renders. It requires actual hidden native creation, natural refusal with exit 1, the owned supervisor's birth, its
@@ -897,13 +890,8 @@ no browser tests, and a minor rebase does not discard existing browser evidence.
 When browser validation is warranted, run the selected specs through the recorder on Chromium and WebKit (WebKit stands
 in for the desktop app's engine family). Every run, full or selected, boots three stacks and spreads its (engine, spec
 file) projects over three workers, one stack each (`e2e/stack-slots.ts`), so a selection of a few spec files already
-runs in parallel. Every stack's two supervisors create new terminals (terminal hosts, drawn by the grid component), and
-an automatic per-test check (`e2e/tests/helpers/host-premise.ts`, through `helpers/evidence.ts`) fails a test any of
-whose terminal sockets, in a browser context the test observes (the default one, every context `observeContext`
-observes, and any registered with `watchHostPremise`; tabs and remounts included), got a byte-stream notice for a real
-session; a test that serves a session the helm does not list declares it with `fabricatedTerminals`. Global setup waits
-for each stack's startup session, and the readiness waits run the per-socket check early. The full-suite child command
-is `cd e2e && npx playwright test`. It needs `cargo build` and
+runs in parallel. Every terminal runs in a terminal host and is drawn by the grid component. Global setup waits for each
+stack's startup session. The full-suite child command is `cd e2e && npx playwright test`. It needs `cargo build` and
 `cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release` first, because it drives the built web
 UI against a real helm and supervisor, plus a one-time
 `cd e2e && npm install && npx playwright install chromium webkit`. Reuse matching builds and successful test results

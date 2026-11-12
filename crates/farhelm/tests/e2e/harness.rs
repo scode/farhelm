@@ -3,11 +3,10 @@
 //! test wants to assert on.
 //!
 //! Every harness creates its terminals in terminal hosts (each started from
-//! the built `farhelm`), as every supervisor does. The terminal helpers
-//! still read a byte stream as well as a grid: an attachment takes whichever
-//! stream its terminal sends, a grid's screen and history arrive in a
-//! transcript as text lines ([`grid_text`]), and
-//! [`SupervisorClientAttachExt::send_keys`] types into either.
+//! the built `farhelm`), as every supervisor does, and every attachment
+//! streams a grid: its screen and history arrive in a transcript as text
+//! lines ([`grid_text`]), and [`SupervisorClientAttachExt::send_keys`] types
+//! into it as grid `text` input.
 //!
 //! This is the
 //! broadly shared layer — everything the pre-split file's shared preamble
@@ -23,9 +22,7 @@
 //! `use crate::harness::*;`, matching what the pre-split file offered
 //! implicitly through shared top-of-file imports.
 
-pub(crate) use farhelm_helm::{
-    Detach, SupervisorClient, SupervisorError, TermEvent, TermStream, ViewerStreams,
-};
+pub(crate) use farhelm_helm::{Detach, SupervisorClient, SupervisorError, TermEvent, TermStream};
 pub(crate) use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 pub(crate) use farhelm_proto::{
     ControlMsg, ErrorKind, Frame, FrameKind, SessionInfo, SessionStatus, TerminalSelector,
@@ -110,9 +107,10 @@ pub(crate) trait TermSource {
     /// Receive one event only when it is already queued for draining.
     fn try_recv(&mut self) -> Result<TermEvent, tokio::sync::mpsc::error::TryRecvError>;
 
-    /// Whether this source's data events are grid messages (a new
-    /// terminal's stream) rather than terminal bytes, which decides how a
-    /// waiter adds them to its transcript ([`append_transcript`]).
+    /// Whether this source's data events are grid messages rather than
+    /// plain bytes, which decides how a waiter adds them to its transcript
+    /// ([`append_transcript`]). Every attachment's are; plain bytes are what
+    /// this file's scripted sources feed the waiters' own unit tests.
     fn is_grid(&self) -> bool {
         false
     }
@@ -128,19 +126,16 @@ impl TermSource for TermStream {
     }
 
     fn is_grid(&self) -> bool {
-        self.stream_kind() == farhelm_proto::StreamKind::Grid
+        true
     }
 }
 
-/// Add one data event's payload to a waiter's transcript: a byte stream's
-/// bytes as they are, a grid message as the text it carries
-/// ([`grid_text`]).
+/// Add one data event's payload to a waiter's transcript: a grid message as
+/// the text it carries ([`grid_text`]), and a scripted source's plain bytes
+/// as they are ([`TermSource::is_grid`]).
 ///
-/// This is what lets one waiter, and one needle, serve both kinds of
-/// terminal: a test looking for what a program printed finds it in either
-/// transcript. Escape sequences exist only in a byte stream, which only an
-/// old terminal sends. A grid transcript's order is the
-/// order rows were sent, not printed (see [`grid_text`]).
+/// A grid transcript holds no escape sequences, and its order is the order
+/// rows were sent, not printed (see [`grid_text`]).
 pub(crate) fn append_transcript(grid: bool, seen: &mut Vec<u8>, bytes: &[u8]) {
     if grid {
         seen.extend_from_slice(&grid_text(bytes));
@@ -193,50 +188,18 @@ pub(crate) fn grid_text(bytes: &[u8]) -> Vec<u8> {
     text.into_bytes()
 }
 
-/// The grid attachments the harness's attach helpers made, by client
-/// connection and channel, so that [`SupervisorClientAttachExt::send_keys`]
-/// knows which way to type into a channel without every call site passing
-/// its stream. A grid attachment made some other way is not here, and
-/// `send_keys` would type into it as bytes, which the supervisor refuses as
-/// a malformed message: attach through the helpers.
-///
-/// A channel number is never reused on one connection, so an entry left
-/// behind by an attachment that ended can name nothing else.
-static GRID_CHANNELS: std::sync::Mutex<std::collections::BTreeSet<(u64, u32)>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
-
-/// Record `channel` as a grid attachment of `client`'s when `stream` is
-/// one (see [`GRID_CHANNELS`]).
-fn note_attachment(client: &SupervisorClient, channel: u32, stream: &TermStream) {
-    if stream.stream_kind() == farhelm_proto::StreamKind::Grid {
-        GRID_CHANNELS
-            .lock()
-            .expect("the grid channel registry is never poisoned")
-            .insert((client.connection_id(), channel));
-    }
-}
-
-/// Whether `client`'s `channel` is a grid attachment the harness made.
-fn is_grid_channel(client: &SupervisorClient, channel: u32) -> bool {
-    GRID_CHANNELS
-        .lock()
-        .expect("the grid channel registry is never poisoned")
-        .contains(&(client.connection_id(), channel))
-}
-
 /// Test-only attachment operations with an explicit initial-replay boundary.
 ///
-/// Every method attaches whichever stream the terminal sends (a byte
-/// stream for an old terminal, a grid stream for a new one; the waiters
-/// read either, see [`append_transcript`]). Production attaches return one
-/// stream containing the terminal's catch-up, its `ReplayComplete` marker,
-/// and later terminal events. A test that needs to
+/// Production attaches return one stream containing the terminal's catch-up,
+/// its `ReplayComplete` marker, and later terminal events. A test that needs to
 /// act on a settled terminal must consume that marker before it starts any
 /// other wait: the ordinary text waiters intentionally swallow marker events.
-/// The `*_live` methods make that ordering part of setup and return
-/// `(channel, replay_bytes, post_marker_stream)`. `replay_bytes` contains
-/// every data byte before the initial marker; `post_marker_stream` has not
-/// been read past it.
+/// The `*_live` methods make that ordering part of setup and return `(channel,
+/// replay_bytes, post_marker_stream)`. `replay_bytes` contains every data byte
+/// before the initial marker; `post_marker_stream` has not been read past it. A
+/// `history_reset` can send history again later without a second marker, so
+/// callers must not treat the returned stream as rows that were necessarily
+/// produced after the attach.
 ///
 /// The `*_at_boundary` methods are deliberately raw. They return the original
 /// production result without reading its receiver, for tests whose premise is
@@ -289,13 +252,12 @@ pub(crate) trait SupervisorClientAttachExt {
     ) -> anyhow::Result<(u32, TermStream)>;
 
     /// Type `bytes` into `channel`, an attachment one of the methods above
-    /// made, whichever kind of terminal it holds: as terminal input on a
-    /// byte stream, and on a grid stream as `text` input messages, which the
-    /// supervisor writes to the program as they are.
+    /// made, as `text` input messages, which the supervisor writes to the
+    /// program as they are.
     ///
-    /// On a grid stream the bytes must be UTF-8 (a test of other bytes is a
-    /// test of the byte stream). Like `send_input`, input to an attachment
-    /// that has ended is dropped without a word.
+    /// The bytes must be UTF-8, since a grid `text` message carries a
+    /// string. Input to an attachment that has ended is dropped without a
+    /// word.
     async fn send_keys(&self, channel: u32, bytes: Vec<u8>);
 }
 
@@ -353,18 +315,8 @@ impl SupervisorClientAttachExt for SupervisorClient {
         terminal: TerminalSelector,
         lease: &str,
     ) -> anyhow::Result<(u32, TermStream)> {
-        let (channel, stream) = self
-            .attach_terminal(
-                session_id,
-                cols,
-                rows,
-                terminal,
-                lease,
-                ViewerStreams::BytesOrGrid,
-            )
-            .await?;
-        note_attachment(self, channel, &stream);
-        Ok((channel, stream))
+        self.attach_terminal(session_id, cols, rows, terminal, lease)
+            .await
     }
 
     async fn attach_terminal_if_unowned_at_boundary(
@@ -375,27 +327,12 @@ impl SupervisorClientAttachExt for SupervisorClient {
         terminal: TerminalSelector,
         lease: &str,
     ) -> anyhow::Result<(u32, TermStream)> {
-        let (channel, stream) = self
-            .attach_terminal_if_unowned(
-                session_id,
-                cols,
-                rows,
-                terminal,
-                lease,
-                ViewerStreams::BytesOrGrid,
-            )
-            .await?;
-        note_attachment(self, channel, &stream);
-        Ok((channel, stream))
+        self.attach_terminal_if_unowned(session_id, cols, rows, terminal, lease)
+            .await
     }
 
     async fn send_keys(&self, channel: u32, bytes: Vec<u8>) {
-        if !is_grid_channel(self, channel) {
-            self.send_input(channel, bytes).await;
-            return;
-        }
-        let text = String::from_utf8(bytes)
-            .expect("typing into a grid attachment takes UTF-8; bytes are a byte stream's test");
+        let text = String::from_utf8(bytes).expect("typing into a grid attachment takes UTF-8");
         // Each piece holds at most the protocol's text bound, and is cut
         // smaller while its encoding is over a grid input message's bound:
         // JSON writes a control byte as six, so a piece of control bytes
@@ -421,8 +358,8 @@ impl SupervisorClientAttachExt for SupervisorClient {
                     other => panic!("one character cannot be typed as a grid message: {other:?}"),
                 }
             };
-            // The only refusal left is an attachment that has ended, which
-            // drops the input the way `send_input` does.
+            // The only refusal left is an attachment that has ended, whose
+            // input is dropped.
             if self.send_grid_input(channel, message).await.is_err() {
                 return;
             }
@@ -1185,18 +1122,14 @@ pub(crate) async fn wait_for_agent_ready_on(
     wait_for_host_agent_ready(&host, session_id).await;
 }
 
-/// What the fake agent prints when it echoes `text` back, as `stream`'s
-/// transcript holds it: `echo:` and the text colored cyan in a byte stream,
-/// and without the color escapes in a grid transcript ([`grid_text`]).
+/// What the fake agent prints when it echoes `text` back, as a grid
+/// transcript holds it ([`grid_text`]): `echo:` and the text, the agent's
+/// color dropped with the escapes.
 ///
-/// The colored prefix is the agent's own, which is what tells its answer
-/// from the terminal driver's echo of the typed line.
-pub(crate) fn agent_echo(stream: &TermStream, text: &str) -> String {
-    if stream.is_grid() {
-        format!("echo:{text}")
-    } else {
-        format!("echo:\x1b[36m{text}")
-    }
+/// The prefix is the agent's own, which is what tells its answer from the
+/// terminal driver's echo of the typed line.
+pub(crate) fn agent_echo(text: &str) -> String {
+    format!("echo:{text}")
 }
 
 /// The pid of the process `session_id`'s agent terminal runs (its host's
@@ -2951,8 +2884,6 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         }
     }
 

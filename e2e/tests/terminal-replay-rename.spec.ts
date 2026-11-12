@@ -99,11 +99,10 @@ test("rename exposes peer title and refusal characters and seeds an escaped draf
  *
  * `holdMarker` keeps a catch-up phase open past the marker that would
  * normally end it — the seam every hidden-state assertion below depends
- * on. The three limits let the graceful-degradation bounds be crossed in
- * milliseconds and kilobytes instead of in seconds and megabytes: no
- * fixture in this suite can make a real supervisor replay 3 MiB, send a
- * million frames, or go silent mid-catch-up, so without these the bounds
- * would be untested rather than tested loosely.
+ * on. The idle limit lets the watchdog bound be crossed in milliseconds
+ * instead of seconds: no fixture in this suite can make a real supervisor
+ * go silent mid-catch-up, so without it the bound would be untested rather
+ * than tested loosely.
  *
  * The idle window is stretched to a minute by default, and that is not
  * belt-and-braces: holding a phase open means NOTHING else may end it out
@@ -115,7 +114,7 @@ test("rename exposes peer title and refusal characters and seeds an escaped draf
  */
 async function holdCatchUpFromNextLoad(
   page: Page,
-  overrides: { bufferBytes?: number; bufferChunks?: number; idleMs?: number } = {},
+  overrides: { idleMs?: number } = {},
 ) {
   await page.addInitScript((overrides) => {
     (window as any).__farhelmTestReplay = {
@@ -127,10 +126,9 @@ async function holdCatchUpFromNextLoad(
 }
 
 /**
- * Wait until this island's catch-up phase is being HELD open — every byte
- * the supervisor meant to replay has arrived and been buffered, the marker
- * that would have ended the phase has been recorded instead of acted on,
- * and nothing has been written to xterm.js.
+ * Wait until this island's catch-up phase is being HELD open — the replay
+ * has arrived and been applied to the still-hidden terminal, and the marker
+ * that would have ended the phase has been recorded instead of acted on.
  *
  * This is the synchronization point the hidden-state assertions need:
  * "mid-catch-up" is otherwise a moment no test can reliably be inside.
@@ -313,19 +311,16 @@ async function afterTwoReads(page: Page, matches: (url: URL) => boolean, trigger
 //
 // The assertions come in two halves, and both are needed. DURING the
 // catch-up — held open, which is the only way to be inside that window —
-// the terminal element is genuinely hidden, the placeholder is genuinely
-// on screen, and xterm.js has been given nothing: those are computed-style
-// and buffer-content facts, not the island's opinion of itself, so
-// deleting the line that hides the terminal fails this test. AFTER the
-// release, the replay reached xterm.js as EXACTLY ONE `term.write()`, the
-// reveal happened inside that write's completion callback (so xterm.js had
-// consumed the whole replay before anything became visible), and the first
-// visible frame was at the tail.
+// the terminal element is genuinely hidden and the placeholder is genuinely
+// on screen: those are computed-style facts, not the island's opinion of
+// itself, so deleting the line that hides the terminal fails this test.
+// AFTER the release, the marker is what ended the catch-up, the whole
+// replay is there, and the view follows the tail.
 //
-// This test fails against M4's behavior — where every replay chunk was its
-// own write into a visible terminal — which is what makes it the
-// milestone's executable acceptance rather than a description of the code.
-test("reattach-lands-at-tail (agent terminal): hidden through catch-up, one write, viewport at the tail", async ({
+// This test fails against M4's behavior — where every replay chunk was
+// written into a visible terminal — which is what makes it the milestone's
+// executable acceptance rather than a description of the code.
+test("reattach-lands-at-tail (agent terminal): hidden through catch-up, viewport at the tail", async ({
   page,
   request,
 }) => {
@@ -349,7 +344,7 @@ test("reattach-lands-at-tail (agent terminal): hidden through catch-up, one writ
     await waitForTermText(page, "spam-line-200");
 
     // A reload is the harshest detach/reattach there is: a brand-new
-    // xterm.js with an empty buffer, so everything below came from this
+    // grid with an empty model, so everything below came from this
     // attach's own replay. The hold is armed first, so the reattach's
     // catch-up stays open instead of completing before Node can look.
     await holdCatchUpFromNextLoad(page);
@@ -358,8 +353,8 @@ test("reattach-lands-at-tail (agent terminal): hidden through catch-up, one writ
     await waitForSessionMounted(page, id);
     await waitForHeldCatchUp(page, "terminal");
 
-    // Mid-catch-up, asserted against the DOM and the buffer rather than
-    // against the island's own bookkeeping.
+    // Mid-catch-up, asserted against the DOM rather than against the
+    // island's own bookkeeping.
     await expect(page.locator("#terminal")).toBeHidden();
     await expect(page.locator("#term-connecting")).toBeVisible();
     // A grid applies the replay's frames as they arrive, to a terminal that
@@ -369,12 +364,8 @@ test("reattach-lands-at-tail (agent terminal): hidden through catch-up, one writ
     await releaseCatchUp(page, "terminal");
     const replay = await waitForReplayReveal(page, "terminal");
     expect(replay.revealReason, "the marker is what ended the catch-up").toBe("marker");
-    expect(
-      replay.viewportAtTailOnReveal,
-      "the first visible frame is at the tail",
-    ).toBe(true);
+    expect(replay.viewportAtTailOnReveal, "the first visible frame is at the tail").toBe(true);
     expect(replay.buffering).toBe(false);
-    expect(replay.bufferedBytes, "nothing is held once the flush has taken it").toBe(0);
 
     // The replay is not merely batched but complete, and the terminal is
     // genuinely on screen afterwards.
@@ -432,7 +423,7 @@ test("a reveal leaves focus on a header button moved to during catch-up", async 
 // unselected pane is hidden as a whole (app.css's `.terminal-pane`), so a
 // hidden terminal inside one proves nothing at all. Selected, the pane is
 // on screen and the only thing hiding the terminal is its own catch-up.
-test("reattach-lands-at-tail (tab): hidden through catch-up, one write, viewport at the tail", async ({
+test("reattach-lands-at-tail (tab): hidden through catch-up, viewport at the tail", async ({
   page,
   request,
 }) => {
@@ -1089,8 +1080,8 @@ test("replay-starved: a watchdog expiry that fires late does not end a live catc
 });
 
 // The lifecycle guard, from the outside: a catch-up whose mount is gone
-// must not be able to act when its deferred ending finally runs. xterm.js
-// runs a queued write callback even after `dispose()`, and the replacement
+// must not be able to act when its deferred ending finally runs. A queued
+// reveal can still run after its mount is disposed, and the replacement
 // mount is by then using the SAME DOM nodes — so a stale reveal would
 // un-hide a terminal that is mid-catch-up on someone else's replay.
 //
@@ -1434,7 +1425,7 @@ test("reveal-does-not-steal-focus: a rename field being typed into keeps focus a
   }
 });
 
-/** Observe real agent input independently of xterm's focus bookkeeping.
+/** Observe real agent input independently of the terminal's focus bookkeeping.
  * Binary frames carry terminal input; text frames carry protocol controls.
  * The final live echo in each caller also proves this observer saw the
  * attachment that would have received a stray Enter.

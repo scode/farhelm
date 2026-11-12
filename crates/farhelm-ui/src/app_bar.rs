@@ -716,7 +716,7 @@ pub(crate) fn AppBar(
     let mut shortcuts_open = use_signal(|| false);
     let mut shortcuts_closing = use_signal(|| false);
     // The surviving bar owns removal and return. Waiting for the exact modal
-    // root to leave lets xterm accept focus after its modal veto is gone.
+    // root to leave lets the terminal accept focus after its modal veto is gone.
     let close_shortcuts = use_callback(move |()| {
         if *shortcuts_closing.peek() {
             return;

@@ -181,22 +181,17 @@ test("all appearance choices update live while the mounted terminal stays dark",
   const documentIdentity = await page.evaluateHandle(() => document);
   const owner = await page.evaluateHandle(() => (window as any).farhelmAppearance);
   expect(await owner.evaluate((value) => typeof value?.mountSettings)).toBe("function");
-  // The agent terminal's component, whichever kind, and the colors it draws
-  // with: xterm.js's theme option, or the default colors the grid painted on
-  // its own element (as its inline style serializes them), which a grid that
+  // The agent terminal's grid and the default colors it painted on its own
+  // element (as its inline style serializes them), which a grid that
   // re-themed for the page's appearance would change.
-  const terminal = await page.evaluateHandle(() => (window as any).__farhelmTerm ?? (window as any).__farhelmGrid);
+  const terminal = await page.evaluateHandle(() => (window as any).__farhelmGrid);
   const themeOf = (component: any) =>
-    component.options
-      ? component.options.theme
-      : { background: component.element.style.backgroundColor, foreground: component.element.style.color };
+    ({ background: component.element.style.backgroundColor, foreground: component.element.style.color });
   const theme = await terminal.evaluate(themeOf);
-  const grid = await terminal.evaluate((component: any) => !component.options);
-  expect(theme.background.toLowerCase()).toBe(grid ? "rgb(40, 44, 52)" : "#282c34");
-  // xterm's viewport is backing behind the renderer's canvas, with its own
-  // vendored black default. Preserve that baseline; the theme and outer gutter
-  // below independently pin the terminal's actual dark palette.
-  const viewportBackground = await page.locator("#terminal :is(.xterm-viewport, .grid-terminal)")
+  expect(theme.background.toLowerCase()).toBe("rgb(40, 44, 52)");
+  // The grid element's computed background, kept as the baseline every
+  // appearance must leave unchanged.
+  const viewportBackground = await page.locator("#terminal .grid-terminal")
     .evaluate((element) => getComputedStyle(element).backgroundColor);
   const panel = await openAppearance(page);
   const dialog = await page.locator('.app-settings-dialog[role="dialog"]').elementHandle();
@@ -299,10 +294,10 @@ test("all appearance choices update live while the mounted terminal stays dark",
     );
     expect(await documentIdentity.evaluate((original) => original === document)).toBe(true);
     expect(await owner.evaluate((original) => original === (window as any).farhelmAppearance)).toBe(true);
-    expect(await terminal.evaluate((original) => original === ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid))).toBe(true);
+    expect(await terminal.evaluate((original) => original === (window as any).__farhelmGrid)).toBe(true);
     expect(await terminal.evaluate(themeOf)).toEqual(theme);
     await expect(page.locator("#terminal")).toHaveCSS("background-color", "rgb(40, 44, 52)");
-    await expect(page.locator("#terminal :is(.xterm-viewport, .grid-terminal)")).toHaveCSS("background-color", viewportBackground);
+    await expect(page.locator("#terminal .grid-terminal")).toHaveCSS("background-color", viewportBackground);
   }
 
   try {

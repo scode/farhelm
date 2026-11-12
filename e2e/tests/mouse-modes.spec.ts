@@ -9,26 +9,19 @@
 // This is the one end-to-end path that proves mouse-mode restoration
 // survives a client detach/reattach cycle, and it deliberately drives the
 // mouse through REAL pointer events (`page.mouse.click`), never synthetic
-// escape bytes written straight to the socket: xterm.js itself must
-// encode the click into a mouse report, so the whole chain under test is
-// DOM click -> xterm.js encoding -> WebSocket -> supervisor -> tmux ->
-// agent, not merely the server-side replay machinery in isolation.
+// escape bytes written straight to the socket: the grid must turn the click
+// into a mouse message and the supervisor must encode it into a report in
+// the program's mode, so the whole chain under test is DOM click -> grid
+// mouse message -> WebSocket -> supervisor's encoder -> terminal host ->
+// agent, not merely the server-side mode bookkeeping in isolation.
 //
-// Two client paths are pinned together because they are genuinely
-// different code, and the test exists to prove BOTH are wired: vendored
-// xterm.js routes its legacy (X10-derived) mouse encoding through
-// `onBinary` UNCONDITIONALLY whenever that encoding is active (a plain
-// "which mode is on" check, not a per-byte inspection), while its SGR
-// encoding is pure ASCII and always routed through `onData` instead. The
-// legacy leg's own click is deliberately placed at a column that FORCES a
-// byte above 0x7f through the wire — proving the `onBinary` path carries
-// a real high byte intact, not merely that it fires at all — which is
-// also, incidentally, the only thing in this suite that drives `onBinary`
-// with a real browser mouse event: PLAN_M6_5.md item 1 extracted
-// `term.onBinary`'s byte conversion into `term-bytes.js` behind a
-// `node --test` unit contract, and that unit test alone cannot prove the
-// extracted helper is actually wired to the page — this test is what
-// closes that gap.
+// Two report encodings are pinned together because they are genuinely
+// different output of the supervisor's encoder (grid_input.rs), and the test
+// exists to prove BOTH reach the program: the default (X10-derived)
+// encoding packs each coordinate into one byte, while SGR is pure ASCII.
+// The default leg's own click is deliberately placed at a column that
+// FORCES a byte above 0x7f through the wire — proving a real high byte
+// arrives intact at the program, not merely that a report fires at all.
 import { expect, test } from "./helpers/evidence";
 import { Page, APIRequestContext } from "@playwright/test";
 import path from "node:path";
@@ -64,7 +57,7 @@ const SGR_REPORT_PREFIX = [0x1b, 0x5b, 0x3c] as const; // ESC [ <
 /**
  * Reconstruct the ordered byte stream the fake agent's hex echo produced,
  * from the terminal's rendered text. `hex_echo_loop` (fake_agent.rs)
- * emits one hex-encoded LINE per raw `read()`, and the pty/tmux are free
+ * emits one hex-encoded LINE per raw `read()`, and the pty is free
  * to split a single mouse report's bytes across more than one `read()` —
  * so a report's hex tokens can legitimately land on separate hex-echo
  * lines. Scanning a single line's text for a report's byte-window (as an
@@ -201,16 +194,16 @@ async function findSessionIdByTitle(
  * Pick a column this test can legally click, wide enough to leave margin
  * on both sides of the required [96, 223] window.
  *
- * 223 is xterm.js's OWN cap for its legacy (X10-derived) mouse encoding:
- * each coordinate is packed into a single byte offset by 32, and once
- * `column + 32` (or `row + 32`) would exceed 255 the encoder returns an
- * EMPTY string — the click produces no report at all rather than a
+ * 223 is the cap of the default (X10-derived) mouse encoding, which the
+ * supervisor's encoder keeps: each coordinate is packed into a single byte
+ * offset by 32, and once `column + 32` (or `row + 32`) would exceed 255 the
+ * encoder sends nothing — the click produces no report at all rather than a
  * corrupted one, so a column past 223 would not fail loudly, it would
  * just silently starve every assertion below of anything to find. 96 is
  * the first column whose encoded byte (`96 + 32 = 128`) genuinely leaves
  * the 7-bit ASCII range — a click below it keeps every report byte ASCII,
- * which cannot distinguish correct high-byte transport through `onBinary`
- * from a UTF-8-mangling or truncation bug there, exactly the fidelity
+ * which cannot distinguish correct high-byte transport to the program
+ * from a UTF-8-mangling or truncation bug on the way, exactly the fidelity
  * this test exists to prove (PLAN_M6_5.md item 2 review).
  */
 async function chooseClickColumn(page: Page): Promise<number> {
@@ -224,7 +217,7 @@ async function chooseClickColumn(page: Page): Promise<number> {
 
 /**
  * Click the CENTER of a specific (1-based) terminal cell, computed from
- * xterm's screen geometry (`box.width`/`term.cols`, `box.height`/`term.rows`)
+ * the grid screen's geometry (its box over the terminal's columns and rows)
  * rather than the outer terminal box, whose padding and scrollbar are not
  * cells. A fixed pixel offset also cannot work: the terminal's on-screen size
  * depends on the viewport and font metrics, neither of which this test
@@ -316,7 +309,7 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
 
     // --- Legacy leg: cue DECSET 1000 alone, click at a column that
     // FORCES a high byte, and prove the full report body — including
-    // that byte — reached the agent via onBinary. ---
+    // that byte — reached the agent. ---
     await page.locator("#terminal").click();
     await page.keyboard.type("legacy");
     await page.keyboard.press("Enter");
@@ -334,7 +327,7 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
       page,
       LEGACY_REPORT_PREFIX,
       2,
-      "a legacy mouse report must reach the agent via onBinary",
+      "a legacy mouse report must reach the agent",
     );
     // The second prefix can arrive before its body in another PTY read.
     // Settle on the entire byte sequence, never on a truncated body slice.
@@ -364,7 +357,7 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
     // The reveal above guarantees the reattach's replay — including any
     // restored DECSET escape sequences — has fully landed, so this read
     // is a settled baseline, not a value still catching up. The replay
-    // carries the first click's two reports forward (tmux's own pane
+    // carries the first click's two reports forward (the terminal's own
     // history), so the baseline for "new reports arrived" is whatever it
     // settled at here, not zero.
     const legacyBaselineAfterReattach = await countReports(page, LEGACY_REPORT_PREFIX);
@@ -373,14 +366,14 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
       page,
       LEGACY_REPORT_PREFIX,
       legacyBaselineAfterReattach + 2,
-      "legacy mouse mode must survive the reattach (PaneModes restoration)",
+      "legacy mouse mode must survive the reattach",
     );
 
     // --- SGR leg: cue DECSET 1006 on top, click, and prove an
-    // SGR-shaped (onData-delivered) report reaches the agent. No fresh
-    // focus click is needed first: `clickTerminalCell` above already
-    // focused xterm's hidden input — mouse-tracking mode does not change
-    // that xterm still focuses on mousedown. ---
+    // SGR-shaped report reaches the agent. No fresh focus click is needed
+    // first: `clickTerminalCell` above already focused the grid's input —
+    // mouse-tracking mode does not change that the grid still focuses on
+    // mousedown. ---
     await page.keyboard.type("sgr");
     await page.keyboard.press("Enter");
     await waitForTermText(page, "MOUSE-MODE:sgr");
@@ -391,14 +384,14 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
       page,
       SGR_REPORT_PREFIX,
       sgrBaseline + 2,
-      "an SGR mouse report must reach the agent via onData",
+      "an SGR mouse report must reach the agent",
     );
 
     // --- A SECOND detach/reattach: the legacy leg above already proves
     // legacy-mode restoration, but nothing yet exercises SGR's OWN
-    // restoration — a regression that dropped `mouse_sgr` specifically
-    // from `PaneModes`' replay (while leaving `mouse_standard` intact)
-    // would pass every assertion above. Repeating the cycle for the SGR
+    // restoration — a regression that dropped the SGR encoding
+    // specifically from what a reattached viewer is sent (while leaving the
+    // tracking mode intact) would pass every assertion above. Repeating the cycle for the SGR
     // leg is what actually pins that branch. ---
     // Detach = select another session (the shared row), then reselect.
     await reattachWithModes(page, title, id, sharedId);
@@ -409,7 +402,7 @@ test("mouse-modes-restored-on-reattach", async ({ page, request }) => {
       page,
       SGR_REPORT_PREFIX,
       sgrBaselineAfterReattach + 2,
-      "SGR mouse mode must survive the reattach (PaneModes restoration)",
+      "SGR mouse mode must survive the reattach",
     );
   } finally {
     if (id) {
@@ -480,20 +473,19 @@ function mouseProgramScript(ready: string): string {
   );
 }
 
-/** Wait for the mounted surface's committed mouse mode before dragging.
- * A ready line alone does not prove that either renderer has applied the
- * program's tracking mode, which decides who owns the gesture. */
+/** Wait for the grid's committed mouse mode before dragging. A ready line
+ * alone does not prove that the grid has applied the program's tracking
+ * mode, which decides who owns the gesture. */
 async function waitForMouseTracking(page: Page): Promise<void> {
   await expect
     .poll(() => page.evaluate(() => {
-      const island = (window as any).__farhelmIslands?.terminal;
-      if (island?.grid) return island.grid.model.state.mouse === "off" ? "none" : island.grid.model.state.mouse;
-      return island?.term?.modes.mouseTrackingMode ?? "none";
+      const grid = (window as any).__farhelmIslands?.terminal?.grid;
+      return grid ? grid.model.state.mouse : "off";
     }), {
       timeout: 15_000,
       message: "the program must have turned mouse tracking on before the drag",
     })
-    .not.toBe("none");
+    .not.toBe("off");
 }
 
 /** A plain left-button drag across the agent terminal's screen, well past
@@ -543,7 +535,7 @@ test("drag-copy notice: shown only for a drag the program kept without copying",
     cwd: "/tmp",
     invocation: `sh -c '${mouseProgramScript(ready)}'`,
   });
-  // Observe the real input socket before attaching, for either wire format.
+  // Observe the real input socket before attaching.
   // The earlier program-owned drag proves this observer is live before the
   // dismiss button's absence-of-input assertion depends on it.
   const input: InputFrame[] = [];

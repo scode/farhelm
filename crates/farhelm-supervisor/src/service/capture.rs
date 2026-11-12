@@ -209,7 +209,7 @@ pub(crate) fn note_first_input(entry: &SessionEntry, before_input: ScreenState) 
 ///
 /// - preceded by ESC: Farhelm's own Shift+Enter (and Alt+Enter) sends `ESC CR`
 ///   precisely so the agent inserts a newline instead of submitting
-///   (`shift-enter-key.js`);
+///   (SPEC.md, "Terminal experience");
 /// - inside a bracketed paste (`ESC [200~` .. `ESC [201~`) in the same frame:
 ///   an agent with bracketed paste enabled keeps the paste in its composer
 ///   unsubmitted. The scan dates from the old tmux terminals, whose browser

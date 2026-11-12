@@ -304,7 +304,7 @@ open_agent_attachments() {
 import re, sys
 log, session = sys.argv[1], sys.argv[2]
 open_count = 0
-pattern = re.compile(r"farhelm_helm::terminal_attachments: terminal (attached|ended) session=(\S+) terminal=agent ")
+pattern = re.compile(r"farhelm_helm::terminal_attachments: terminal (attached|ended) session=(\S+) terminal=agent\b")
 with open(log, errors="replace") as lines:
     for line in lines:
         match = pattern.search(re.sub(r"\x1b\[[0-9;]*m", "", line))
@@ -315,10 +315,12 @@ PY
 }
 # How many `terminal attached` events for session $2's agent terminal log $1
 # holds, open or not: what tells a socket that closed and came back from one
-# that stayed, alongside `open_agent_attachments`.
+# that stayed, alongside `open_agent_attachments`. `terminal=agent` may end the
+# line (the event carries no field after it), and a tab's value never starts
+# with `agent`, so no trailing delimiter is needed.
 agent_attachment_starts() {
   sed 's/\x1b\[[0-9;]*m//g' "$1" |
-    grep -cF "farhelm_helm::terminal_attachments: terminal attached session=$2 terminal=agent "
+    grep -cF "farhelm_helm::terminal_attachments: terminal attached session=$2 terminal=agent"
 }
 # Type `printf smoke-typed-ok >$3` and Enter into session $1's agent terminal
 # through the embedded helm at $2 (http://host:port) as a viewer that can draw
@@ -327,7 +329,8 @@ agent_attachment_starts() {
 # socket and a listed row do not show (an unreadable host is listed and still
 # listens). Speaks the browser's WebSocket by hand, as the Rust process tests
 # do: the native credential travels in Sec-WebSocket-Protocol. Requires the
-# stream to be a grid, so it also proves the terminal is in a host.
+# stream to open with a grid `hello`, the first message of every grid
+# attachment, so it also proves the grid stream reached the page.
 drive_terminal() {
   python3 - "$1" "$2" "$3" "$SMOKE_SECRET" <<'PY'
 import base64, json, os, socket, struct, sys, time
@@ -336,7 +339,7 @@ host, port = base.split("//", 1)[1].rstrip("/").rsplit(":", 1)
 deadline = time.monotonic() + 60
 sock = socket.create_connection((host, int(port)), timeout=30)
 key = base64.b64encode(os.urandom(16)).decode()
-sock.sendall((f"GET /api/sessions/{session}/term?grid=1 HTTP/1.1\r\nHost: {host}:{port}\r\n"
+sock.sendall((f"GET /api/sessions/{session}/term HTTP/1.1\r\nHost: {host}:{port}\r\n"
               f"Connection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\n"
               f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Protocol: farhelm, farhelm-device-{secret}\r\n\r\n").encode())
 head = b""
@@ -381,22 +384,23 @@ def send(payload):
     n = len(payload)
     frame += bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack(">H", n)
     sock.sendall(frame + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
-notice = None
+hello = None
 while time.monotonic() < deadline:
     opcode, payload = message()
     if opcode != 1:
+        # A grid message: binary rows start with a zero byte, the rest is JSON.
+        if hello is None:
+            hello = payload[:1] != b"\0" and json.loads(payload).get("t") == "hello"
         continue
     text = json.loads(payload)
-    if text.get("type") == "stream":
-        notice = text.get("kind")
-    elif text.get("type") == "detached":
+    if text.get("type") == "detached":
         sys.exit(f"detached: {text}")
     elif text.get("type") == "replay_complete":
         break
 else:
     sys.exit("no replay_complete within the bound")
-if notice != "grid":
-    sys.exit(f"the terminal streams as {notice!r}, not as a grid")
+if not hello:
+    sys.exit("the terminal stream did not open with a grid hello")
 send(json.dumps({"t": "text", "data": f"printf smoke-typed-ok >{proof}"}).encode())
 send(json.dumps({"t": "key", "key": "Enter", "code": "Enter", "kc": 13, "mods": 0}).encode())
 while time.monotonic() < deadline:
@@ -1252,10 +1256,10 @@ if [ "$APPEARANCE_MODE" = 1 ]; then
       done
       [ -n "$observed" ] || fail "native appearance observation timed out"
       sed -n 's/^desktop_appearance_smoke: //p' "$evidence/desktop.log" >"$evidence/observation.json"
-      # The probe fails a terminal that is not a grid; the kind and the burst
-      # count are asserted here too, so a probe that stopped checking the
-      # terminal cannot pass the case.
-      python3 -c 'import json,sys; result=json.load(open(sys.argv[1])); assert result.get("ok"), result; assert result.get("terminalKind") == "grid", result.get("terminalKind"); assert result.get("terminalRoundtrip", {}).get("burstLines") == 512, result.get("terminalRoundtrip")' \
+      # The probe fails a terminal that is not a grid; the burst count is
+      # asserted here too, so a probe that stopped checking the terminal
+      # cannot pass the case.
+      python3 -c 'import json,sys; result=json.load(open(sys.argv[1])); assert result.get("ok"), result; assert result.get("terminalRoundtrip", {}).get("burstLines") == 512, result.get("terminalRoundtrip")' \
         "$evidence/observation.json" || fail "native appearance observation failed (see $evidence)"
       kill -0 "$desktop_pid" 2>/dev/null || fail "appearance app died before final frame"
       DISPLAY="$DISP" timeout 10 import -window "$window" "$evidence/final-client.png" || fail "capturing final appearance client"
@@ -1632,17 +1636,17 @@ for _ in $(seq 1 30); do
 done
 [ -n "$RESTORED_ATTACHMENT" ] ||
   fail "the relaunched page does not hold the remembered non-newest session (open attachments: remembered ${REMEMBERED_CLIENTS:-?}, newest ${NEWEST_CLIENTS:-?})"
-# The plain-text link asset reached the same relaunched page whose
+# The terminal's link asset reached the same relaunched page whose
 # terminal attachment the oracle above just proved: parity
 # (`scripts/check-desktop-assets.sh`) holds the requested and bundled
 # sets equal but cannot prove the window ever asked for this file, and
 # the first-boot "something was served" check is satisfied by any
-# single lucky file. The hashed name keeps its `addon-web-links-` stem
-# (`addon-web-links-dxh<hash>.js`, like the clipboard addon's), so a
-# stem prefix match names this asset without pinning the content hash.
-# The restart log is the one that pairs with a proven terminal mount.
-grep -q 'desktop asset handler: served /assets/addon-web-links-' "$X/desktop-restart.log" ||
-  fail "the relaunched page never requested the vendored plain-text link asset (see $X/desktop-restart.log)"
+# single lucky file. The hashed name keeps its `terminal-links-` stem
+# (`terminal-links-dxh<hash>.js`), so a stem prefix match names this
+# asset without pinning the content hash. The restart log is the one
+# that pairs with a proven terminal mount.
+grep -q 'desktop asset handler: served /assets/terminal-links-' "$X/desktop-restart.log" ||
+  fail "the relaunched page never requested the terminal link asset (see $X/desktop-restart.log)"
 SESSION_REDISCOVERED=""
 for _ in $(seq 1 30); do
   if curl_auth -sf --max-time 5 "$API/api/sessions/$SID" >/dev/null; then

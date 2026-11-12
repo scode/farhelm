@@ -1,9 +1,7 @@
 // The terminal's link opening and plain-text URL policy, and the hover
-// checks that read a terminal's cells, shared by every link source: on a new
-// terminal the grid component's links (terminal.js's `createGridLinks`), on
-// an old one xterm.js's built-in OSC 8 provider (a program emitting a real
-// hyperlink escape) and the vendored WebLinks addon (a bare http(s) URL
-// printed as plain text). Split out on its own for the same reason
+// checks that read a terminal's cells, shared by every link source the grid
+// component offers (terminal.js's `createGridLinks`): a program's OSC 8
+// hyperlink, and a bare http(s) URL printed as plain text. Split out on its own for the same reason
 // copy-on-select.js is — `node --test` runs the EXACT functions
 // terminal.js calls, not hand-copied doubles that could silently drift
 // from what ships — and terminal.js treats this file's global as a mount
@@ -15,31 +13,28 @@
 // navigation under `dioxus:`, else window.open with noopener. It performs
 // no scheme filtering. terminal.js's OSC handler explicitly permits only
 // http(s) here and routes file targets to terminal-files.js; every other
-// scheme is ignored. The plain WebLinks adapter has its own stricter
-// isPlainWebUrl boundary. File lookup/transfer never reaches this opener.
+// scheme is ignored. Printed URLs have their own stricter isPlainWebUrl
+// boundary. File lookup/transfer never reaches this opener.
 //
 // ## What this does NOT do
 //
 // Ordinary opening does no fetching, confirmation or async lookup and stays
 // inside the activation stack. Native remote Meta-click instead hands an
 // explicit tunnel intent to Rust, which owns consent and the async request.
-// This asset never sends tunnel HTTP requests. The `confirm()`
-// xterm shows by default without a `linkHandler` is exactly what the tests
-// pin against (see e2e/tests/terminal-links.spec.ts). And this file never
-// DECIDES what text is a link — the WebLinks addon owns detection
-// (its default matcher, whose http(s)-only boundaries were verified
-// against the vendored bundle before wiring — lowercase or UPPERCASE
-// schemes only, since the upstream regex carries no `i` flag);
-// `isPlainWebUrl` is the second boundary at activation time, rejecting
-// anything that is not an absolute http(s) URL with a host even if
-// detection ever handed it over.
+// This asset never sends tunnel HTTP requests, and no link asks for a
+// confirmation (e2e/tests/terminal-links.spec.ts pins that). And this file
+// never DECIDES what text is a link — grid-buffer.js's `rowLinks` owns
+// detection (a matcher ported from the web-links add-on, http(s) only, in
+// lowercase or UPPERCASE schemes since the upstream regex carries no `i`
+// flag); `isPlainWebUrl` is the second boundary at activation time,
+// rejecting anything that is not an absolute http(s) URL with a host even
+// if detection ever handed it over.
 //
 // ## Link lines: how the link code reads a terminal
 //
 // The hover and click checks here and in terminal-files.js read what a
 // terminal shows through one small interface, the one the grid component
-// offers (grid-buffer.js's `linkLines`), so new and old terminals share
-// one implementation:
+// offers (grid-buffer.js's `linkLines`):
 //
 // - `lines.line(abs)`: the line numbered `abs` (0-based), or undefined
 //   when there is none.
@@ -54,11 +49,6 @@
 //   the last written cell when `trimRight`.
 // - A range: `{start: {abs, col}, end: {abs, col}}`, the end column
 //   exclusive.
-//
-// An old terminal's xterm.js buffer is read through an adapter to this
-// shape (`xtermLines`, with `fromXtermRange` and `toXtermRange` for
-// xterm.js's 1-based ranges), which only the xterm.js path in terminal.js
-// and terminal-files.js's xterm.js add-on use.
 (function () {
   /**
    * Open a terminal link target in the page's system browser.
@@ -108,7 +98,7 @@
    *
    * Anything failing any check is not clickable: terminal.js consults
    * this before opening, and rejected schemes must never be decorated
-   * either (the addon's own http(s)-only matcher is the first boundary;
+   * either (the detector's own http(s)-only matcher is the first boundary;
    * this is the second). The original string is preserved for opening —
    * this validates, never rewrites.
    *
@@ -168,71 +158,18 @@
     return 'raw';
   }
 
-  /** Admit only the release of a primary press on this terminal's screen.
-   * Mouse-reporting programs suppress local selection, so selection alone
-   * cannot distinguish a click from a drag. Four CSS pixels tolerate hand
-   * jitter; crossing that distance retires the gesture even if it returns
-   * to the press. Document capture observes the whole gesture before xterm
-   * activates a link, including releases outside the terminal. The exact
-   * release event is the admission token, never a sticky permission.
-   *
-   * The drag check is only as good as the observer's coverage: a press is
-   * judged by the movement this object saw, so a press must not outlive the
-   * listeners that feed it. Whoever removes those listeners calls `reset()`.
-   * Reconnect is the case that needs it: a recovery that ends by restoring
-   * the old screen hands this same object to new listeners, and a press
-   * kept across the gap would let a drag away and back during the gap
-   * release as a click. `reset()` clears state in place rather than handing
-   * out a new object, because the terminal's link providers captured this
-   * one at mount and keep asking it `isClick`.
-   */
-  function createLinkGesture() {
-    let press = null;
-    let click = null;
-    return {
-      observe(event, onScreen) {
-        if (event.type === 'mousedown' && event.button === 0) {
-          click = null;
-          press = onScreen ? { x: event.clientX, y: event.clientY, dragged: false } : null;
-        }
-        if (!press) return;
-        if (event.type === 'mousemove' || (event.type === 'mouseup' && event.button === 0)) {
-          press.dragged ||= Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4;
-        }
-        if (event.type === 'mouseup' && event.button === 0) {
-          click = press.dragged ? null : event;
-          press = null;
-        }
-      },
-      isClick(event) { return event === click; },
-      /** Forget any held press and any admitted release; the next click
-       * has to start with a press observed from here on. */
-      reset() {
-        press = null;
-        click = null;
-      },
-    };
-  }
-
   /** Decide whether this press belongs to Farhelm's web link gesture.
-   * Forced local selection keeps xterm's own path. File links never qualify:
-   * their broad path detection must not steal ordinary transcript input.
-   * The press is withheld as a whole, including any drag and release it owns;
-   * no later motion replays a press the program never received.
+   * The grid component asks only about a primary-button press on a link
+   * while the program has mouse reporting on and the forcing modifier is not
+   * held (grid-terminal.js, "Links"): a forced press is a local selection,
+   * and without mouse reporting nothing reaches the program to withhold.
+   * File links never qualify: their broad path detection must not steal
+   * ordinary transcript input. The press is withheld as a whole, including
+   * any drag and release it owns; no later motion replays a press the
+   * program never received.
    */
-  function interceptLinkPress({ button, tracking, forced, webLink, mode }) {
-    return button === 0 && tracking && !forced && webLink && mode === 'intercept';
-  }
-
-  /** Suppress only a complete mouse report emitted during its owned DOM event.
-   * xterm emits one report synchronously through its public output callbacks.
-   * A captured event remains in dispatch until eventPhase becomes NONE (0);
-   * unlike a microtask, that boundary cannot expire between native listeners.
-   * Stale events, focus reports, keyboard input and pasted lookalikes pass.
-   */
-  function suppressMouseReport(data, dispatch) {
-    return !!(dispatch && dispatch.withheld && dispatch.event.eventPhase !== 0 &&
-      (/^\x1b\[M[\s\S]{3}$/.test(data) || /^\x1b\[<\d+;\d+;\d+[Mm]$/.test(data)));
+  function interceptLinkPress({ button, webLink, mode }) {
+    return button === 0 && webLink && mode === 'intercept';
   }
 
   /**
@@ -393,12 +330,13 @@
    * `https://good.example.evil.test`) is a mismatch, as is URL-like text
    * that does not parse.
    *
-   * Web hover normally supplies the complete tagged text via linkHoverText.
-   * If xterm's private tag is unavailable, hover falls back to the row-only
-   * comparison. An incomplete join is handled separately by showLinkTarget:
-   * a fragment that happens to equal the target must not authorize quietness.
-   * Untagged text around a link is outside this comparison; the quiet display
-   * still names the real host and never certifies all surrounding output.
+   * Web hover normally supplies the complete tagged text via linkHoverText. If
+   * the cells' hyperlink tag is unavailable (undefined, see "Link lines"),
+   * hover falls back to the row-only comparison. An incomplete join is handled
+   * separately by showLinkTarget: a fragment that happens to equal the target
+   * must not authorize quietness. Untagged text around a link is outside this
+   * comparison; the quiet display still names the real host and never certifies
+   * all surrounding output.
    *
    * @param {string | null | undefined} text
    * @param {string} uri
@@ -452,7 +390,7 @@
    * The text an OSC 8 link underlines on the hovered row.
    *
    * `range` is the hovered link's cells on one row of `lines` (see "Link
-   * lines"); both terminals' OSC 8 links are one per row. File hover uses
+   * lines"); the grid's OSC 8 links are one per row. File hover uses
    * this only as an identity snapshot; web hover uses linkHoverText to join
    * tagged rows. Returns null when there is no range or the row is gone, so
    * the caller falls back to the quiet display.
@@ -475,15 +413,15 @@
   /** Join consecutive rows carrying this OSC 8 tag, including agent-drawn wraps.
    * Agents often move the cursor instead of letting the terminal wrap, so a
    * soft wrap cannot establish the link's extent; the cells' hyperlink tag
-   * does. On an old terminal the tag is xterm.js's undocumented
-   * `extended.urlId` (`xtermLines`), which a real-bundle browser test pins;
-   * losing that field restores the old row comparison.
+   * does; a line that cannot tell (an undefined tag) keeps the row
+   * comparison.
    *
    * Only one run per row may join. Bounds or ambiguous runs produce a fragment
    * only when an adjacent row carries the tag: repeated links on a single row
    * must retain their ordinary hover behavior. Spaces within each tagged run
    * survive joining, since a space at a row edge can change the named target.
-   * Only xterm's empty pad before a terminal-wrapped wide character is omitted.
+   * Only the empty pad a terminal leaves before a wide character it wrapped
+   * to the next row is omitted.
    * No text outside the tagged cells is evidence for a match.
    * Adjacent complete addresses may reuse an id. Compare the hovered run alone
    * only when every run independently names the target within the same bounds.
@@ -574,56 +512,6 @@
       if (text.length > 8192) return null;
     }
     return text;
-  }
-
-  // ------------------------------------------------------------------
-  // Old terminals: the xterm.js adapter (see "Link lines")
-  // ------------------------------------------------------------------
-
-  /**
-   * Link lines over an xterm.js terminal's active buffer, for old terminals
-   * only: line `abs` is buffer row `abs`, and a cell's tag is the
-   * undocumented `extended.urlId` xterm.js keeps on the cell its public
-   * `getCell` returns.
-   *
-   * Each `cell(x)` asks xterm.js for a fresh cell. xterm.js replaces a
-   * cell's `extended` only when the cell has extended attributes, so a
-   * reused cell would carry the preceding link's tag into unlinked
-   * indentation; a fresh one never does, and nothing is written to objects
-   * the buffer may own.
-   *
-   * @param {{buffer: {active: {getLine(y: number): any}}}} term
-   */
-  function xtermLines(term) {
-    const buffer = term.buffer.active;
-    return {
-      line(abs) {
-        const line = buffer.getLine(abs);
-        if (!line) return undefined;
-        return {
-          length: line.length,
-          wrapped: !!line.isWrapped,
-          cell(x) {
-            const cell = line.getCell?.(x);
-            return cell ? { chars: cell.getChars?.(), width: cell.getWidth?.(), tag: cell.extended?.urlId } : undefined;
-          },
-          text: (from, to, trimRight) => line.translateToString(!!trimRight, from, to),
-        };
-      },
-    };
-  }
-
-  /** An xterm.js range (1-based, end cell inclusive) as a link-lines range;
-   * undefined for a missing one, so the link-lines readers' own "no range"
-   * answer (null) still applies. */
-  function fromXtermRange(range) {
-    if (!range?.start || !range?.end) return undefined;
-    return { start: { abs: range.start.y - 1, col: range.start.x - 1 }, end: { abs: range.end.y - 1, col: range.end.x } };
-  }
-
-  /** The inverse of `fromXtermRange`. */
-  function toXtermRange(range) {
-    return { start: { x: range.start.col + 1, y: range.start.abs + 1 }, end: { x: range.end.col, y: range.end.abs + 1 } };
   }
 
   /**
@@ -734,17 +622,12 @@
     tunnelTarget,
     shouldTunnel,
     activateWebLink,
-    createLinkGesture,
     interceptLinkPress,
-    suppressMouseReport,
     linkTargetParts,
     linkTextMismatch,
     linkRowText,
     linkHoverText,
     linkRangeText,
-    xtermLines,
-    fromXtermRange,
-    toXtermRange,
     visibleFormatCharacters,
     shortenedTarget,
     displayedTarget,

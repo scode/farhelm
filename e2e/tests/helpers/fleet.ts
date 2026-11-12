@@ -5,8 +5,8 @@
 //
 // This module owns the shared fleet contract: real API fixtures and the
 // non-obvious feed behavior that specs need to control. The terminal island
-// has a separate contract in helpers/term.ts — `window.__farhelmTerm`,
-// `term.buffer.active`, and readiness globals — because terminal assertions
+// has a separate contract in helpers/term.ts — `window.__farhelmGrid`, the
+// island registry and its readiness records — because terminal assertions
 // rely on that surface across spec files. Genuinely one-off snippets still
 // stay local.
 //

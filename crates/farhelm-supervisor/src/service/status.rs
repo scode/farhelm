@@ -382,10 +382,6 @@ pub(crate) fn entry_info(entry: &SessionEntry) -> SessionInfo {
     // reap may lag this reply by a tick — hiding the corpse here is what
     // keeps the listing honest in that window.
     info.tabs = super::core::listed_host_tabs(&entry.session.host_tabs, false);
-    // From the terminal the entry holds, not the row's stored kind: a
-    // terminal-less entry (a launch not yet confirmed, a terminal a reboot
-    // took) reports no kind.
-    info.agent_terminal = entry.terminal.as_ref().map(HostTerminal::wire_kind);
     let (mut status, mut annotation) = session_status(entry);
     let launch_error = entry
         .run
@@ -427,22 +423,6 @@ pub(crate) fn entry_info(entry: &SessionEntry) -> SessionInfo {
     info.claude_trust_prompt &= info.status.is_live();
     info.workspace_trust_prompt &= info.status.is_live();
     info
-}
-
-/// Report on a reply that this supervisor creates new terminals in
-/// terminal hosts (`SessionInfo::supervisor_creates_host_terminals`), which
-/// is always true: every terminal a supervisor creates is a host.
-///
-/// Still reported because clients read it: the client shows its migration
-/// band only for a session whose supervisor reports this, and a supervisor
-/// from before terminal hosts, which never sets it, creates tmux terminals.
-/// Applied at the two reply boundaries every `SessionInfo` leaves through,
-/// the listing (`listing::list_all`) and the single-session replies
-/// (`Supervisor::with_checkout_metadata`), rather than stored on entries:
-/// it describes the supervisor sending the reply, while a stored copy would
-/// describe whichever supervisor built the entry.
-pub(crate) fn report_new_terminals(info: &mut SessionInfo) {
-    info.supervisor_creates_host_terminals = true;
 }
 
 /// What this observation should offer the durable record, or `None` when

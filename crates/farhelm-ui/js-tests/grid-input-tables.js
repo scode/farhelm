@@ -39,7 +39,6 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const input = require("../assets/grid-input.js");
-const { shiftEnterKeyAction, mergeArmedPrefix } = require("../assets/shift-enter-key.js");
 
 const KEY_TABLE_PATH = path.join(__dirname, "../../farhelm-supervisor/tests/fixtures/grid-keys.jsonl");
 const KEYDOWN_TABLE_PATH = path.join(__dirname, "fixtures/input/keydown-actions.jsonl");
@@ -176,18 +175,33 @@ function keydown(kc, key, code, mods, altGraph = false) {
 // ## The key table
 
 /**
+ * Whether a keydown is Farhelm's Shift+Enter chord (SPEC.md, "Terminal
+ * experience"): Enter with Shift alone, not during an input method's
+ * composition (`isComposing`, or the older 229 key code some WebKit paths
+ * still stamp) and not with AltGraph, which an international layout may use
+ * for a character of its own. The chord sends ESC CR in one write, the
+ * newline binding Claude Code and Codex honor in place of submit; the
+ * supervisor's encoder (grid_input.rs) applies the same rule.
+ */
+function isShiftEnterChord(ev) {
+  const composing = !!ev.isComposing || ev.keyCode === 229;
+  const altGraph = !!(ev.getModifierState && ev.getModifierState("AltGraph"));
+  return ev.key === "Enter" && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !composing && !altGraph;
+}
+
+/**
  * The bytes one keydown sends, before the page's filters decide whether it
  * is sent at all (a third-level shift, a lone capital, the keydown after a
  * dead key: those are the keydown table's), as lowercase hex ("" for
- * none): the sequence with Option not acting as Meta on a Mac, Shift+Enter's
- * ESC merged on as terminal.js merges it, encoded as UTF-8 the way the
- * page's `TextEncoder` sends it (a lone surrogate becomes U+FFFD).
+ * none): the sequence with Option not acting as Meta on a Mac, Shift+Enter
+ * as ESC CR (`isShiftEnterChord`), encoded as UTF-8 the way the page's
+ * `TextEncoder` sends it (a lone surrogate becomes U+FFFD).
  */
 function sentBytes(ev, appCursor, isMac) {
   const result = input.keyboardResult(ev, appCursor, isMac, false);
   if (!result.key) return "";
   let data = result.key;
-  if (shiftEnterKeyAction(ev) === "arm") data = mergeArmedPrefix(true, data).send;
+  if (isShiftEnterChord(ev) && data.startsWith("\r")) data = "\x1b" + data;
   return Buffer.from(data, "utf8").toString("hex");
 }
 

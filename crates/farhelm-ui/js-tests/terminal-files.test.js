@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const terminalLinks = require('../assets/terminal-links.js');
-const { linkRangeText, xtermLines, fromXtermRange } = terminalLinks;
+const { linkRangeText } = terminalLinks;
 const { pathTokens, oscTarget, pathLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects, LINK_COVER_SELECTOR, MAX_BYTES } = require('../assets/terminal-files.js');
 
 /** A noninteractive clipped or covered disclosure is not inspectable. Both
@@ -121,7 +121,7 @@ test('hover preserves both path pieces and advertises open only for native admit
   }
 });
 
-/** Both xterm adapters pass the click event to this shared admission path.
+/** The grid's links pass the click event to this shared admission path.
  * A native modifier can request an opening offered by the hover, while the
  * server can still refuse it after saving; web modifiers only download.
  */
@@ -251,7 +251,7 @@ test('the numeric-version guard keeps version spellings out and answers near-mat
   assert.equal(result.status, 0, result.stderr);
 });
 
-/** Enabling xterm all-scheme delivery must never send executable targets to an opener. */
+/** The terminal passes every OSC 8 scheme; that must never send executable targets to an opener. */
 test('OSC allows web unchanged and decoded file paths only', () => {
   assert.deepEqual(oscTarget('https://example.test/x'), { kind: 'web', uri: 'https://example.test/x' });
   assert.deepEqual(oscTarget('file://another-host/tmp/my%20report.pdf'), { kind: 'file', path: '/tmp/my report.pdf' });
@@ -261,8 +261,8 @@ test('OSC allows web unchanged and decoded file paths only', () => {
     'file://host?next=/tmp/report.pdf', 'file://host#/tmp/report.pdf', 'file://?next=/tmp/report.pdf', 'file://#/tmp/report.pdf', 'file:///a?', 'file:///a#', 'file:///a%00b', 'file:///a?x', 'file:///a#x', 'file:///bad%']) assert.equal(oscTarget(uri), null, uri);
 });
 
-/** Link lines (terminal-links.js, "Link lines") over the same cell fixtures:
- * what both terminals' file links read. Recognition and text snapshots read
+/** Link lines (terminal-links.js, "Link lines") over cell fixtures: what
+ * the terminal's file links read. Recognition and text snapshots read
  * these same cells, so a partial repaint changes one shared fixture.
  */
 function lines(rows) {
@@ -281,28 +281,17 @@ function lines(rows) {
   } };
 }
 
-/** Public xterm.js cell fixtures for the old terminal's add-on, which reads
- * them through terminal-links.js's `xtermLines`. The same rows as `lines`.
+/** Link lines over rows of plain strings, read live, so a test can repaint
+ * a row by assigning to `rows`.
  */
-function terminal(rows) {
-  return { buffer: { active: { getLine(y) {
-    const row = rows[y];
-    if (!row) return undefined;
-    return { isWrapped: row.wrapped, length: row.cells.length,
-    translateToString(trim, from, to) {
-      const text = row.cells.slice(from, to).map(([chars, width]) => width ? chars || ' ' : '').join('');
-      return trim ? text.trimEnd() : text;
-    }, getCell(x) {
-      const [chars, width] = row.cells[x];
-      return { getChars: () => chars, getWidth: () => width };
-    } };
-  } } } };
+function stringLines(rows) {
+  return { line(abs) {
+    const text = rows[abs];
+    return text === undefined ? undefined : lines([{ cells: Array.from(text, ch => [ch, 1]), wrapped: false }]).line(0);
+  } };
 }
 
-/** UTF-16 offsets must not shift a link after wide or combined cells, including wraps.
- * Both terminals' lines give the same link: the grid's directly, an old
- * terminal's through xterm.js's adapter.
- */
+/** UTF-16 offsets must not shift a link after wide or combined cells, including wraps. */
 test('path mapping handles wide, combining and wrapped path cells', () => {
   const cells = s => Array.from(s, ch => [ch, 1]);
   const rows = [
@@ -312,13 +301,12 @@ test('path mapping handles wide, combining and wrapped path cells', () => {
   const expected = [{ path: 'src/main.rs', range: { start: { abs: 0, col: 4 }, end: { abs: 1, col: 4 } } }];
   for (const abs of [0, 1]) {
     assert.deepEqual(pathLinks(lines(rows), abs), expected);
-    assert.deepEqual(pathLinks(xtermLines(terminal(rows)), abs), expected);
   }
 });
 
 /** The same text must link through a terminal wrap and a program's own newline.
  * TUIs often pad the head and indent the tail, neither of which belongs in
- * the destination. Both adapters must return the same cells and whole path.
+ * the destination. Both shapes must return the same cells and whole path.
  */
 test('paths cut near the right edge join through soft wraps and program breaks', () => {
   const head = 'Failure screenshot (/tmp/farhelm-';
@@ -333,9 +321,7 @@ test('paths cut near the right edge join through soft wraps and program breaks',
     const expected = [{ path: '/tmp/farhelm-tmp/run-id/failure.jpg', range: {
       start: { abs: 0, col: head.indexOf('/') }, end: { abs: 1, col: indentation.length + tail.length - 1 },
     } }];
-    for (const view of [lines(rows), xtermLines(terminal(rows))]) {
-      for (const abs of [0, 1]) assert.deepEqual(pathLinks(view, abs), expected, `wrapped=${wrapped}, row=${abs}`);
-    }
+    for (const abs of [0, 1]) assert.deepEqual(pathLinks(lines(rows), abs), expected, `wrapped=${wrapped}, row=${abs}`);
   }
 });
 
@@ -353,10 +339,8 @@ test('cut paths keep delimiters, column limits and the two-row boundary', () => 
     [row('file:///tmp/head-'), row('tail/file.txt')],
     [row('/tmp/head-'), row('tail/'), row('file.txt')],
   ]) {
-    for (const view of [lines(rows), xtermLines(terminal(rows))]) {
-      for (let abs = 0; abs < rows.length; abs++) {
-        assert.ok(pathLinks(view, abs).every(link => link.range.start.abs === link.range.end.abs), JSON.stringify(rows));
-      }
+    for (let abs = 0; abs < rows.length; abs++) {
+      assert.ok(pathLinks(lines(rows), abs).every(link => link.range.start.abs === link.range.end.abs), JSON.stringify(rows));
     }
   }
   // Exactly four columns may be a TUI margin, but an exactly fitting tail
@@ -369,11 +353,9 @@ test('cut paths keep delimiters, column limits and the two-row boundary', () => 
     { cells: [['界', 2], ['', 0], [' ', 1], ...Array.from('/tmp/head-', ch => [ch, 1]), ...Array.from('    ', ch => [ch, 1])], wrapped: false },
     { cells: [[' ', 1], ['e\u0301', 1], ['界', 2], ['', 0], ...Array.from('.txt:12!', ch => [ch, 1])], wrapped: false },
   ];
-  for (const view of [lines(wide), xtermLines(terminal(wide))]) {
-    assert.deepEqual(pathLinks(view, 1), [{ path: '/tmp/head-e\u0301界.txt', range: {
-      start: { abs: 0, col: 3 }, end: { abs: 1, col: 8 },
-    } }]);
-  }
+  assert.deepEqual(pathLinks(lines(wide), 1), [{ path: '/tmp/head-e\u0301界.txt', range: {
+    start: { abs: 0, col: 3 }, end: { abs: 1, col: 8 },
+  } }]);
 });
 
 /** A plain word above a path is not its head, even when the cut's fit rule
@@ -389,48 +371,8 @@ test('plain words cannot donate a head to a cut path', () => {
       { path: '/work/real.txt', range: { start: { abs: 1, col: 0 }, end: { abs: 1, col: 14 } } },
       { path: '/work/gone.txt', range: { start: { abs: 1, col: 15 }, end: { abs: 1, col: 29 } } },
     ];
-    for (const view of [lines(rows), xtermLines(terminal(rows))]) {
-      assert.deepEqual(pathLinks(view, 1), expected, head);
-    }
+    assert.deepEqual(pathLinks(lines(rows), 1), expected, head);
   }
-});
-
-/** Recognition must stay synchronous for ordinary supervisor files. Retiring
- * checkout confinement must not add host Stat requests before offering a path. */
-test('ordinary path providers retain immediate recognition without admission requests', async () => {
-  const rows=[{cells:Array.from('/work/report.txt',ch=>[ch,1]),wrapped:false}];
-  let provider;
-  const term={...terminal(rows),element:{querySelector:()=>null,removeEventListener(){}},registerLinkProvider(value){provider=value;return {dispose(){}};}};
-  const context={window:{farhelmTerminalLinks:terminalLinks},AbortController,URL,setTimeout,clearTimeout};
-  vm.runInNewContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'),'utf8'),context);
-  const addon=new context.window.farhelmTerminalFiles.XtermFileLinksAddon({endpoint:'/files',secret:()=> 'fixture'});
-  addon.request=()=>{throw new Error('recognition must not perform a host lookup');};
-  addon.activate(term);
-  try {
-    const offered=await new Promise(resolve=>provider.provideLinks(1,resolve));
-    assert.deepEqual(Array.from(offered,link=>link.text),['/work/report.txt']);
-  } finally {addon.dispose();}
-});
-
-/** Native OSC 8 links still own arbitrary labels and their original callbacks.
- * The file addon must leave that provider unchanged when mounted or disposed. */
-test('ordinary file addon preserves the real xterm OSC provider',async t=>{
-  const {Terminal}=require('../assets/vendor/xterm.js');
-  const term=new Terminal({cols:80,rows:5,allowProposedApi:true,linkHandler:{allowNonHttpProtocols:true,activate(){}}});
-  t.after(()=>term.dispose());
-  const provider=term._core._linkProviderService.linkProviders[0];
-  const original=provider.provideLinks;
-  const context={window:{farhelmTerminalLinks:terminalLinks},AbortController,URL,setTimeout,clearTimeout};
-  vm.runInNewContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'),'utf8'),context);
-  const addon=new context.window.farhelmTerminalFiles.XtermFileLinksAddon({endpoint:'/files',secret:()=> 'fixture'});
-  term.loadAddon(addon);
-  assert.equal(provider.provideLinks,original);
-  await new Promise(resolve=>term.write('\x1b]8;;file:///work/report.txt\x1b\\result\x1b]8;;\x1b\\',resolve));
-  const offered=await new Promise(resolve=>provider.provideLinks(1,resolve));
-  assert.equal(offered.length,1);
-  assert.equal(linkRangeText(xtermLines(term),fromXtermRange(offered[0].range)),'result');
-  addon.dispose();
-  assert.equal(provider.provideLinks,original);
 });
 
 /** Opening headers are not completion: bytes are offered only after EOF. */
@@ -536,7 +478,7 @@ test('same-task redraw preserves answered ready and refused hovers', async () =>
   }
 });
 
-/** xterm installs decoration accessors after the synchronous hover callback.
+/** A terminal may install decoration accessors after the synchronous hover callback.
  * Restoration must reach those accessors, while a departure before the
  * microtask runs must not write through them onto an unrelated current link.
  */
@@ -632,7 +574,7 @@ test('real departure aborts and hides, and a later same-path hover checks afresh
   fixture.addon.dispose();
 });
 
-/** xterm cursor accessors write to its current link, not necessarily the
+/** The grid's cursor accessors write to its current link, not necessarily the
  * object that carries them. A deferred teardown must never touch that setter.
  */
 test('leave withdraws admission immediately and deferred teardown leaves another cursor alone', async () => {
@@ -670,8 +612,10 @@ test('disposal clears pending hover teardown and rejects late replies', async ()
   assert.equal(fixture.shown.length, 1);
 });
 
-/** Run the shipped addon with an owned DOM and clock, without changing globals.
- * Notice, click, save and public buffer primitives are modeled; real geometry and
+/** Run the shipped `FileLinks` with an owned DOM and clock, without changing
+ * globals, hosted the way the grid hosts it: a view whose element may not
+ * exist yet and whose lines `setLines` replaces. Notice, click, save and link
+ * lines are modeled; real geometry and
  * browser rendering remain the two-engine integration suite's responsibility.
  * The ready hover offers opening by default; save-only cases remove that offer.
  */
@@ -709,7 +653,7 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
     window: { innerHeight: 100, innerWidth: 300, farhelmTerminalLinks: { ...terminalLinks, visibleFormatCharacters: text => text } },
     document: { createElement: element },
     AbortController, Blob,
-    // A strict callable rejects an addon receiver just as browser timers do.
+    // A strict callable rejects a FileLinks receiver just as browser timers do.
     // The default wrappers must invoke these as globals, not instance methods.
     setTimeout: function(callback, delay) {
       'use strict';
@@ -724,13 +668,14 @@ function noticeFixture(native = true, opened = true, defaultTimers = false, isMa
     URL: { createObjectURL: () => 'blob:owned', revokeObjectURL() {} },
   });
   vm.runInContext(fs.readFileSync(require.resolve('../assets/terminal-files.js'), 'utf8'), context);
-  const addon = new context.window.farhelmTerminalFiles.XtermFileLinksAddon({ endpoint: '/files', secret: () => 'fixture', native, isMac, isClick: () => true, ...(defaultTimers ? {} : clock) });
-  const term = { element: opened ? root : undefined, registerLinkProvider: () => ({ dispose() {} }), getSelection: () => '',
-    buffer: { active: { getLine: () => ({ length: 10, translateToString: () => 'report.pdf' }) } } };
-  addon.activate(term);
+  const host = { element: opened ? root : undefined, lines: stringLines(['report.pdf']) };
+  // Returned as `addon`, the name the tests below share.
+  const addon = new context.window.farhelmTerminalFiles.FileLinks({ endpoint: '/files', secret: () => 'fixture', native, isMac, isClick: () => true, ...(defaultTimers ? {} : clock),
+    view: { get element() { return host.element; }, lines: () => host.lines, hasSelection: () => false } });
   addon.hovered = { path: 'report.pdf', info: { status: 'ready', path: '/output/report.pdf', can_open: true }, controller: new AbortController(),
     range: { start: { abs: 0, col: 0 }, end: { abs: 0, col: 10 } }, screenText: 'report.pdf' };
-  return { addon, timers, listeners, disclosure, open: () => { term.element = root; }, notice: () => root.querySelector(':scope > .terminal-file-message') };
+  return { addon, timers, listeners, disclosure, open: () => { host.element = root; }, setLines: (value) => { host.lines = value; },
+    notice: () => root.querySelector(':scope > .terminal-file-message') };
 }
 
 /** A fitting stat is insufficient once the window clips its disclosure.
@@ -810,11 +755,8 @@ test('live approval coverage refuses file transfers and shares web refusal lifet
 test('partial wrapped redraw invalidates file transfer evidence', async () => {
   for (const native of [false, true]) {
     const fixture = noticeFixture(native, true, false, true);
-    let rows = ['report', '.pdf'];
-    fixture.addon.term.buffer.active.getLine = y => rows[y] === undefined ? undefined : {
-      length: rows[y].length,
-      translateToString: (_trim, start, end) => rows[y].slice(start, end),
-    };
+    const rows = ['report', '.pdf'];
+    fixture.setLines(stringLines(rows));
     const range = { start: { abs: 0, col: 0 }, end: { abs: 1, col: 4 } };
     fixture.addon.show = () => { fixture.disclosure.hidden = false; };
     const requests = [];
@@ -832,7 +774,7 @@ test('partial wrapped redraw invalidates file transfer evidence', async () => {
     rows[1] = '.pdf';
     await fixture.addon.download('report.pdf', { metaKey: true });
     assert.deepEqual(requests[1], { operation: 'download', open: native });
-    rows = [];
+    rows.length = 0;
     await fixture.addon.download('report.pdf', { metaKey: true });
     assert.equal(requests.length, 2, 'missing rows cannot establish unchanged text');
     fixture.addon.dispose();
@@ -851,8 +793,8 @@ test('a wrapped or program-broken printed path cannot grow beyond its cached end
       { cells: cells('long/repor'), wrapped: false },
       { cells: cells('t.txt     '), wrapped },
     ];
-    fixture.addon.term.buffer = terminal(rows).buffer;
-    const [{ path, range }] = pathLinks(xtermLines(fixture.addon.term), 0);
+    fixture.setLines(lines(rows));
+    const [{ path, range }] = pathLinks(lines(rows), 0);
     assert.equal(path, 'long/report.txt');
     assert.deepEqual(range.end, { abs: 1, col: 5 });
     fixture.addon.show = () => { fixture.disclosure.hidden = false; };
@@ -865,9 +807,9 @@ test('a wrapped or program-broken printed path cannot grow beyond its cached end
     await fixture.addon.hover({}, path, { range, decorations: {} }, range);
     assert.equal(fixture.addon.hovered.info.status, 'ready');
     rows[1].cells = cells('t.txt.bak ');
-    assert.equal(linkRangeText(xtermLines(fixture.addon.term), range), fixture.addon.hovered.screenText,
+    assert.equal(linkRangeText(lines(rows), range), fixture.addon.hovered.screenText,
       'the old rectangle alone still matches after the extension');
-    assert.equal(pathLinks(xtermLines(fixture.addon.term), 0)[0].path, 'long/report.txt.bak');
+    assert.equal(pathLinks(lines(rows), 0)[0].path, 'long/report.txt.bak');
     await fixture.addon.download(path, { metaKey: true });
     assert.equal(requests.length, 1, 'the newly extended token must not reuse the previous target');
     rows[1].cells = cells('t.txt     ');
@@ -877,10 +819,10 @@ test('a wrapped or program-broken printed path cannot grow beyond its cached end
   }
 });
 
-/** Real browser timers reject an addon as their receiver. Default scheduling
+/** Real browser timers reject a `FileLinks` as their receiver. Default scheduling
  * and cancellation must retain global-call semantics just like injected clocks.
  */
-test('default notice timers do not receive the addon as their receiver', () => {
+test('default notice timers do not receive the FileLinks as their receiver', () => {
   const fixture = noticeFixture(true, true, true);
   fixture.addon.message('saved to /output/report.pdf', 'success');
   assert.equal(fixture.timers.size, 1);
@@ -889,10 +831,11 @@ test('default notice timers do not receive the addon as their receiver', () => {
   fixture.addon.dispose();
 });
 
-/** xterm activates addons before creating its element. Failed mounts must
- * also dispose safely; notice listeners belong to a later, opened terminal.
+/** The grid's links are created before the component whose element they
+ * read. Failed mounts must also dispose safely; notice listeners belong to a
+ * later, existing terminal element.
  */
-test('activation and disposal do not require an opened terminal element', () => {
+test('construction and disposal do not require a terminal element', () => {
   const failedMount = noticeFixture(true, false);
   assert.equal(failedMount.listeners.size, 0);
   failedMount.addon.dispose();

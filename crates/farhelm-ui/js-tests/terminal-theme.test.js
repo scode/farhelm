@@ -1,5 +1,5 @@
-// The shipped xterm.js theme is a cross-surface contract: the browser's
-// palette, the CSS terminal ground, and tmux's OSC answers must describe the
+// The shipped terminal theme is a cross-surface contract: the browser's
+// palette, the CSS terminal ground, and the emulator's OSC answers must describe the
 // same readable default. This test pins the asset directly so a visual
 // change cannot quietly drift from the source table or the CSS surface.
 const test = require("node:test");

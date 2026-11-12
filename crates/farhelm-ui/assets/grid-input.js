@@ -24,10 +24,11 @@
 // without knowing them.
 //
 // `keydownAction` makes the decision. Its rules, and the keyboard rules in
-// `keyboardResult` that it asks whether a sequence exists, are ported
-// from the vendored xterm.js 6.0.0 (`evaluateKeyboardEvent` and the filters
-// around it in `CoreBrowserTerminal._keyDown`), so a new terminal types
-// exactly like an old one. Farhelm's checked-in tables pin both over the
+// `keyboardResult` that it asks whether a sequence exists, are ported from
+// xterm.js 6.0.0 (`evaluateKeyboardEvent` and the filters around it in
+// `CoreBrowserTerminal._keyDown`) and are Farhelm's own keyboard contract
+// now: a terminal types the way the xterm family of terminals does, which is
+// what shells and agents read. Farhelm's checked-in tables pin both over the
 // whole key space (js-tests/grid-input-tables.js): the bytes for every
 // keydown, which the supervisor's encoder is held to as well, and which
 // keydowns are sent at all.
@@ -38,12 +39,11 @@
 //
 // ## Mouse and wheel
 //
-// Mouse events become `mouse` messages in cell coordinates, sent only for
-// what the program's mouse mode asks for (`state.mouse`), with the cell
-// rounding, clamping and move de-duplication old terminals use, so a click
-// lands on the same cell in both. Wheel steps accumulate pixel deltas into
-// lines, so a trackpad scrolls a program at the same rate as in an old
-// terminal.
+// Mouse events become `mouse` messages in cell coordinates, sent only for what
+// the program's mouse mode asks for (`state.mouse`), with the cell rounding,
+// clamping and move de-duplication xterm.js uses. Wheel steps accumulate pixel
+// deltas into lines, so a trackpad scrolls a program at the same rate as in
+// xterm.js.
 (function (root) {
   "use strict";
 
@@ -110,7 +110,7 @@
    * `cancel` whether the event is cancelled anyway.
    *
    * Kept line for line with the original's branches rather than
-   * simplified, because its value is giving exactly the old terminal's
+   * simplified, because its value is giving exactly xterm.js's
    * answer; the key table (js-tests/grid-input-tables.js) pins it. The
    * supervisor's encoder makes the same computation with the program's real
    * modes; the page only needs `type`, `cancel` and whether `key` exists.
@@ -251,9 +251,9 @@
     return result;
   }
 
-  // The `navigator.platform` values that count as a Mac (old terminals'
-  // xterm.js uses the same list), and the list copy-on-select.js uses for
-  // the forcing modifier.
+  // The `navigator.platform` values that count as a Mac (xterm.js's list,
+  // ported below), and the list copy-on-select.js uses for the forcing
+  // modifier.
   const MAC_PLATFORMS = ["Macintosh", "MacIntel", "MacPPC", "Mac68K"];
 
   /**
@@ -294,7 +294,7 @@
 
   /**
    * What the grid does with one keydown (Option not acting as Meta, and no
-   * screen-reader mode, as old terminals are configured too):
+   * screen-reader mode, as Farhelm configured xterm.js too):
    *
    * - `"send"`: send a `key` message and cancel the event;
    * - `"pass"`: leave the event to the browser, whose text input (if any)
@@ -493,8 +493,7 @@
   /**
    * The cell under a pointer offset (pixels from the screen's top left): a
    * boundary pixel belongs to the cell before it, and a point outside the
-   * grid clamps to its edge, as in old terminals, so a press lands on the
-   * same cell in both.
+   * grid clamps to its edge, as in xterm.js.
    *
    * Ported from xterm.js 6.0.0's `getCoords` (src/browser/input/Mouse.ts), MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -591,12 +590,11 @@
 
   /**
    * How many lines one wheel event scrolls a program, accumulating partial
-   * lines from pixel deltas across events (damped to 0.3 under 50 px, which
-   * is how a trackpad's events look), at sensitivity 1, and 5 under Alt or
-   * Ctrl. Shift+wheel is horizontal and scrolls nothing. The grid sends one
-   * report (or one arrow key) per event whose amount is not zero, as old
-   * terminals do, so callers only need the sign of `deltaY` once this says
-   * the event counts.
+   * lines from pixel deltas across events (damped to 0.3 under 50 px, which is
+   * how a trackpad's events look), at sensitivity 1, and 5 under Alt or Ctrl.
+   * Shift+wheel is horizontal and scrolls nothing. The grid sends one report
+   * (or one arrow key) per event whose amount is not zero, as xterm.js does, so
+   * callers only need the sign of `deltaY` once this says the event counts.
    *
    * Ported from xterm.js 6.0.0's `CoreMouseService.consumeWheelEvent`, MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -637,10 +635,10 @@
   //
   // An Alt-click (Option on a Mac) moves a shell's cursor to the clicked
   // cell by typing arrow keys: `moveToCellSequence` decides how many, from
-  // the cursor, the screen and its soft wraps. It is ported from the
-  // vendored xterm.js 6.0.0 and kept branch for branch with the original
-  // (including the argument it passes that looks like a slip: landing the
-  // cursor where an old terminal lands it is the point), and the Alt-click
+  // the cursor, the screen and its soft wraps. It is ported from xterm.js
+  // 6.0.0 and kept branch for branch with the original (including the
+  // argument it passes that looks like a slip: the cursor landing where the
+  // Alt-click table says is Farhelm's contract), and the Alt-click
   // table (js-tests/grid-input-tables.js) pins its results. Its sequences
   // are made with normal cursor keys; the client sends them as `key`
   // messages (`arrowKeyMessages`), so the supervisor encodes each with the

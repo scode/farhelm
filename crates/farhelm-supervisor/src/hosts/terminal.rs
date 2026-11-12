@@ -2633,24 +2633,6 @@ impl HostTerminal {
             .and_then(std::ffi::OsStr::to_str)
             .unwrap_or_default()
     }
-
-    /// This terminal's kind as replies report it to clients
-    /// (`SessionInfo::agent_terminal`, `TabInfo::kind`): always a host. The
-    /// wire still carries the kind for clients that tell the two kinds of
-    /// terminal apart, which an older page and helm do.
-    pub(crate) fn wire_kind(&self) -> farhelm_proto::TerminalKind {
-        farhelm_proto::TerminalKind::Host
-    }
-
-    /// The reply's description of a tab backed by this terminal: its id and
-    /// its kind ([`Self::wire_kind`]). Every `TabInfo` a reply carries is
-    /// built here.
-    pub(crate) fn tab_info(&self, id: String) -> farhelm_proto::TabInfo {
-        farhelm_proto::TabInfo {
-            id,
-            kind: Some(self.wire_kind()),
-        }
-    }
 }
 
 /// A host's size in the emulator's terms.

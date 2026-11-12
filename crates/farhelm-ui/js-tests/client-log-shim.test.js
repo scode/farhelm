@@ -1,7 +1,7 @@
 // Unit coverage for client-log-shim.js: the pure formatting/queue/threshold
 // helpers under plain `require()`, plus the stateful installed controller
 // (arming, capture guard, batched `fetch` flushing) exercised through a
-// `node:vm` fabricated window, following term-bytes.test.js's pattern (see
+// `node:vm` fabricated window, following paste-sanitizer.test.js's pattern (see
 // that file's header for why `node --test` and why `node:vm` rather than
 // mouse-mode e2e alone). Read client-log-shim.js's own module docs first —
 // they are the spec this file pins against, in particular the "buffer until
@@ -300,7 +300,7 @@ test("isLoopbackBase rejects a non-loopback host, a private-but-not-loopback hos
 
 // =======================================================================
 // C. Stateful controller, exercised through a node:vm fabricated window —
-// following term-bytes.test.js's pattern. `require()` only ever exercises
+// following paste-sanitizer.test.js's pattern. `require()` only ever exercises
 // the CommonJS branch (module is always defined there), so the install
 // branch, the capture guard, and the fetch/timer flush pipeline need a
 // context shaped like a real page: a `window`, a scriptable `console`, a
@@ -401,7 +401,7 @@ function createSandbox() {
 
 /**
  * Evaluate the shim's actual source (read from disk, not re-typed here —
- * the same reasoning as term-bytes.test.js's vm test: running the real file
+ * the same reasoning as paste-sanitizer.test.js's vm test: running the real file
  * is what makes this a regression test rather than a restatement) into a
  * sandbox built by `createSandbox`. When `pendingConfig` is given it is
  * installed on `window.__farhelmClientLogPending` BEFORE evaluation, so the

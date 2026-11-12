@@ -15,7 +15,7 @@ import { drainedRoute } from "./helpers/drained-route";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { disposeRelease, expectConnectedRelease, observeModalRelease, type ModalReleaseObservation } from "./helpers/modal-release";
 
-/** Override the platform before the shortcut and xterm both classify it. */
+/** Override the platform before the shortcut and the terminal both classify it. */
 async function platform(page: Page, mac: boolean): Promise<void> {
   await page.addInitScript((value) => {
     Object.defineProperty(Navigator.prototype, "platform", { get: () => value });
@@ -86,7 +86,7 @@ test("opening a template reports the launcher's catalog read failure", async ({ 
 for (const mac of [false, true]) {
   /**
    * Real binary input frames distinguish taking the chord from merely
-   * showing a dialog after xterm also sent it. A live echo after Escape and
+   * showing a dialog after the terminal also sent it. A live echo after Escape and
    * after a different-session jump proves both focus handoffs.
    * The non-Mac case also observes connected release before actual removal:
    * observer-only cleanup cannot establish the close-before-return contract.

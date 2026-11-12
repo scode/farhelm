@@ -283,8 +283,8 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 /// same time, and selecting a tab is a CSS visibility change, never an
 /// attach cutover — attach-on-select was considered and rejected, since
 /// each switch would pay a full replay and exercise the takeover machinery
-/// for no gain. What that costs is one xterm instance, one WebSocket, and
-/// one supervisor-side control client per tab; what it buys is that a
+/// for no gain. What that costs is one terminal component, one WebSocket,
+/// and one supervisor-side stream per tab; what it buys is that a
 /// background tab keeps consuming its own stream, which per-terminal flow
 /// control (PLAN_M4.md item 3) makes safe.
 ///
@@ -413,7 +413,8 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 /// render before it has executed (a real, if rare, race). Bumping the
 /// counter on every sync attempt AND on drop means a selection switch
 /// unmounting this view before that wait resolves reliably cancels it. Once `window.farhelmTerm`
-/// exists, `mountWhenReady`'s OWN per-island wait for xterm's globals is a
+/// exists, `mountWhenReady`'s OWN per-island wait for the terminal's
+/// scripts and font is a
 /// separate concern guarded entirely inside terminal.js (its `pendings`
 /// replacement-and-clear scheme — see that function's docs); this token
 /// does not reach that far.
@@ -529,15 +530,14 @@ fn publish_header_prefill(
 }
 
 /// Reattach after every Restart result, independently of its temporary payload.
-/// A current detail read may consume the reply's terminal-kind override before
-/// this effect runs. The durable completion revision still owes one remount,
+/// A current detail read may retire the remembered Restart outcome before this
+/// effect runs. The durable completion revision still owes one remount,
 /// including after a refusal or unknown outcome that detached the old viewer.
 fn use_restart_observation(
     operations: SessionOps,
     id: Signal<String>,
     mut mount_generation: Signal<u32>,
     mut relaunched: Signal<bool>,
-    mut terminal_kind: Signal<Option<Option<farhelm_proto::TerminalKind>>>,
 ) {
     let mut observed = use_signal(|| {
         operations
@@ -556,9 +556,8 @@ fn use_restart_observation(
         if state.restart_revision == *observed.peek() {
             return;
         }
-        if let Some(outcome) = state.restart.filter(|outcome| outcome.succeeded) {
+        if state.restart_succeeded {
             relaunched.set(true);
-            terminal_kind.set(Some(outcome.agent_terminal));
         }
         mount_generation += 1;
         observed.set(state.restart_revision);
@@ -613,18 +612,6 @@ pub(crate) fn SessionView(
     // replays the pane's scrollback, which for a reused terminal is what
     // puts the PRIOR run's output back on screen above the new one.
     let mount_generation = use_signal(|| 0_u32);
-    // The agent's terminal kind as this view's last successful Restart
-    // reported it, until a detail read describing the restarted run
-    // commits: `Some(kind)` is the reply's word (itself possibly `None`),
-    // `None` means the listing in `current` speaks. Held because the
-    // generation bump above remounts the agent's terminal at once, while
-    // `current` still describes the run the Restart replaced; see
-    // `agent_spec_kind`.
-    let mut restart_terminal_kind = use_signal(|| {
-        operations
-            .retained_restart(session.id.raw())
-            .map(|outcome| outcome.agent_terminal)
-    });
     // Whether this client has relaunched the session since it last saw it
     // interrupted. Set by a restart reply, cleared once a read commits any
     // status other than `Interrupted` (the effect below), and read by
@@ -643,7 +630,7 @@ pub(crate) fn SessionView(
     // whose Restart finished while the switcher was open can show the card
     // until this view's first detail read, a brief gap accepted rather than
     // changing what the switcher hands over.
-    let mut relaunched = use_signal(|| operations.retained_restart(session.id.raw()).is_some());
+    let mut relaunched = use_signal(|| operations.retained_restart(session.id.raw()));
     // Whether a restart is in flight (disables the control and guards
     // re-entry, mirroring `ListView`'s `pending`).
     let restarting = use_memo(move || {
@@ -844,12 +831,6 @@ pub(crate) fn SessionView(
     // was closed. `poll_sequence` below is the counter both sides read.
     let mut opened_tabs = use_signal(Vec::<(String, u64)>::new);
     let mut closed_tabs = use_signal(HashSet::<String>::new);
-    // The kind each optimistic open's reply gave (old or new terminal), by
-    // tab id, so the migration band and the session details can name a tab
-    // the strip already shows before any detail read lists it
-    // (`tabs::visible_tab_infos`). An entry goes when its tab leaves
-    // `opened_tabs`: at an accepted detail read, and when the tab is closed.
-    let mut opened_tab_kinds = use_signal(HashMap::<String, farhelm_proto::TerminalKind>::new);
     // How many detail reads have been STARTED by this view. Incremented at
     // each fetch's launch, so a read's own index is the value it took
     // before incrementing, and an optimistic open recording the current
@@ -1042,9 +1023,6 @@ pub(crate) fn SessionView(
                     opened_tabs.write().retain(|(id, observed_from)| {
                         !live.contains(id.as_str()) && index < *observed_from
                     });
-                    opened_tab_kinds
-                        .write()
-                        .retain(|id, _| opened_tabs.peek().iter().any(|(opened, _)| opened == id));
                     closed_tabs.write().retain(|id| live.contains(id.as_str()));
                     occurrences.observe(&fresh);
                     workspace_occurrences.observe(&fresh);
@@ -1062,15 +1040,7 @@ pub(crate) fn SessionView(
                             .write()
                             .get_mut(operation_id.peek().as_str())
                     {
-                        state.restart = None;
-                    }
-                    // The restart epoch admits only reads started after a
-                    // Restart finished, so this one describes the restarted
-                    // run and its kind replaces the reply's.
-                    // Written only when set, so ordinary reads do not dirty
-                    // the terminal specs.
-                    if restart_terminal_kind.peek().is_some() {
-                        restart_terminal_kind.set(None);
+                        state.restart_succeeded = false;
                     }
                     true
                 }
@@ -1501,13 +1471,7 @@ pub(crate) fn SessionView(
     // lifecycle boundaries, so a return during an operation sees its completion.
     let refresh_after_operation = request_detail.clone();
     let mut observed_operation = use_signal(|| operations.revision(&operation_id.peek()));
-    use_restart_observation(
-        operations,
-        operation_id,
-        mount_generation,
-        relaunched,
-        restart_terminal_kind,
-    );
+    use_restart_observation(operations, operation_id, mount_generation, relaunched);
     use_effect(move || {
         let state = operations
             .lifecycle
@@ -1617,9 +1581,6 @@ pub(crate) fn SessionView(
                     // not have.
                     let observed_from = poll_sequence.peek().to_owned();
                     opened_tabs.write().push((tab.id.clone(), observed_from));
-                    if let Some(kind) = tab.kind {
-                        opened_tab_kinds.write().insert(tab.id.clone(), kind);
-                    }
                     selected.set(Some(tab.id));
                 }
                 // The supervisor's own words, verbatim: a vanished working
@@ -1652,10 +1613,7 @@ pub(crate) fn SessionView(
         let base = close_base.clone();
         let session_id = close_session_id.clone();
         spawn(async move {
-            let tab = crate::Tab {
-                id: tab_id.clone(),
-                kind: None,
-            };
+            let tab = crate::Tab { id: tab_id.clone() };
             match close_tab(&base, &session_id, &tab).await {
                 Ok(()) => {
                     // Acting on a response already in hand, not guessing:
@@ -1674,7 +1632,6 @@ pub(crate) fn SessionView(
                     // at which point the stale optimistic entry would
                     // resurrect a tab that does not exist.
                     opened_tabs.write().retain(|(id, _)| id != &tab_id);
-                    opened_tab_kinds.write().remove(&tab_id);
                     if selected.read().as_deref() == Some(tab_id.as_str()) {
                         selected.set(None);
                     }
@@ -1752,28 +1709,12 @@ pub(crate) fn SessionView(
         if !keep_terminal_surface(&session, relaunched(), had_terminal()) {
             return Some("[]".to_string());
         }
-        // With their kinds: an optimistically opened tab takes the kind its
-        // open reply gave until a detail read lists it.
-        let tabs = crate::tabs::visible_tab_infos(
-            &session.tabs,
-            &opened_tabs.read(),
-            &opened_tab_kinds.read(),
-            &closed_tabs.read(),
-        );
-        let active = selected
-            .read()
-            .clone()
-            .filter(|id| tabs.as_slice().iter().any(|tab| &tab.id == id));
+        let tabs = visible_tabs(&session.tabs, &opened_tabs.read(), &closed_tabs.read());
+        let active = selected.read().clone().filter(|id| tabs.contains(id));
         // Only the tabs within the island cap are ever handed to
         // terminal.js — see `tabs::MAX_MOUNTED_TAB_ISLANDS`. The strip
         // still lists the rest; their panes explain themselves instead.
-        let mountable = tabs.as_slice().iter().take(MAX_MOUNTED_TAB_ISLANDS);
-        let agent_kind = agent_spec_kind(
-            session.agent_terminal,
-            *restart_terminal_kind.read(),
-            restarting(),
-            session.supervisor_creates_host_terminals,
-        );
+        let mountable = tabs.iter().take(MAX_MOUNTED_TAB_ISLANDS);
         // Every value here goes through serde_json rather than string
         // interpolation: the session and tab ids come from a supervisor,
         // which with --ssh is a different machine. A hostile or compromised
@@ -1803,10 +1744,6 @@ pub(crate) fn SessionView(
             // shell, whatever the session's agent is.
             "notice": drag_copy_notice_element_id(AGENT_TERMINAL_ELEMENT_ID),
             "copyHint": session.agent_kind.drag_copy_hint(),
-            // Which kind of terminal this is, which decides how terminal.js
-            // builds its surface: a new terminal mounts the grid component
-            // and nothing of xterm.js (see `agent_spec_kind`).
-            "kind": agent_kind,
             "path": terminal_ws_path(&spec_session_id, None, &lease),
             // Where an UNATTENDED reconnect attaches instead (PLAN_M6.md
             // item 7): a route only a helm that honors the non-displacing
@@ -1823,8 +1760,7 @@ pub(crate) fn SessionView(
             "primary": true,
             "focus": active.is_none(),
         })];
-        for tab in mountable {
-            let id = &tab.id;
+        for id in mountable {
             specs.push(serde_json::json!({
                 "el": tab_terminal_element_id(id),
                 "sessionId": spec_session_id,
@@ -1834,10 +1770,6 @@ pub(crate) fn SessionView(
                 "status": attachment_status_element_id(&tab_terminal_element_id(id)),
                 "notice": drag_copy_notice_element_id(&tab_terminal_element_id(id)),
                 "copyHint": serde_json::Value::Null,
-                // A tab's kind never changes while it lives (closing and
-                // reopening is how a tab becomes new), so the listing's word
-                // is current.
-                "kind": tab.kind,
                 "path": terminal_ws_path(&spec_session_id, Some(id), &lease),
                 "pathUnowned": terminal_ws_unowned_path(&spec_session_id, Some(id), &lease),
                 "gen": 0,
@@ -2007,15 +1939,6 @@ pub(crate) fn SessionView(
     // captures its own dialog's warning from the same render, below.
     let restart_prompt_stops = crate::status::restart_prompt_stops_agent(&shown.status);
     let tabs = visible_tabs(&shown.tabs, &opened_tabs.read(), &closed_tabs.read());
-    // The same tabs with their kinds, for the surfaces that name tabs by the
-    // strip's labels (the migration band, the details' terminal kinds). They
-    // take only this type, never `shown.tabs` (`tabs::VisibleTabs`).
-    let visible_tab_infos = crate::tabs::visible_tab_infos(
-        &shown.tabs,
-        &opened_tabs.read(),
-        &opened_tab_kinds.read(),
-        &closed_tabs.read(),
-    );
     // Both of these are DERIVED rather than written back to their signals
     // when they go stale, and that is safe precisely because tab ids are
     // never reused (farhelm-proto's `TabInfo::id`): an id that has left the
@@ -2830,14 +2753,8 @@ pub(crate) fn SessionView(
                     }
                 }
             }
-            // The move to new terminals (`migration`): first ordinary notice below the top
-            // row, so it is the first notice a visit to an old session shows,
-            // and given the header's own reading of whether Restart can run.
-            crate::migration::MigrationBand { session: shown.clone(), tabs: visible_tab_infos.clone(), restart_available }
-            // names what the offer is NOW), so truncating them would hide the
-            // one sentence that says what to do next. Conditional, so they
-            // cost the steady state nothing.
-            //
+            // The restart and stop errors below are conditional, so they cost
+            // the steady state nothing.
             //
             // Both render through `PeerLine`, as every refusal does
             // (`api::refusal_text`'s contract): the helm's text can quote
@@ -3339,15 +3256,6 @@ pub(crate) fn SessionView(
                 if let Some(checkout) = &shown.working_copy {
                     crate::icons::ManagedCheckoutMark { checkout: checkout.clone(), cwd: shown.cwd.clone(), sandbox: sandbox.is_some() }
                 }
-                // Which kind each terminal is, once kinds can differ
-                // (`migration::terminal_kinds`); the label is short, the
-                // description names every terminal.
-                if let Some(kinds) = crate::migration::terminal_kinds(&shown, &visible_tab_infos) {
-                    span { class: "session-details-terminals", "data-tooltip": "{kinds.description}",
-                        "{kinds.label}"
-                        span { class: "visually-hidden", ": {kinds.description}" }
-                    }
-                }
                 button {
                     r#type: "button",
                     class: if copied_directory().is_some() { "header-copy copied" } else { "header-copy" },
@@ -3814,41 +3722,6 @@ fn keep_terminal_surface(session: &Session, relaunched: bool, had_terminal: bool
     }
 }
 
-/// The `kind` the agent terminal's spec hands terminal.js: `"host"` for a
-/// new terminal, `"tmux"` for an old one, `"pending"` while this view's
-/// own Restart may be moving an old terminal into a new one, and null when
-/// nothing says (an older helm, no terminal).
-///
-/// terminal.js builds a new terminal's grid directly, with nothing of
-/// xterm.js, only when the spec says `host`; any other kind gets the
-/// xterm.js-first path old terminals have always had, with a grid notice
-/// swapping the grid in. So the kind has to be right at the moment of each
-/// remount, and two remounts happen before the listing (`listed`) can know
-/// a Restart's outcome:
-///
-/// - The generation bump when the Restart's reply arrives. The reply names
-///   the restarted agent's kind (`restart_reply`, `Some` until a detail read
-///   of the restarted run commits), and that word wins over the listing.
-/// - The reconnect attempts while the Restart is in flight (`restarting`),
-///   since the Restart's teardown detaches the agent's attachment. Where the
-///   Restart can move the agent into a new terminal (the agent is not
-///   already in one, and its supervisor creates them), the kind is not known
-///   until the reply, so the spec says `pending` and terminal.js mounts
-///   nothing until the next spec names it. A Restart that cannot change the
-///   kind keeps it, and its reconnects proceed as before.
-fn agent_spec_kind(
-    listed: Option<farhelm_proto::TerminalKind>,
-    restart_reply: Option<Option<farhelm_proto::TerminalKind>>,
-    restarting: bool,
-    creates_host_terminals: bool,
-) -> serde_json::Value {
-    let known = restart_reply.unwrap_or(listed);
-    if restarting && creates_host_terminals && known != Some(farhelm_proto::TerminalKind::Host) {
-        return serde_json::Value::from("pending");
-    }
-    serde_json::json!(known)
-}
-
 /// The sentence the interrupted card shows where the terminal was.
 ///
 /// Names the host restart and the intentional handoff before stating what
@@ -4050,8 +3923,7 @@ mod tests {
             let id = use_signal(|| "source".to_string());
             let generation = use_signal(|| 0u32);
             let relaunched = use_signal(|| false);
-            let kind = use_signal(|| None);
-            use_restart_observation(operations, id, generation, relaunched, kind);
+            use_restart_observation(operations, id, generation, relaunched);
             HANDLES.with(|slot| slot.set(Some((operations, generation))));
             rsx! {}
         }
@@ -4062,14 +3934,7 @@ mod tests {
         for (index, succeeded) in [false, true].into_iter().enumerate() {
             dom.in_runtime(|| {
                 operations.boundary("source");
-                operations.finish_restart(
-                    "source",
-                    crate::list::RestartOutcome {
-                        succeeded,
-                        agent_terminal: None,
-                    },
-                    0,
-                );
+                operations.finish_restart("source", succeeded);
                 // Model the admitted post-completion detail commit before any
                 // observer gets to run, rather than relying on network timing.
                 operations
@@ -4077,7 +3942,7 @@ mod tests {
                     .write()
                     .get_mut("source")
                     .unwrap()
-                    .restart = None;
+                    .restart_succeeded = false;
                 assert_eq!(
                     *generation.peek(),
                     index as u32,
@@ -4500,8 +4365,6 @@ mod tests {
             pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         }
     }
 
@@ -4585,10 +4448,9 @@ mod tests {
     /// (`SessionOps::retained_restart`) and how it decides on the card
     /// (`terminal_absence`): a Restart recorded with no view mounted, then
     /// opened while the listing still says Interrupted, mounts the terminal;
-    /// a listing read that was in flight at the reply and shows the replaced
-    /// run as running changes nothing; a later read showing the session
-    /// running forgets the Restart, so once a reboot makes the session
-    /// Interrupted again, a newly opened view shows the interrupted card.
+    /// a later read showing the session running forgets the Restart, so once
+    /// a reboot makes the session Interrupted again, a newly opened view shows
+    /// the interrupted card.
     #[farhelm_testtrace::test]
     fn a_restart_finished_elsewhere_is_forgotten_once_the_listing_shows_it_running() {
         use std::cell::Cell;
@@ -4613,7 +4475,7 @@ mod tests {
             ..interrupted.clone()
         };
         let opened = |session: &Session| {
-            let seeded = operations.retained_restart(session.id.raw()).is_some();
+            let seeded = operations.retained_restart(session.id.raw());
             terminal_absence(session, seeded)
         };
         dom.in_runtime(|| {
@@ -4622,93 +4484,21 @@ mod tests {
                 Some(TerminalAbsence::Interrupted),
                 "premise: an interrupted session with no Restart shows the card"
             );
-            // Listing generation 3 was the newest started when the reply came.
             operations.boundary("restarted");
-            operations.finish_restart(
-                "restarted",
-                crate::list::RestartOutcome {
-                    succeeded: true,
-                    agent_terminal: None,
-                },
-                3,
-            );
-            operations.retire_confirmed_restarts(std::slice::from_ref(&interrupted), 4);
+            operations.finish_restart("restarted", true);
+            operations.retire_confirmed_restarts(std::slice::from_ref(&interrupted));
             assert_eq!(
                 opened(&interrupted),
                 None,
                 "before the listing catches up, the restarted session mounts its terminal"
             );
-            operations.retire_confirmed_restarts(std::slice::from_ref(&running), 3);
-            assert_eq!(
-                opened(&interrupted),
-                None,
-                "a read already in flight at the reply proves nothing about the new run"
-            );
-            operations.retire_confirmed_restarts(std::slice::from_ref(&running), 5);
+            operations.retire_confirmed_restarts(std::slice::from_ref(&running));
             assert_eq!(
                 opened(&interrupted),
                 Some(TerminalAbsence::Interrupted),
                 "after a later reboot, the card and its Restart offer are back"
             );
         });
-    }
-
-    /// The agent terminal's spec kind follows the listing, except where a
-    /// Restart's reply knows better or the Restart is still deciding.
-    ///
-    /// Why: terminal.js mounts a new terminal's grid without xterm.js only
-    /// when the spec says `host`. Right after a Restart moves an old agent
-    /// into a new terminal, the listing still says `tmux`, so without the
-    /// reply's word the remount would build xterm.js for a new terminal;
-    /// and while the Restart is in flight the kind is not known at all, so
-    /// a reconnect then must wait rather than guess.
-    /// Spec: with no Restart, the listing's kind (or null). A reply's kind
-    /// wins over the listing, a reply naming none included. While a Restart
-    /// is in flight on a supervisor that creates new terminals, an agent not
-    /// already in a new terminal is `pending`; one already in a new terminal
-    /// stays `host`, and a supervisor that creates only old terminals keeps
-    /// the listed kind.
-    #[farhelm_testtrace::test]
-    fn the_agent_spec_kind_follows_the_restart_that_may_move_it() {
-        use farhelm_proto::TerminalKind::{Host, Tmux};
-        let kind = |value: serde_json::Value| value.as_str().map(str::to_owned);
-        assert_eq!(
-            kind(agent_spec_kind(Some(Host), None, false, true)),
-            Some("host".into())
-        );
-        assert_eq!(
-            kind(agent_spec_kind(Some(Tmux), None, false, true)),
-            Some("tmux".into())
-        );
-        assert!(agent_spec_kind(None, None, false, true).is_null());
-        // The reply's word, before the listing has caught up.
-        assert_eq!(
-            kind(agent_spec_kind(Some(Tmux), Some(Some(Host)), false, true)),
-            Some("host".into())
-        );
-        assert!(agent_spec_kind(Some(Tmux), Some(None), false, true).is_null());
-        // A Restart in flight.
-        assert_eq!(
-            kind(agent_spec_kind(Some(Tmux), None, true, true)),
-            Some("pending".into())
-        );
-        assert_eq!(
-            kind(agent_spec_kind(None, None, true, true)),
-            Some("pending".into())
-        );
-        assert_eq!(
-            kind(agent_spec_kind(Some(Host), None, true, true)),
-            Some("host".into())
-        );
-        assert_eq!(
-            kind(agent_spec_kind(Some(Tmux), None, true, false)),
-            Some("tmux".into())
-        );
-        // A second Restart after a first moved the agent: the reply's host.
-        assert_eq!(
-            kind(agent_spec_kind(Some(Tmux), Some(Some(Host)), true, true)),
-            Some("host".into())
-        );
     }
 
     /// An outage can retain only a screen from this view's own lifetime;
@@ -5185,8 +4975,6 @@ mod tests {
                 pin_position: None,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             }
         }
         // The view shows B (learned from its own read); the parent's
@@ -5247,8 +5035,6 @@ mod tests {
                 pin_position: None,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             }
         }
 
@@ -5347,8 +5133,6 @@ mod tests {
             pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
         assert_eq!(
             status_badge_destination(&unknown),
@@ -5425,8 +5209,6 @@ mod tests {
                 pin_position: None,
                 notifications: Vec::new(),
                 notifications_read_through: 0,
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             }
         }
         assert!(
@@ -5505,8 +5287,6 @@ mod tests {
             pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
         assert!(seen_effect_eligible(&already_seen));
         assert_eq!(

@@ -167,7 +167,7 @@ test.afterEach(async ({ page }, testInfo) => {
 async function observeWakeTransition(form: Locator, protectTerminal: boolean) {
   return form.evaluateHandle((node, protectTerminal) => {
     const root = node as HTMLElement;
-    const input = document.querySelector('#terminal :is(.grid-terminal-input, .xterm-helper-textarea)');
+    const input = document.querySelector('#terminal .grid-terminal-input');
     if (!input || document.activeElement !== input || input.closest('[inert]') ||
       !root.hidden || root.getAttribute('aria-modal') === 'true') {
       throw new Error('wake observation requires a released hidden launcher and focused B terminal');

@@ -81,9 +81,9 @@ it reaches the parser: a pre-scan would need a second parser to know where seque
   hyperlink when the dropped sequence is an OSC 8; otherwise a link made long enough for the parser to drop would leave
   the previous link on the text after it, where a slightly shorter one is rejected by the hyperlink cap below. After
   every OSC the buffer is shrunk back to 1 KiB if it grew beyond that. The value is set by OSC 52 clipboard writes,
-  which carry the whole selection base64-encoded: xterm.js, which renders Farhelm's terminals today, drops OSC payloads
-  over 10,000,000 characters (`PAYLOAD_LIMIT` in `crates/farhelm-ui/assets/vendor/xterm.js`), so 10 MiB accepts every
-  copy that works there, about 7.5 MB of copied text. The `no_std` parser has its own fixed buffer and is unchanged.
+  which carry the whole selection base64-encoded: xterm.js, which rendered Farhelm's terminals when this limit was set,
+  drops OSC payloads over 10,000,000 characters (`PAYLOAD_LIMIT` in its 6.0.0 release), so 10 MiB accepts every copy
+  that worked there, about 7.5 MB of copied text. The `no_std` parser has its own fixed buffer and is unchanged.
 - Zero-width characters per cell, `alacritty_terminal::term::cell::MAX_ZEROWIDTH_CHARS` = 16. Upstream appends every
   combining character to the previous cell, four bytes each, without limit. Further ones are dropped. Real text needs
   far fewer: stacked diacritics and Hangul jamo use two or three per cell, a subdivision flag such as Scotland's six.
@@ -148,8 +148,8 @@ lines, and cursor positions are (line, column) from 0. The xterm source checked 
 mirror at xterm-412 (commit `5c75ead9a75d4b2e666ca06fa94503b5766ed93f`: `button.c` 1.686, `charproc.c` 1.2134,
 `cursor.c` 1.101, `main.h` 1.93, `misc.c` 1.1137, `ptydata.c` 1.173, `ptyx.h` 1.1174, `screen.c` 1.682, `util.c` 1.1032,
 and its control sequence documentation `ctlseqs.ms` 1.748); the tmux source is the 3.7c release Farhelm pins
-(`scripts/build-pinned-tmux-ci.sh`, `.github/release/source-pins.env`). xterm.js, which renders Farhelm's terminals
-today, was checked in its vendored copy (`crates/farhelm-ui/assets/vendor/xterm.js`, 6.0.0) and, where a record cites a
+(`scripts/build-pinned-tmux-ci.sh`, `.github/release/source-pins.env`). xterm.js, which rendered Farhelm's terminals
+when these records were written, was checked in the copy Farhelm then vendored (6.0.0) and, where a record cites a
 source file, in the `xtermjs/xterm.js` source at tag 6.0.0 (commit `f447274f430fd22513f6adbf9862d19524471c04`). The
 alacritty application (outside the crate) was read at the master commit below. "Observed" means the bytes were run
 through the crates: the published, unpatched ones unless the record names another configuration (the patched trees, or
@@ -363,7 +363,7 @@ records" after the records).
   back to 1 KiB (`MAX_OSC_RAW`, the size of upstream's `no_std` buffer). The `no_std` parser, which has a fixed buffer,
   is unchanged.
 - Why Farhelm needs it: one program must not grow the shared supervisor's memory without bound. The limit is set so that
-  every OSC 52 copy that works in the browser's xterm.js today, about 7.5 MB of text, still works.
+  every OSC 52 copy that worked in the browser's xterm.js when it was set, about 7.5 MB of text, still works.
 - Upstream code: `vte/src/lib.rs`, `Parser::action_osc_put` and `Parser::osc_end`.
 - Patch hunks (vte, `lib.rs`): `@@ -45,6 +50,23 @@` (`OSC_PAYLOAD_LIMIT`); `@@ -64,6 +86,13 @@` (the `osc_overflow`
   field, shared with the next record: this one needs only whether the limit was hit, the next one the count of complete

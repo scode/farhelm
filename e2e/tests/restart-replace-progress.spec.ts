@@ -11,8 +11,6 @@ import { mountNativeTunnelPreview } from "./helpers/native-tunnel-preview";
 import { fulfillAsHelm, installTerminalSuiteHooks, rowByTitle } from "./helpers/terminal-suite";
 
 installTerminalSuiteHooks();
-test.use({ fabricatedTerminals: true });
-
 const SOURCE_ID = "11111111-2222-3333-4444-555555555555";
 const SOURCE_TITLE = "slow lifecycle request";
 const HOST_NAME = "slow host";

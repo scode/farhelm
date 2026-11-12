@@ -59,7 +59,7 @@ installTerminalSuiteHooks({ tabSweep: true });
  *
  * The earlier monolithic spec had two tests that deliberately wrecked the
  * shared fixture: the multi-megabyte input test echoes 2 MiB of `a` through
- * the pane — enough to push `FAKE-AGENT READY` out of the 12,000-line tmux
+ * the pane — enough to push `FAKE-AGENT READY` out of the 12,000-line
  * history entirely — and the ctrl-c test then kills its agent, which is why
  * that test's own docs say nothing after it may depend on the shared
  * session. A test waiting for the banner then failed on the FIRST attempt
@@ -693,7 +693,7 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
       await page.keyboard.type(`link ${text}`);
       await page.keyboard.press("Enter");
       await waitForTermText(page, `echo:link ${text}`);
-      await expect(page.locator("#terminal :is(.xterm-rows > div, .grid-terminal-row)").filter({ hasText: `echo:link ${text}` }).last()).toBeVisible();
+      await expect(page.locator("#terminal .grid-terminal-row").filter({ hasText: `echo:link ${text}` }).last()).toBeVisible();
     }
     const snapshotCols = (await terminalSize(page))!.cols;
     // Withheld BEFORE the close, so there is no window at all in which the
@@ -783,9 +783,9 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
       // attempt tore down and rebuilt this island, so without the held screen
       // the user would be staring at an empty pane under the banner.
       //
-      // Read from the DOM rather than through the xterm buffer helper every
-      // other test uses, and the difference is the point: the buffer helper
-      // reads the island's published terminal, and there is deliberately no
+      // Read from the DOM rather than through the model helper every other
+      // test uses, and the difference is the point: the model helper reads
+      // the island's published grid, and there is deliberately no
       // island here any more. What is on screen is a rendered snapshot with
       // no attachment behind it — which is exactly what "non-live" means.
       await expect(page.locator("#terminal")).toBeVisible();
@@ -799,7 +799,7 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
         window.open = ((url: string) => { (window as any).__snapshotOpened.push(url); return null; }) as typeof window.open;
       });
       for (const text of [snapshotUrl, "snapshot.txt"]) {
-        const linkRow = page.locator("#terminal :is(.xterm-rows > div, .grid-terminal-row)").filter({ hasText: `echo:link ${text}` }).last();
+        const linkRow = page.locator("#terminal .grid-terminal-row").filter({ hasText: `echo:link ${text}` }).last();
         await expect(linkRow).toBeVisible();
         const linkBox = await linkRow.boundingBox();
         expect(linkBox, "the complete link must occupy a painted snapshot row").not.toBeNull();
@@ -839,7 +839,7 @@ test("takeover-during-backoff-does-not-steal-the-session", async ({
           navigator.clipboard.writeText = async (text) => { (window as any).__snapshotCopies.push(text); };
         });
       }
-      const row = page.locator("#terminal :is(.xterm-rows > div, .grid-terminal-row)").filter({ hasText: `echo:${marker}` }).last();
+      const row = page.locator("#terminal .grid-terminal-row").filter({ hasText: `echo:${marker}` }).last();
       await expect(row).toBeVisible();
       const box = await row.boundingBox();
       expect(box, "the held marker row must be painted before selecting it").not.toBeNull();
@@ -1885,7 +1885,7 @@ try {
   // Someone finally ASKS: leaving and reopening the session is the
   // user's own attach, and it must both work and leave nothing of the
   // old screen behind — a kept screen that outlived its element would
-  // stack a dead terminal under the live one, and leak an xterm
+  // stack a dead terminal under the live one, and leak a grid
   // instance per detach.
   await sharedSessionRow(page).click();
   await expect(page.locator(".session-details .title")).toHaveText("e2e-session");
@@ -1893,7 +1893,7 @@ try {
   await waitForSessionRevealed(page, id);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
   expect(
-    await page.evaluate(() => document.querySelectorAll("#terminal :is(.xterm-rows, .grid-terminal-screen)").length),
+    await page.evaluate(() => document.querySelectorAll("#terminal .grid-terminal-screen").length),
     "exactly one terminal in the element: the reopened one",
   ).toBe(1);
 } finally {
@@ -1907,7 +1907,7 @@ try {
 //
 // The departure check in `sync()` used to skip tombstones, so a tombstoned
 // terminal whose tab closed, or whose session view emptied under a stale
-// host, kept its xterm alive, and when the same terminal returned it was
+// host, kept its terminal alive, and when the same terminal returned it was
 // skipped as still tombstoned before anything was painted: a blank pane with
 // no way to take control. The view's own syncs are captured and replayed
 // without, then with, the agent terminal, which is the departure and the
@@ -2026,7 +2026,7 @@ try {
     .toBe(true);
   await waitForTermText(page, "FAKE-AGENT READY", 20_000);
   expect(
-    await page.evaluate(() => document.querySelectorAll("#terminal :is(.xterm-rows, .grid-terminal-screen)").length),
+    await page.evaluate(() => document.querySelectorAll("#terminal .grid-terminal-screen").length),
     "exactly one terminal in the element: the buried screen was disposed",
   ).toBe(1);
 } finally {

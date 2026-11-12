@@ -1,16 +1,16 @@
 // Unit coverage for copy-on-select.js's copy decisions and notice lifecycle, run with
-// node's built-in test runner (matches shift-enter-key.test.js's rationale:
-// one small decision does not earn a bundler, and `node --test` already
-// loads the exact file the page ships).
+// node's built-in test runner (one small decision does not earn a bundler,
+// and `node --test` already loads the exact file the page ships).
 //
 // The decision is now trivial by design (see copy-on-select.js's header for
 // why an earlier "does this differ from the last copy" cache was removed as
 // a real bug, not simplified away for its own sake): copy when a primary gesture
 // allowed local selection and ended with non-empty text. What these
-// cases pin is that BOTH of xterm's own signals are consulted rather than
-// either one alone — `hasSelection()` and `getSelection()` are read
-// separately in terminal.js, and a caller that got them out of sync (never
-// observed in practice, but not provably impossible) must not copy.
+// cases pin is that BOTH of the grid component's selection signals are
+// consulted rather than either one alone — `hasSelection()` and the
+// selection's text are read separately, and a caller that got them out of
+// sync (never observed in practice, but not provably impossible) must not
+// copy.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { copySelectionOnMouseUp } = require("../assets/copy-on-select.js");
@@ -71,7 +71,7 @@ test("only a primary press can copy a retained local selection", () => {
 });
 
 test("browser-global branch: window.farhelmCopyOnSelect exists with no module present", () => {
-  // Mirrors shift-enter-key.test.js's `node:vm` check: every test above
+  // Mirrors paste-sanitizer.test.js's `node:vm` check: every test above
   // `require()`s this file, which only ever exercises the `module.exports`
   // branch. A fresh vm context with `window` but no `module` is the one
   // environment shape that runs the OTHER branch, so this is what actually
@@ -102,7 +102,7 @@ test("browser-global branch: window.farhelmCopyOnSelect exists with no module pr
 // program that has mouse reporting on and copies nothing. Why they matter:
 // the notice must appear only in that one case (a notice after a drag that
 // DID copy, or after a click, would be noise users learn to ignore), and the
-// key it names must be the one xterm actually honors on the platform.
+// key it names must be the one the grid actually honors on the platform.
 const {
   forcingModifier,
   dragMayHaveCopiedNothing,
@@ -110,7 +110,6 @@ const {
   createDragCopyNotice,
   DRAG_NOTICE_MS,
   pressForcesSelection,
-  isOsc52Write,
   DRAG_THRESHOLD_PX,
 } = require("../assets/copy-on-select.js");
 
@@ -142,8 +141,8 @@ test("no notice for a gesture that copied or never tried to", () => {
     "a click (pointer barely moved)": { moved: DRAG_THRESHOLD_PX - 1 },
     "a drag the program answered with OSC 52": { osc52SincePress: true },
     "a forced Option/Shift drag (Farhelm made its own selection)": { forced: true, hasSelection: true },
-    // Option/Shift held but the drag stayed inside one cell, so xterm made
-    // no selection: the user is already holding the key the notice names.
+    // Option/Shift held but the drag stayed inside one cell, so no
+    // selection was made: the user is already holding the key the notice names.
     "a forced drag that selected nothing": { forced: true, hasSelection: false },
     "a pane with no mouse tracking at the press": { trackingAtPress: false },
     "a press outside the terminal screen (the scrollbar)": { onScreen: false },
@@ -155,9 +154,9 @@ test("no notice for a gesture that copied or never tried to", () => {
   assert.equal(dragMayHaveCopiedNothing(null), false, "no gesture at all");
 });
 
-test("the forcing modifier follows xterm's own Mac platform list", () => {
-  // Exactly the `navigator.platform` values the vendored xterm.js treats as
-  // Mac; anything else, iPad included, forces with Shift.
+test("the forcing modifier follows the grid's Mac platform list", () => {
+  // Exactly the `navigator.platform` values grid-input.js's `platformOf`
+  // treats as Mac; anything else, iPad included, forces with Shift.
   for (const mac of ["Macintosh", "MacIntel", "MacPPC", "Mac68K"]) {
     assert.equal(forcingModifier(mac), "Option", mac);
   }
@@ -181,20 +180,13 @@ test("the notice names the platform's key, with the agent's own instruction when
   assert.match(codex, /hold Option while dragging/);
 });
 
-test("the forcing modifier is read from the press with xterm's rule", () => {
-  // Option on xterm's Mac platforms, Shift elsewhere; the other key does
+test("the forcing modifier is read from the press with the platform's rule", () => {
+  // Option on Mac platforms, Shift elsewhere; the other key does
   // nothing, so holding it is not a forced press.
   assert.equal(pressForcesSelection({ altKey: true, shiftKey: false }, "MacIntel"), true);
   assert.equal(pressForcesSelection({ altKey: false, shiftKey: true }, "MacIntel"), false);
   assert.equal(pressForcesSelection({ altKey: false, shiftKey: true }, "Linux x86_64"), true);
   assert.equal(pressForcesSelection({ altKey: true, shiftKey: false }, "Linux x86_64"), false);
-});
-
-test("only an OSC 52 write counts as the program copying, never a read query", () => {
-  assert.equal(isOsc52Write("c;YW5zd2VyZWQ="), true);
-  assert.equal(isOsc52Write(";YW5zd2VyZWQ="), true, "an empty selection target is still a write");
-  assert.equal(isOsc52Write("c;?"), false);
-  assert.equal(isOsc52Write("?"), false);
 });
 
 // --- Notice placement and lifecycle --------------------------------------

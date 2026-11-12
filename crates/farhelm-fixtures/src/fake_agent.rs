@@ -1649,8 +1649,8 @@ fn basic() -> anyhow::Result<()> {
             return Ok(());
         }
         // Report the real PTY geometry on demand. The browser resize test
-        // uses this rather than trusting xterm's local dimensions, which
-        // can change even when the WebSocket-to-tmux resize path is
+        // uses this rather than trusting the page's local dimensions, which
+        // can change even when the resize path to the terminal is
         // disconnected.
         if trimmed == "size" {
             let size = std::process::Command::new("stty")
@@ -2194,27 +2194,16 @@ impl CueScanner {
 /// does.
 ///
 /// Two SEPARATE cues, `legacy\r` and `sgr\r`, rather than one "enable
-/// mouse" command — because they exercise DIFFERENT client code paths and
-/// a test needs to provoke each independently:
+/// mouse" command — because the two encodings differ in what bytes reach
+/// the program, and a test needs to provoke each independently:
 ///
 /// - `legacy` turns on DECSET 1000 alone: reports use the X10-derived
-///   encoding, which vendored xterm.js routes through `onBinary`
-///   UNCONDITIONALLY whenever that encoding is the active one — not
-///   because of any particular byte value, but because `onBinary` is
-///   simply where this encoding's reports are always delivered. The
-///   format nonetheless CAN carry bytes above 0x7f (`column`/`row` are
-///   each offset by 32, and a column or row past 95 already crosses that
-///   line), and it is only by clicking at such a coordinate that a test
-///   actually forces a high byte through the wire — proving the
-///   `onBinary` path byte-for-byte rather than merely exercising it.
-///   `term-bytes.js`'s extracted byte-domain conversion (PLAN_M6_5.md
-///   item 1) is exactly what that high byte's fidelity depends on:
-///   without a high-coordinate click, that extraction's unit test could
-///   pass while the browser-side global sat entirely unwired, and this
-///   fixture would never notice.
+///   encoding, whose `column`/`row` are each offset by 32, so a click past
+///   column or row 95 makes a report carrying a byte above 0x7f; clicking
+///   at such a coordinate is how a test shows that byte reaches the
+///   program intact.
 /// - `sgr` layers DECSET 1006 on top: reports switch to SGR's pure-ASCII
-///   encoding, delivered through `onData` instead — the ordinary text
-///   path every other fake-agent script's input already exercises.
+///   encoding.
 ///
 /// Every byte this script receives — a cue word, a real mouse report,
 /// anything else — is echoed back as hex regardless of whether it meant

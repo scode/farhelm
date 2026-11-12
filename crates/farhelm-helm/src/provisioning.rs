@@ -5658,7 +5658,6 @@ mod tests {
         session.tabs = (0..tabs)
             .map(|index| farhelm_proto::TabInfo {
                 id: format!("{title}-tab-{index}"),
-                kind: None,
             })
             .collect();
         session
@@ -13116,18 +13115,10 @@ mod tests {
     /// has sampled the pane. Wait for that readiness boundary rather than
     /// treating the provisional status as evidence that the session died.
     ///
-    /// The terminal is driven the way the browser drives it, as a viewer that
-    /// can draw grids, and must answer with `expected`: a provisioned
-    /// supervisor runs the bare `farhelm supervisor run`, so its sessions run
-    /// in terminal hosts and stream as grids, where a tmux terminal would
-    /// stream bytes. Requiring the kind keeps these cases from quietly going
-    /// back to testing tmux if the provisioned launch ever did. The typed line
-    /// must then show its output either way.
-    async fn assert_session_operable(
-        client: &crate::client::SupervisorClient,
-        session_id: &str,
-        expected: farhelm_proto::StreamKind,
-    ) {
+    /// The terminal is driven the way the browser drives it, as a grid
+    /// viewer typing `text` and an Enter `key`, and the typed line must then
+    /// show its output in the grid's rows.
+    async fn assert_session_operable(client: &crate::client::SupervisorClient, session_id: &str) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         let session = loop {
             let listing = client.list_sessions().await.expect("list live session");
@@ -13159,16 +13150,9 @@ mod tests {
                 24,
                 farhelm_proto::TerminalSelector::default(),
                 "",
-                crate::client::ViewerStreams::BytesOrGrid,
             )
             .await
             .expect("attach to the retained session");
-        assert_eq!(
-            terminal.stream_kind(),
-            expected,
-            "the retained session's terminal streams as the kind its supervisor creates"
-        );
-        let grid = expected == farhelm_proto::StreamKind::Grid;
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 match terminal.recv().await {
@@ -13187,37 +13171,30 @@ mod tests {
         let token = format!("farhelmoperable{}", uuid::Uuid::new_v4().simple());
         let marker = token.to_ascii_uppercase();
         let command = format!("printf '%s\\n' '{token}' | tr '[:lower:]' '[:upper:]'");
-        if grid {
-            // The browser's grid client sends typed characters as `text` and
-            // Enter as a `key`, and the supervisor encodes them for the
-            // program from the terminal's modes.
-            use farhelm_proto::grid::GridInput;
-            let enter = GridInput::Key {
-                key: "Enter".into(),
-                code: "Enter".into(),
-                kc: 13,
-                mods: 0,
-                mac: false,
-            };
-            for message in [GridInput::Text { data: command }, enter] {
-                client
-                    .send_grid_input(channel, message.encode().expect("a grid input message"))
-                    .await
-                    .expect("the retained terminal takes grid input");
-            }
-        } else {
+        // The browser's grid client sends typed characters as `text` and
+        // Enter as a `key`, and the supervisor encodes them for the program
+        // from the terminal's modes.
+        use farhelm_proto::grid::GridInput;
+        let enter = GridInput::Key {
+            key: "Enter".into(),
+            code: "Enter".into(),
+            kc: 13,
+            mods: 0,
+            mac: false,
+        };
+        for message in [GridInput::Text { data: command }, enter] {
             client
-                .send_input(channel, format!("{command}\n").into_bytes())
-                .await;
+                .send_grid_input(channel, message.encode().expect("a grid input message"))
+                .await
+                .expect("the retained terminal takes grid input");
         }
         tokio::time::timeout(Duration::from_secs(10), async {
-            let mut output = Vec::new();
             loop {
                 match terminal.recv().await {
                     // A grid stream carries the screen's rows, not the
                     // program's bytes: the marker is looked for in the text
                     // of the rows each message draws or adds to history.
-                    Some(crate::client::TermEvent::Data(bytes)) if grid => {
+                    Some(crate::client::TermEvent::Data(bytes)) => {
                         use farhelm_proto::grid::{GridOutput, Row};
                         let text = |row: &Row| {
                             row.runs
@@ -13235,12 +13212,6 @@ mod tests {
                             _ => false,
                         };
                         if shown {
-                            break;
-                        }
-                    }
-                    Some(crate::client::TermEvent::Data(bytes)) => {
-                        output.extend(bytes);
-                        if String::from_utf8_lossy(&output).contains(&marker) {
                             break;
                         }
                     }
@@ -13988,25 +13959,7 @@ mod tests {
         // is outstanding. Nothing after this point asks the manager to
         // reconfigure or re-dial the row.
         let client = wait_real_client(&manager, accepted.host_id).await;
-        // A provisioned supervisor runs the bare `farhelm supervisor run`,
-        // whose default is terminal hosts: the session is a host terminal, and
-        // the supervisor says it creates them (what the migration band reads).
-        let listed = client.list_sessions().await.expect("list the session");
-        let listed = listed
-            .sessions
-            .iter()
-            .find(|row| row.id == session.id)
-            .expect("the session is listed");
-        assert_eq!(
-            listed.agent_terminal,
-            Some(farhelm_proto::TerminalKind::Host),
-            "the provisioned supervisor created the session in a terminal host: {listed:?}"
-        );
-        assert!(
-            listed.supervisor_creates_host_terminals,
-            "the provisioned supervisor reports that it creates terminal hosts: {listed:?}"
-        );
-        assert_session_operable(&client, &session.id, farhelm_proto::StreamKind::Grid).await;
+        assert_session_operable(&client, &session.id).await;
         client.delete_session(&session.id).await.unwrap();
 
         // UNINSTALL leg, for the ssh shapes only: the helm's own machine has
@@ -14053,16 +14006,12 @@ mod tests {
             );
             let tmux_socket = supervisor_state.join("tmux.sock");
             let listing = client.list_sessions().await.unwrap();
-            let ended_row = listing
-                .sessions
-                .iter()
-                .find(|session| session.id == ended.id)
-                .expect("the ended session is listed");
-            assert_eq!(
-                ended_row.agent_terminal,
-                Some(farhelm_proto::TerminalKind::Host),
-                "fixture premise: the ended session's terminal is a host, kept with its final \
-                 screen: {ended_row:?}"
+            assert!(
+                listing
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == ended.id),
+                "fixture premise: the ended session is listed"
             );
             // Its own socket, captured now: the uninstall removes the file and
             // the directory, and the check afterwards must not depend on them.

@@ -1,8 +1,8 @@
 // The grid client's wire decoder and screen/history model: pure, no DOM.
 //
-// New terminals (the ones a terminal host runs) reach the page as a grid of
-// styled runs that the supervisor's emulator computed, not as bytes for
-// xterm.js. The supervisor-to-client messages (`hello`, `state`, `rows`,
+// Terminals (each run by a terminal host) reach the page as a grid of
+// styled runs that the supervisor's emulator computed, not as the program's
+// bytes. The supervisor-to-client messages (`hello`, `state`, `rows`,
 // `frame`, `history`, `history_reset`, `clipboard`) are specified in the grid stream
 // format (`farhelm-proto`'s grid types and the format notes they came
 // from). This file turns one data frame into a validated message and

@@ -165,12 +165,11 @@ pub(crate) struct HostTab {
 }
 
 impl HostTab {
-    /// The reply's description of this tab: [`HostTerminal::tab_info`] for its
-    /// host, so the tab reports itself as a terminal host's (the client's
-    /// migration band and terminal kinds read that) without spelling the kind
-    /// out here.
+    /// The reply's description of this tab: its id.
     pub(crate) fn tab_info(&self) -> TabInfo {
-        self.host.tab_info(self.tab_id.clone())
+        TabInfo {
+            id: self.tab_id.clone(),
+        }
     }
 
     /// Whether the tab is over: its shell exited (its runtime processed the

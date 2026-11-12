@@ -543,7 +543,6 @@ test("with no CSPRNG, a create still carries a key while the session view refuse
     expect(
       await page.evaluate(() => Object.keys((window as any).__farhelmIslands ?? {}).length),
     ).toBe(0);
-    expect(await page.evaluate(() => (window as any).__farhelmTermReady)).toBeUndefined();
   } finally {
     await cleanUpSessionsTitled(request, title);
   }

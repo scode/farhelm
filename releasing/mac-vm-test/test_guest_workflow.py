@@ -60,10 +60,10 @@ independent updater check. These assertions cover instructions, not live UI.
 class TerminalTransitionInstructionsTests(unittest.TestCase):
     """Pin what P0's old-session turns are told, in both the managed and the plain envelope.
 
-The receipts gate what the tester cannot fake; these instructions carry what
-only the UI can show: the band, the session details' terminal kind and the
-resumed agent remembering the earlier turn. These assertions cover the
-delivered text, not live product behavior.
+The receipts gate what the tester cannot fake, the terminal kinds included
+(the candidate shows none in its UI); these instructions carry what only the
+UI can show: the Restart offer and the resumed agent remembering the earlier
+turn. These assertions cover the delivered text, not live product behavior.
 """
 
     def test_only_the_updater_old_fixture_starts_old_sessions(self):
@@ -89,26 +89,29 @@ delivered text, not live product behavior.
 
 The post-upgrade question's answer must differ from the 42 already on screen.
 The agent restart must not be routed through the app updater's owned restart
-transition, the band and move are conditional on what the candidate creates,
-and every branch, including the one without a Restart, ends with the final
-sample the import requires.
+transition, the move is conditional on what the candidate creates, and every
+branch, including the one without a Restart, ends with the final sample the
+import requires, which is also what checks the move (the candidate's session
+details name no terminal kind).
 """
         for side, survival, final in (('local', 'host_survival', 'old_session_after'),
                                       ('remote', 'remote_host_survival', 'remote_old_session_after')):
             with self.subTest(side=side):
                 text = managed_instructions(side + '-old-session', 'p0-updater-upgrade', 'ordinary')
                 self.assertLess(text.index(f'call {survival} exactly'), text.index(f'Select the old {side} session'))
-                for restart in ("use the band's Restart", "use the session's ordinary Restart"):
-                    self.assertLess(text.index('What is 6 times 8?'), text.index(restart))
-                    self.assertLess(text.index(restart), text.index('Which word did I ask you to remember'))
+                restart = "use the\nsession's ordinary Restart"
+                self.assertLess(text.index('What is 6 times 8?'), text.index(restart))
+                self.assertLess(text.index(restart), text.index('Which word did I ask you to remember'))
                 self.assertLess(text.index('Which word did I ask you to remember'), text.index('finish by calling ' + final))
-                self.assertIn('skip to\nthe final step', text)
                 self.assertNotIn('stop after', text)
                 self.assertNotIn('6 times 7', text)
-                for phrase in ('migration band', 'only\nClone or Replace', 'If survived is false', 'previous_can_create_hosts',
-                               'never brick_ui method restart', 'expect no band and do not restart', 'never supply it',
-                               'earlier 17 + 25\nanswer', 'new answer 48', 'Restart back\nto tmux is a fail'):
+                for phrase in ('only Clone or Replace', 'If survived is false', 'previous_can_create_hosts',
+                               'never brick_ui method restart', 'do not restart; skip to the final step',
+                               'never supply it', 'earlier 17 + 25\nanswer', 'new answer 48',
+                               'moved to one new\nterminal host'):
                     self.assertIn(phrase, text)
+                for phrase in ('band', 'details', 'terminal kind'):
+                    self.assertNotIn(phrase, text)
                 plain = instructions(side + '-old-session', 'p0-updater-upgrade', 'ordinary')
                 self.assertNotIn('brick_ui', plain)
                 self.assertIn('Which word did I ask you to remember', plain)
@@ -118,18 +121,21 @@ sample the import requires.
                 self.assertIn('touched the old\nsession before this call: then report automation-failure', text)
                 self.assertIn('automation-failure if you touched the old', plain)
 
-    def test_agent_checks_read_the_new_sessions_terminal_kind_and_keep_it_running(self):
+    def test_agent_checks_sample_terminal_hosts_and_keep_the_session_running(self):
         """The new session's still-running terminal is what tells the old-session comparison what the candidate creates.
 
 A tester that tidied it away would leave that comparison unable to run, so
-both envelopes on both hosts must say to keep it.
+both envelopes on both hosts must say to keep it. The managed envelope takes
+the terminal-host sample through its fixed operation and reads no terminal
+kind from the session details, which the candidate no longer shows.
 """
         for check, operation in (('local-supervisor-agent', 'terminal_hosts'),
                                  ('remote-supervisor-agent', 'remote_terminal_hosts')):
             with self.subTest(check=check):
                 text = managed_instructions(check, 'p0-updater-upgrade', 'ordinary')
                 self.assertIn('call ' + operation, text)
-                self.assertIn('Either kind passes here', text)
+                self.assertIn('which the import checks', text)
+                self.assertNotIn('details', text)
                 self.assertIn('untouched', text)
                 for envelope in (text, instructions(check, 'p0-updater-upgrade', 'ordinary')):
                     self.assertIn('Leave this new session running;\nthe old-session check samples its terminal.',

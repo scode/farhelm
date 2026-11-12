@@ -433,9 +433,9 @@ fn is_plain_docs_tail(tail: &str) -> bool {
 /// [`PeerLine`] run, with its empty and whitespace-only placeholders. Text
 /// with one is cut into isolated runs like [`PeerLine`]'s, but the plain
 /// runs use the placeholder-free spelling, since the space between a
-/// sentence and its link is not a blank value. A link opens the way the
-/// migration band's docs link does (`app_bar::open_external_page`), in the
-/// system browser from the desktop app and in a new tab elsewhere.
+/// sentence and its link is not a blank value. A link opens through
+/// `app_bar::open_external_page`, like the app bar's documentation link: in
+/// the system browser from the desktop app and in a new tab elsewhere.
 #[component]
 fn NotificationText(text: PeerText) -> Element {
     let runs = notification_runs(text.raw());

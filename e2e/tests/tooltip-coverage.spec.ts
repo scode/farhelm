@@ -130,13 +130,12 @@ async function expectCovered(page: Page, state: string, root: string, minimum: n
 /**
  * Include default-type inputs: several template fields and quick search have
  * no explicit type, and selecting only input[type=text] would miss them.
- * The terminals' hidden keyboard targets are left out: xterm.js owns its
- * helper textarea and its separate input policy, and the grid terminal's
- * input field (grid-terminal.js) keeps the attributes chosen to match that
- * textarea, not this sweep's form-field policy.
+ * The terminals' hidden keyboard targets are left out: the grid terminal's
+ * input field (grid-terminal.js) has its own input policy, not this sweep's
+ * form-field policy.
  */
 const TEXT_FIELDS =
-  "input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], input[type=tel], input[type=password], textarea:not(.xterm-helper-textarea):not(.grid-terminal-input)";
+  "input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], input[type=tel], input[type=password], textarea:not(.grid-terminal-input)";
 
 /**
  * Check mounted fields, even when hidden or disabled, so dormant launcher

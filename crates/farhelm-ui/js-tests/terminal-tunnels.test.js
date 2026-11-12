@@ -3,7 +3,7 @@
 // manufacturing a browser-only tunnel permission.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { tunnelTarget, shouldTunnel, activateWebLink, createLinkGesture } = require('../assets/terminal-links.js');
+const { tunnelTarget, shouldTunnel, activateWebLink } = require('../assets/terminal-links.js');
 
 test('only normalized loopback and wildcard bind targets receive tunnel offers', () => {
   for (const host of ['localhost', 'sub.localhost.', '127.0.0.1', '127.255.1.2', '127.1', '0x7f000001', '0.0.0.0', '[::1]', '[::]']) {
@@ -52,13 +52,13 @@ test('native remote primary Meta release owns the tunnel gesture exclusively', (
   assert.equal(opened.at(-1), 'http:localhost');
 });
 
-test('a reporting-program drag cannot acquire a tunnel release token', () => {
-  const gesture = createLinkGesture();
-  gesture.observe({ type: 'mousedown', button: 0, clientX: 10, clientY: 10 }, true);
-  gesture.observe({ type: 'mousemove', clientX: 30, clientY: 10 }, true);
-  const release = { type: 'mouseup', button: 0, clientX: 10, clientY: 10 };
-  gesture.observe(release, true);
-  assert.equal(gesture.isClick(release), false);
-  assert.equal(shouldTunnel({ uri: 'http://localhost:5173/', native: true, remote: true,
-    button: 0, metaKey: true, click: gesture.isClick(release), mode: 'intercept' }), false);
+/** A drag the grid did not admit as a click (its `isLinkClick`, under
+ * grid-terminal.js's `CLICK_JITTER_PX` rule) must not tunnel even when
+ * every other condition offers one: a reporting program's drag leaves no
+ * local selection, so the click admission is the only thing between a drag
+ * and a tunnel. */
+test('a release not admitted as a click never tunnels', () => {
+  const offer = { uri: 'http://localhost:5173/', native: true, remote: true, button: 0, metaKey: true, mode: 'intercept' };
+  assert.equal(shouldTunnel({ ...offer, click: true }), true, 'premise: an admitted click tunnels');
+  assert.equal(shouldTunnel({ ...offer, click: false }), false);
 });

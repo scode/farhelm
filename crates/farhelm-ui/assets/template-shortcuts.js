@@ -58,7 +58,8 @@
       chord(event, definition.template_list.modifiers, definition);
 
     // Opening the template list supersedes an unfinished sequence. Recognize
-    // it before the armed branch so its chord never falls through to xterm.
+    // it before the armed branch so its chord never falls through to the
+    // terminal.
     if (list) return { action: "template-list", consume: true };
 
     if (!armed) {
@@ -126,12 +127,12 @@
   /** Decide when an editor keeps the sequence prefix's normal meaning.
    * Outside the launcher, text editing always wins. Its own fields yield the
    * prefix only when they hold a selection, so Cmd-X still cuts selected text.
-   * The terminals' input proxies (xterm's implementation textarea and the
-   * grid terminal's input) are not ordinary editors.
+   * The terminal's input proxy (the grid terminal's hidden input field) is
+   * not an ordinary editor.
    */
   function prefixReservedForTextEditing(target, context, doc) {
     if (!(target instanceof Element)) return false;
-    if (target.matches(".xterm-helper-textarea, .grid-terminal-input")) return false;
+    if (target.matches(".grid-terminal-input")) return false;
     const input = target.closest("input, textarea");
     if (!input && !target.isContentEditable) return false;
     if (context !== "launcher") return true;

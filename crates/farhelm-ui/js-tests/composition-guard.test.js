@@ -97,7 +97,7 @@ test("ambiguous held composing keys spare the next key, including after another 
 test("installation marks app input once and leaves the terminal untouched", () => {
   class Target {
     constructor(terminal = false) { this.terminal = terminal; }
-    matches(selector) { return this.terminal && selector === ".xterm-helper-textarea, .grid-terminal-input"; }
+    matches(selector) { return this.terminal && selector === ".grid-terminal-input"; }
   }
   const listeners = new Map();
   const window = {

@@ -257,43 +257,9 @@ pub(crate) enum HeaderPrefillRequest {
 pub(crate) struct RestartBridge {
     pub(crate) current: Signal<Option<Session>>,
     pub(crate) before: Callback<api::RestartEdit, Result<(), String>>,
-    pub(crate) after: EventHandler<RestartOutcome>,
+    /// Called with whether the POST succeeded (see `SessionOps::finish_restart`).
+    pub(crate) after: EventHandler<bool>,
     pub(crate) error: EventHandler<String>,
-}
-
-/// What one finished Restart POST tells the session view that reattaches
-/// after it: whether it succeeded, and, when it did, which kind of terminal
-/// the restarted agent now runs in.
-///
-/// The kind is the reply's (`SessionInfo::agent_terminal`) because the
-/// reattach happens before any listing has caught up with the restart: a
-/// Restart can move an old agent into a new terminal, and the listing the
-/// view holds still says old. terminal.js mounts a new terminal's grid
-/// directly only when it is told the terminal is new, so the reply's word is
-/// what keeps that remount from building xterm.js first.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct RestartOutcome {
-    pub(crate) succeeded: bool,
-    /// The restarted agent's terminal kind from a successful reply; `None`
-    /// for a refusal, a lost reply, or a reply that names no kind (an older
-    /// supervisor, or a restart that left the session without a terminal).
-    pub(crate) agent_terminal: Option<farhelm_proto::TerminalKind>,
-}
-
-impl RestartOutcome {
-    /// The outcome of a Restart POST's result, whatever its error type.
-    pub(crate) fn of<E>(result: &Result<Session, E>) -> Self {
-        match result {
-            Ok(session) => Self {
-                succeeded: true,
-                agent_terminal: session.agent_terminal,
-            },
-            Err(_) => Self {
-                succeeded: false,
-                agent_terminal: None,
-            },
-        }
-    }
 }
 
 impl RestartBridge {
@@ -310,9 +276,9 @@ impl RestartBridge {
     }
 
     /// Every actual POST result reattaches, including refusals and lost replies.
-    pub(crate) fn finish(self, outcome: RestartOutcome) {
+    pub(crate) fn finish(self, succeeded: bool) {
         if self.current.try_read().is_ok() {
-            self.after.call(outcome);
+            self.after.call(succeeded);
         }
     }
 }
@@ -2016,10 +1982,7 @@ pub(crate) fn ListView(
             // reads the reply's own rows, so it needs no `authoritative` and
             // runs outside the absence cleanup below: a filtered, truncated
             // or one-session read that shows the session is evidence enough.
-            // It takes this read's gate `generation`, never `index` (the poll
-            // sequence the rename settling uses): the outcome's floor is a
-            // `ReadGate` generation.
-            operations.retire_confirmed_restarts(&listing.sessions, generation);
+            operations.retire_confirmed_restarts(&listing.sessions);
             // A changed consequence is a replacement question, not authority
             // for an answer already queued from the previous rendered opening.
             if let Some(drawn) = bulk_delete_question.peek_key() {
@@ -3451,11 +3414,7 @@ pub(crate) fn ListView(
                         .insert(id.clone(), format!("Restart: {reason}"));
                 }
                 operations.restarting.write().remove(&id);
-                operations.finish_restart(
-                    &id,
-                    RestartOutcome::of(&result),
-                    listing_reads.peek().latest_started(),
-                );
+                operations.finish_restart(&id, result.is_ok());
                 refresh(Trigger::Explicit);
                 end_row_op(&id);
             });
@@ -3674,15 +3633,11 @@ pub(crate) fn ListView(
         restart_claim.set(Some(claim));
         Ok(())
     });
-    let restart_after = use_callback(move |outcome: RestartOutcome| {
+    let restart_after = use_callback(move |succeeded: bool| {
         if let Some(source) = restart_source.peek().as_ref() {
             operations.restarting.write().remove(source.id.raw());
             operations.pending.write().remove(source.id.raw());
-            operations.finish_restart(
-                source.id.raw(),
-                outcome,
-                listing_reads.peek().latest_started(),
-            );
+            operations.finish_restart(source.id.raw(), succeeded);
         }
         restart_claim.set(None);
         header_refresh.set(true);

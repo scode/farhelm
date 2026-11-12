@@ -252,8 +252,7 @@ test("the line source numbers history and screen and hides history on request", 
 // hover's redraw check are terminal-links.js and terminal-files.js code
 // written against link lines (terminal-links.js, "Link lines"), which the
 // grid offers directly (`linkLines`). These tests run that shipped code on
-// the grid's lines, so a grid terminal is held to the same answers as an old
-// terminal read through xterm.js's adapter.
+// the grid's lines, the lines the page's links really read.
 const links = require("../assets/terminal-links.js");
 const files = require("../assets/terminal-files.js");
 

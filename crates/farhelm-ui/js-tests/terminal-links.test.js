@@ -5,14 +5,14 @@
 //
 // Two independent seams, not one restated twice:
 //
-// - `isPlainWebUrl` is the plain-TEXT adapter's activation boundary — the
+// - `isPlainWebUrl` is printed URLs' activation boundary — the
 //   allowlist that decides whether detector output may open. Every reject
 //   below closes a real navigation hole (parser trimming, origin
 //   acquisition, scheme smuggling), and each accept pins a shape that must
 //   keep working; a regression here either opens something hostile or
 //   silently un-links legitimate output, and neither failure would show up
 //   in any other unit test.
-// - `openTerminalUrl` is the shared opener both adapters call. Its web
+// - `openTerminalUrl` is the shared opener every web link calls. Its web
 //   branch is also covered by the browser suite, but its `dioxus:` branch
 //   is unreachable there — no browser run can present that origin — so
 //   these vm cases are the ONLY automated coverage of the desktop open
@@ -26,9 +26,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const {
   isPlainWebUrl,
-  createLinkGesture,
   interceptLinkPress,
-  suppressMouseReport,
   linkTargetParts,
   shortenedTarget,
   displayedTarget,
@@ -36,9 +34,6 @@ const {
   linkRowText,
   linkHoverText,
   linkRangeText,
-  xtermLines,
-  fromXtermRange,
-  toXtermRange,
   visibleFormatCharacters,
 } = require("../assets/terminal-links.js");
 
@@ -69,64 +64,6 @@ const SHIPPED_SOURCE = fs.readFileSync(
   "utf8",
 );
 
-/** Mouse reporting can leave selection empty for a real drag. Admission
- * therefore follows the complete primary gesture, including an excursion
- * that returns to the starting cell, and never leaks to a later event.
- */
-test("only a primary click within four pixels admits that exact release", () => {
-  const gesture = createLinkGesture();
-  const event = (type, x, y = 10, button = 0) => ({ type, clientX: x, clientY: y, button });
-  for (const [excursion, end, allowed] of [[10, 10, true], [14, 14, true], [15, 15, false], [30, 10, false]]) {
-    gesture.observe(event('mousedown', 10), true);
-    gesture.observe(event('mousemove', excursion), true);
-    const release = event('mouseup', end);
-    gesture.observe(release, true);
-    assert.equal(gesture.isClick(release), allowed);
-    assert.equal(gesture.isClick({ ...release }), false, 'another event cannot borrow the last click');
-  }
-  gesture.observe(event('mousedown', 10), false);
-  const outside = event('mouseup', 10);
-  gesture.observe(outside, true);
-  assert.equal(gesture.isClick(outside), false, 'a press elsewhere cannot activate this terminal');
-  gesture.observe(event('mousedown', 10, 10, 2), true);
-  const secondary = event('mouseup', 10, 10, 2);
-  gesture.observe(secondary, true);
-  assert.equal(gesture.isClick(secondary), false);
-});
-
-/** A terminal's reconnect removes the gesture's listeners and may later put
- * the same object back behind new ones when it restores the old screen.
- * Movement in between is unobserved, so a press held across that gap could
- * drag away and back and still release as a click. Teardown resets the
- * gesture: after `reset()`, a release with no press observed since admits
- * nothing, an already admitted release is withdrawn, and the same object
- * (the one link providers captured) still admits a fresh click.
- */
-test("reset retires a held press and an admitted release in place", () => {
-  const gesture = createLinkGesture();
-  const event = (type, x, y = 10, button = 0) => ({ type, clientX: x, clientY: y, button });
-  // Premise: a still press and release on this object counts as a click.
-  gesture.observe(event('mousedown', 10), true);
-  const admitted = event('mouseup', 10);
-  gesture.observe(admitted, true);
-  assert.equal(gesture.isClick(admitted), true, 'premise: a still press and release is a click');
-  gesture.reset();
-  assert.equal(gesture.isClick(admitted), false, 'a release admitted before the reset is withdrawn');
-
-  // The same release at the press point, with an unobserved drag away and
-  // back in between, must not complete a press from before the reset.
-  gesture.observe(event('mousedown', 10), true);
-  gesture.reset();
-  const release = event('mouseup', 10);
-  gesture.observe(release, true);
-  assert.equal(gesture.isClick(release), false, 'a press from before the reset cannot complete');
-
-  gesture.observe(event('mousedown', 10), true);
-  const fresh = event('mouseup', 10);
-  gesture.observe(fresh, true);
-  assert.equal(gesture.isClick(fresh), true, 'the reset object still serves its providers');
-});
-
 /** Range snapshots must include a wrapped continuation without trimming
  * meaningful spaces. Unreadable or unbounded ranges cannot authorize a file.
  */
@@ -144,15 +81,16 @@ test("file link snapshots cover every row and refuse missing or excessive ranges
   assert.equal(linkRangeText(lines, null), null);
 });
 
-/** Link ownership must never consume a file, forced selection or another
- * button. The pure press policy complements real browser report assertions;
- * a drag keeps the same ownership because later motion never replays input. */
-test("only default primary web-link presses under mouse reporting are withheld", () => {
-  const link = { button: 0, tracking: true, forced: false, webLink: true, mode: "intercept" };
+/** Link ownership must never consume a file press or another button. The
+ * grid asks only about a press under mouse reporting without the forcing
+ * modifier, so those two conditions are its, not this policy's. The pure
+ * press policy complements real browser report assertions; a drag keeps the
+ * same ownership because later motion never replays input. */
+test("only default primary web-link presses are withheld", () => {
+  const link = { button: 0, webLink: true, mode: "intercept" };
   assert.equal(interceptLinkPress(link), true);
   for (const change of [
-    { button: 1 }, { button: 2 }, { tracking: false }, { forced: true },
-    { webLink: false }, { mode: "both" }, { mode: "program" },
+    { button: 1 }, { button: 2 }, { webLink: false }, { mode: "both" }, { mode: "program" },
   ]) assert.equal(interceptLinkPress({ ...link, ...change }), false, JSON.stringify(change));
 });
 
@@ -345,25 +283,6 @@ test("displayedTarget keeps empty query and fragment delimiters", () => {
   assert.equal(displayedTarget("not a url"), "not a url");
 });
 
-// Only synchronous mouse-report output from the owned dispatch may disappear.
-// A stale event must not consume later pasted report-shaped text, and a live
-// event must preserve unrelated focus and keyboard output. Native listener
-// ordering itself is covered by real pointer input in the browser regression.
-test("withheld dispatch filtering preserves stale and non-mouse input", () => {
-  const event = { eventPhase: 3 };
-  const dispatch = { event, withheld: true };
-  for (const report of ["\x1b[M !!", "\x1b[<0;10;20M", "\x1b[<0;10;20m", "\x1b[<32;120;450M"]) {
-    assert.equal(suppressMouseReport(report, dispatch), true);
-    assert.equal(suppressMouseReport(report, { event, withheld: false }), false);
-    assert.equal(suppressMouseReport(report, null), false);
-  }
-  for (const input of ["hello", "\r", "\x1b[I", "\x1b[O", "\x1b[M", "\x1b[<0;10;20Mextra"]) {
-    assert.equal(suppressMouseReport(input, dispatch), false);
-  }
-  event.eventPhase = 0;
-  assert.equal(suppressMouseReport("\x1b[<0;10;20M", dispatch), false);
-});
-
 // Why this matters: the loud hover warning exists to catch a link whose
 // underlined text is a web address while the link goes somewhere else; if
 // it fired on ordinary link text or on trailing-slash differences, people
@@ -446,8 +365,7 @@ test("linkRowText reads the underlined cells of the hovered row", () => {
 });
 
 /** Link lines whose rows are runs of `[text, tag]`, one cell per character;
- * with `missingTag`, cells carry no tag at all, as an old terminal's do when
- * xterm.js no longer keeps it.
+ * with `missingTag`, cells carry no tag at all (a terminal that cannot tell).
  */
 function taggedTerminal(rows, missingTag = false) {
   return { line(abs) {
@@ -467,77 +385,18 @@ function taggedTerminal(rows, missingTag = false) {
   } };
 }
 
-/** xterm.js's public buffer API, preserving the private tag's ownership.
- * Frozen extended attributes catch accidental writes to buffer-owned objects.
- * As in xterm, loading an untagged cell leaves a reused object's extended
- * attributes untouched; indentation must not borrow the preceding link's tag.
- * With `missingTag`, cells carry no `extended` at all, as when an xterm.js
- * upgrade drops the private field.
- */
-function xtermTagged(rows, missingTag = false) {
-  return { buffer: { active: { getLine(y) {
-    const runs = rows[y];
-    if (!runs) return undefined;
-    const text = runs.map(([text]) => text).join('');
-    const tags = runs.flatMap(([text, tag]) => Array(text.length).fill(tag));
-    return {
-      length: text.length,
-      getCell(x, cell = missingTag ? {} : { extended: Object.freeze({ urlId: 0 }) }) {
-        if (tags[x] && !missingTag) cell.extended = Object.freeze({ urlId: tags[x] });
-        cell.getChars = () => text[x] ?? '';
-        cell.getWidth = () => 1;
-        return cell;
-      },
-      translateToString(trim, from, to) {
-        const result = text.slice(from, to);
-        return trim ? result.trimEnd() : result;
-      },
-    };
-  } } } };
-}
-
-/** An old terminal's lines come through the xterm.js adapter, which must not
- * let a reused cell's tag leak into unlinked cells.
+/** Without a hyperlink tag (a line whose terminal cannot tell, see
+ * terminal-links.js's "Link lines"), the hover falls back to the hovered row
+ * alone.
  *
- * Why: xterm.js replaces a cell's private `extended` only when the cell has
- * extended attributes, so reading a row through one reused cell would give
- * unlinked indentation the preceding link's tag and join text that is not
- * part of the link.
- * Spec: `xtermLines` gives each cell xterm.js's chars, width and urlId tag
- * from a fresh cell (untagged indentation reads 0 while a reused cell would
- * read 7), a row's text through `translateToString`, and xterm.js's 1-based
- * ranges convert to link-lines ranges and back.
+ * Why: SPEC_impl.md promises that a missing tag restores the row-only
+ * comparison rather than failing or joining rows by guesswork.
+ * Spec: with every cell's tag undefined, `linkHoverText` answers `unknown`
+ * with the hovered row's text.
  */
-test('the xterm.js adapter reads fresh cells and converts ranges', () => {
-  const term = xtermTagged([[['https://examp', 7]], [['     ', 0], ['le.com/a', 7]]]);
-  const reused = term.buffer.active.getLine(0).getCell(0);
-  assert.equal(term.buffer.active.getLine(1).getCell(0, reused).extended.urlId, 7,
-    'premise: a reused xterm cell retains its tag while loading unlinked indentation');
-  const lines = xtermLines(term);
-  assert.deepEqual(lines.line(1).cell(0), { chars: ' ', width: 1, tag: 0 });
-  assert.deepEqual(lines.line(1).cell(5), { chars: 'l', width: 1, tag: 7 });
-  assert.equal(lines.line(1).text(5, 13, false), 'le.com/a');
-  assert.equal(lines.line(2), undefined);
-  const xterm = { start: { x: 6, y: 2 }, end: { x: 13, y: 2 } };
-  assert.deepEqual(fromXtermRange(xterm), cells(6, 2, 13, 2));
-  assert.deepEqual(toXtermRange(fromXtermRange(xterm)), xterm);
-  const joined = linkHoverText(lines, fromXtermRange(xterm), 'https://example.com/a');
-  assert.deepEqual(joined, { kind: 'whole', text: 'https://example.com/a' });
-  assert.equal(fromXtermRange(undefined), undefined, 'a missing range stays missing');
-});
-
-/** Without xterm.js's private tag, the adapter reports no tag and the hover
- * falls back to the hovered row alone.
- *
- * Why: the tag is an undocumented field that a manual xterm.js upgrade can
- * remove; SPEC_impl.md promises that losing it restores the old row-only
- * comparison rather than failing or joining by guesswork.
- * Spec: through `xtermLines`, a cell with no `extended` has an undefined
- * tag, and `linkHoverText` answers `unknown` with the hovered row's text.
- */
-test('the xterm.js adapter falls back to the row when the tag is unavailable', () => {
-  const lines = xtermLines(xtermTagged([[['https://examp', 7]], [['le.com/a', 7]]], true));
-  assert.equal(lines.line(0).cell(0).tag, undefined);
+test('the hover falls back to the row when the tag is unavailable', () => {
+  const lines = taggedTerminal([[['https://examp', 7]], [['le.com/a', 7]]], true);
+  assert.equal(lines.line(0).cell(0).tag, undefined, 'premise: no cell carries a tag');
   assert.deepEqual(linkHoverText(lines, cells(1, 1, 13, 1), 'https://example.com/a'), { kind: 'unknown', text: 'https://examp' });
 });
 
