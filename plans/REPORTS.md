@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`per-host-checkout-folder`](reports/per-host-checkout-folder.report.md) landed 2026-11-09 in #3250: A Checkout folder field in each host's settings, with Settings → Checkouts becoming the default for hosts without one
 - [`rail-notification-bell`](reports/rail-notification-bell.report.md) landed 2026-11-09 in #3243, #3244, #3251: A notification bell in the rail for notices that are not about one session, red with a count when unread; its first notice is a trashed checkout whose files could not be freed, with Retry now, and the Trash dialog keeps such folders listed
 - [`mux-chunk-size`](reports/mux-chunk-size.report.md) landed 2026-11-09 in #3254: Upload, download and tunnel data between helm and supervisor goes in 32 KiB chunks instead of 256 KiB, with the connection's multiplexing explained in SPEC_impl.md
 - [`grid-binary-stream`](reports/grid-binary-stream.report.md) landed 2026-11-09 in #3245, #3252, #3255: A committed browser memory and attach benchmark, then a binary encoding for new terminals' screen and history messages and compact on-demand-decoded scrollback in the page
