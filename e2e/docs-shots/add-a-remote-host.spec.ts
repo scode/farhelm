@@ -29,7 +29,7 @@ test("add button", async ({ page, request }) => {
   // opens the host list.
   const button = page.locator(".host-rail-add");
   await expect(button).toBeVisible();
-  await director.callout(button, "Adds a host: a Linux machine you can reach over ssh.", { side: "right" });
+  await director.callout(button, "Adds a host: a Linux machine or Apple silicon Mac you can reach over ssh.", { side: "right" });
   // The hosts above the button and the callout; the whole rail runs the
   // window's full height.
   await shot(page, `${PAGE}/add-button`, [button, page.locator(".host-rail-entry").first()], { maxWidth: 900 });

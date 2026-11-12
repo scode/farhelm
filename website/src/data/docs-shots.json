@@ -1,12 +1,12 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-08T01:18:30Z",
-  "captured_from": "ac521332ea16c99cef380f7cbbedf37bba2fc760",
-  "commit": "3749837a4f8a57ee0cf338422d6484c876dd2f64",
+  "captured_at": "2026-11-12T02:19:35Z",
+  "captured_from": "1d28a4eaf62a929a33b0cff50ea4634a540a3dcb",
+  "commit": "f30cbdc3f3593b31ae3459064497ad7607c9e977",
   "shots": {
     "add-a-remote-host/add-button": {
-      "height": 576,
+      "height": 596,
       "width": 746
     },
     "add-a-remote-host/add-dialog": {
@@ -58,7 +58,7 @@
       "width": 604
     },
     "manage-hosts/app-settings": {
-      "height": 1430,
+      "height": 1812,
       "width": 1802
     },
     "manage-hosts/details": {
@@ -70,7 +70,7 @@
       "width": 1860
     },
     "manage-hosts/host-settings": {
-      "height": 2118,
+      "height": 2838,
       "width": 1594
     },
     "manage-hosts/remove-dialog": {
@@ -346,7 +346,7 @@
       "width": 1486
     },
     "session-list/row-menu": {
-      "height": 1040,
+      "height": 1072,
       "width": 1860
     },
     "session-list/statuses": {
@@ -358,19 +358,19 @@
       "width": 1080
     },
     "session-list/trash-dialog": {
-      "height": 1576,
+      "height": 1616,
       "width": 1424
     },
     "start-a-session/checkout-setup": {
-      "height": 872,
+      "height": 1020,
       "width": 1860
     },
     "start-a-session/destination": {
-      "height": 1160,
+      "height": 1376,
       "width": 2272
     },
     "start-a-session/effort-and-permissions": {
-      "height": 742,
+      "height": 642,
       "width": 2542
     },
     "start-a-session/harness-and-model": {
@@ -382,7 +382,7 @@
       "width": 1862
     },
     "start-a-session/host-yolo-setting": {
-      "height": 768,
+      "height": 1024,
       "width": 1544
     },
     "start-a-session/launch-button": {
@@ -410,11 +410,11 @@
       "width": 1860
     },
     "stop-restart-resume/header-actions": {
-      "height": 940,
-      "width": 1368
+      "height": 1020,
+      "width": 1536
     },
     "stop-restart-resume/row-menu": {
-      "height": 1110,
+      "height": 1142,
       "width": 1860
     },
     "work-in-a-session/download-hover": {
@@ -423,7 +423,7 @@
     },
     "work-in-a-session/header": {
       "height": 382,
-      "width": 1308
+      "width": 1322
     },
     "work-in-a-session/tabs": {
       "height": 384,

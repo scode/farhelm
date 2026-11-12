@@ -21,7 +21,8 @@ discarded when you delete the session.
 
 Sandboxes bill while running, including while their agents are idle. Snapshot storage also costs money, including while
 a sandbox is suspended; see [Tensorlake pricing](https://www.tensorlake.ai/pricing) for current terms. Building a
-recipe's snapshot uses a temporary sandbox that bills too. Closing Farhelm does not delete your sandboxes.
+recipe's snapshot, and preparing it for new hosts, each use a temporary sandbox that bills too. Closing Farhelm does not
+delete your sandboxes.
 
 ## Connect your Tensorlake account
 
@@ -41,8 +42,8 @@ Farhelm stores the API key **unencrypted on the helm's machine**, in its state d
 again. Farhelm cannot check SSH key registration with an API key; an unregistered key shows up as an error during the
 first sandbox setup or snapshot build.
 
-You can also save, test or clear the same API key in Settings → **Credentials**. Both places show whether a key is
-saved; neither shows its value again.
+You can also save, test or clear the same API key in Settings → **Credentials**, where it is labelled **Tensorlake API
+key**. Both places show whether a key is saved; neither shows its value again.
 
 ## Save named credentials
 
@@ -78,7 +79,7 @@ digit, and have at most 32 characters. A saved recipe cannot be renamed; create 
 
 Under **Software**, choose the base Farhelm builds on:
 
-- Managed Ubuntu uses Tensorlake's Ubuntu image with systemd for sandboxes and a pinned Ubuntu image for Podman.
+- **Managed Ubuntu** uses Tensorlake's Ubuntu image with systemd for sandboxes and a pinned Ubuntu image for Podman.
 - **Your image** takes an image name from your Tensorlake project and works only for Tensorlake.
 - **Your snapshot** takes a snapshot ID from that project and works only for Tensorlake.
 - **Container image** takes an image reference and **Container login user** for Podman only.
@@ -88,8 +89,9 @@ launcher with the reason it cannot be used there.
 
 A custom base must run systemd as its init system, allow sudo without a password, be Ubuntu or Debian with apt, and
 include bash, curl and git. The build checks these first and names the first missing requirement. A base containing an
-existing Farhelm supervisor installation is refused at host setup because it would copy another host's identity. You
-cannot select a snapshot Farhelm manages for a recipe: a later rebuild would delete it.
+existing Farhelm supervisor installation is refused because it would copy another host's identity: when Farhelm prepares
+the recipe's snapshot for new hosts, with the reason on the recipe's row, or at host setup. You cannot select a snapshot
+Farhelm manages for a recipe: a later rebuild would delete it.
 
 For any base, enter optional **Ubuntu packages**, separated by spaces or newlines. Farhelm builds a Tensorlake snapshot
 or a Podman image with those packages, Claude Code and Codex from their official installers. Each environment gets
@@ -160,20 +162,24 @@ carries traffic in the other direction.
 
 ## Build or rebuild a snapshot
 
-In **Settings → Recipes**, each recipe shows build status per place, with **Rebuild** for the Tensorlake account and
-each container host. Use the Tensorlake action to build its first snapshot, or let adding the first ordinary sandbox
-host build it. A session-owned sandbox needs that snapshot before launch. Status shows build progress, age and failure
-reasons. Use Rebuild to try again.
+In **Settings → Recipes**, each recipe's row shows its Tensorlake snapshot, with **Build snapshot** while it has none
+and **Rebuild snapshot** once it has one, and a status line with **Rebuild** for each container host. Build the first
+snapshot there, or let adding the first ordinary sandbox host build it. A session-owned sandbox needs that snapshot
+before launch. Status shows build progress, age and failure reasons; a failed build offers **Retry**.
 
-Rebuild also picks up fresh packages and agents, or changes to the recipe's base or packages. A Tensorlake rebuild
-replaces the old snapshot and deletes it once the new one is ready. Hosts already created from the old snapshot keep
-running; their software and size do not change. A failed rebuild keeps the previous snapshot available. Size changes
-apply to new hosts, and base or package changes apply to new hosts after a rebuild. If you reduce the disk below the
-snapshot's size, rebuild before adding a host.
+New hosts and sandbox sessions start from a second, prepared snapshot with Farhelm already installed. The first one to
+need it prepares it, which takes about a minute; the recipe's row says whether it is ready.
+
+**Rebuild snapshot** also picks up fresh packages and agents, or changes to the recipe's base or packages. A Tensorlake
+rebuild replaces the old snapshot and deletes it once the new one is ready. Hosts already created from the old snapshot
+keep running; their software and size do not change. A failed rebuild keeps the previous snapshot available. Size
+changes apply to new hosts, and base or package changes apply to new hosts after a rebuild. If you reduce the disk below
+the snapshot's size, rebuild before adding a host.
 
 The recipe's row warns if Farhelm could not delete an old build sandbox or snapshot; the next build or deleting the
-recipe retries that cleanup. Deleting a recipe also deletes its managed snapshot, and is refused while a host uses the
-recipe.
+recipe retries that cleanup. Deleting a recipe cancels any running build and deletes the snapshots and container images
+Farhelm built for it; your own base image or snapshot is kept. It is refused while a host uses the recipe, and container
+images still in use must be released first.
 
 ## Give each session its own sandbox
 
@@ -212,9 +218,10 @@ name or recipe before creating anything. The confirmation groups billing, the pr
 together. **Create Tensorlake sandboxes without asking** in Settings → **Tensorlake** skips this question; it starts
 off. **Set up new hosts without asking** under Hosts does not skip it.
 
-The host appears in **Hosts** as soon as setup starts, with progress for the snapshot build if needed, sandbox creation
-and Farhelm setup. If setup fails, its details show why; **Re-run** continues setup on the same sandbox. Use
-[Delete sandbox](#delete-a-sandbox) if you do not want to keep it.
+The host appears in **Hosts** as soon as setup starts, with progress for the snapshot build and **Prepare snapshot**
+when needed, sandbox creation, and connecting to Farhelm, which starts when the sandbox boots. If setup fails, its
+details show why; **Re-run** continues setup on the same sandbox. Use [Delete sandbox](#delete-a-sandbox) if you do not
+want to keep it.
 
 New Tensorlake hosts have **Start YOLO sessions without asking** on. This skips Farhelm's
 [YOLO confirmation](/docs/using/start-a-session/#confirm-a-yolo-launch); you still choose the session's permission mode
@@ -266,9 +273,9 @@ needed to delete it. Agents cannot delete Tensorlake hosts.
 ### Sandboxes not on this helm
 
 Settings → **Tensorlake** lists **Sandboxes not on this helm** alongside the account settings. The recipe catalog is
-under **Recipes**. These Farhelm-created sandboxes have no host or snapshot build on this helm. They can remain after
-interrupted setup, lost helm state, or creation by another helm; the latter are marked **from another helm**. Sandboxes
-you created outside Farhelm do not appear.
+under **Recipes**. These Farhelm-created sandboxes have no host, snapshot build or preparation on this helm. They can
+remain after interrupted setup, lost helm state, or creation by another helm; the latter are marked **from another
+helm**. Sandboxes you created outside Farhelm do not appear.
 
 Nothing is deleted automatically. Check the name and state before choosing **Delete**: confirmation deletes that
 sandbox's files, sessions and snapshots too. Failed cleanup stays visible with **Retry cleanup**. **Refresh** beside the

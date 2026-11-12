@@ -46,7 +46,9 @@ setup, billing and suspension. The rest of this page covers **SSH**.
 />
 
 The dialog also takes an optional alias: the name Farhelm shows for the host instead of its destination, everywhere
-except the host's details. You can change it later in the host's settings. An agent in one of your sessions can also ask to add a host; Farhelm opens this same dialog with the agent's destination and alias filled in ([Approve what agents do](/docs/using/approve-agent-requests/#host-changes)).
+except the host's details. You can change it later in the host's settings. An agent in one of your sessions can also ask to add a host. Its request waits as a card, and
+**Open add dialog** on it opens this same dialog with the agent's destination and alias filled in
+([Approve what agents do](/docs/using/approve-agent-requests/#host-changes)).
 
 If Farhelm is already running on the host (you set it up before, say), the host is added as it is and the dialog
 closes. Otherwise Farhelm shows what it would set up there and asks first:
@@ -61,7 +63,8 @@ but Farhelm still checks for it for now
 ([Move sessions to new terminals](/docs/using/new-terminals/#tmux-is-still-needed) has more). After you choose
 **Set up**, the dialog closes and setup runs: the host's mark on the [navigation rail](/docs/using/manage-hosts/), the
 column of icons down the left edge of the sidebar, shows a ring until it is done. Setup progress also appears above your
-sessions; select that host there to open its row in **Hosts**, where you can see each step:
+sessions, naming the current step; hover over that row to see every step, or select it to open the host's row in
+**Hosts**:
 
 <Screenshot
   name="add-a-remote-host/connected-host"

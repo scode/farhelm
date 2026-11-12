@@ -173,17 +173,18 @@ carry a tab marker and are never hung up.
 
 Where this launch recorded a cgroup scope, the manager is still there, and that unit still exists, the scope is killed
 first: SIGTERM to everything in it, up to five seconds for the unit to retire on its own (the wait ends the moment it
-does), then SIGKILL if it has not, then a bounded wait for the unit to be collected. The process-table sweep runs
-afterwards regardless — as the backstop there, and as the whole mechanism on a host with no user manager. It SIGTERMs
-everything the first enumeration found, waits up to the same five seconds for every one of those pids to be confirmed
-gone (again ending as soon as they are), then RE-ENUMERATES and SIGSTOPs the refreshed set: the refresh comes first so
-that a process forked inside a TERM handler is frozen along with everything else rather than escaping with the parent.
-Stopped processes cannot fork, so what is left only shrinks — up to five further passes re-enumerate and SIGSTOP
-whatever is newly there, then everything found gets SIGKILL and is polled until each pid is confirmed gone: exited,
-replaced by an unrelated process on the same number, or a zombie nobody has reaped yet, all three of which mean it can
-no longer run anything. Both bounds fail loudly rather than quietly: a fifth pass that still finds something new, or a
-pid still alive when the poll gives up, makes the stop report a failure. A supervisor restart does not kill sessions,
-and a host reboot takes everything down with the machine.
+does), then SIGKILL if it has not, then a bounded wait for the unit to be collected. When every scope is confirmed gone
+and nothing Farhelm started directly is still alive, that is the whole cleanup: a process that moved itself out of the
+scope, or only carries the session's markers, is left running. Otherwise, and on a host with no user manager, the
+process-table sweep runs afterwards. It SIGTERMs everything the first enumeration found, waits up to the same five
+seconds for every one of those pids to be confirmed gone (again ending as soon as they are), then RE-ENUMERATES and
+SIGSTOPs the refreshed set: the refresh comes first so that a process forked inside a TERM handler is frozen along with
+everything else rather than escaping with the parent. Stopped processes cannot fork, so what is left only shrinks — up
+to five further passes re-enumerate and SIGSTOP whatever is newly there, then everything found gets SIGKILL and is
+polled until each pid is confirmed gone: exited, replaced by an unrelated process on the same number, or a zombie nobody
+has reaped yet, all three of which mean it can no longer run anything. Both bounds fail loudly rather than quietly: a
+fifth pass that still finds something new, or a pid still alive when the poll gives up, makes the stop report a failure.
+A supervisor restart does not kill sessions, and a host reboot takes everything down with the machine.
 
 There is no ordering between parent and child: the wrapper and the agent are signalled in one pass over an unordered
 set, and nothing waits for either before signalling the other. What is offered is up to five seconds between SIGTERM and

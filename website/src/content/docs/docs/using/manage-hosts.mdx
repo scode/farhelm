@@ -19,12 +19,13 @@ host is covered in [Add a remote host](/docs/get-started/add-a-remote-host/).
 
 The bell just above **Hosts** shows [notices about a host](/docs/using/session-list/#notices-about-a-host), starting with
 trashed checkouts whose files could not be freed. It turns red with an unread count. Opening and closing it quiets the
-bell while keeping the problem listed until it is resolved. Host setup and update problems keep their existing marks
-and attention rows below.
+bell while keeping the problem listed until it is resolved. Host setup and update problems are not listed there; they
+show on the host's mark and in the rows above your sessions, described next.
 
 Hosts with a problem, an update, or setup still running also appear above your sessions, so you can keep track of them
-while you work. Select a row or its **Details** button to open the host list at that host. The list disappears when
-nothing needs attention and while the full host list is open.
+while you work. While a setup, update or uninstall runs, its row names the current step; hover anywhere on the row to
+see every step and the reason for any problem. Select a row or its **Details** button to open the host list at that
+host. The list disappears when nothing needs attention and while the full host list is open.
 
 ## The host menu
 
@@ -63,7 +64,7 @@ YOLO confirmation offers when you [start a session](/docs/using/start-a-session/
 
 **Manage sessions on this host without asking** lets agents in this host's sessions create, spawn, copy, rename, stop,
 restart and delete sessions on this same host. A copy's source must be here too. It starts off on every host, including
-Tensorlake sandboxes and hosts added before the update. Requests for other hosts, template changes, host changes and
+Tensorlake sandboxes. Requests for other hosts, template changes, host changes and
 links are outside this permission. The helm, the program that shows all your hosts' sessions and serves the UI, must
 still be reachable ([The pieces](/docs/how-it-works/the-pieces/)).
 
@@ -99,7 +100,9 @@ they reload.
 
 When a host has an update, its mark on the navigation rail and the **Hosts** button at the rail's foot show an
 up-arrow. Above your sessions, each update row offers **Update**. If several listed hosts have updates, **Update all**
-updates those hosts. You can dismiss optional update reminders; required updates stay visible because that host's
+updates those hosts. While automatic updates are off, **Always update** there also updates the listed hosts and turns on
+**Update remote hosts automatically**, so later updates install without asking. If that choice cannot be saved, a
+message says later updates will still wait, with **Try again**. You can dismiss optional update reminders; required updates stay visible because that host's
 sessions cannot be reached until it is updated. The reminders return when another host gains an update, Farhelm changes
 version, or you reload the interface.
 
@@ -112,11 +115,11 @@ Updating a host does not interrupt its sessions: they keep running through the u
 **Update**, **Update all** and automatic updates use the same flow for them. A remote Mac with the Farhelm desktop app
 installed cannot be updated this way, even though you can use Farhelm already running there; update Farhelm from the desktop app on that Mac instead.
 If Farhelm cannot plan an update, a dialog shows the reason before anything changes. While the update runs, its progress
-appears above your sessions. A failed update appears there with **Details**, and the host's mark on the rail shows a
+appears above your sessions; hover over that row to see each step. A failed update appears there with **Details**, and the host's mark on the rail shows a
 warning until you open the host list, where its row shows what happened.
 
 To have Farhelm update remote hosts as soon as updates are available, turn on **Update remote hosts automatically** in
-Settings, under **Hosts**. It starts off. Once on, it works whenever Farhelm is running, which on your Mac means while
+Settings, under **Hosts**. It starts off; **Always update** above your sessions turns it on too. Once on, it works whenever Farhelm is running, which on your Mac means while
 the app is open. It never updates your Mac. If an automatic update of a host fails, Farhelm does not try that host again
 until it reconnects or Farhelm restarts; the host keeps its up-arrow, so you can update it yourself. The choice applies to every remote host; other open Farhelm windows pick it
 up when they reload.
@@ -211,8 +214,8 @@ and, in the desktop app, file types to open with a modifier-click and
 [**Keep a checkout ready for faster launches**](/docs/using/start-a-session/#prepared-checkouts), while **Agent trust** holds the managed-checkout trust switches; both are covered in
 [Start a session](/docs/using/start-a-session/#start-from-a-managed-checkout). **Credentials** holds the GitHub tokens,
 agent logins and API endpoint tokens that [shared recipes](/docs/using/tensorlake-sandboxes/#save-named-credentials)
-can use. **Recipes** holds the shared catalog, with build status and Rebuild for each container host or the Tensorlake
-account. **Tensorlake** keeps its cloud account settings and sandbox leftovers. **Containers** shows
+can use. **Recipes** holds the shared catalog, with each recipe's Tensorlake snapshot and its build status on each container
+host. **Tensorlake** keeps its cloud account settings and sandbox leftovers. **Containers** shows
 [Podman readiness and container leftovers](/docs/agents/containerized-sessions/).
 
 **Appearance** chooses **System**, **Dark** or **Light**; **System** follows your device's own setting, and the terminal

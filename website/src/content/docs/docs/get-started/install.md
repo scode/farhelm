@@ -6,9 +6,9 @@ sidebar:
 ---
 
 Farhelm runs as a desktop app on your Mac, and for now that is the one way to run it: the installer supports Macs with
-Apple silicon only. Linux machines can still run your sessions, as hosts your Mac reaches over ssh; you add those from
-inside the app once it is running ([Add a remote host](/docs/get-started/add-a-remote-host/)). Support for running
-Farhelm itself on Linux is coming.
+Apple silicon only. Linux machines and other Apple silicon Macs can still run your sessions, as hosts your Mac reaches
+over ssh; you add those from inside the app once it is running
+([Add a remote host](/docs/get-started/add-a-remote-host/)). Support for running Farhelm itself on Linux is coming.
 
 ## Install
 
@@ -24,7 +24,8 @@ keeps itself up to date, installing new releases in the background; see
 [Update or uninstall Farhelm](/docs/using/update-and-uninstall/). Running the installer again also updates Farhelm, and
 that is safe while Farhelm is open: Farhelm notices the new version, and its version number turns red until you restart
 it. If an install was cut short, by a reboot or a power loss say, running the installer again finishes it and repairs
-the copy it left behind.
+the copy it left behind. An installation older than v0.23.0 cannot be updated this way: the installer refuses and says
+how to remove it first. Your data can stay, but the new version may not be able to use all of it.
 
 ## If the installer asks for tmux
 

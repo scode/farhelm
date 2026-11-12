@@ -26,9 +26,10 @@ It lists what it will remove and asks before removing anything. It removes the F
 every version kept inside it, and the `farhelm` command from `~/.local/bin`. It keeps your data under
 `~/.local/state/farhelm`: your list of hosts, preferences, session history, logs, and the repository caches for managed
 checkouts. Your projects, your agents, tmux, and your managed checkouts (including their trash and
-[prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) in `.farhelm-spares` inside the directory set as
-**Checkout folder**) are not touched. To see the list without changing anything, add `--dry-run`. If Farhelm is still
-open when you confirm, it refuses and asks you to quit it first, and nothing is removed.
+[prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) in `.farhelm-spares` inside your Mac's checkout
+directory, its own **Checkout folder** in its host settings or else **Default checkout folder** under **Settings →
+Checkouts**) are not touched. To see the list without changing anything, add `--dry-run`. If Farhelm is still open when
+you confirm, it refuses and asks you to quit it first, and nothing is removed.
 
 Farhelm's [supervisor](/docs/how-it-works/the-pieces/), the part that keeps your sessions running, keeps running after
 you quit Farhelm. Uninstall stops it for you once you confirm, and lists that among what it will do. If it does not stop
