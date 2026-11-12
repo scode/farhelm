@@ -1873,27 +1873,6 @@ async fn shell_session(h: &Harness) -> (SessionInfo, farhelm_teststate::TestDir)
     (session, work)
 }
 
-/// The `COLSxROWS` tmux reports for the window containing `pane`.
-async fn window_geometry(h: &Harness, pane: &str) -> String {
-    let out = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            pane,
-            "#{window_width}x#{window_height}",
-        ],
-    )
-    .await;
-    assert!(
-        out.status.success(),
-        "querying a window's geometry failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
-}
-
 /// Capture tmux's own view after a terminal attach unexpectedly fails.
 ///
 /// This runs only on the failure path. Keeping the probes out of the successful
@@ -2103,34 +2082,37 @@ async fn terminal_conformance_holds_for_the_agent_and_for_a_tab() {
         .expect("the tmux server survives the tab's immediate detach");
 }
 
-/// A resize reflows ONLY the window of the terminal whose channel carried
-/// it (PLAN_M4.md item 3: resize goes per window).
+/// A resize changes the size of ONLY the terminal whose channel carried it
+/// (PLAN_M4.md item 3: resize goes per terminal).
 ///
-/// Before tabs, `resize-window` was targeted at the tmux SESSION, which
-/// resolves to whichever window tmux last made current — unambiguous with
-/// one window and silently wrong with two. This is the test that would
-/// have caught that: it resizes each terminal in turn and requires the
-/// other's geometry to stay put.
-///
-/// Old terminals: it reads each terminal's size from its tmux window; porting
-/// it to host sizes is a follow-up.
+/// Why: the agent and each tab are separate terminals of one session, and
+/// a viewer sizes the one it shows. A resize that reached a sibling would
+/// reflow a terminal nobody is looking at, at a size nobody asked for: the
+/// bug this test was written for in tmux days, when resizes were aimed at
+/// the tmux session and so landed on whichever window tmux had last made
+/// current. Spec: with the agent and a tab, made at 80x24, both attached at
+/// 81x25 by one client (premise: both hosts reach 81x25), a resize of the
+/// tab's channel to 111x33 brings the tab's host to 111x33 while the
+/// agent's stays at 81x25, and a resize of the agent's channel to 90x30
+/// brings the agent's host to 90x30 while the tab's stays at 111x33. Sizes are read from each terminal host's runtime, which
+/// reports a size once the host's own resize record has arrived.
 #[farhelm_testtrace::test]
-async fn a_resize_reflows_only_the_named_terminals_window() {
-    let h = harness_tmux().await;
+async fn a_resize_reflows_only_the_named_terminal() {
+    let h = harness().await;
     let (session, _work) = basic_session(&h).await;
     let _cleanup = MarkerCleanupGuard::new(session.id.clone());
 
     let tab = h.client.open_tab(&session.id).await.expect("open a tab");
-    let agent_pane = pane_id_of(
-        &h.state.path().join("tmux.sock"),
-        &format!("fh-{}", session.id),
-    )
-    .await;
-    let tab_pane = tab_pane(&h, &session.id, &tab.id).await;
+    let agent_host = h
+        .sup
+        .agent_host_for_test(&session.id)
+        .await
+        .expect("the agent runs in a terminal host");
+    let tab_host = crate::host_tabs::tab_host(&h.sup, &session.id, &tab.id).await;
 
     let (agent_chan, initial_replay, mut agent_rx) = h
         .client
-        .attach_terminal_live(&session.id, 80, 24, TerminalSelector::Agent, "one-client")
+        .attach_terminal_live(&session.id, 81, 25, TerminalSelector::Agent, "one-client")
         .await
         .expect("attach the agent");
     let mut agent_seen = initial_replay;
@@ -2139,8 +2121,8 @@ async fn a_resize_reflows_only_the_named_terminals_window() {
         .client
         .attach_terminal_live(
             &session.id,
-            80,
-            24,
+            81,
+            25,
             TerminalSelector::Tab { id: tab.id.clone() },
             "one-client",
         )
@@ -2148,41 +2130,65 @@ async fn a_resize_reflows_only_the_named_terminals_window() {
         .expect("attach the tab");
     let mut tab_seen = initial_replay;
     wait_for_shell(&h.client, tab_chan, &mut tab_rx, &mut tab_seen, "READY").await;
+    // Premise: both attaches sized their terminals (81x25, not the 80x24
+    // the session and its tab were made at), so each terminal acts on the
+    // resizes of its own channel and a size seen later can only have come
+    // from the resizes below.
+    wait_for_host_size(&agent_host, "the agent", "81x25").await;
+    wait_for_host_size(&tab_host, "the tab", "81x25").await;
 
     h.client.resize(&session.id, tab_chan, 111, 33).await;
-    wait_for_pane_geometry(&h, &tab_pane, "111x33").await;
+    wait_for_host_size(&tab_host, "the tab", "111x33").await;
     assert_eq!(
-        window_geometry(&h, &agent_pane).await,
-        "80x24",
-        "resizing a tab must not reflow the agent's window"
+        host_size(&agent_host),
+        "81x25",
+        "resizing a tab must not resize the agent's terminal"
     );
 
     h.client.resize(&session.id, agent_chan, 90, 30).await;
-    wait_for_pane_geometry(&h, &agent_pane, "90x30").await;
+    wait_for_host_size(&agent_host, "the agent", "90x30").await;
     assert_eq!(
-        window_geometry(&h, &tab_pane).await,
+        host_size(&tab_host),
         "111x33",
-        "resizing the agent terminal must not reflow a tab's window"
+        "resizing the agent terminal must not resize a tab's terminal"
     );
 }
 
-/// Poll one window's geometry until it reaches `expected`. Resize is
-/// fire-and-forget, so polling is the only observation available — the
-/// per-window counterpart of `session_lifecycle`'s `wait_for_geometry`.
-async fn wait_for_pane_geometry(h: &Harness, pane: &str, expected: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        let got = window_geometry(h, pane).await;
-        if got == expected {
-            return;
+/// The size a terminal host's runtime has in force, as "COLSxROWS": the
+/// size of the latest resize record the host sent back.
+fn host_size(host: &farhelm_supervisor::hosts::HostTerminal) -> String {
+    let size = host.size();
+    format!("{}x{}", size.cols, size.rows)
+}
+
+/// Wait until `host` (`what`, for the failure message) has `expected` in
+/// force ([`host_size`]), failing the test after ten seconds. Woken by any
+/// change of the runtime's status and otherwise re-checked every 100 ms,
+/// since the size is the emulator's and not a status field of its own. A
+/// runtime that has ended (its status channel closed) can change size no
+/// more, so the wait stops there and fails at once if the size is not the
+/// one expected.
+async fn wait_for_host_size(
+    host: &farhelm_supervisor::hosts::HostTerminal,
+    what: &str,
+    expected: &str,
+) {
+    let mut status = host.subscribe();
+    let reached = tokio::time::timeout(Duration::from_secs(10), async {
+        while host_size(host) != expected {
+            if let Ok(Err(_)) =
+                tokio::time::timeout(Duration::from_millis(100), status.changed()).await
+            {
+                return;
+            }
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "window of pane {pane} never reached {expected} (last: {got})"
-        );
-        // sleep-ok: poll the geometry applied by the asynchronous resize command
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    })
+    .await;
+    assert!(
+        reached.is_ok() && host_size(host) == expected,
+        "{what}'s terminal never reached {expected} (last: {})",
+        host_size(host)
+    );
 }
 
 /// Input sent on one terminal's channel reaches ONLY that terminal's pane

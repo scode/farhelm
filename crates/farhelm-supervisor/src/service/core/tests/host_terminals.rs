@@ -68,8 +68,13 @@ async fn a_later_host_generation_without_tmux_keeps_tab_discovery_incomplete() {
 }
 
 /// Wait until `condition` holds for `host`, re-checking on every change of
-/// its status.
-async fn wait_for(host: &HostTerminal, what: &str, condition: impl Fn(&HostTerminal) -> bool) {
+/// its status, for at most [`WAIT`]; shared with the other unit tests of
+/// host terminals in `service::core::tests`.
+pub(crate) async fn wait_for(
+    host: &HostTerminal,
+    what: &str,
+    condition: impl Fn(&HostTerminal) -> bool,
+) {
     let mut status = host.subscribe();
     let waited = tokio::time::timeout(WAIT, async {
         while !condition(host) {
@@ -921,27 +926,47 @@ async fn a_stop_before_the_exit_record_still_records_the_shims_report() {
 /// relaunched in tmux would leave a host row whose `pane` holds a tmux pane
 /// id, which every later reader looks for as a host's socket. Spec: with a
 /// resumable session's row turned into a host row naming socket `ABCDEFGH`
-/// and its entry holding no terminal, under a supervisor whose host program
-/// does not exist, a consented Restart fails starting the session's
-/// terminal host (not tmux) definitively: the row is still a host row with
-/// `pane` `ABCDEFGH` and its earlier outcome, at the next generation, and
-/// the failed launch left no launch spec or host record behind.
+/// and its entry holding no terminal (the host its create started ended,
+/// no socket left), under a supervisor whose host starts
+/// are refused from then on, a consented Restart fails starting the
+/// session's terminal host (not tmux) definitively: the row is still a host
+/// row with `pane` `ABCDEFGH` and its earlier outcome, at the next
+/// generation, and the failed launch left no launch spec or host record
+/// behind.
 #[farhelm_testtrace::test]
 async fn a_terminal_less_host_row_restarts_in_a_host_never_in_tmux() {
     let state = StateDir::new();
+    let (program, starts) = refusable_host_program(&state);
     let sup = Supervisor::new_with_seams(
         state.path(),
         dummy_exe(),
         SupervisorTimeouts::default(),
         SupervisorSeams {
-            host_program: Some(PathBuf::from("/nonexistent/farhelm-host")),
-            ..SupervisorSeams::tmux_terminals()
+            host_program: Some(program),
+            ..host_seams()
         },
     )
     .await
     .expect("supervisor");
     let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
+    starts.refuse();
     let id = created.id.clone();
+    // End the host the create started, so that the session really has no
+    // terminal, rather than a live host of its own beside the Restart.
+    let Some(Terminal::Host(created_host)) = sup
+        .sessions
+        .lock()
+        .await
+        .get(&id)
+        .and_then(|entry| entry.terminal.clone())
+    else {
+        panic!("premise: the create started its agent in a host");
+    };
+    let ended = created_host.shutdown().await;
+    assert!(
+        ended.as_ref().is_ok_and(|report| report.ended) && host_sockets(state.path()).is_empty(),
+        "premise: the created host ended and left no socket: {ended:?}"
+    );
     sup.store
         .set_terminal_for_test(&id, crate::store::TerminalKind::Host, "ABCDEFGH")
         .await
@@ -954,7 +979,7 @@ async fn a_terminal_less_host_row_restarts_in_a_host_never_in_tmux() {
     let failed = sup
         .restart_session(&id, true, None, None)
         .await
-        .expect_err("no host can start from a program that does not exist");
+        .expect_err("no host can start once the program refuses");
     let failed = format!("{failed:#}");
     assert!(failed.contains("terminal host"), "{failed}");
     assert!(!failed.contains("tmux"), "{failed}");
@@ -4057,27 +4082,29 @@ async fn a_cancelled_seed_of_a_running_runtime_gives_the_emulator_back() {
     .await;
 }
 
-/// A supervisor with dummy launches, whose host program does not exist and
-/// whose Restart can be held at its window by `window`, and a resumable
-/// session of it made a host session: its agent terminal is a stand-in host,
-/// adopted with `options`, whose child has exited (so a Restart stops
-/// nothing and needs no consent). Returns the supervisor, the session's id,
-/// the stand-in's runtime and the stand-in, and the state directory.
+/// A supervisor with dummy launches, whose host starts fail once the
+/// session exists and whose Restart can be held at its window by `window`,
+/// and a resumable session of it made a host session: its agent terminal is
+/// a stand-in host, adopted with `options`, whose child has exited (so a
+/// Restart stops nothing and needs no consent). Returns the supervisor, the
+/// session's id, the stand-in's runtime and the stand-in, and the state
+/// directory.
 ///
-/// The session is created in tmux (`SupervisorSeams::tmux_terminals`) and
-/// then given the stand-in: a unit test cannot start a real host for the
-/// create (`tmux_supervisor`), and a Restart of a host agent starts a host
-/// whichever kind new terminals are.
+/// The session is created in a real host ([`refusable_host_program`]) and
+/// then given the stand-in, with the created host ended; every host start
+/// after the create is refused, so a Restart fails definitively when it
+/// starts its new host.
 async fn host_session_with(
     options: crate::hosts::HostTerminalOptions,
     window: Option<RestartWindowGate>,
 ) -> (Arc<Supervisor>, String, HostTerminal, TestHost, StateDir) {
+    let state = StateDir::new();
+    let (program, starts) = refusable_host_program(&state);
     let mut seams = SupervisorSeams {
-        host_program: Some(PathBuf::from("/nonexistent/farhelm-host")),
-        ..SupervisorSeams::tmux_terminals()
+        host_program: Some(program),
+        ..host_seams()
     };
     seams.faults.restart_window_gate = window;
-    let state = StateDir::new();
     let sup = Supervisor::new_with_seams(
         state.path(),
         dummy_exe(),
@@ -4087,6 +4114,7 @@ async fn host_session_with(
     .await
     .expect("supervisor");
     let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
+    starts.refuse();
     let id = created.id.clone();
     let (old, test_host) = adopt_test_host_with(
         TestHostSpec {
@@ -4110,7 +4138,7 @@ async fn host_session_with(
         )
         .await
         .expect("make the row a host row");
-    {
+    let created_host = {
         let mut sessions = sup.sessions.lock().await;
         let entry = sessions.get(&id).cloned().expect("the created session");
         sessions.insert(
@@ -4126,7 +4154,18 @@ async fn host_session_with(
                 scope: entry.scope.clone(),
             }),
         );
-    }
+        entry.terminal.clone()
+    };
+    // The host the create started is off the entry now; end it, so the
+    // only host the session has is the stand-in.
+    let Some(Terminal::Host(created_host)) = created_host else {
+        panic!("premise: the create started its agent in a host");
+    };
+    let ended = created_host.shutdown().await;
+    assert!(
+        ended.as_ref().is_ok_and(|report| report.ended),
+        "premise: the created host ended: {ended:?}"
+    );
     (sup, id, old, test_host, state)
 }
 
@@ -4415,7 +4454,7 @@ async fn host_agent_with_an_earlier_start(
 #[farhelm_testtrace::test(flavor = "multi_thread")]
 async fn a_restart_without_consent_touches_no_program_of_a_working_host_agent() {
     let state = StateDir::new();
-    let sup = tmux_supervisor(state.path(), dummy_exe())
+    let sup = host_supervisor(state.path(), dummy_exe())
         .await
         .expect("supervisor");
     let mut ended = std::process::Command::new("true")
@@ -4477,7 +4516,7 @@ async fn a_restart_asks_again_for_consent_after_settling_earlier_starts() {
     let first_stage = Arc::new(std::sync::Mutex::new(Some(first_stage)));
     let _first_stage_ends = EndsChildOnDrop(Arc::clone(&first_stage));
     let waited = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let mut seams = SupervisorSeams::tmux_terminals();
+    let mut seams = host_seams();
     seams.faults.launch_starter_waiting = Some(Arc::new({
         let entry = Arc::clone(&entry);
         let first_stage = Arc::clone(&first_stage);

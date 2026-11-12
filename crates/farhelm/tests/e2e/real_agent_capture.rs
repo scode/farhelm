@@ -5,48 +5,79 @@
 //! changes such as `/clear` or `/new`. They require vendor authentication and
 //! network access, and are never part of ordinary CI.
 //!
-//! Still on old terminals: they drive and read the real agent through its
-//! tmux pane (`send-keys`, `capture-pane`). Moving them to terminal hosts,
-//! where a shipped agent now runs, means reading and typing through a viewer
-//! instead, and needs a run with real vendor logins to validate; it is a
-//! known follow-up.
+//! They run the agent the way a shipped supervisor does, in a terminal host
+//! of its own. The agent is driven through an ordinary grid attachment
+//! (`send_keys`) and read from the supervisor's own emulator of its host
+//! ([`screen`]), never through a second connection to the host, which would
+//! take it over from the supervisor.
 
 use crate::harness::*;
 use crate::hook_identity::ServeTask;
 
-/// Shortest a `capture-pane` is ever given to answer, whatever the caller's
-/// remaining budget is.
-///
-/// [`pane_within`] bounds every tmux query by the polling loop's own
-/// deadline, which is what stops a wedged tmux from hanging a test past it.
-/// The floor keeps that from degenerating at the end of a budget, where a
-/// zero-length timeout would report "tmux did not answer" for a query that
-/// was never given a chance — and the pane that failure message wants to
-/// print is exactly what the query would have returned.
-const TMUX_ANSWER_FLOOR: Duration = Duration::from_secs(15);
+/// How much of the visible screen [`screen`] reads: far more than a 100x30
+/// terminal's screen text, so the whole screen always comes back.
+const SCREEN_BYTES: usize = 64 * 1024;
 
-/// The rendered pane, as one string, bounded by the caller's `deadline`.
+/// The agent's visible screen, as the supervisor's emulator of its terminal
+/// host holds it, as one string.
 ///
-/// Every polling loop in this file reads the pane rather than the terminal
-/// stream (a TUI's first paint arrives as cursor-positioned fragments that
-/// the raw transcript shows as bare line endings). `tmux_query` awaits a
-/// child process with no timeout of its own, so a tmux server that stops
-/// answering — a real failure mode on a machine loaded enough to be running
-/// two vendor agents — would park a loop forever INSIDE an iteration, where
-/// its own deadline check never runs. Bounding the query is what keeps
-/// these audits failing with a diagnosis instead of hanging.
-async fn pane_within(
-    sock: &std::path::Path,
-    tmux_name: &str,
-    deadline: tokio::time::Instant,
-) -> String {
-    let budget = deadline
-        .saturating_duration_since(tokio::time::Instant::now())
-        .max(TMUX_ANSWER_FLOOR);
-    let args = ["capture-pane", "-p", "-t", tmux_name];
-    match tokio::time::timeout(budget, tmux_query(sock, &args)).await {
-        Ok(pane) => String::from_utf8_lossy(&pane.stdout).into_owned(),
-        Err(_) => panic!("tmux did not answer a capture-pane for {tmux_name} within {budget:?}"),
+/// Every polling loop in this file reads the screen rather than the
+/// attachment's stream: a grid stream sends a row once per version of it,
+/// in the order rows changed, so text in the transcript says nothing about
+/// what the screen shows now (`harness::grid_text`). The screen is what a
+/// user sees, and it is read from memory, so no read can hang on a wedged
+/// terminal. Panics when the session's agent has no terminal host runtime,
+/// which for these tests means the create did not start the agent where a
+/// shipped supervisor would.
+async fn screen(sup: &Supervisor, session_id: &str) -> String {
+    sup.agent_host_for_test(session_id)
+        .await
+        .unwrap_or_else(|| panic!("session {session_id}'s agent has no terminal host runtime"))
+        .screen_tail(SCREEN_BYTES)
+}
+
+/// The text a grid attachment's stream carried (`harness::grid_text`: every
+/// row it sent, each time it changed, and every history line), newest
+/// [`STREAM_TEXT_CAP`] bytes of it.
+///
+/// For an oracle that must not depend on what the screen still shows when
+/// it is read: text that was on the screen, or entered the scrollback, is
+/// here even after the program redrew over it. It says nothing about order
+/// or count (a row is here once per version of it).
+#[derive(Clone, Default)]
+struct StreamText(Arc<std::sync::Mutex<Vec<u8>>>);
+
+/// How much of a stream's text [`StreamText`] keeps: far more than one
+/// screen and its recent history, bounded because a TUI repainting for
+/// minutes sends megabytes of rows.
+const STREAM_TEXT_CAP: usize = 1024 * 1024;
+
+impl StreamText {
+    /// Drain `stream` for the rest of the attachment, keeping its text; the
+    /// returned task ends with the stream.
+    fn record(&self, mut stream: TermStream) -> tokio::task::JoinHandle<()> {
+        let kept = Arc::clone(&self.0);
+        tokio::spawn(async move {
+            while let Some(event) = stream.recv().await {
+                if let TermEvent::Data(bytes) = event {
+                    let mut kept = kept.lock().expect("the stream text");
+                    kept.extend_from_slice(&grid_text(&bytes));
+                    let excess = kept.len().saturating_sub(STREAM_TEXT_CAP);
+                    kept.drain(..excess);
+                }
+            }
+        })
+    }
+
+    /// Everything kept, as text.
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().expect("the stream text")).into_owned()
+    }
+
+    /// The newest `max` bytes kept, as text, for a failure message.
+    fn tail(&self, max: usize) -> String {
+        let kept = self.0.lock().expect("the stream text");
+        String::from_utf8_lossy(&kept[kept.len().saturating_sub(max)..]).into_owned()
     }
 }
 
@@ -73,34 +104,32 @@ async fn pane_within(
 /// 2. Nothing slow may sit between accepting the dialog and whatever the
 ///    caller does next: the prompt must reach the ready agent.
 ///
-/// Matching is against the RENDERED pane, not the raw stream: a TUI's first
-/// paint arrives as cursor-positioned fragments that the raw transcript
-/// shows as bare line endings.
+/// Matching is against the RENDERED screen ([`screen`]), not the stream: a
+/// TUI's first paint arrives as cursor-positioned fragments.
 ///
 /// Accepted side effect: accepting trust writes the (soon-deleted) scratch
 /// path into the user's real agent config. That is the vendor's own write,
 /// and the same class of consequence these tests already embrace by
 /// observing the real HOME.
-async fn wait_for_tmux_agent_ready(
+async fn wait_for_agent_tui_ready(
+    sup: &Supervisor,
     client: &SupervisorClient,
-    sock: &std::path::Path,
     session_id: &str,
     chan: u32,
     ready_marker: &str,
     trust_dialog_markers: &[&str],
 ) {
-    let tmux_name = format!("fh-{session_id}");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
     loop {
-        let text = pane_within(sock, &tmux_name, deadline).await;
+        let text = screen(sup, session_id).await;
         // The deadline is checked FIRST, before either branch: a dialog
         // that never advances no matter how often it is answered is a real
-        // failure mode (codex's does exactly that under tmux), and a
-        // dialog branch that looped straight back to the top would press
-        // enter at it forever instead of failing with the pane printed.
+        // failure mode (codex's once did exactly that), and a dialog branch
+        // that looped straight back to the top would press enter at it
+        // forever instead of failing with the screen printed.
         assert!(
             tokio::time::Instant::now() < deadline,
-            "timed out waiting for {ready_marker:?}; rendered pane:\n{text}"
+            "timed out waiting for {ready_marker:?}; rendered screen:\n{text}"
         );
         if trust_dialog_markers.iter().any(|m| text.contains(m)) {
             // Claude's trust menu can default to refusal. Move only when
@@ -128,7 +157,7 @@ async fn wait_for_tmux_agent_ready(
 // ---------------------------------------------------------------------
 // Real-agent HOOK audit (plan §4.4)
 //
-// The two tests below are the tripwire for the vendor facts the injected
+// The tests below are the tripwire for the vendor facts the injected
 // `SessionStart` hook rests on. Every one of them was verified by hand
 // once; none of them is guaranteed by anything but the vendors' goodwill,
 // and if one changes the symptom is SILENT — identity capture quietly
@@ -159,10 +188,19 @@ async fn wait_for_tmux_agent_ready(
 // the value survives, which makes it the only place these facts can be
 // checked from.
 //
-// Run them individually and deliberately:
+// Run them individually and deliberately, through the recorder like any
+// other runtime test, in its generic mode (nextest's per-test limit ends a
+// test after five minutes, shorter than a Codex audit's own deadlines),
+// with the vendor's own login in the real HOME and none of an enclosing
+// agent session's own variables (`CLAUDECODE`, its API credentials) in the
+// environment:
 //
-//     cargo test -p farhelm --test e2e -- --ignored --test-threads 1 \
-//         real_claude_session_reports_its_identity_across_clear
+//     python3 scripts/record-test-run.py --kind development \
+//         --selection 'real Claude hook audit across /clear' \
+//         --concurrency 'one test; libtest one thread' --tmux none \
+//         -- cargo test -p farhelm --test e2e -- --ignored --exact \
+//         --test-threads 1 \
+//         real_agent_capture::real_claude_session_reports_its_identity_across_clear
 // ---------------------------------------------------------------------
 
 /// Bring up a supervisor that is genuinely LISTENING on its unix socket,
@@ -180,8 +218,9 @@ async fn wait_for_tmux_agent_ready(
 /// aborts on drop and its [`ServeTask::stop`] reports a `serve()` that
 /// ended any other way.
 ///
-/// Default seams, and that is the point — hooks are
-/// on by default, so this exercises the configuration a user gets.
+/// Default seams, and that is the point: hooks are on by default, and the
+/// agent runs in a terminal host started from the built `farhelm`, so this
+/// exercises the configuration a user gets.
 async fn serving_supervisor(
     state: &std::path::Path,
 ) -> (Arc<Supervisor>, Arc<SupervisorClient>, ServeTask) {
@@ -189,7 +228,7 @@ async fn serving_supervisor(
         state,
         farhelm_bin().into(),
         suite_timeouts(),
-        SupervisorSeams::tmux_terminals(),
+        SupervisorSeams::default(),
     )
     .await
     .expect("supervisor");
@@ -242,26 +281,21 @@ async fn wait_for_reported_identity(
             return conversation;
         }
         // On timeout, dump everything a human would go looking for by
-        // hand: the rendered pane (did the prompt submit? is a dialog up?
+        // hand: the rendered screen (did the prompt submit? is a dialog up?
         // did the turn error?) and the hook's own trace (did it run, and
         // what did the supervisor answer?). A bare "no identity" message
         // costs whoever runs this audit a full re-run under a probe.
         if tokio::time::Instant::now() >= deadline {
-            let pane = tmux_query(
-                &state.join("tmux.sock"),
-                &["capture-pane", "-p", "-t", &format!("fh-{session_id}")],
-            )
-            .await;
             let hook_log = state.join("hook-log").join(format!("{session_id}.log"));
             panic!(
-                "no reported identity{} within {secs}s\n--- hook log ({}):\n{}\n--- pane:\n{}",
+                "no reported identity{} within {secs}s\n--- hook log ({}):\n{}\n--- screen:\n{}",
                 match previous {
                     Some(was) => format!(" other than {was}"),
                     None => String::new(),
                 },
                 hook_log.display(),
                 std::fs::read_to_string(&hook_log).unwrap_or_else(|e| format!("<unreadable: {e}>")),
-                String::from_utf8_lossy(&pane.stdout),
+                screen(sup, session_id).await,
             );
         }
         // sleep-ok: poll changed identity plus hook acknowledgement between deadline checks.
@@ -412,11 +446,12 @@ fn assert_resume_names(snapshot: &SessionSnapshot, conversation: &str) {
 #[ignore = "needs real Claude Code credentials; run deliberately"]
 async fn real_claude_session_reports_its_identity_across_clear() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = farhelm_teststate::tempdir().expect("state dir");
+    // Declared before the state directory so that, on a failure too, the
+    // state directory's teardown (which ends its terminal hosts, and the
+    // vendor agent with them) runs before the agent's folder is removed.
     let work = farhelm_teststate::tempdir().expect("workdir");
+    let state = farhelm_teststate::tempdir().expect("state dir");
     let (sup, client, accepting) = serving_supervisor(state.path()).await;
-    let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
-    let sock = state.path().join("tmux.sock");
 
     let session = client
         .create_session_with_extras(
@@ -429,21 +464,19 @@ async fn real_claude_session_reports_its_identity_across_clear() {
         )
         .await
         .unwrap_or_else(|e| panic!("launching the real claude: {e:#}"));
-    let tmux_name = format!("fh-{}", session.id);
     let (chan, _replay, mut rx) = client
         .attach_live(&session.id, 100, 30)
         .await
         .expect("attach");
-    // Drained for the whole run, not dropped: the terminal path is
-    // flow-controlled with an overflow detach, so an unread receiver
-    // eventually detaches this viewer — after which every `send_input`
-    // lands on a dead channel and the agent looks like it is swallowing
-    // keystrokes. These tests read the PANE for their assertions, so the
-    // stream's only job is to keep the attachment alive.
+    // Drained for the whole run, not dropped: a viewer that stops reading
+    // is eventually detached as stalled, after which every keystroke lands
+    // on a dead channel and the agent looks like it is swallowing them.
+    // These tests read the SCREEN for their assertions, so the stream's
+    // only job is to keep the attachment alive.
     let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
-    wait_for_tmux_agent_ready(
+    wait_for_agent_tui_ready(
+        &sup,
         &client,
-        &state.path().join("tmux.sock"),
         &session.id,
         chan,
         "Claude Code v",
@@ -463,7 +496,7 @@ async fn real_claude_session_reports_its_identity_across_clear() {
         &first,
     );
 
-    // `/clear` is driven by what the pane shows, not by sleeps, in both
+    // `/clear` is driven by what the screen shows, not by sleeps, in both
     // halves — the same discipline `submit_prompt` uses, and for the same
     // reason: individual keystroke bursts were observed to vanish on a
     // loaded machine, and a blind Enter that missed would submit `/clear`
@@ -478,18 +511,18 @@ async fn real_claude_session_reports_its_identity_across_clear() {
     // and proved nothing, then hung.
     let clears = |text: &str| text.matches("/clear").count();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    let baseline = clears(&pane_within(&sock, &tmux_name, deadline).await);
+    let baseline = clears(&screen(&sup, &session.id).await);
     // The command and its Enter are separate keystrokes, as a human's are.
     // Retyping is guarded on the composer being genuinely empty of it, or
     // a slow render would leave `/clear/clear` in the box.
     loop {
-        let text = pane_within(&sock, &tmux_name, deadline).await;
+        let text = screen(&sup, &session.id).await;
         if clears(&text) > baseline {
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the composer never showed the typed /clear; rendered pane:\n{text}"
+            "the composer never showed the typed /clear; rendered screen:\n{text}"
         );
         client.send_keys(chan, b"/clear".to_vec()).await;
         // sleep-ok: pace command retries while polling a new rendered occurrence of /clear.
@@ -524,8 +557,8 @@ async fn real_claude_session_reports_its_identity_across_clear() {
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Enter never executed /clear (identity still {first}); rendered pane:\n{}",
-            pane_within(&sock, &tmux_name, deadline).await
+            "Enter never executed /clear (identity still {first}); rendered screen:\n{}",
+            screen(&sup, &session.id).await
         );
     }
 
@@ -553,15 +586,20 @@ async fn real_claude_session_reports_its_identity_across_clear() {
     );
 
     // Teardown BEFORE the permit is released. `SLOTS` bounds how many
-    // supervisors, tmux servers and vendor agents run at once, so handing
+    // supervisors, terminal hosts and vendor agents run at once, so handing
     // the permit back while this test's own are still being torn down
     // admits the next harness into a machine that is still carrying this
-    // one — which is exactly the load the semaphore exists to prevent.
+    // one — which is exactly the load the semaphore exists to prevent. A
+    // terminal host outlives its supervisor by design, so dropping the
+    // supervisor ends nothing: the hosts (hanging up the vendor agent in
+    // them) are ended explicitly, then the agent's folder goes.
     accepting.stop().await;
     drain.abort();
     drop(client);
     drop(sup);
-    drop(tmux);
+    end_all_terminals(state.path()).await;
+    drop(state);
+    drop(work);
     drop(slot);
 }
 
@@ -571,11 +609,13 @@ async fn real_claude_session_reports_its_identity_across_clear() {
 ///
 /// This audits the vendor facts Claude's positional admission rule rests
 /// on, which no fixture can: that a child started from Claude's Bash tool
-/// inherits the session credential (so without the rule its report WOULD
-/// land), and that the Bash tool runs it through a shell that stays
-/// resident, which puts the child at least two links below the pane where
-/// the rule refuses it. `child.sh` `exec`s the child so the Bash tool's own
-/// shell is the only intermediary, the tightest shape a shell-out takes.
+/// inherits the session credential (so its report reaches the supervisor,
+/// and without the rule it WOULD land), and that the child is a process of
+/// its own below the parent `claude`, whose report at startup was admitted
+/// and pinned the parent as this launch's emitter, so the rule refuses the
+/// child's (`service::core::vendor::positional`). `child.sh` `exec`s the
+/// child so the Bash tool's own shell is the only intermediary, the
+/// tightest shape a shell-out takes.
 /// It records the child's ancestry to `child-ancestry.txt` first, and the
 /// test prints that file, so a failure (or a vendor change) names the chain
 /// that was actually observed.
@@ -591,11 +631,12 @@ async fn real_claude_session_reports_its_identity_across_clear() {
 #[ignore = "needs real Claude Code credentials and network; two short model turns; run deliberately"]
 async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = farhelm_teststate::tempdir().expect("state dir");
+    // Declared before the state directory so that, on a failure too, the
+    // state directory's teardown (which ends its terminal hosts, and the
+    // vendor agent with them) runs before the agent's folder is removed.
     let work = farhelm_teststate::tempdir().expect("workdir");
+    let state = farhelm_teststate::tempdir().expect("state dir");
     let (sup, client, accepting) = serving_supervisor(state.path()).await;
-    let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
-    let sock = state.path().join("tmux.sock");
 
     let hook = format!(
         "{} internal hook --vendor claude",
@@ -632,16 +673,15 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
         )
         .await
         .unwrap_or_else(|e| panic!("launching the real claude: {e:#}"));
-    let tmux_name = format!("fh-{}", session.id);
     let (chan, _replay, mut rx) = client
         .attach_live(&session.id, 100, 30)
         .await
         .expect("attach");
     // Drained for the same reason as in the `/clear` audit above.
     let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
-    wait_for_tmux_agent_ready(
+    wait_for_agent_tui_ready(
+        &sup,
         &client,
-        &sock,
         &session.id,
         chan,
         "Claude Code v",
@@ -671,14 +711,14 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
         if let Some(line) = child_line(&log) {
             break line;
         }
-        let pane = pane_within(&sock, &tmux_name, deadline).await;
+        let text = screen(&sup, &session.id).await;
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the shelled-out child never reported; hook log:\n{log}\n--- pane:\n{pane}"
+            "the shelled-out child never reported; hook log:\n{log}\n--- screen:\n{text}"
         );
         // Enter is re-pressed only while the prompt still sits in the
         // composer, as in `submit_prompt`.
-        if pane.contains(prompt) {
+        if text.contains(prompt) {
             client.send_keys(chan, b"\r".to_vec()).await;
         }
         // sleep-ok: pace conditional Enter retries while polling the hook log in this manual audit.
@@ -689,10 +729,10 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
     eprintln!("observed child ancestry (pid ppid comm), innermost first:\n{ancestry}");
 
     assert!(
-        child.contains(" refused conflict ") && child.contains("nested below"),
-        "the child's report must reach the supervisor and be refused for its ancestry \
-         (`no-credential` would mean the Bash tool no longer passes the credential through); \
-         line: {child}\nancestry:\n{ancestry}"
+        child.contains(" refused conflict ") && child.contains("pinned emitter"),
+        "the child's report must reach the supervisor and be refused as another process than \
+         the pinned emitter (`no-credential` would mean the Bash tool no longer passes the \
+         credential through); line: {child}\nancestry:\n{ancestry}"
     );
     let snapshot = sup
         .session_snapshot(&session.id)
@@ -711,7 +751,9 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
     drain.abort();
     drop(client);
     drop(sup);
-    drop(tmux);
+    end_all_terminals(state.path()).await;
+    drop(state);
+    drop(work);
     drop(slot);
 }
 
@@ -725,19 +767,21 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
 /// expected to lag the `/new` until a prompt actually goes out — a lag a
 /// user sees too, and one worth re-verifying whenever codex is bumped.
 ///
-/// The synthetic `CODEX_HOME` is not a convenience; see
-/// [`real_codex_session_captures_its_conversation_identity`] for why the
-/// folder-trust modal makes it the only path that works, and for the shim
-/// that carries the variable into the launch.
+/// Codex runs with this machine's own configuration and login, and the
+/// session's directory is trusted for this invocation only
+/// ([`trusted_codex`]), so that no folder-trust modal stands between the
+/// launch and the first prompt.
 #[farhelm_testtrace::test]
 #[ignore = "needs real Codex credentials and network; run deliberately"]
 async fn real_codex_session_reports_its_identity_across_new() {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = farhelm_teststate::tempdir().expect("state dir");
+    // Declared before the state directory so that, on a failure too, the
+    // state directory's teardown (which ends its terminal hosts, and the
+    // vendor agent with them) runs before the agent's folder is removed.
     let work = farhelm_teststate::tempdir().expect("workdir");
-    let (_synth, agent) = synthetic_codex_home(work.path());
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let agent = trusted_codex(work.path());
     let (sup, client, accepting) = serving_supervisor(state.path()).await;
-    let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
 
     let session = client
         .create_session_with_extras(
@@ -750,7 +794,7 @@ async fn real_codex_session_reports_its_identity_across_new() {
         )
         .await
         .unwrap_or_else(|e| panic!("launching the real codex: {e:#}"));
-    let (chan, _replay, mut rx) = client
+    let (chan, _replay, rx) = client
         .attach_live(&session.id, 100, 30)
         .await
         .expect("attach");
@@ -758,18 +802,17 @@ async fn real_codex_session_reports_its_identity_across_new() {
     // attachment overflow-detaches and later input silently stops landing
     // — with far more rendered output here (codex repaints heavily), this
     // test hit exactly that as minutes-in keystroke loss.
-    let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
-    // No dialog markers: trust is seeded in the synthetic config, so the
-    // modal must not appear at all.
-    wait_for_tmux_agent_ready(
-        &client,
-        &state.path().join("tmux.sock"),
-        &session.id,
-        chan,
-        "OpenAI Codex (v",
-        &[],
-    )
-    .await;
+    //
+    // Kept rather than only drained: `/new`'s closing notice can leave the
+    // visible screen before a read of it (the first run on terminal hosts
+    // found the screen already showing the new chat and no notice), while
+    // every row and history line the stream sent is in this transcript
+    // ([`StreamText`]).
+    let transcript = StreamText::default();
+    let drain = transcript.record(rx);
+    // No dialog markers: the invocation trusts the directory, so the modal
+    // must not appear at all.
+    wait_for_agent_tui_ready(&sup, &client, &session.id, chan, "OpenAI Codex (v", &[]).await;
 
     // Codex fires its hook at first prompt SUBMISSION, so before one goes
     // out there must be no identity at all. Without this the test would
@@ -778,14 +821,9 @@ async fn real_codex_session_reports_its_identity_across_new() {
     assert_identity_stays(&sup, &client, &session.id, None, 5).await;
 
     // Digit-free, for the same reason the capture test's prompt is.
-    submit_prompt(
-        &client,
-        &state.path().join("tmux.sock"),
-        &session.id,
-        chan,
-        "ok",
-    )
-    .await;
+    submit_prompt(&sup, &client, &session.id, chan, "ok").await;
+    // What `submit_prompt` waited for: the answer on the screen.
+    let first_answer = "• ok";
     let first =
         wait_for_reported_identity(&sup, &client, state.path(), &session.id, None, 300).await;
     assert_resume_names(
@@ -799,36 +837,35 @@ async fn real_codex_session_reports_its_identity_across_new() {
     // `/new` is driven the same observed way as a prompt (see
     // `submit_prompt` for the paste-swallow failure a blind sleep invites):
     // type it, wait for the slash-command popup to render, Enter, and then
-    // require the line codex prints when the OLD conversation is closed —
-    // which names the id we already hold, so matching on it cannot pass
-    // early. An Enter that missed the popup would have submitted "/new" as
-    // a chat message instead, and this wait is what turns that from five
-    // silent minutes into an immediate readable pane dump.
-    let sock = state.path().join("tmux.sock");
-    let tmux_name = format!("fh-{}", session.id);
+    // require proof that the command ran: the notice older codex printed
+    // when the OLD conversation closed (it names the id we already hold, so
+    // matching on it cannot pass early), or the new chat's reset view that
+    // codex 0.167 shows instead. An Enter that missed the popup would have
+    // submitted "/new" as a chat message instead, and this wait is what
+    // turns that from five silent minutes into an immediate readable screen
+    // dump.
     // `submit_prompt` returns only once the first ANSWER has rendered, so
     // the turn is over and the composer accepts input again (codex
     // swallows composer keystrokes while a task runs — its own tip says to
     // Tab-queue instead). Even so, both halves of `/new` are driven by
-    // what the pane shows rather than by sleeps, with retype/re-press on a
+    // what the screen shows rather than by sleeps, with retype/re-press on a
     // cadence: individual keystroke bursts were observed to vanish on a
     // loaded machine. The popup line proves the composer holds the
-    // command; the resume notice codex prints when it closes a
-    // conversation proves Enter executed it — and it names the id
-    // this test already holds, so the wait cannot pass early.
+    // command; the closing notice or the reset view proves Enter executed
+    // it (see the wait below).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
     let news = |text: &str| text.matches("/new").count();
-    let baseline = news(&pane_within(&sock, &tmux_name, deadline).await);
+    let baseline = news(&screen(&sup, &session.id).await);
     loop {
-        let text = pane_within(&sock, &tmux_name, deadline).await;
+        let text = screen(&sup, &session.id).await;
         if text.contains("start a new chat") {
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the /new slash-command popup never rendered; pane:\n{text}"
+            "the /new slash-command popup never rendered; screen:\n{text}"
         );
-        // Retyped only when the pane shows NEITHER the popup nor the
+        // Retyped only when the screen shows NEITHER the popup nor the
         // command itself. Codex renders the popup a moment after the text
         // lands, so a loop that retyped on every miss would type into a
         // composer that already held `/new` and leave `/new/new` there —
@@ -843,7 +880,7 @@ async fn real_codex_session_reports_its_identity_across_new() {
         {
             // This vendor prompt can cover the composer after the reply.
             // Dismiss it without changing the model or saving preferences;
-            // the next pane observation must still prove `/new` is ready.
+            // the next screen observation must still prove `/new` is ready.
             client.send_keys(chan, b"\x1b".to_vec()).await;
         } else if news(&text) <= baseline {
             client.send_keys(chan, b"/new".to_vec()).await;
@@ -856,11 +893,12 @@ async fn real_codex_session_reports_its_identity_across_new() {
         client.send_keys(chan, b"\r".to_vec()).await;
         // sleep-ok: pace Enter retries before checking the old conversation's resume marker.
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let text = pane_within(&sock, &tmux_name, deadline).await;
-        // Codex may offer a titled picker entry instead of a direct resume
-        // command, and the terminal can wrap its UUID. The closing notice
-        // must still name this exact old conversation; a generic ready
-        // composer would not establish that `/new` actually closed it.
+        let shown = screen(&sup, &session.id).await;
+        let text = format!("{}\n{shown}", transcript.text());
+        // Codex up to some version before 0.167 printed a closing notice
+        // naming the old conversation; it may offer a titled picker entry
+        // instead of a direct resume command, and the terminal can wrap its
+        // UUID. Such a notice must name this exact old conversation.
         let closing_notice = text
             .split_once("To continue this session, run codex resume")
             .map(|(_, notice)| {
@@ -870,15 +908,29 @@ async fn real_codex_session_reports_its_identity_across_new() {
                     .flat_map(|line| line.chars().filter(|c| !c.is_whitespace()))
                     .collect::<String>()
             });
+        // Codex 0.167 prints no such notice (runs on 2026-11-11 found
+        // none on the screen or in anything the stream sent): it resets its
+        // view to a new chat. That reset is the proof `/new` ran rather
+        // than a ready composer alone: the first answer is gone from the
+        // screen and the new chat's header is there, while an Enter that
+        // missed the popup would have sent "/new" as a message below that
+        // answer. What `/new` did to the conversation is then pinned by the
+        // identity below: kept until the next prompt, a new one after it.
+        let view_reset = shown.contains("OpenAI Codex (v")
+            && !shown.contains(first_answer)
+            && !shown.contains("/new");
         if text.contains(&format!("codex resume {}", resume_identity(&first)))
             || closing_notice.is_some_and(|notice| notice.contains(&resume_identity(&first)))
+            || view_reset
         {
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "/new never closed the persistent conversation {}; pane:\n{text}",
-            resume_identity(&first)
+            "/new never closed the persistent conversation {}; screen:\n{shown}\n\
+             --- the stream's newest text:\n{}",
+            resume_identity(&first),
+            transcript.tail(8 * 1024)
         );
     }
 
@@ -889,7 +941,7 @@ async fn real_codex_session_reports_its_identity_across_new() {
     // than defensive.
     assert_identity_stays(&sup, &client, &session.id, Some(&first), 5).await;
 
-    submit_prompt(&client, &sock, &session.id, chan, "pong").await;
+    submit_prompt(&sup, &client, &session.id, chan, "pong").await;
 
     let renewed =
         wait_for_reported_identity(&sup, &client, state.path(), &session.id, Some(&first), 300)
@@ -918,7 +970,9 @@ async fn real_codex_session_reports_its_identity_across_new() {
     drain.abort();
     drop(client);
     drop(sup);
-    drop(tmux);
+    end_all_terminals(state.path()).await;
+    drop(state);
+    drop(work);
     drop(slot);
 }
 
@@ -928,14 +982,21 @@ async fn real_codex_session_reports_its_identity_across_new() {
 /// actual completions also establish that ordinary clear changes the path and
 /// leaves the old header intact. Default API authentication remains available;
 /// only this private work directory receives an invocation-time trust override.
+///
+/// Codex runs as an undeclared command launch, so the supervisor injects no
+/// hooks of its own and the probe's are the only ones: what is audited is
+/// the vendor's callback, not Farhelm's reporting of it. The session still
+/// gives Codex the terminal a shipped supervisor would, a terminal host.
 #[farhelm_testtrace::test]
 #[ignore = "needs real Codex credentials and network; run deliberately"]
 async fn real_codex_stop_names_the_persisted_transcript_after_clear() {
-    let _slot = SLOTS.acquire().await.expect("suite slot");
+    // The harness is declared last so that it drops first, on a failure
+    // too: its state directory's teardown ends the terminal host (and
+    // Codex in it) and only then releases its slot, before the probe's
+    // files and Codex's folder are removed.
     let state = farhelm_teststate::tempdir().expect("private audit state");
     let work = farhelm_teststate::tempdir().expect("private vendor workdir");
-    let sock = state.path().join("tmux.sock");
-    let _tmux = TmuxServerGuard::new(sock.clone());
+    let h = harness().await;
     let log = state.path().join("events.jsonl");
     let probe = state.path().join("probe.py");
     std::fs::write(&probe, r#"import json, pathlib, sys
@@ -956,6 +1017,8 @@ with open(sys.argv[1], 'a') as log:
         "--dangerously-bypass-hook-trust".into(),
         "--dangerously-bypass-approvals-and-sandbox".into(),
         "-c".into(),
+        CODEX_NO_UPDATE_CHECK.into(),
+        "-c".into(),
         "features.hooks=true".into(),
         "-c".into(),
         format!(
@@ -973,84 +1036,87 @@ with open(sys.argv[1], 'a') as log:
         ]);
     }
     let command = shell_words::join(&argv);
-    let created = tmux_query(
-        &sock,
-        &[
-            "new-session",
-            "-d",
-            "-s",
-            "audit",
-            "-x",
-            "100",
-            "-y",
-            "30",
-            "-c",
-            work.path().to_str().unwrap(),
-            &command,
-        ],
-    )
-    .await;
-    assert!(created.status.success(), "vendor tmux launch: {created:?}");
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            farhelm_proto::SessionLaunch::plain_command(&command),
+            None,
+            100,
+            30,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("launching the real codex: {e:#}"));
+    let (chan, _replay, mut rx) = h
+        .client
+        .attach_live(&session.id, 100, 30)
+        .await
+        .expect("attach");
+    // Drained so the attachment stays alive, as in the audits above.
+    let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
     let mut deadline = tokio::time::Instant::now() + Duration::from_secs(120);
     loop {
-        let pane = pane_within(&sock, "audit", deadline).await;
-        if pane.contains("OpenAI Codex (v") {
+        let text = screen(&h.sup, &session.id).await;
+        if text.contains("OpenAI Codex (v") {
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Codex never became ready: {pane}"
+            "Codex never became ready: {text}"
         );
         // sleep-ok: poll the vendor's rendered startup marker.
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     for turn in 0..2 {
         if turn == 1 {
-            tmux_query(&sock, &["send-keys", "-t", "audit", "-l", "/clear"]).await;
+            h.client.send_keys(chan, b"/clear".to_vec()).await;
             deadline = tokio::time::Instant::now() + Duration::from_secs(60);
             loop {
-                let pane = pane_within(&sock, "audit", deadline).await;
-                if pane.contains("/clear") {
+                let text = screen(&h.sup, &session.id).await;
+                if text.contains("/clear") {
                     break;
                 }
                 assert!(
                     tokio::time::Instant::now() < deadline,
-                    "clear not in composer: {pane}"
+                    "clear not in composer: {text}"
                 );
                 // sleep-ok: wait for the literal slash command before submitting it.
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
-            tmux_query(&sock, &["send-keys", "-t", "audit", "Enter"]).await;
+            // Enter goes separately from the text, as a human's does: text
+            // and Enter in one write can read as a paste.
+            h.client.send_keys(chan, b"\r".to_vec()).await;
         }
         let prompt = if turn == 0 {
             "Reply with exactly OK. Do not use tools."
         } else {
             "Reply with exactly PONG. Do not use tools."
         };
-        tmux_query(&sock, &["send-keys", "-t", "audit", "-l", prompt]).await;
+        h.client.send_keys(chan, prompt.as_bytes().to_vec()).await;
         deadline = tokio::time::Instant::now() + Duration::from_secs(300);
         loop {
-            let pane = pane_within(&sock, "audit", deadline).await;
-            if pane.contains(prompt) {
+            let text = screen(&h.sup, &session.id).await;
+            if text.contains(prompt) {
                 break;
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "prompt not in composer: {pane}"
+                "prompt not in composer: {text}"
             );
             // sleep-ok: wait for the vendor to render this turn's prompt.
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        tmux_query(&sock, &["send-keys", "-t", "audit", "Enter"]).await;
+        h.client.send_keys(chan, b"\r".to_vec()).await;
         loop {
             let rows = codex_probe_events(&log);
             if rows.iter().filter(|r| r["event"] == "Stop").count() > turn {
                 break;
             }
-            let pane = pane_within(&sock, "audit", deadline).await;
+            let text = screen(&h.sup, &session.id).await;
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "no completed Stop; events={rows:?}; pane={pane}"
+                "no completed Stop; events={rows:?}; screen={text}"
             );
             // sleep-ok: poll callback evidence while a real model turn completes.
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -1084,6 +1150,11 @@ with open(sys.argv[1], 'a') as log:
             "the exact callback header survives ordinary clear"
         );
     }
+    drain.abort();
+    end_all_terminals(h.state.path()).await;
+    drop(h);
+    drop(work);
+    drop(state);
 }
 
 /// Read bounded private callback evidence without turning partial appends into
@@ -1104,7 +1175,7 @@ fn codex_probe_events(path: &std::path::Path) -> Vec<serde_json::Value> {
 }
 
 /// Type one short, digit-free prompt and submit it, VERIFYING each half
-/// against the rendered pane rather than trusting sleeps.
+/// against the rendered screen rather than trusting sleeps.
 ///
 /// Every property here is learned rather than stylistic. Digit-free
 /// because a numbered modal treats a stray digit as an option selection.
@@ -1113,9 +1184,9 @@ fn codex_probe_events(path: &std::path::Path) -> Vec<serde_json::Value> {
 /// and inserts the carriage return instead of submitting. And Enter is
 /// re-sent while the prompt is still in the composer, because a fixed
 /// sleep between the two halves was observed to lose the Enter anyway on
-/// a loaded machine — the pane sat with the full prompt rendered and
+/// a loaded machine — the screen sat with the full prompt rendered and
 /// unsubmitted for the test's whole deadline. Submission is a state the
-/// pane can be asked about, so the test asks instead of guessing.
+/// screen can be asked about, so the test asks instead of guessing.
 ///
 /// ## What the answer oracle is, and is not
 ///
@@ -1124,39 +1195,38 @@ fn codex_probe_events(path: &std::path::Path) -> Vec<serde_json::Value> {
 /// `#[ignore]`d tests. It rests on three things nothing enforces: that the
 /// model answers with the single word it was asked for, that codex renders
 /// an answer with that bullet, and that the caller passes a `word` unique
-/// within its own test — `capture-pane` renders only the visible screen,
+/// within its own test — [`screen`] reads only the visible screen,
 /// so an earlier identical answer that has scrolled off would make any
 /// counting scheme (also tried) miss the new one. It is the right trade
 /// only because the alternative heuristics are worse: the composer and the
 /// submitted echo render the prompt with the same `›` decoration, and
 /// warnings render below the composer, so every line-position rule tried
-/// here misread some pane sooner or later.
+/// here misread some screen sooner or later.
 async fn submit_prompt(
+    sup: &Supervisor,
     client: &SupervisorClient,
-    sock: &std::path::Path,
     session_id: &str,
     chan: u32,
     word: &str,
 ) {
     let prompt = format!("Reply with the single word {word}.");
-    let tmux_name = format!("fh-{session_id}");
 
     client.send_keys(chan, prompt.as_bytes().to_vec()).await;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
-        let text = pane_within(sock, &tmux_name, deadline).await;
+        let text = screen(sup, session_id).await;
         if text.contains(&prompt) {
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the composer never showed the typed prompt; rendered pane:\n{text}"
+            "the composer never showed the typed prompt; rendered screen:\n{text}"
         );
         // sleep-ok: poll rendered prompt text between deadline checks before submitting it.
         tokio::time::sleep(Duration::from_millis(300)).await;
     }
 
-    // Enter is re-pressed only while the prompt is still ON the pane. Once
+    // Enter is re-pressed only while the prompt is still ON the screen. Once
     // it has left, the composer cannot still be holding it, and further
     // Enters are no longer re-pressing anything — they are keystrokes
     // arriving at whatever state the agent has moved into, which is not a
@@ -1165,13 +1235,13 @@ async fn submit_prompt(
     let marker = format!("• {word}");
     let deadline = tokio::time::Instant::now() + Duration::from_secs(240);
     loop {
-        let text = pane_within(sock, &tmux_name, deadline).await;
+        let text = screen(sup, session_id).await;
         if text.contains(&marker) {
             return;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Enter never produced the {marker:?} answer; rendered pane:\n{text}"
+            "Enter never produced the {marker:?} answer; rendered screen:\n{text}"
         );
         if text.contains(&prompt) {
             client.send_keys(chan, b"\r".to_vec()).await;
@@ -1207,65 +1277,40 @@ fn real_agent_launch(
     )
 }
 
-/// A private `CODEX_HOME` with the working directory already trusted, plus
-/// a `codex`-named shim that carries the variable into the launch.
+/// The real `codex` on `PATH` with `work` trusted for this invocation only,
+/// as one shell-quoted command line for a declared command launch.
 ///
-/// Extracted so both real-codex tests share one description of a setup that
-/// is entirely about working around codex's input-dead folder-trust modal
-/// (see [`real_codex_session_captures_its_conversation_identity`]).
-/// Returns the tempdir — which must outlive the run — and the invocation.
-fn synthetic_codex_home(work: &std::path::Path) -> (farhelm_teststate::TestDir, String) {
-    let real_home = std::env::var_os("HOME").expect("a real-agent run needs a real HOME");
-    let real_auth = std::path::Path::new(&real_home).join(".codex/auth.json");
-    let auth = std::fs::read(&real_auth).unwrap_or_else(|e| {
-        panic!(
-            "this test needs an authenticated codex ({}): {e}",
-            real_auth.display()
-        )
-    });
-
-    let synth = farhelm_teststate::tempdir().expect("synthetic codex home");
-    let codex_home = synth.path().join(".codex");
-    std::fs::create_dir_all(&codex_home).expect("codex home");
-    let auth_path = codex_home.join("auth.json");
-    std::fs::write(&auth_path, auth).expect("auth.json");
-    std::fs::set_permissions(
-        &auth_path,
-        std::os::unix::fs::PermissionsExt::from_mode(0o600),
-    )
-    .expect("auth.json mode");
-    // The trust key is the exact path the session is created with.
-    std::fs::write(
-        codex_home.join("config.toml"),
-        format!(
-            "[projects.\"{}\"]\ntrust_level = \"trusted\"\n",
-            work.display()
-        ),
-    )
-    .expect("config.toml");
-
-    let real_codex = which_binary("codex").expect("codex on PATH");
-    let bin = synth.path().join("bin");
-    std::fs::create_dir_all(&bin).expect("shim dir");
-    let shim = bin.join("codex");
-    std::fs::write(
-        &shim,
-        format!(
-            "#!/bin/sh\nexec env CODEX_HOME={} {} \"$@\"\n",
-            shell_quote(&codex_home.to_string_lossy()),
-            shell_quote(&real_codex.to_string_lossy()),
-        ),
-    )
-    .expect("shim");
-    std::fs::set_permissions(
-        &shim,
-        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755),
-    )
-    .expect("shim mode");
-
-    let agent = shim.to_string_lossy().into_owned();
-    (synth, agent)
+/// The trust is an invocation-time `-c` override, the same one
+/// [`real_codex_stop_names_the_persisted_transcript_after_clear`] passes, so
+/// Codex keeps this machine's own configuration and login (a model provider
+/// configured in `config.toml` is a login as much as `auth.json` is) and
+/// nothing is written to it. Its folder-trust modal is kept away rather than
+/// answered: earlier runs of these audits found it would not take the
+/// answer typed at it. [`CODEX_NO_UPDATE_CHECK`] is passed too.
+fn trusted_codex(work: &std::path::Path) -> String {
+    let codex = which_binary("codex").expect("real Codex on PATH");
+    let trust = format!(
+        "projects.{}.trust_level=\"trusted\"",
+        serde_json::to_string(work.to_str().expect("UTF-8 workdir")).expect("quote the workdir")
+    );
+    shell_words::join([
+        codex.to_str().expect("UTF-8 codex path"),
+        "-c",
+        trust.as_str(),
+        "-c",
+        CODEX_NO_UPDATE_CHECK,
+    ])
 }
+
+/// The `-c` override that keeps Codex from checking for a newer release at
+/// startup, for this invocation only.
+///
+/// A release published between two runs of an audit puts Codex's update
+/// screen in front of the first prompt (it did, between two runs of these
+/// audits on 2026-11-11: 0.167.0 found 0.167.2 and stopped there), and the
+/// audit must neither update the vendor's agent nor answer for the user.
+/// The check is the vendor's, not part of what is audited.
+const CODEX_NO_UPDATE_CHECK: &str = "check_for_update_on_startup=false";
 
 /// First `name` on `PATH` that is an executable regular file.
 fn which_binary(name: &str) -> Option<std::path::PathBuf> {
@@ -1278,9 +1323,4 @@ fn which_binary(name: &str) -> Option<std::path::PathBuf> {
                 m.is_file() && m.permissions().mode() & 0o111 != 0
             })
         })
-}
-
-/// Single-quote `s` for `/bin/sh`, closing and reopening around any quote.
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
 }

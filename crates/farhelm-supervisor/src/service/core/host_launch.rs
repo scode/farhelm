@@ -359,8 +359,10 @@ impl Supervisor {
     /// tests, runs its shim from itself and so starts hosts the shipped way,
     /// from `/proc/self/exe` on Linux. In this crate's own unit tests the
     /// fallback is a path that does not exist, even when a test passes the
-    /// libtest runner as its launch shim: run as `internal terminal-host
-    /// --socket …`, the runner would read those arguments as test filters.
+    /// libtest runner as its launch shim: a unit test that wants real hosts
+    /// names its own test binary through the seam (`tests::host_seams`),
+    /// which answers a host's command line before libtest sees it
+    /// (`hosts::test_program`).
     #[cfg(any(test, feature = "test-seams"))]
     pub(super) fn host_program(&self) -> PathBuf {
         if let Some(program) = &self.seams.host_program {

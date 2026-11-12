@@ -4361,7 +4361,7 @@ mod tests {
     use super::super::capture::CaptureState;
     use super::super::connection::CONNECTION_WRITER_QUEUE;
     use super::super::core::tests::{
-        StateDir, declared_command, dummy_exe, entry_with, tmux_supervisor,
+        StateDir, declared_command, dummy_exe, entry_with, host_seams, host_supervisor,
     };
     use super::super::core::{HANDLER_ADMISSION_PERMITS, LIST_ADMISSION_PERMITS};
     use super::super::core::{RunCells, SessionCells};
@@ -5740,7 +5740,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn ordinary_and_spawn_refusals_replay_until_their_window_expires() {
         let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         for marked in [false, true] {
@@ -5931,7 +5931,7 @@ mod tests {
                     create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
                     ..crate::service::FaultHooks::default()
                 },
-                ..SupervisorSeams::tmux_terminals()
+                ..host_seams()
             },
         )
         .await
@@ -5975,12 +5975,9 @@ mod tests {
             "owned create did not settle before fixture cleanup"
         );
         let all_permits = settled.unwrap().expect("admission remains open");
-        for stored in sup.store.load_all().await.expect("read cleanup handles") {
-            let _ = sup
-                .tmux
-                .kill_session(&super::super::core::session_tmux_name(&stored.id))
-                .await;
-        }
+        // The settled session's agent runs in a real host; end it as the
+        // fixture's cleanup, best effort, before the permits go.
+        let _ = crate::hosts::stop_terminal_hosts(state.path()).await;
         drop(all_permits);
         if let Err(error) = observed {
             if error.is_panic() {
@@ -9642,7 +9639,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn every_helm_create_key_has_the_created_sessions_lifetime() {
         let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);

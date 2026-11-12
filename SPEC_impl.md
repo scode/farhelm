@@ -2301,25 +2301,28 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   (`SupervisorSeams::tmux_terminals()`; the e2e suite's `harness_tmux` and `supervisor_process_tmux`), which a test does
   when its subject exists only for old terminals (byte-stream attachments and their escape sequences, tmux's flow
   control and replay, tmux windows as tabs and the session sink, pane ids, moving old sessions into hosts). A few e2e
-  tests stay on old terminals for now with their reason in their docs (for example a few tab tests that read tmux
-  windows, a byte-stream backlog measurement, the real-vendor capture tests, and those whose docs record a behavior new
-  terminals showed differently: a create into a directory that cannot be entered, a 0x0 attach); those are known gaps,
-  not old-terminal subjects. A supervisor inside a test binary cannot start a host from its own executable; in builds
-  with test seams, one whose launch shim program is not its own executable starts hosts from that program (the built
-  `farhelm` for the e2e suite's in-process supervisors) unless `SupervisorSeams::host_program` names another, while a
-  real `farhelm supervisor run` starts them the shipped way even when built with test seams. The e2e harness's terminal
-  helpers read either kind of terminal (a grid stream's rows as text, typing as grid `text` input). The supervisor
-  crate's own unit tests have no such binary, so those that need a real terminal create old ones by name
-  (`tests::tmux_supervisor`) and check what they check on old terminals only: some of the same behavior is pinned on new
-  terminals by the e2e suite and the unit tests' stand-in hosts, but not all of it, which is a known gap. The flag is a
-  harness seam, built like `--boot-id-file`: never read from the environment (tests never change their own process's
-  environment, and a systemd unit or an agent's shell could inherit a variable by accident) and never a user setting,
-  since which kind new terminals are is the release's decision. The harnesses that run a real supervisor process and
-  test old terminals pass `--new-terminals tmux`: the e2e suite's tmux process fixture, the process tests of tmux's own
-  control clients, the browser suite's old-terminal set (`FARHELM_E2E_SUITE_TERMINALS=tmux`, which starts both of every
-  stack's supervisors with it; `e2e/suite-terminals.ts`), and the README and docs media stacks, whose captures were
-  designed against tmux terminals. The browser suite's ordinary run passes `--new-terminals host` to both supervisors of
-  every stack (`e2e/start-stack.sh`), so it tests new terminals, and checks that every terminal it attaches is one. The
+  tests stay on old terminals for now with their reason in their docs (for example a byte-stream backlog measurement,
+  and those whose docs record a behavior new terminals showed differently: a create or a tab open in a directory that
+  cannot be entered, a 0x0 attach); those are known gaps, not old-terminal subjects. A supervisor inside a test binary
+  cannot start a host from its own executable; in builds with test seams, one whose launch shim program is not its own
+  executable starts hosts from that program (the built `farhelm` for the e2e suite's in-process supervisors) unless
+  `SupervisorSeams::host_program` names another, while a real `farhelm supervisor run` starts them the shipped way even
+  when built with test seams. The e2e harness's terminal helpers read either kind of terminal (a grid stream's rows as
+  text, typing as grid `text` input). The supervisor crate's own unit tests have no `farhelm`, so their test binary is
+  its own host program: started with a host's command line (`internal terminal-host --socket <path>`), a loader
+  initializer in it runs the host crate's entry point before libtest's `main` starts any thread, and exits
+  (`hosts::test_program`). It is registered on glibc Linux only; elsewhere every host start from a unit test is refused
+  (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal. Those that
+  need a real terminal run on such hosts (`tests::host_supervisor`); the ones still on old terminals by name
+  (`tests::tmux_supervisor`) have tmux itself as their subject. The flag is a harness seam, built like `--boot-id-file`:
+  never read from the environment (tests never change their own process's environment, and a systemd unit or an agent's
+  shell could inherit a variable by accident) and never a user setting, since which kind new terminals are is the
+  release's decision. The harnesses that run a real supervisor process and test old terminals pass
+  `--new-terminals tmux`: the e2e suite's tmux process fixture, the process tests of tmux's own control clients, the
+  browser suite's old-terminal set (`FARHELM_E2E_SUITE_TERMINALS=tmux`, which starts both of every stack's supervisors
+  with it; `e2e/suite-terminals.ts`), and the README and docs media stacks, whose captures were designed against tmux
+  terminals. The browser suite's ordinary run passes `--new-terminals host` to both supervisors of every stack
+  (`e2e/start-stack.sh`), so it tests new terminals, and checks that every terminal it attaches is one. The
   process-level tests of hosts (`crates/farhelm/tests/e2e/host_processes.rs`) pass `host` explicitly, except the one
   that checks the bare command's default. The value is fixed for the supervisor's lifetime: it decides only what later
   creates, tab opens and Restarts start in and never moves a running terminal, and a supervisor restarted with the other

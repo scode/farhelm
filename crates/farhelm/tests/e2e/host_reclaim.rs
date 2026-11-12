@@ -613,9 +613,10 @@ async fn hosts_this_build_cannot_read_are_never_reclaimed() {
 /// supervisor refuses a symlinked one because what it reaches may be another
 /// installation's. The records name sockets by joining that directory, so the
 /// record path must be refused as the scan is, or a removal or a `Shutdown`
-/// reaches through the link. Spec: a store that knows a keeper (a tmux
-/// session, so the state directory has no socket directory of its own);
-/// `hosts` made a symlink to another directory's socket directory, holding
+/// reaches through the link. Spec: a store that knows a keeper whose host
+/// was ended and whose state directory's socket directory was then removed,
+/// so the state directory has no socket directory of its own; `hosts` made
+/// a symlink to another directory's socket directory, holding
 /// the socket file a host killed with SIGKILL left; a launch record of a
 /// session no store holds naming that socket. Once a supervisor serves, the
 /// other directory's socket file and the record are both still there.
@@ -624,13 +625,14 @@ async fn a_symlinked_socket_directory_is_never_reclaimed_through() {
     let stack = Stack::new().await;
     let state = stack.state.path();
     let home = farhelm_teststate::tempdir().expect("home");
-    let tmux_seams = SupervisorSeams {
-        new_terminals: farhelm_supervisor::service::NewTerminals::Tmux,
-        ..tab_seams(home.path())
-    };
-    let (sup, client) = stack.supervisor(tmux_seams).await;
+    let (sup, client) = stack.supervisor(tab_seams(home.path())).await;
     let kept = keeper(&client, stack.work.path()).await;
     retire(state, sup, client).await;
+    // The keeper only has to be known to the store (an empty database
+    // reclaims nothing); its host and the socket directory it lived in go,
+    // so that `hosts` can become the symlink under test.
+    end_all_terminals(state).await;
+    std::fs::remove_dir_all(state.join("hosts")).expect("remove the socket directory");
     assert!(
         !state.join("hosts").exists(),
         "premise: no socket directory of its own"
