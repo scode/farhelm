@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`mac-uninstall-volume-names`](reports/mac-uninstall-volume-names.report.md) landed 2026-11-09 in #3267: A remote Mac's uninstall treats its mount check as best effort: it refuses only a mount it reads unambiguously inside the folder and never stops on an unreadable or ambiguous mount line
 - [`update-and-auto-update`](reports/update-and-auto-update.report.md) landed 2026-11-09 in #3269: An "Always update" button in the sidebar's host update prompt that updates the listed hosts and turns on automatic remote updates, showing in the prompt when saving the setting fails
 - [`approval-cards-fit`](reports/approval-cards-fit.report.md) landed 2026-11-09 in #3273: Approval cards keep their answer controls in view: one aligned fact list, a compact From line with a shortened requester ID, one permission row, capped text boxes, a pinned answer bar, and a 75% height cap, audited across every request kind
 - [`host-progress-hover`](reports/host-progress-hover.report.md) landed 2026-11-09 in #3272: One hover card for a running host's progress in the Hosts panel and the sidebar's attention box: every step, the current step kept in view, the host's connection detail and the run's message
