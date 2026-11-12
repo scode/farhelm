@@ -398,60 +398,80 @@ in the same window, before the window's next read of the host list shows it). Th
 estimate was low, not because the scope grew. The alternatives were landing #3339 alone and dropping the hardening, or
 landing it alone and planning the hardening separately; both leave those races in place for now.
 
-## Blocked
+### 2026-11-12: answer to a blocked question
 
-Blocked on 2026-11-12 (claim d1792a).
+The question, as the executor put it:
 
-### The finished stack is over the raised size limit
+> Blocked on 2026-11-12 (claim d1792a).
+>
+> ### The finished stack is over the raised size limit
+>
+> **What this plan is about.** Suspending or resuming a Tensorlake sandbox used to lock the whole browser window against
+> launches and host changes until it finished, up to two and a half minutes for a Resume. You decided on the 2026-11-11
+> planning page to let them overlap, refusing a Suspend or Resume only while that window's own launch is starting on, or
+> waking, the same host. You also asked for the launch's own wake of a suspended host to be hardened, because the
+> overlap makes two races more likely: a launch's Resume refused with "This host is busy" while another Suspend, Resume
+> or host operation is still running, and a host suspended again while the launch waits for it to connect, which left
+> the launch waiting a full minute before a timeout that blamed the connection.
+>
+> **What happened so far.** The first run stopped because the first PR alone was over the original limit of about 400
+> changed lines. The landing monitor answered on your behalf on 2026-11-12: continue as planned, with the limit raised
+> to about 1,000 changed lines for the whole stack, and block again if it goes over rather than trim what the plan asks
+> for.
+>
+> **What is done.** Both PRs are built, reviewed by the required reviewer with its findings fixed, and open as drafts:
+>
+> - #3339, the overlap itself (unchanged since the first run, only rebased onto current main).
+> - #3341, the hardening. A launch's Resume refused only because another operation holds the host is sent again each
+>   second, and the launch carries on when that operation ends or when another Resume brings the host up; any other
+>   refusal still fails at once. A host suspended again while the launch waits fails it at once, saying so. The waiting
+>   shares the minute the launch already allowed for connecting; the accepted Resume request itself does not count, so a
+>   slow restore is never cut off. To tell "busy" apart from refusals that waiting cannot clear, the helm now labels its
+>   "This host is busy" refusal in a way only it can set, and the browser retries on that label alone. A launch wakes a
+>   paused container host the same way it wakes a sandbox, so container hosts get the same label; that took a few lines.
+>   Browser tests cover all three cases (busy then accepted, suspended again, and a stale reading right after a
+>   successful Resume that must not count as suspended again) on Chromium and WebKit.
+>
+> Every acceptance criterion is met and the targeted tests pass; nothing else remains to build.
+>
+> **Why it stopped.** Counted the way the limit counts (code, tests and docs, without the changelog entry or the TODO
+> removal), the stack is about 1,215 changed lines: about 600 for #3339 and about 615 for #3341. The second PR was
+> estimated at about 300 added lines; it adds about 555 and removes about 60. Its scope did not grow. Most of it is the
+> browser's wake logic and its explanation (about 370 lines: roughly 150 of code, 110 of comments explaining why each
+> rule is what it is, and 100 of unit tests), the three browser tests (about 120), and the helm's "busy" label with its
+> test (about 110).
+>
+> ### The question
+>
+> How should this continue?
+>
+> - **Accept the stack at about 1,215 lines.** The next run writes the report and delivers both PRs as they are. The
+>   cost is a review about a fifth larger than the limit you set.
+> - **Trim it first.** Shorten the comments and fold the unit tests together. That would save perhaps 100 to 150 lines,
+>   still leaving it over 1,000, and would likely shorten the explanation of why a suspension shown right after a
+>   successful Resume is not a new one, which is the subtle part a future change is most likely to break.
+> - **Deliver #3339 alone and drop the hardening**, or **deliver #3339 alone and plan the hardening separately** for
+>   later. Both were offered at the first block, and the landing monitor turned both down on your behalf on 2026-11-12:
+>   the overlap without the hardening makes both races more likely, from the same window as well as from another one.
+>   Neither race leaves anything in a wrong state; the user sees a misleading error and launches again. Planning it
+>   separately would also mean building and reviewing #3341 again later.
+>
+> I recommend accepting the stack as it is. Nothing was added beyond what the plan asks for, and trimming cannot bring
+> it under the limit without dropping tests the plan requires.
 
-**What this plan is about.** Suspending or resuming a Tensorlake sandbox used to lock the whole browser window against
-launches and host changes until it finished, up to two and a half minutes for a Resume. You decided on the 2026-11-11
-planning page to let them overlap, refusing a Suspend or Resume only while that window's own launch is starting on, or
-waking, the same host. You also asked for the launch's own wake of a suspended host to be hardened, because the overlap
-makes two races more likely: a launch's Resume refused with "This host is busy" while another Suspend, Resume or host
-operation is still running, and a host suspended again while the launch waits for it to connect, which left the launch
-waiting a full minute before a timeout that blamed the connection.
+The maintainer's answer:
 
-**What happened so far.** The first run stopped because the first PR alone was over the original limit of about 400
-changed lines. The landing monitor answered on your behalf on 2026-11-12: continue as planned, with the limit raised to
-about 1,000 changed lines for the whole stack, and block again if it goes over rather than trim what the plan asks for.
+### Accept the stack at about 1,215 lines
 
-**What is done.** Both PRs are built, reviewed by the required reviewer with its findings fixed, and open as drafts:
+Answered by the landing monitor on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering blocks" (the
+maintainer delegated non-huge blocks to it on 2026-10-28). A later change of mind is a follow-up, not a reason to stop
+the plan.
 
-- #3339, the overlap itself (unchanged since the first run, only rebased onto current main).
-- #3341, the hardening. A launch's Resume refused only because another operation holds the host is sent again each
-  second, and the launch carries on when that operation ends or when another Resume brings the host up; any other
-  refusal still fails at once. A host suspended again while the launch waits fails it at once, saying so. The waiting
-  shares the minute the launch already allowed for connecting; the accepted Resume request itself does not count, so a
-  slow restore is never cut off. To tell "busy" apart from refusals that waiting cannot clear, the helm now labels its
-  "This host is busy" refusal in a way only it can set, and the browser retries on that label alone. A launch wakes a
-  paused container host the same way it wakes a sandbox, so container hosts get the same label; that took a few lines.
-  Browser tests cover all three cases (busy then accepted, suspended again, and a stale reading right after a successful
-  Resume that must not count as suspended again) on Chromium and WebKit.
+Decision: deliver #3339 and #3341 as they are, without trimming comments or folding tests. The size limit for this
+plan's stack is now about 1,215 changed lines, counted as before; write the report and deliver.
 
-Every acceptance criterion is met and the targeted tests pass; nothing else remains to build.
-
-**Why it stopped.** Counted the way the limit counts (code, tests and docs, without the changelog entry or the TODO
-removal), the stack is about 1,215 changed lines: about 600 for #3339 and about 615 for #3341. The second PR was
-estimated at about 300 added lines; it adds about 555 and removes about 60. Its scope did not grow. Most of it is the
-browser's wake logic and its explanation (about 370 lines: roughly 150 of code, 110 of comments explaining why each rule
-is what it is, and 100 of unit tests), the three browser tests (about 120), and the helm's "busy" label with its test
-(about 110).
-
-### The question
-
-How should this continue?
-
-- **Accept the stack at about 1,215 lines.** The next run writes the report and delivers both PRs as they are. The cost
-  is a review about a fifth larger than the limit you set.
-- **Trim it first.** Shorten the comments and fold the unit tests together. That would save perhaps 100 to 150 lines,
-  still leaving it over 1,000, and would likely shorten the explanation of why a suspension shown right after a
-  successful Resume is not a new one, which is the subtle part a future change is most likely to break.
-- **Deliver #3339 alone and drop the hardening**, or **deliver #3339 alone and plan the hardening separately** for
-  later. Both were offered at the first block, and the landing monitor turned both down on your behalf on 2026-11-12:
-  the overlap without the hardening makes both races more likely, from the same window as well as from another one.
-  Neither race leaves anything in a wrong state; the user sees a misleading error and launches again. Planning it
-  separately would also mean building and reviewing #3341 again later.
-
-I recommend accepting the stack as it is. Nothing was added beyond what the plan asks for, and trimming cannot bring it
-under the limit without dropping tests the plan requires.
+Why: every acceptance criterion is met and nothing was added beyond what the plan asks for. Trimming would save perhaps
+100 to 150 lines, still leave the stack over the previous limit of about 1,000, and would most likely cut the
+explanation of why a suspended state shown right after a successful Resume is not a new suspension, the part a future
+change is most likely to break. Delivering #3339 alone, with or without planning the hardening later, was already turned
+down on 2026-11-12 for the reasons recorded in the previous decision, and #3341 is now built and reviewed.
