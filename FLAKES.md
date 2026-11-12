@@ -4827,3 +4827,44 @@ directories are kept privately.
 Class: fixture-premise
 
 Cause: hypothesis
+
+## 2026-11-12 — long-host header progress test's listing route fails with "Route is already handled" (e2e/tests/restart-replace-progress.spec.ts)
+
+`header progress keeps controls inside a 650px pane with a long host` failed on WebKit in a narrow browser check of the
+tmux-end-old-terminals stack's tip on a Tensorlake sandbox (run `6cfdb804-985a-46f2-8a6f-4580357eae70`) with
+Playwright's "Route is already handled", thrown by the spec's own session-listing route handler in `openSource`. The
+spec's other seven tests passed in that run. Repeated with `--repeat-each=20` on the same build, the whole spec on each
+engine, it failed 1 of 20 on WebKit (run `5ae50998-2b4b-4259-ae15-54a88d7040f9`) and 1 of 20 on Chromium (run
+`4611265d-0a70-4a05-a86b-b010ec11deed`), every other test of the spec passing all 20 times. On main without the stack,
+the test alone repeated 20 times failed 2 of 20 on WebKit (run `e3b624fc-3519-4f74-9420-6c06c328a2ee`) and 0 of 20 on
+Chromium (run `0fee0628-2e30-45f9-9ada-60e5874bc621`), always with the same error, so the flake predates the stack. Each
+failure ended fast, on the route error, not on a timeout; which step of the test was running when it fired was not
+established. `openSource` installs its `/api/hosts` and session-listing routes as plain `page.route` handlers that call
+`route.fetch` and then `route.fulfill`, while the page keeps reading the listing under an installed clock;
+`e2e/tests/helpers/drained-route.ts` documents that a route can lose ownership while `route.fetch` reads its reply and
+treats this error as moot, and this spec does not use it. Two explanations fit and neither is ruled out: a listing read
+the page abandoned while the handler was still fetching, or the established mechanism of the 2026-09-05 and 2026-10-17
+entries for this error (interception removed or the test torn down while a handler was still fetching). Why only this
+test of the eight fails, when all eight share `openSource`'s routes, is open; it is the only one that opens a session
+that is not interrupted and the only one that resizes the viewport. Open. The same error was seen once in
+`restart-with.spec.ts` (`restart with withdraws working-agent consent when its source exits`, Chromium, run
+`63ae0313-7f09-4ed4-b43f-0a535f5793a1`, in a whole-suite run of an earlier tip of the stack, `2d34c0eb`); on the final
+tip that test then passed 20 of 20 on each engine (runs `73835b3f-d372-4a17-93b7-b93fba51b63e` and
+`e5e41d70-9139-43c4-b5aa-2e4151c26d52` repeat the whole spec), so it is noted here and not recorded as its own flake.
+
+```text
+Error: route.fulfill: Route is already handled!
+  > 58 |     await route.fulfill({ response, json: listing });
+```
+
+Evidence: Tensorlake sandboxes (Ubuntu 24.04, Node 24.16, three stacks each, the recorder's generic mode with
+`npx playwright test --project=<engine>-restart-replace-progress --retries=0`, plus `--repeat-each=20` and, on main,
+`--grep` for this title). Packs of the stack's tip `399e27c4` (no tracked changes; 19 untracked review-queue files the
+stack deletes) and of main `8928d8b3` (no tracked changes; the stack's untracked changelog fragment
+`end-old-terminals.md`), all inert Markdown. Recorded tmux 3.7c executables, SHA256 `7ffdb77a…` in the tip pack and
+`b0343b76…` in the main pack; locale C.UTF-8; only the recorder's own `FARHELM_TEST_TRACE_DIR`, no ambient Farhelm
+variables; per-case load unavailable. The failed run directories are kept privately.
+
+Class: fixture-premise
+
+Cause: hypothesis

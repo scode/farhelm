@@ -27,3 +27,4 @@ nextest farhelm::e2e create_idempotency::a_crash_before_the_outcome_commit_still
 nextest farhelm-supervisor service::core::tests::a_failed_create_replays_its_error_and_a_changed_override_conflicts  # failed-create-replay-timeout
 playwright stop-tabs.spec.ts bulk Stop carries each target's tab precondition with skip false  # stop-tabs-bulk-list-stale
 playwright tensorlake-lifecycle.spec.ts a suspended session banner resumes its host  # tensorlake-banner-route-after-cleanup
+playwright restart-replace-progress.spec.ts header progress keeps controls inside a 650px pane with a long host  # long-host-header-progress-route
