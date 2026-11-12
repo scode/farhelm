@@ -30,10 +30,10 @@ What is NOT isolated, and what follows from it:
   `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*`, `fh-e2e.*` or `fh-smoke.*` directory
   holding a live flock, or a docker container from the CentOS script: leave them alone. The teststate sweep already
   reaps dead runs from any checkout, guarded by the flock, so nothing needs killing by hand.
-- The `systemd --user` manager and the CPU are shared. Timing budgets, the transient-scope availability probe, and the
-  RSS measurement in `terminal_backpressure` assume a quiet machine, and another agent's battery is exactly the load
-  FLAKES.md records as tripping them. A failure under that load is an environment event: keep the retained run, re-run
-  narrowly when the machine is quieter, and do not log it as a flake or a regression on one observation.
+- The `systemd --user` manager and the CPU are shared. Timing budgets and the transient-scope availability probe assume
+  a quiet machine, and another agent's battery is exactly the load FLAKES.md records as tripping them. A failure under
+  that load is an environment event: keep the retained run, re-run narrowly when the machine is quieter, and do not log
+  it as a flake or a regression on one observation.
 
 ## Agent scratch space
 

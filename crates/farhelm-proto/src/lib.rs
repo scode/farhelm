@@ -1171,18 +1171,15 @@ pub struct SessionInfo {
     )]
     pub agent_terminal: Option<TerminalKind>,
     /// Whether this session's supervisor creates new terminals in terminal
-    /// hosts: its internal switch (`SupervisorSeams::new_terminals` in
-    /// `farhelm-supervisor`) is on. A fact about the supervisor, repeated on
-    /// each of its sessions so that a reader holding one session can decide
-    /// on its own.
+    /// hosts. A fact about the supervisor, repeated on each of its sessions
+    /// so that a reader holding one session can decide on its own.
     ///
     /// The UI shows the migration band only while this is true, and the
     /// session details' terminal kinds only while this is true or the
     /// session already has a new terminal: before a host creates new
     /// terminals, there is nothing to move a session to. False from a sender
     /// that predates the field, which is the safe reading for the same
-    /// reason. A supervisor kept on old terminals on purpose (the media
-    /// harnesses' option) reports false too.
+    /// reason. Every supervisor of this build reports true.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub supervisor_creates_host_terminals: bool,
     /// The repository this session was created from by a fresh GitHub
@@ -1760,8 +1757,8 @@ pub enum StreamKind {
 #[serde(rename_all = "snake_case")]
 pub enum TerminalKind {
     /// A pane in the supervisor's private tmux server: every terminal from
-    /// before terminal hosts, and the kind a supervisor with its internal
-    /// switch off still creates.
+    /// before terminal hosts, which a supervisor may still serve but no
+    /// longer creates.
     Tmux,
     /// A terminal host process that owns the pty and the program in it.
     Host,
@@ -3850,10 +3847,7 @@ pub enum ControlMsg {
     /// that lies about everything but the one field this request changed.
     SessionRenamed { req_id: u64, session: SessionInfo },
     /// Open a terminal tab: a plain shell in the session's working
-    /// directory, in a terminal host of its own (PLAN_M4.md item 2; a
-    /// supervisor started with the test-only `--new-terminals tmux` opens
-    /// it as a window on an old session's tmux session instead, and refuses
-    /// it for a session whose agent runs in a terminal host). Refused —
+    /// directory, in a terminal host of its own (PLAN_M4.md item 2). Refused —
     /// with the session untouched — when the working directory has
     /// vanished (M3's restart precondition, same error shape), when the
     /// agent's terminal no longer exists (a rebooted session must be
@@ -7695,11 +7689,11 @@ mod tests {
         );
     }
 
-    /// Spec: the terminal kinds and the switch report travel as
+    /// Spec: the terminal kinds and the host terminals report travel as
     /// `agent_terminal`, `supervisor_creates_host_terminals` and a tab's
     /// `kind`, spelled `tmux` and `host`; an absent field, `null` and a kind
-    /// this build does not know all decode as "not reported" (and the switch
-    /// as off), and the unset values are left off the wire.
+    /// this build does not know all decode as "not reported" (and the report
+    /// as false), and the unset values are left off the wire.
     ///
     /// Why: these fields join protocol 68 as additive, which holds only if
     /// a receiver that lacks them, or a sender that omits them, changes

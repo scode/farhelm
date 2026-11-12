@@ -19,13 +19,11 @@ import { type Page, type APIRequestContext } from "@playwright/test";
 import fs from "node:fs";
 import { renameSession, stubFeed } from "./helpers/fleet";
 import { attachSession, cleanupSession, restartIdleAgent, termText, waitForTermText } from "./helpers/term";
-import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 import { routeGate } from "./helpers/route-gate";
 import {
   addTab,
   createTabSession,
-  FLOOD_AGENT_COMMAND,
   fulfillAsHelm,
   islandText,
   reconnectTimingsFromNextLoad,
@@ -653,126 +651,6 @@ test("a displaced view discovers the winner's new tab without attaching it, unti
     ).toContainText("Detached", { timeout: 15_000 });
   } finally {
     if (second) await second.close();
-    if (id) await cleanupSession(request, id);
-  }
-});
-
-// PLAN_M4.md item 3's isolation claim, at the browser level: per-terminal
-// flow control is what makes it safe to leave background tabs attached, so
-// a viewer that stops draining ONE tab must pause only that tab.
-//
-// Driven with a real producer inside a real tab (the fake agent's flood
-// script, run as an ordinary command — which is what a tab being a plain
-// shell buys) and a write patch scoped to that one xterm instance, so the
-// stall is genuinely one terminal's and not a page-wide freeze. The agent
-// terminal and the sibling tab are proven unaffected by INPUT round trips,
-// not merely by their counters staying zero: a page that had wedged
-// entirely would also report zero pauses everywhere.
-test("stalling one tab's writes pauses only that tab; the agent and a sibling stay live", { tag: OLD_TERMINAL_TAG }, async ({
-  page,
-  request,
-}) => {
-  // xterm.js's write-callback flow control. A grid stream is paced by the
-  // helm and the supervisor instead (their own tests pin a paused flood
-  // losing nothing), and the grid has no writes to stall.
-  test.setTimeout(180_000);
-  const title = `tab-isolation-${Date.now()}`;
-  let id: string | undefined;
-  try {
-    // Lower the pause mark before anything mounts, because the default one
-    // is not reachable here and the test used to lose a race it could not
-    // see. A stalled tab pauses after four megabytes of undrained output;
-    // the supervisor cuts a viewer that stops consuming loose with a
-    // visible stall reason well before that, and on a loaded machine it
-    // wins. Instrumenting the failure showed exactly that: three of twenty
-    // loaded WebKit executions closed the socket at about four seconds with
-    // "terminal stopped consuming output (stalled)" while only 1.4-2.2 MB
-    // sat undrained, so `pauseCount` could not have moved. With the mark at
-    // 64 KiB the crossing happens in milliseconds and the isolation claim
-    // below is observed rather than raced.
-    //
-    // It is lowered for the whole page rather than one island, which makes
-    // the sibling assertions STRONGER: the agent and the sibling now have a
-    // mark that is easy to trip, and they still must not trip it.
-    await page.addInitScript(() => {
-      (window as any).__farhelmTestFlowControl = { highWater: 64 * 1024 };
-    });
-    const session = await openSessionWithTabs(page, request, title, 2);
-    id = session.id;
-    const [stalled, sibling] = session.tabs;
-
-    // Swallow completion callbacks for ONE island's terminal only. Applied
-    // after mount (unlike the page-wide patches earlier in this file)
-    // precisely so it can be scoped by instance identity — the producer
-    // below has not started yet, so nothing is missed by patching late.
-    await page.evaluate((el) => {
-      const target = (window as any).__farhelmIslands[el].term;
-      const real = (window as any).Terminal.prototype.write;
-      (window as any).__heldWrites = [];
-      (window as any).Terminal.prototype.write = function (data: unknown, cb?: () => void) {
-        if (this === target && cb) {
-          return real.call(this, data, () => (window as any).__heldWrites.push(cb));
-        }
-        return real.call(this, data, cb);
-      };
-      (window as any).__realWrite = real;
-    }, `terminal-${stalled}`);
-
-    // A tab is a plain shell, so the suite's own flood fixture runs in it
-    // as an ordinary command — no special support needed on either side.
-    await selectTerminal(page, stalled);
-    await page.locator(`[id="terminal-${stalled}"]`).click();
-    await page.keyboard.type(`${FLOOD_AGENT_COMMAND}`);
-    await page.keyboard.press("Enter");
-
-    await expect
-      .poll(
-        () =>
-          page.evaluate(
-            (el) => (window as any).__farhelmIslands[el].test.pauseCount,
-            `terminal-${stalled}`,
-          ),
-        { timeout: 60_000, message: "the stalled tab must cross HIGH_WATER and pause" },
-      )
-      .toBeGreaterThanOrEqual(1);
-
-    // The other two terminals never paused...
-    const others = await page.evaluate(
-      (els) =>
-        els.map((el: string) => (window as any).__farhelmIslands[el].test.pauseCount),
-      ["terminal", `terminal-${sibling}`],
-    );
-    expect(others).toEqual([0, 0]);
-    // ...and, more to the point, still work. This is the assertion that
-    // would fail if one wedged terminal had pinned the whole connection.
-    await selectTerminal(page, "agent");
-    await page.locator("#terminal").click();
-    await page.keyboard.type("isolation-agent");
-    await page.keyboard.press("Enter");
-    await waitForTermText(page, "echo:isolation-agent", 20_000);
-    const live = shellMarker("ISOLATION-SIBLING");
-    await selectTerminal(page, sibling);
-    await runInShell(page, `terminal-${sibling}`, live.command, live.expected);
-
-    // Releasing the held callbacks drains the backlog and the paused tab
-    // resumes on its own — the other half of the watermark contract.
-    await page.evaluate(() => {
-      (window as any).Terminal.prototype.write = (window as any).__realWrite;
-      const held = (window as any).__heldWrites;
-      (window as any).__heldWrites = [];
-      for (const cb of held) cb();
-    });
-    await expect
-      .poll(
-        () =>
-          page.evaluate(
-            (el) => (window as any).__farhelmIslands[el].test.resumeCount,
-            `terminal-${stalled}`,
-          ),
-        { timeout: 60_000, message: "draining must resume the paused tab" },
-      )
-      .toBeGreaterThanOrEqual(1);
-  } finally {
     if (id) await cleanupSession(request, id);
   }
 });

@@ -4839,12 +4839,13 @@
         // xterm.js 6.0.0. The vendored bundle stays byte-identical to
         // upstream (SPEC_impl.md, "Terminal widget: xterm.js island",
         // records this as the one deliberate constraint on it), so this
-        // compensates from the outside instead:
-        // `e2e/tests/terminal-scroll-freeze.spec.ts` scrolls a real
-        // terminal back mid-flood and shows the painted DOM going stale
+        // compensates from the outside instead. A real terminal
+        // scrolled back mid-flood showed the painted DOM going stale
         // — rendered rows disagree with `term.buffer.active` and stay
         // that way — for two shapes: a plain flood once scrollback is
-        // already full, and output confined to a DECSTBM scroll region.
+        // already full, and output confined to a DECSTBM scroll region
+        // (a browser spec reproduced both while the suite could still
+        // create old terminals).
         //
         // What is established, read directly from the bundle: once
         // scrollback is full and the user is scrolled back,

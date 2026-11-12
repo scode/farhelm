@@ -201,10 +201,10 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
         })
         .collect();
     let mut sessions = sup.store.project_checkout_metadata(sessions).await?;
-    // Every row, held ones included: the switch is this supervisor's, not
+    // Every row, held ones included: the report is this supervisor's, not
     // the entry's (`report_new_terminals`).
     for session in &mut sessions {
-        report_new_terminals(sup.new_terminals(), session);
+        report_new_terminals(session);
     }
     *sup.last_listed.lock().expect("last-listed mutex poisoned") = sessions
         .iter()

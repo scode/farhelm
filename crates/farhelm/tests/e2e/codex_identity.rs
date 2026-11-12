@@ -757,7 +757,6 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     let Harness {
         client,
         sup,
-        _tmux,
         state,
         _slot,
     } = h;
@@ -799,7 +798,6 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     let h = Harness {
         client,
         sup,
-        _tmux,
         state,
         _slot,
     };
@@ -1601,7 +1599,6 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     let Harness {
         client,
         sup,
-        _tmux,
         state,
         _slot,
     } = h;

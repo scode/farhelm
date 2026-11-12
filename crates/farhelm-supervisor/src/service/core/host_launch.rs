@@ -1,15 +1,11 @@
-//! Starting a create's agent in a terminal host, behind the switch
-//! [`super::SupervisorSeams::new_terminals`] (on in every shipped
-//! supervisor, since `farhelm supervisor run` defaults to hosts; an
-//! in-process harness turns it on by choice).
+//! Starting a create's agent in a terminal host, where every launch starts.
 //!
-//! A host launch is the tmux launch with a different terminal around the
-//! same command. Everything up to the command is shared
+//! Everything up to the command is shared with Restart
 //! ([`Supervisor::prepare_launch`]: the spec, the hook policy, the login
 //! shell and the shim's command line, with the `systemd-run --user --scope`
-//! wrapper inside it exactly as a tmux pane runs it); this module only
-//! starts that command as a host's child, and answers the questions the
-//! create's launch identity asks of a host:
+//! wrapper inside it); this module only starts that command as a host's
+//! child, and answers the questions the create's launch identity asks of a
+//! host:
 //!
 //! - **What the child gets** ([`host_child_env`]): the supervisor's own
 //!   environment with the variables of Farhelm's terminal set over it
@@ -297,9 +293,17 @@ pub(super) struct SpawnedInHost {
     /// The runtime adopted for the new host, reporting to the supervisor's
     /// liveness notifier.
     pub(super) host: HostTerminal,
-    /// See `Spawned::artifacts`.
+    /// The files this launch owns: its spec and the rest of its launch
+    /// artifacts, which the caller removes if the launch is given up.
     pub(super) artifacts: LaunchArtifacts,
-    /// See `Spawned::hooked`.
+    /// Whether this launch's argv carried the conversation hook, as
+    /// [`Supervisor::with_farhelm_args`] decided.
+    ///
+    /// Returned rather than left on the supervisor because the cell that
+    /// records it, `RunCells::hooked`, belongs to the entry PUBLISHED for
+    /// this launch, and on the create path that entry does not exist until
+    /// the launch is confirmed. Both callers carry this value forward to
+    /// that publication; nothing else reads it.
     pub(super) hooked: bool,
     /// [`Supervisor::host_scan`] held shared since just before the host's
     /// first stage started: the caller keeps it until the host's entry is
@@ -397,10 +401,9 @@ impl Supervisor {
     }
 
     /// Start one launch's agent in a new terminal host, tagged with its
-    /// session and launch generation, and adopt the host: the host
-    /// counterpart of [`Self::spawn_agent`]'s new tmux session.
+    /// session and launch generation, and adopt the host.
     ///
-    /// The host's child runs exactly the command a tmux pane would
+    /// The host's child runs the launch's composed command
     /// ([`Self::prepare_launch`]), in `cwd`, at `cols` x `rows` (clamped
     /// as tmux clamps them), with the environment of [`host_child_env`]
     /// and the default journal cap. `initial_snapshot` seeds its terminal:
@@ -464,8 +467,8 @@ impl Supervisor {
             .await
             .map_err(HostSpawnFailure::Spec)?;
         // Counted from before the host starts until it is tracked below (or
-        // this launch fails), as for a tmux window: a stop in between still
-        // waits for it, and once the stop's wait has ended nothing starts.
+        // this launch fails): a stop in between still waits for it, and
+        // once the stop's wait has ended nothing starts.
         let _starting = match self.starting_launch() {
             Ok(starting) => starting,
             Err(LaunchesClosed) => {
@@ -616,7 +619,9 @@ impl Supervisor {
                 });
             }
         };
-        // Told once the launch is known to be running, as for tmux.
+        // The hook Farhelm could not add, told to the user once the launch
+        // is known to be running. The store fences the record on this
+        // generation, which the row already carries.
         if let Some(skip) = hook_skip {
             self.notify_session(
                 id,

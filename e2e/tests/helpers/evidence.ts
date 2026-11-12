@@ -14,18 +14,17 @@ import {
   BrowserTimeline,
   registerObservedPage,
 } from "./timeline";
-import { HostPremiseWatch, setActiveHostPremiseWatch, suiteTerminalsOf, watchHostPremise } from "./host-premise";
+import { HostPremiseWatch, setActiveHostPremiseWatch, watchHostPremise } from "./host-premise";
 
 export { expect };
 
 type EvidenceFixtures = {
   timeline: BrowserTimeline;
   /**
-   * On the main suite's new-terminal run, the watch that fails a test any of
-   * whose attachments of a real session came back as an old terminal
-   * (host-premise.ts); null on every other run.
+   * The watch that fails a test any of whose attachments of a real session
+   * came back as an old terminal (host-premise.ts).
    */
-  hostPremise: HostPremiseWatch | null;
+  hostPremise: HostPremiseWatch;
   /**
    * A test that serves a session the helm does not list (a fabricated reply)
    * sets this, so the host premise reads that session's absence as expected
@@ -75,14 +74,6 @@ export const test = base.extend<EvidenceFixtures>({
   }, { auto: true }],
   fabricatedTerminals: [false, { option: true }],
   hostPremise: [async ({ playwright, baseURL, extraHTTPHeaders, fabricatedTerminals }, use, testInfo) => {
-    const terminals = suiteTerminalsOf(testInfo.config);
-    // The run's kind, on every test of the main suite, so a report shows
-    // which kind of terminal a result is about.
-    if (terminals) testInfo.annotations.push({ type: "suite terminals", description: terminals });
-    if (terminals !== "host") {
-      await use(null);
-      return;
-    }
     // Lookups get a request context of their own, authorized as the test's
     // is, made only if a byte stream ever shows up (HostPremiseWatch), so a
     // test whose terminals are all new keeps its resource profile.
@@ -99,7 +90,7 @@ export const test = base.extend<EvidenceFixtures>({
       problems = await watch.finish(testInfo);
     }
     if (problems.length) {
-      throw new Error(`the new-terminal run's premise failed:\n${problems.join("\n")}`);
+      throw new Error(`the host-terminal premise failed:\n${problems.join("\n")}`);
     }
   }, { auto: true }],
   // Depends on `hostPremise` so the running test's watch is in place when
@@ -132,7 +123,7 @@ export async function observeContext(
   context: BrowserContext,
   timeline: BrowserTimeline,
 ): Promise<void> {
-  // Every observed context is also under the new-terminal run's premise
+  // Every observed context is also under the host-terminal premise's
   // watch (host-premise.ts), before any listener group of its own.
   watchHostPremise(context);
   let initReady = false;

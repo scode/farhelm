@@ -3,7 +3,7 @@
 
 use crate::harness::*;
 
-use crate::terminal_tabs::{listed_tabs, wait_for_shell, window_rows};
+use crate::terminal_tabs::{listed_tabs, wait_for_shell};
 
 // ---------------------------------------------------------------------------
 // The marker model (PLAN_M4.md item 2, positive selection)
@@ -169,46 +169,5 @@ fn the_marked_decoy_scrubs_inherited_kind_markers_from_its_child() {
     assert!(
         envs.contains(&entry("FARHELM_TAB_ID", None)),
         "the decoy must scrub an inherited tab kind marker"
-    );
-}
-
-/// The agent's window carries its marker after a create AND after a
-/// restart that reuses the same pane (PLAN_M4.md item 2).
-///
-/// The marker became load-bearing when pane-less reload learned to prefer
-/// it: without it, a session whose durable pane record is empty could
-/// recover onto a TAB's pane and then reap that tab on its next stop. So
-/// its presence is asserted directly against tmux rather than inferred,
-/// and asserted again after a restart — `respawn-pane` keeps the window
-/// and its options, and this is what would notice if a future change
-/// swapped it for a fresh window instead.
-#[farhelm_testtrace::test]
-async fn the_agent_window_keeps_its_marker_across_a_restart_in_place() {
-    let h = harness_tmux().await;
-    let (session, _work) = resumable_basic_session(&h).await;
-    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
-
-    let agent_marker = |rows: &[String]| -> Option<String> {
-        rows.iter().find_map(|row| {
-            let fields: Vec<&str> = row.split('|').collect();
-            (fields.get(1) == Some(&format!("fh-{}", session.id).as_str())
-                && fields.get(2) == Some(&"@0"))
-            .then(|| fields.get(4).unwrap_or(&"").to_string())
-        })
-    };
-    assert_eq!(
-        agent_marker(&window_rows(&h).await).as_deref(),
-        Some(session.id.as_str()),
-        "a created session's agent window must carry its own session id as the agent marker"
-    );
-
-    h.client
-        .restart_session(&session.id, true)
-        .await
-        .expect("restart");
-    assert_eq!(
-        agent_marker(&window_rows(&h).await).as_deref(),
-        Some(session.id.as_str()),
-        "a restart that reuses the pane must leave the agent window's marker intact"
     );
 }

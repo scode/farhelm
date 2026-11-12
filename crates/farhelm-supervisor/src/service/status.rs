@@ -67,7 +67,7 @@
 //! describes a session exactly as `ListSessions` would" a property of the
 //! code rather than a promise maintained by hand.
 
-use super::core::{NewTerminals, SessionEntry, Supervisor};
+use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::{
     append_launch_excerpt, read_launch_sentinel, sentinel_could_still_apply, stopped_before_start,
     wrapper_failure_detail,
@@ -597,25 +597,20 @@ pub(crate) fn entry_info(
     info
 }
 
-/// Report on a reply whether this supervisor creates new terminals in
-/// terminal hosts (`SessionInfo::supervisor_creates_host_terminals`): the
-/// supervisor's switch as `Supervisor::new_terminals` reads it, the same
-/// reading a create decides its kind from, so the report and what a create
-/// does cannot disagree.
+/// Report on a reply that this supervisor creates new terminals in
+/// terminal hosts (`SessionInfo::supervisor_creates_host_terminals`), which
+/// is always true: every terminal a supervisor creates is a host.
 ///
-/// The client shows its migration band only for a session whose supervisor
-/// reports this, so a supervisor kept on old terminals (the switch off, as
-/// the media harnesses run it) never shows one. Applied at the two reply
-/// boundaries every `SessionInfo` leaves through, the listing
-/// (`listing::list_all`) and the single-session replies
+/// Still reported because clients read it: the client shows its migration
+/// band only for a session whose supervisor reports this, and a supervisor
+/// from before terminal hosts, which never sets it, creates tmux terminals.
+/// Applied at the two reply boundaries every `SessionInfo` leaves through,
+/// the listing (`listing::list_all`) and the single-session replies
 /// (`Supervisor::with_checkout_metadata`), rather than stored on entries:
-/// the switch belongs to this process, while a stored copy would describe
-/// whichever supervisor built the entry.
-pub(crate) fn report_new_terminals(new_terminals: NewTerminals, info: &mut SessionInfo) {
-    info.supervisor_creates_host_terminals = match new_terminals {
-        NewTerminals::Tmux => false,
-        NewTerminals::Host => true,
-    };
+/// it describes the supervisor sending the reply, while a stored copy would
+/// describe whichever supervisor built the entry.
+pub(crate) fn report_new_terminals(info: &mut SessionInfo) {
+    info.supervisor_creates_host_terminals = true;
 }
 
 /// The exit code `terminal` still holds, if its program is dead and its

@@ -5,7 +5,6 @@ use crate::harness::*;
 
 use crate::boot_id_durable_outcome::listed;
 use crate::create_idempotency::handoff_to_new_supervisor;
-use crate::restart_with_resume::pane_capture;
 
 /// Observe the first restart's dying agent while its original generation is stopping.
 ///
@@ -320,63 +319,6 @@ async fn a_repointed_working_directory_refuses_the_restart() {
     );
 }
 
-/// Pane ids are assigned by a server-wide counter that restarts at `%0`
-/// with the tmux server, so a remembered `%N` can name a pane belonging to
-/// a completely different session — and `respawn-pane` REPLACES the
-/// process in whatever it names. Binding the target to the session as well
-/// (`=<session>:.<pane>`) is what makes that unconstructible.
-///
-/// This drives the reuse path itself rather than the pairing in isolation:
-/// two sessions whose pane ids come from the same counter, one restarted,
-/// and the other's agent must be entirely undisturbed.
-#[farhelm_testtrace::test]
-async fn a_restart_respawns_only_its_own_pane() {
-    let h = harness_tmux().await;
-    let sock = h.state.path().join("tmux.sock");
-    let (restarted, _work_a) = resumable_basic_session(&h).await;
-    let (bystander, _work_b) = resumable_basic_session(&h).await;
-
-    let (chan, initial_replay, mut rx) = h
-        .client
-        .attach_live(&bystander.id, 80, 24)
-        .await
-        .expect("attach");
-    let mut seen = initial_replay;
-    wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
-    h.client
-        .send_keys(chan, b"BYSTANDER-MARKER\r".to_vec())
-        .await;
-    wait_for(&mut rx, &mut seen, "BYSTANDER-MARKER", 10).await;
-    let bystander_pane = pane_id_of(&sock, &format!("fh-{}", bystander.id)).await;
-
-    h.client
-        .restart_session(&restarted.id, true)
-        .await
-        .expect("restart");
-    wait_for_live_status(&h.client, &restarted.id, 30).await;
-
-    // The bystander's agent must be untouched by another session's
-    // respawn. Waited for rather than read once: this list lands moments
-    // after a restart churned the same tmux server, which is exactly when
-    // a tolerated `list-panes` diagnostic can degrade one list to an empty
-    // pane map (see `wait_for_listing`). The pane-identity check below is
-    // what actually carries "untouched"; this one only establishes it is
-    // alive at all.
-    wait_for_live_status(&h.client, &bystander.id, 30).await;
-    assert_eq!(
-        pane_id_of(&sock, &format!("fh-{}", bystander.id)).await,
-        bystander_pane,
-        "and it must still be the same pane"
-    );
-    // Its terminal content is intact too — a respawn would have cleared
-    // the visible grid even where it left the pane in place.
-    let content = pane_capture(&sock, &format!("fh-{}", bystander.id)).await;
-    assert!(
-        content.contains("BYSTANDER-MARKER"),
-        "the bystander's own output must survive: {content}"
-    );
-}
-
 /// The reason sentinel paths are generation-scoped at all
 /// (`spec_path_for_launch`/`status_path_for_spec`, both keyed on the
 /// launch's generation number): a stale sentinel from an EARLIER
@@ -483,7 +425,6 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
         client,
         sup,
         state,
-        _tmux,
         _slot,
     } = h;
     let sup2 = handoff_to_new_supervisor(state.path(), sup, client).await;

@@ -109,15 +109,10 @@ pub(crate) struct TmuxTerminal {
 /// Two host terminals are equal when they share one runtime
 /// ([`crate::hosts::HostTerminal`]'s own equality).
 ///
-/// A create makes a [`Terminal::Host`] when the supervisor's switch says
-/// so (`SupervisorSeams::new_terminals`: on in a supervisor `farhelm
-/// supervisor run` starts unless `--new-terminals tmux` says otherwise, off
-/// in an in-process harness unless the test turns it on), a Restart of a
-/// host agent
-/// makes a new one, and a restarted supervisor's reload makes one for
-/// every host row whose host it finds
-/// again (`core::host_handover`): adopted, or, for a host it cannot read, a
-/// handle that answers as unavailable
+/// Every create makes a [`Terminal::Host`], every Restart makes a new one,
+/// and a restarted supervisor's reload makes one for every host row whose
+/// host it finds again (`core::host_handover`): adopted, or, for a host it
+/// cannot read, a handle that answers as unavailable
 /// (`crate::hosts::HostTerminal::unavailable`), never no terminal at all.
 /// Every arm for it here and at the decision points is the final one, so
 /// later changes only add constructors.
@@ -375,14 +370,6 @@ impl Terminal {
             id,
             kind: Some(self.wire_kind()),
         }
-    }
-}
-
-impl TmuxTerminal {
-    /// [`Terminal::tab_info`] for a tab whose window this is (a tab just
-    /// opened in tmux), through the variant like every other tab.
-    pub(crate) fn tab_info(&self, id: String) -> farhelm_proto::TabInfo {
-        Terminal::Tmux(self.clone()).tab_info(id)
     }
 }
 

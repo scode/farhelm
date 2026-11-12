@@ -8,7 +8,7 @@
 //! kernel `flock` on the directory while they are up). Farhelm could
 //! already launch such a thing, but only with the directory baked into
 //! the invocation string. `{cwd}` lets one command line follow the session's
-//! working directory; `Supervisor::spawn_agent` fills it as quoted data before
+//! working directory; `Supervisor::prepare_launch` fills it as quoted data before
 //! handing the original command source to Bash.
 //! The report-driven tests use `hook-report`; other cases keep `claude-record`
 //! as a plain argv-echoing fixture. Identity always comes from an explicit report.
@@ -468,7 +468,7 @@ async fn a_wrapper_launch_receives_the_sessions_directory() {
 /// agent's own argv.
 ///
 /// Two things could break independently here, which is why both are
-/// asserted. The fill itself is `spawn_agent`'s and is shared by every
+/// asserted. The fill itself is `prepare_launch`'s and is shared by every
 /// mode; what differs is the VECTOR that arrives at it. `relaunch_argv`'s
 /// `Resume` arm picks the stored template — already substituted for
 /// `{conversation}` by `filled_resume_argv` — instead of re-splitting the

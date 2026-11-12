@@ -3,15 +3,13 @@
 # the checksummed source pins when the cache did not already supply it, and
 # refuse anything but the pinned version.
 #
-# This is the build half of what scripts/test-tmux-pinned-shutdown.sh used
-# to do on its own. It is split out because the pinned build is no longer
-# only the focused teardown suite's concern: with the floor becoming the
-# regression-tested version (TODO.md's 2026-08-22 decision; the runtime
-# check lands later in the same stack), every CI job that drives tmux —
-# the full suite, the desktop smoke — has to run on this binary rather than
-# on whatever the runner's distro ships below the floor.
-# Those jobs prepend the printed directory to PATH; the shutdown suite still
-# calls this first and then runs its scenarios.
+# It began as the build half of a focused teardown regression suite, and is
+# its own script because the pinned build is every tmux-driving job's
+# concern: with the floor being the regression-tested version (TODO.md's
+# 2026-08-22 decision), every CI job that drives tmux — the full suite, the
+# desktop smoke — has to run on this binary rather than on whatever the
+# runner's distro ships below the floor. Those jobs prepend the printed
+# directory to PATH.
 #
 # Idempotent and cache-friendly: a binary that already exists at the target
 # path is reused, and the version assertion turns a cached binary of the

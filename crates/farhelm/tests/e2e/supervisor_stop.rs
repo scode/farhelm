@@ -1,18 +1,13 @@
 //! Stopping a real `farhelm supervisor run` process the way systemd does.
 //!
 //! The generated units use `KillMode=process`, so every planned stop,
-//! restart, and upgrade is a SIGTERM to the supervisor alone while tmux and
-//! every session keep running. Before the supervisor handled that signal it
-//! died on the spot, closing every tmux control client with output still
-//! streaming, which is the shape that can make tmux abort its whole private
-//! server (BUGS.md, "Abrupt supervisor death can crash the private tmux
-//! server"). The abort itself is too rare to reproduce on demand, so this
-//! module pins the part Farhelm controls: the signal reaches the orderly
-//! output shutdown, which finishes inside its budget, and the process then
-//! exits cleanly instead of being killed by the signal, having switched
-//! every output-bearing client to `no-output` first. The last part is
-//! observed through a `--tmux` wrapper that records each acknowledged
-//! `refresh-client -f no-output` the supervisor runs.
+//! restart, and upgrade is a SIGTERM to the supervisor alone while every
+//! session keeps running in its terminal host. This module pins that each
+//! way a supervisor is stopped (SIGTERM, a terminal hangup, a closed stdin
+//! tether) reaches the orderly shutdown, which finishes inside its budget,
+//! that the process then exits cleanly instead of being killed by the
+//! signal, and that the session's agent outlives it and still answers
+//! input; and that an inherited ignored hangup is honored.
 
 use crate::harness::*;
 
@@ -37,93 +32,59 @@ enum Stop {
 
 /// Spec: a terminal hangup (the pseudo-terminal holding the supervisor's
 /// stderr closes, then SIGHUP reaches the supervisor's whole process group)
-/// runs the same orderly output shutdown as SIGTERM: the supervisor exits
-/// with status 0 after both output clients acknowledged `no-output`, and
-/// the session survives and its agent answers a fresh input line after shutdown.
+/// runs the same orderly shutdown as SIGTERM: the supervisor exits with
+/// status 0, and the session's agent survives in its terminal host and
+/// answers a fresh input line after the shutdown.
 ///
 /// Why it matters: a terminal hangup is how a hand-started
 /// `farhelm supervisor run` (or a desktop app launched from a terminal) is
-/// most often stopped, and three separate failures hid behind it. Unhandled,
-/// SIGHUP killed the supervisor outright. Because the signal goes to the
-/// whole group, the tmux clients the supervisor spawned got it too and were
-/// torn down before the supervisor could switch them off. And with its
-/// stderr terminal gone, the supervisor's first log line after the hangup
-/// panicked the process before the shutdown ran. The supervisor is started
-/// as a group leader so the signal reaches its group and not the test
-/// runner's.
+/// most often stopped, and two separate failures hid behind it. Unhandled,
+/// SIGHUP killed the supervisor outright. And with its stderr terminal
+/// gone, the supervisor's first log line after the hangup panicked the
+/// process before the shutdown ran. The supervisor is started as a group
+/// leader so the signal reaches its group and not the test runner's; the
+/// agent surviving shows the hangup to the group did not reach the
+/// session's host either.
 #[farhelm_testtrace::test]
-async fn a_hangup_to_the_supervisors_group_closes_output_clients_in_order() {
+async fn a_hangup_to_the_supervisors_group_stops_it_in_order() {
     stop_attached_supervisor(Stop::HangupToGroup).await;
 }
 
 /// Spec: a supervisor holding a live, streaming terminal attachment answers
-/// SIGTERM by closing its output clients through the orderly path and
-/// exiting with status 0, and the agent it was serving still answers fresh input.
+/// SIGTERM through the orderly shutdown and exits with status 0, and the
+/// agent it was serving still answers fresh input.
 ///
-/// Why it matters: a SIGTERM-killed process (exit by signal) is exactly the
-/// abrupt close that risks the whole tmux server; exit status 0 plus the
-/// "stopping" log line without the budget-exceeded warning is the evidence
-/// that the handler ran and completed. The session check guards the other
-/// direction: an orderly shutdown must not take the agents down with it;
-/// a retained dead pane would still satisfy session existence alone.
+/// Why it matters: exit status 0 plus the "stopping" log line without the
+/// budget-exceeded warning is the evidence that the handler ran and
+/// completed, rather than the process dying of the signal. The session
+/// check guards the other direction: an orderly shutdown must not take the
+/// agents down with it; a host process that still runs would not prove that
+/// its agent does.
 #[farhelm_testtrace::test]
-async fn sigterm_closes_output_clients_in_order_and_exits_cleanly() {
+async fn sigterm_stops_the_supervisor_in_order_and_exits_cleanly() {
     stop_attached_supervisor(Stop::Sigterm).await;
 }
 
 /// Spec: a closed stdin tether (`--exit-on-stdin-close`) runs the same
-/// orderly output shutdown as SIGTERM before the supervisor exits.
-/// Its agent must still answer fresh input after the tether closes, since
-/// a retained dead pane alone would not prove running work survived.
+/// orderly shutdown as SIGTERM before the supervisor exits, and its agent
+/// still answers fresh input after the tether closes.
 ///
 /// Why it matters: the tether used to be raced against the supervisor and
 /// win by dropping it mid-stream, which is the same abrupt close as a
 /// signal death; a tethering parent going away is a routine stop, not a
 /// crash.
 #[farhelm_testtrace::test]
-async fn a_closed_desktop_tether_closes_output_clients_in_order() {
+async fn a_closed_desktop_tether_stops_the_supervisor_in_order() {
     stop_attached_supervisor(Stop::TetherClosed).await;
-}
-
-/// Write a tmux wrapper that execs the real tmux for everything except the
-/// supervisor's output-disabling command, which it runs, then records with
-/// its exit status in `log`, one line each.
-///
-/// That command is a separate tmux process whose successful exit is the
-/// supervisor's acknowledgement that tmux applied `no-output` to the named
-/// client (`TmuxDriver::disable_control_client_output`), and it can only
-/// succeed while that client still exists, so a recorded success is proof
-/// that the client was switched off before it was closed. Everything else
-/// is passed through by `exec`, so long-lived control clients are real tmux
-/// processes with the pids and client names the supervisor expects.
-fn no_output_recording_tmux(dir: &std::path::Path, log: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt as _;
-    let real = farhelm_supervisor::tmux::resolve_tmux_program(None, None);
-    let quote = |path: &std::path::Path| shell_words::quote(&path.to_string_lossy()).into_owned();
-    let script = format!(
-        "#!/bin/sh\n\
-         case \" $* \" in\n\
-         *\" refresh-client \"*\" -f no-output \"*)\n\
-         \x20 {real} \"$@\"; rc=$?\n\
-         \x20 printf 'no-output rc=%s args=%s\\n' \"$rc\" \"$*\" >> {log}\n\
-         \x20 exit \"$rc\";;\n\
-         esac\n\
-         exec {real} \"$@\"\n",
-        real = quote(&real),
-        log = quote(log),
-    );
-    let wrapper = dir.join("tmux-no-output-recorder");
-    std::fs::write(&wrapper, script).expect("write the tmux wrapper");
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))
-        .expect("make the tmux wrapper executable");
-    wrapper
 }
 
 /// Start a real supervisor, give it a live attachment on a running fake
 /// agent, stop it the way `stop` says, and check the orderly shutdown ran
-/// and acknowledged `no-output` on the output-bearing clients, the process
-/// exited cleanly, and the agent still answers fresh input. Session existence
-/// alone cannot distinguish a surviving agent from a retained dead pane.
+/// inside its budget, the process exited cleanly, and the agent still
+/// answers fresh input in its terminal host, typed and read over a runtime
+/// of the test's own (no supervisor runs to attach through). A host process
+/// that still runs alone cannot distinguish a surviving agent from a host
+/// showing a dead program's last screen.
 async fn stop_attached_supervisor(stop: Stop) {
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
     let stderr_path = state.path().join("supervisor-stderr.log");
@@ -141,19 +102,10 @@ async fn stop_attached_supervisor(stop: Stop) {
             .expect("stderr capture file")
             .into()
     };
-    let no_output_log = state.path().join("no-output.log");
-    let wrapper = no_output_recording_tmux(state.path(), &no_output_log);
     let mut command = tokio::process::Command::new(farhelm_bin());
-    // `--new-terminals tmux`: what this checks is the orderly stop's
-    // teardown of tmux's output-bearing control clients, which only a tmux
-    // terminal has; on the default the session would run in a terminal host
-    // and the recorded `no-output` acknowledgements would never come.
     command
         .args(["supervisor", "run", "--state-dir"])
-        .arg(state.path())
-        .args(["--new-terminals", "tmux"])
-        .arg("--tmux")
-        .arg(&wrapper);
+        .arg(state.path());
     if matches!(stop, Stop::TetherClosed) {
         command
             .arg("--exit-on-stdin-close")
@@ -165,8 +117,6 @@ async fn stop_attached_supervisor(stop: Stop) {
         // job, and never to the test runner's own group.
         command.process_group(0);
     }
-    let sock = state.path().join("tmux.sock");
-    let _tmux = tmux_guard_for_supervisor_child(sock.clone(), command.as_std());
     let mut child = command
         .stdout(std::process::Stdio::null())
         .stderr(stderr)
@@ -193,25 +143,17 @@ async fn stop_attached_supervisor(stop: Stop) {
         )
         .await
         .expect("create");
-    wait_for_tmux_agent_ready(&sock, &session.id).await;
-    // A live attachment is what gives the supervisor output-bearing clients
-    // (the terminal's forwarder and the session sink) to shut down.
+    // A live attachment, so the stop below meets a supervisor that is
+    // really serving a terminal, not merely holding one.
     let (channel, replay, mut rx) = client
         .attach_live(&session.id, 80, 24)
         .await
         .expect("attach");
     let mut seen = replay;
     // Fresh output through this attachment after its replay, so the stop
-    // below meets clients that are really streaming, not merely opened.
+    // below meets an attachment that is really streaming, not merely opened.
     client.send_keys(channel, b"before-stop\r".to_vec()).await;
     wait_for(&mut rx, &mut seen, "before-stop", 20).await;
-    // Everything the wrapper records from here on is the stop's doing.
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&no_output_log)
-        .and_then(|mut log| std::io::Write::write_all(&mut log, b"STOP\n"))
-        .expect("mark the stop in the no-output log");
 
     match stop {
         Stop::Sigterm => {
@@ -247,7 +189,7 @@ async fn stop_attached_supervisor(stop: Stop) {
     );
 
     // A hangup's stderr went to the closed terminal, so for it the orderly
-    // shutdown is evidenced by the acknowledgements and exit status alone.
+    // shutdown is evidenced by the exit status alone.
     if !matches!(stop, Stop::HangupToGroup) {
         let log = std::fs::read_to_string(&stderr_path).expect("read supervisor stderr");
         assert!(
@@ -259,76 +201,36 @@ async fn stop_attached_supervisor(stop: Stop) {
             "{stop:?}: the orderly shutdown must finish inside its budget; stderr was:\n{log}"
         );
     }
-    // Both output-bearing clients of the attachment, the terminal's
-    // forwarder and the session sink, must have been switched off with an
-    // acknowledgement after the stop began. (The input client never carried
-    // output and is not expected here.)
-    let recorded = std::fs::read_to_string(&no_output_log).expect("read the no-output log");
-    let after_stop = recorded
-        .split_once("STOP\n")
-        .map(|(_, after)| after)
-        .unwrap_or_default();
-    let acknowledged: std::collections::HashSet<&str> = after_stop
-        .lines()
-        .filter(|line| line.starts_with("no-output rc=0 "))
-        .filter_map(|line| {
-            let mut words = line.split_whitespace();
-            words.by_ref().find(|word| *word == "-t")?;
-            words.next()
-        })
-        .collect();
-    assert!(
-        acknowledged.len() >= 2,
-        "{stop:?}: both output clients must acknowledge no-output before exit; recorded:\n{recorded}"
+    // The session's agent outlived its supervisor in its terminal host:
+    // the host answers a runtime of the test's own (nothing else is
+    // connected once the supervisor has exited), and the agent echoes a
+    // line typed there. Only the agent's own echo of a new line proves it
+    // still runs; the host alone would still show a dead program's screen.
+    let row = SessionStore::open(&state.path().join("supervisor.db"), false)
+        .await
+        .expect("open the store")
+        .session(&session.id)
+        .await
+        .expect("read the row")
+        .expect("the row exists");
+    assert_eq!(
+        row.terminal_kind,
+        farhelm_supervisor::store::TerminalKind::Host,
+        "premise: the session runs in a terminal host"
     );
-    // Sessions live in tmux as `fh-<id>` (see `wait_for_agent_ready`).
-    let target = format!("=fh-{}", session.id);
-    let has_session = tmux_query(&sock, &["has-session", "-t", &target]).await;
-    assert!(
-        has_session.status.success(),
-        "{stop:?}: the session must survive its supervisor's orderly stop: {}",
-        String::from_utf8_lossy(&has_session.stderr)
-    );
-
-    // Plain capture strips the basic fixture's color codes. Only its new
-    // echo, not the terminal's input echo or retained history, proves progress.
-    let pane_target = format!("fh-{}", session.id);
-    let probe = format!("after-stop-{}", uuid::Uuid::new_v4());
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let sent = tmux_query_before_deadline(
-        &sock,
-        &["send-keys", "-t", &pane_target, &probe, "Enter"],
-        deadline,
+    let socket = farhelm_supervisor::hosts::hosts_dir(state.path()).join(&row.terminal_address);
+    let host = farhelm_supervisor::hosts::HostTerminal::adopt(
+        &socket,
+        farhelm_supervisor::hosts::Adoption::Recovered,
+        farhelm_supervisor::hosts::HostTerminalOptions::default(),
     )
     .await
-    .expect("post-stop input probe exceeded its deadline");
-    assert!(
-        sent.status.success(),
-        "{stop:?}: send the post-stop liveness probe"
-    );
-    let expected = format!("echo:{probe}");
-    loop {
-        let captured = tmux_query_before_deadline(
-            &sock,
-            &["capture-pane", "-p", "-t", &pane_target],
-            deadline,
-        )
-        .await
-        .expect("post-stop agent echo capture exceeded its deadline");
-        let screen = String::from_utf8_lossy(&captured.stdout);
-        if captured.status.success() && screen.contains(&expected) {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "{stop:?}: the agent must answer fresh input after shutdown; \
-             capture status={} stderr={} screen={screen}",
-            captured.status,
-            String::from_utf8_lossy(&captured.stderr)
-        );
-        // sleep-ok: poll for the post-stop agent echo inside the explicit ten-second deadline.
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    .unwrap_or_else(|error| {
+        panic!("{stop:?}: the session's host must survive its supervisor's orderly stop: {error}")
+    });
+    let probe = format!("after-stop-{}", uuid::Uuid::new_v4());
+    crate::host_restarts::type_line(&host, &probe).await;
+    crate::host_terminals::wait_for_screen(&host, &format!("echo:{probe}")).await;
 }
 
 /// Open a pseudo-terminal pair: the controlling (master) side, whose drop
@@ -392,8 +294,6 @@ async fn an_inherited_ignored_hangup_leaves_the_supervisor_running() {
         .arg(farhelm_bin())
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path());
-    let sock = state.path().join("tmux.sock");
-    let _tmux = tmux_guard_for_supervisor_child(sock, command.as_std());
     let mut child = command
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

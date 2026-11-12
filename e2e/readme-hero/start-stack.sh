@@ -116,6 +116,43 @@ bash_shell=$(command -v bash) || exit 1
 remote_states=()
 remote_pids=()
 
+# End every terminal host whose socket is in state dir $1, with the command
+# an uninstall runs; succeed only when none may still run. The same helper
+# as e2e/start-stack.sh's, where its reasoning is.
+stop_terminal_hosts() {
+  [ -e "$1/hosts" ] || [ -L "$1/hosts" ] || return 0
+  "$bin" internal stop-terminal-hosts --state-dir "$1" </dev/null >/dev/null 2>"$1/stop-terminal-hosts.log" 9>&-
+}
+
+# Whether pid $1 may still run (a zombie counts as gone); as in
+# e2e/start-stack.sh.
+still_running() {
+  local stat
+  kill -0 "$1" 2>/dev/null || return 1
+  stat="$(ps -p "$1" -o stat= 2>/dev/null)" || stat=""
+  case "$stat" in
+    Z*) return 1 ;;
+    '') kill -0 "$1" 2>/dev/null || return 1 ;;
+  esac
+  return 0
+}
+
+# Wait about $1 seconds for the helm and every supervisor, the processes
+# that can start a terminal host, to be gone, and say whether they all are;
+# as in e2e/start-stack.sh.
+creators_gone() {
+  local end=$((SECONDS + $1)) pid alive
+  while :; do
+    alive=false
+    for pid in ${helm_pid:-} ${sup_pid:-} "${remote_pids[@]}"; do
+      still_running "$pid" && alive=true
+    done
+    [ "$alive" = false ] && return 0
+    [ "$SECONDS" -ge "$end" ] && return 1
+    sleep 0.1
+  done
+}
+
 cleanup() {
   kill "${watcher_pid:-}" 2>/dev/null
   wait "${watcher_pid:-}" 2>/dev/null
@@ -124,11 +161,21 @@ cleanup() {
   for pid in "${remote_pids[@]}"; do kill "$pid" 2>/dev/null; done
   rm -f "$stack_info"
   rm -f "$auth_state"
-  tmux -S "$state/tmux.sock" kill-server 2>/dev/null
-  for remote_state in "${remote_states[@]}"; do
-    tmux -S "$remote_state/tmux.sock" kill-server 2>/dev/null
-  done
-  rm -rf "$state"
+  # Terminal hosts outlive their supervisors by design, so each state dir's
+  # hosts are ended before the directory holding their sockets goes, once
+  # nothing is left that could start another. A host that may still run
+  # keeps the directory for the farhelm-teststate sweep, which ends its hosts
+  # later (e2e/start-stack.sh's cleanup has the reasoning).
+  hosts_stopped=true
+  if creators_gone 3; then
+    stop_terminal_hosts "$state" || hosts_stopped=false
+    for remote_state in "${remote_states[@]}"; do
+      stop_terminal_hosts "$remote_state" || hosts_stopped=false
+    done
+  else
+    hosts_stopped=false
+  fi
+  [ "$hosts_stopped" = true ] && rm -rf "$state"
 }
 trap cleanup EXIT
 trap 'exit 143' TERM INT
@@ -147,13 +194,9 @@ orphan_watch() {
 orphan_watch 9>&- &
 watcher_pid=$!
 
-# Every supervisor of the fleet creates new terminals in tmux
-# (`--new-terminals tmux`), although a bare `farhelm supervisor run` creates
-# terminal hosts: the captures this stack serves were designed and approved
-# against tmux terminals drawn by xterm.js, and on a supervisor started this
-# way no session shows the band that asks for old sessions to be moved, which
-# appears only where new terminals are terminal hosts (.agents/docs-media.md).
-HOME="$home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$state" --new-terminals tmux \
+# Every supervisor of the fleet creates its sessions' terminals in terminal
+# hosts, drawn by the grid component, as every shipped supervisor does.
+HOME="$home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$state" \
   >"$state/supervisor.log" 2>&1 9>&- &
 sup_pid=$!
 
@@ -162,7 +205,7 @@ while IFS= read -r destination; do
   test -n "$destination" || continue
   remote_state="$state/remote-$i"
   mkdir -p "$remote_state" || exit 1
-  HOME="$home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$remote_state" --new-terminals tmux \
+  HOME="$home" SHELL="$bash_shell" "$bin" supervisor run --state-dir "$remote_state" \
     >"$state/remote-$i.log" 2>&1 9>&- &
   remote_pids+=("$!")
   remote_states+=("$remote_state")

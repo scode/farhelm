@@ -96,8 +96,6 @@ mod tcp_relays;
 #[cfg(target_os = "linux")]
 mod host_creates;
 #[cfg(target_os = "linux")]
-mod host_migrations;
-#[cfg(target_os = "linux")]
 mod host_processes;
 #[cfg(target_os = "linux")]
 mod host_reclaim;
@@ -109,8 +107,6 @@ mod host_restarts;
 mod host_tabs;
 #[cfg(target_os = "linux")]
 mod host_terminals;
-#[cfg(target_os = "linux")]
-mod replay_marker;
 #[cfg(target_os = "linux")]
 mod session_rename;
 #[cfg(target_os = "linux")]

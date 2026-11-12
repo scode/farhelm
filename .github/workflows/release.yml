@@ -237,11 +237,6 @@ jobs:
             --kind release --selection 'workspace doctests except farhelm-desktop' \
             --concurrency '4 doctest threads' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4
-      - name: "Regress safe output-client teardown on the pinned tmux"
-        if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: |
-          PATH="$PWD/.ci-tmux:$PATH" scripts/test-tmux-pinned-shutdown.sh \
-            --kind release --output-root "$RUNNER_TEMP/test-run-evidence"
       - name: "Run the JS unit harness"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |

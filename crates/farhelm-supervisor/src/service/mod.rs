@@ -131,7 +131,7 @@ pub use connection::handle_connection;
 pub(crate) use core::host_child_env;
 pub use core::{
     BootIdSource, CreateCrashSeam, CreateIntentWaiting, CreateStage, FaultHooks,
-    ForwarderCleanupGate, HostRestartFault, HostRestartStage, NaturalDetachGate, NewTerminals,
+    ForwarderCleanupGate, HostRestartFault, HostRestartStage, NaturalDetachGate,
     ReclaimDiscoveryGate, ReclaimListingFault, STALL_DETACH_TIMEOUT, SampleFault, SampleRead,
     SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams, SupervisorTimeouts,
     TabOpenFault, TabOpenStage, TabSettleGate, TmuxSeedFault, UPLOAD_DISK_STAGE_TIMEOUT,

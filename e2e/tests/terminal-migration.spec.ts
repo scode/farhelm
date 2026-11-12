@@ -5,14 +5,10 @@
 //
 // Two kinds of evidence, kept apart on purpose:
 //
-// - The real stack's own replies. The ordinary run's supervisors create new
+// - The real stack's own replies. The stack's supervisors create new
 //   terminals, so a session made there names its terminals as new and shows
 //   no band; that is the end-to-end check that the kinds and the switch
-//   report reach the browser through the helm unchanged. The old-terminal
-//   set's run (OLD_TERMINAL_TAG; e2e/suite-terminals.ts) has supervisors that
-//   keep the switch off, as the media harnesses' stacks do, and checks that
-//   their sessions look exactly as they always have: no band, no terminal
-//   kinds.
+//   report reach the browser through the helm unchanged.
 // - Seeded listings. The band needs an old session on a supervisor that
 //   creates new terminals, which only a supervisor restarted from tmux to
 //   hosts has, and no browser stack restarts its local supervisor. So the
@@ -20,16 +16,14 @@
 //   UI and the real stack, with only the session rows' terminal fields
 //   rewritten on the way to the page, the way claude-trust.spec.ts seeds its
 //   trust question. That a real supervisor reports exactly those fields for
-//   such a session is checked by the process test
-//   `host_processes::an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move`
-//   (crates/farhelm/tests/e2e/host_processes.rs). The real terminals under
-//   the seeds are new ones.
+//   such a session is no longer checked: the process test that did so needed
+//   a supervisor that creates tmux terminals, which no supervisor can be any
+//   more. The real terminals under the seeds are new ones.
 
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { cleanupSession, createSession, renameSession } from "./helpers/fleet";
 import { attachSession } from "./helpers/term";
-import { OLD_TERMINAL_TAG } from "../suite-terminals";
 
 /** What a seeded row says about its terminals; `undefined` leaves the real
  * stack's value. */
@@ -105,33 +99,6 @@ async function listedRow(request: Parameters<typeof cleanupSession>[0], sessionI
 
 const band = (page: Page) => page.locator(".migration-band");
 const kinds = (page: Page) => page.locator(".session-details .session-details-terminals");
-
-/** A supervisor that does not create new terminals reports its terminals as
- * old and the switch as off, and its sessions show neither the band nor the
- * terminal kinds. Why: that is what the media harnesses' captures run on,
- * and what every shipped supervisor showed before terminal hosts; any change
- * there would show up in every published screenshot. In the old-terminal
- * set, since it needs a supervisor on old terminals; the ordinary run's
- * counterpart is the next test. */
-test("a supervisor still on old terminals shows no band and no terminal kinds", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
-  const session = await createSession(request, { title: `migration-off-${Date.now()}` });
-  try {
-    const tab = await openTab(request, session.id);
-    expect(tab.kind, "the tab-open reply names the tab's kind").toBe("tmux");
-    const row = await listedRow(request, session.id);
-    expect(row.agent_terminal).toBe("tmux");
-    expect(row.supervisor_creates_host_terminals ?? false).toBe(false);
-    expect(row.tabs.map((listed) => listed.kind)).toEqual(["tmux"]);
-
-    await page.goto("/");
-    await attachSession(page, session.id);
-    await expect(page.locator(".session-details")).toBeVisible();
-    await expect(band(page)).toHaveCount(0);
-    await expect(kinds(page)).toHaveCount(0);
-  } finally {
-    await cleanupSession(request, session.id);
-  }
-});
 
 /**
  * A session created on a host that creates new terminals says so in its
@@ -255,7 +222,7 @@ test("an old session's band hides until the next visit and offers only what the 
 test("a new agent with an old tab is told to reopen that tab", async ({ page, request }) => {
   // The seeded kinds are also what the page mounts by: an agent seeded as a
   // new terminal gets the grid alone, which needs the real new terminal under
-  // it that the ordinary run's supervisors make (the old tab's seed is the
+  // it that the stack's supervisors make (the old tab's seed is the
   // compatibility path, xterm.js swapped for the grid).
   const session = await createSession(request, { title: `migration-tabs-${Date.now()}` });
   try {

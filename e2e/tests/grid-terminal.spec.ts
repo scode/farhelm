@@ -1,6 +1,6 @@
 // A terminal in a terminal host, in the real app, against a real helm and a
-// supervisor that creates new terminals (the ordinary run's stacks;
-// e2e/suite-terminals.ts). A session created there runs in a host, and its
+// supervisor that creates new terminals, as every stack's do. A session
+// created there runs in a host, and its
 // terminal reaches the browser as a grid stream that the grid terminal
 // component draws, with no xterm.js terminal built for it.
 //

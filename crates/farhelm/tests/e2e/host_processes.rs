@@ -1,19 +1,13 @@
 //! Terminal hosts under a real supervisor process: `farhelm supervisor run`,
-//! whose hidden `--new-terminals` flag defaults to terminal hosts, so that
-//! every shipped launch (none passes the flag) creates its new terminals in
-//! them.
+//! which creates every terminal in a terminal host.
 //!
-//! Every other test of host terminals runs an in-process supervisor with the
-//! switch set in its seams (`host_creates`, `host_restarts`,
-//! `host_terminals`). What those cannot show is the shipped binary itself:
-//! that the bare command creates its agents and tabs in hosts while the
-//! process fixture for tests written against tmux
-//! (`harness::supervisor_process_tmux`, which passes `--new-terminals tmux`)
-//! still creates tmux terminals, that the flag reaches a create, that the
-//! process's own SIGTERM handling
-//! leaves its hosts running and recoverable, that a process killed outright
-//! leaves them recoverable too, that a new process's startup finds them, that
-//! the socket paths it binds stay within the bound every state directory
+//! Every other test of host terminals runs an in-process supervisor
+//! (`host_creates`, `host_restarts`, `host_terminals`). What those cannot
+//! show is the shipped binary itself: that the bare command creates its
+//! agents and tabs in hosts, that the process's own SIGTERM handling leaves
+//! its hosts running and recoverable, that a process killed outright leaves
+//! them recoverable too, that a new process's startup finds them, that the
+//! socket paths it binds stay within the bound every state directory
 //! already lives under, and that a helm relays a host terminal's grid stream
 //! and its input over the browser's WebSocket. So these tests start the
 //! products as processes, as `prompt_running_agent` and
@@ -48,41 +42,21 @@ const MACOS_SOCKET_PATH_MAX: usize = 103;
 
 // ---- A supervisor process with terminal hosts on ------------------------------
 
-/// The `--new-terminals host` a stack's supervisor is started with unless a
-/// test asks for the bare command ([`HostStack::bare`]).
-///
-/// Named explicitly although it is the default: these tests are about host
-/// terminals, and what they check must not change if the default ever
-/// does. Only the test of the default itself runs without it.
-const EXPLICIT_HOSTS: &[&str] = &["--new-terminals", "host"];
-
-/// The `--new-terminals tmux` a test sets on its stack to stand for a
-/// supervisor from before terminal hosts were the default: what the
-/// sessions a user already had were created by.
-const EXPLICIT_TMUX: &[&str] = &["--new-terminals", "tmux"];
-
-/// One test's real supervisor process, started with `--new-terminals host`
-/// (or with no flag at all, for the test of the default), and what it needs
-/// around it.
+/// One test's real supervisor process, a bare `farhelm supervisor run` as
+/// every shipped launch starts it, and what it needs around it.
 ///
 /// Field order is drop order: the supervisor process first (its `Child` is
-/// killed on drop), then its tmux server, then the directory holding both
-/// their sockets and every host's, whose drop ends the hosts the test left.
-/// A test that fails before [`HostStack::finish`] still tears down in that
-/// order, after its drop has printed the end of the supervisor's log.
+/// killed on drop), then the directory holding its socket and every host's,
+/// whose drop ends the hosts the test left. A test that fails before
+/// [`HostStack::finish`] still tears down in that order, after its drop has
+/// printed the end of the supervisor's log.
 struct HostStack {
     supervisor: Option<tokio::process::Child>,
-    tmux: Option<TmuxServerGuard>,
     /// The supervisor's state directory: `root` itself, or a directory
     /// inside it when a test needs a path of a chosen length.
     state: PathBuf,
-    /// What [`HostStack::start`] passes to `supervisor run` about the kind
-    /// of new terminals: [`EXPLICIT_HOSTS`], nothing, or (for a test that
-    /// needs an old session first) [`EXPLICIT_TMUX`]. Read at each start, so
-    /// a test can change it between restarts.
-    kind_args: &'static [&'static str],
-    /// Further arguments for `supervisor run`, read at each start like
-    /// `kind_args`: a `--tmux` naming the program a test wants it to run.
+    /// Further arguments for `supervisor run`, read at each start: a
+    /// `--tmux` naming the program a test wants it to run.
     extra_args: Vec<std::ffi::OsString>,
     root: farhelm_teststate::TestDir,
     work: farhelm_teststate::TestDir,
@@ -97,24 +71,13 @@ impl HostStack {
         Self::on(root, state).await
     }
 
-    /// A stack like [`HostStack::new`]'s whose supervisor is started as
-    /// every shipped launch starts it: a bare `farhelm supervisor run
-    /// --state-dir`, with no `--new-terminals`.
-    async fn bare() -> Self {
-        let mut stack = Self::new().await;
-        stack.kind_args = &[];
-        stack
-    }
-
     /// A stack whose state directory is `state`, inside `root`, which holds
     /// it and is what cleans it up.
     async fn on(root: farhelm_teststate::TestDir, state: PathBuf) -> Self {
         let slot = SLOTS.acquire().await.expect("semaphore is never closed");
         Self {
             supervisor: None,
-            tmux: None,
             state,
-            kind_args: EXPLICIT_HOSTS,
             extra_args: Vec::new(),
             root,
             work: farhelm_teststate::tempdir().expect("workdir"),
@@ -122,9 +85,8 @@ impl HostStack {
         }
     }
 
-    /// Start `farhelm supervisor run` (with `--new-terminals host` unless
-    /// this is a [`HostStack::bare`] stack) on this stack's state directory,
-    /// wait until it accepts connections, and return a client of it.
+    /// Start `farhelm supervisor run` on this stack's state directory, wait
+    /// until it accepts connections, and return a client of it.
     ///
     /// Its stderr is appended to `supervisor.log` in the test directory, one
     /// file across restarts. The directory goes when the test ends, failed
@@ -142,16 +104,9 @@ impl HostStack {
         let mut command = tokio::process::Command::new(farhelm_bin());
         command
             .args(["supervisor", "run"])
-            .args(self.kind_args)
             .args(&self.extra_args)
             .arg("--state-dir")
             .arg(&self.state);
-        if self.tmux.is_none() {
-            self.tmux = Some(tmux_guard_for_supervisor_child(
-                self.state.join("tmux.sock"),
-                command.as_std(),
-            ));
-        }
         let child = command
             .stdout(std::process::Stdio::null())
             .stderr(log)
@@ -220,14 +175,13 @@ impl HostStack {
     }
 
     /// The socket of the host a session's row names, after checking that
-    /// the row is a confirmed host row: the switch reached the create.
+    /// the row is a confirmed host row.
     async fn host_socket(&self, session_id: &str) -> PathBuf {
         let row = self.row(session_id).await;
         assert_eq!(
             row.terminal_kind,
             TerminalKind::Host,
-            "a create by a supervisor started with {:?} starts its agent in a host",
-            self.kind_args
+            "a create by a real supervisor process starts its agent in a host"
         );
         assert!(
             !row.terminal_address.is_empty(),
@@ -455,19 +409,16 @@ impl GridViewer {
 /// A bare `farhelm supervisor run` creates a new session's agent and a new
 /// tab in terminal hosts.
 ///
-/// Why: this is the switch-on. No shipped launch passes `--new-terminals`
-/// (`farhelm helm setup`'s units, the desktop app and a hand-started
-/// supervisor all run the bare command), so the flag's default is what every
-/// user's new terminals run in; every other test here names the kind
-/// explicitly and would keep passing if the default fell back to tmux.
-/// Spec: with no `--new-terminals`, a created session is a confirmed host
-/// row whose socket a host process serves; its agent terminal attaches as a
-/// grid stream that shows the agent's ready line; and a tab opened in it
-/// attaches as a grid stream too (a tmux window would answer a viewer that
-/// can draw grids with bytes).
+/// Why: `farhelm helm setup`'s units, the desktop app and a hand-started
+/// supervisor all run the bare command, so this is what every user's
+/// terminals run in. Spec: a created session is a confirmed host row whose
+/// socket a host process serves; its agent terminal attaches as a grid
+/// stream that shows the agent's ready line; and a tab opened in it attaches
+/// as a grid stream too (a tmux window would answer a viewer that can draw
+/// grids with bytes).
 #[farhelm_testtrace::test]
 async fn a_bare_supervisor_run_creates_agents_and_tabs_in_hosts() {
-    let mut stack = HostStack::bare().await;
+    let mut stack = HostStack::new().await;
     let client = stack.start().await;
     let session = stack.create(&client).await;
     let socket = stack.host_socket(&session.id).await;
@@ -505,247 +456,7 @@ async fn a_bare_supervisor_run_creates_agents_and_tabs_in_hosts() {
     stack.finish().await;
 }
 
-/// The real-process fixture for tests written against tmux still creates
-/// tmux terminals, now that the bare command creates hosts.
-///
-/// Why: `harness::supervisor_process_tmux` passes `--new-terminals tmux` so
-/// that the tests built on it (byte-stream attaches, reads of the private
-/// tmux server) keep testing old terminals for as long as old terminals exist.
-/// Without that pin they would run against host terminals and either fail
-/// for reasons unrelated to their subject or quietly stop covering tmux.
-/// Spec: a session created through that fixture's supervisor is a tmux row,
-/// its agent's pane in the private tmux server shows the agent ready, and a
-/// viewer that can draw grids is still answered with a byte stream.
-#[farhelm_testtrace::test]
-async fn the_tmux_process_fixture_still_creates_tmux_terminals() {
-    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let supervisor = supervisor_process_tmux().await;
-    let state = supervisor.state.path();
-    wait_for_supervisor_ready(state).await;
-    let stream = farhelm_supervisor::service::connect(state)
-        .await
-        .expect("connect to the supervisor");
-    let (read, write) = tokio::io::split(stream);
-    let client = tokio::time::timeout(WAIT, SupervisorClient::start(read, write))
-        .await
-        .expect("the handshake finished in time")
-        .expect("handshake");
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let session = client
-        .create_session(
-            &work.path().to_string_lossy(),
-            &fixture_cmd("fake-agent --script basic"),
-            None,
-            80,
-            24,
-        )
-        .await
-        .expect("create");
-
-    let row = SessionStore::open(&state.join("supervisor.db"), false)
-        .await
-        .expect("open the store")
-        .session(&session.id)
-        .await
-        .expect("read the row")
-        .expect("the row exists");
-    assert_eq!(
-        row.terminal_kind,
-        TerminalKind::Tmux,
-        "the tmux fixture's supervisor creates tmux terminals: {row:?}"
-    );
-    wait_for_tmux_agent_ready(&state.join("tmux.sock"), &session.id).await;
-    let (channel, stream) = client
-        .attach_terminal(
-            &session.id,
-            80,
-            24,
-            TerminalSelector::default(),
-            "",
-            ViewerStreams::BytesOrGrid,
-        )
-        .await
-        .expect("attach");
-    assert_eq!(
-        stream.stream_kind(),
-        farhelm_proto::StreamKind::Bytes,
-        "a tmux terminal answers even a grid-capable viewer with bytes"
-    );
-    client.detach(channel).await;
-}
-
-/// A session a supervisor created in tmux is still served from tmux by the
-/// bare `farhelm supervisor run` started on its state directory afterwards,
-/// and is reported as an old terminal on a supervisor that creates new ones,
-/// while a session created now runs in a host.
-///
-/// Why: this is every existing user's first start after the update that
-/// turns terminal hosts on. Their running sessions must keep working where
-/// they are, and the listing must carry exactly the two facts the migration
-/// band and the session details are drawn from (the session's agent terminal
-/// is old, and its supervisor creates new ones); the browser specs check the
-/// band against seeded rows and the real-host half only for sessions that
-/// are already new, since a browser stack cannot make an old session on a
-/// host that creates new ones. Spec: a session created by a supervisor
-/// started with `--new-terminals tmux` is a tmux row whose agent is ready in
-/// the private tmux server; after an orderly stop and a bare start on the
-/// same state directory, the listing reports that session with
-/// `agent_terminal: tmux` and `supervisor_creates_host_terminals: true`, its
-/// agent is still ready in tmux, and a session created afterwards is a
-/// confirmed host row listed with `agent_terminal: host`. The old session's
-/// terminal is attached through the bare supervisor by a viewer that can draw
-/// grids and still answers with a byte stream: served from tmux.
-///
-/// The same session carries the old-terminal notification (SPEC.md,
-/// "Status"), recorded by the bare supervisor's own ticker with nobody
-/// looking at the session: exactly one, unresolved, with the docs link, and
-/// none on the new session. Closing the session's old tab and stopping its
-/// agent leaves nothing old running, and the ticker resolves that same
-/// notification. (A Restart with an old tab open needs a resumable agent;
-/// `host_migrations::a_restart_with_an_old_tab_open_keeps_one_old_terminal_warning`
-/// covers it.)
-#[farhelm_testtrace::test]
-async fn an_old_session_after_the_switch_to_hosts_is_reported_as_one_to_move() {
-    let mut stack = HostStack::new().await;
-    stack.kind_args = EXPLICIT_TMUX;
-    let client = stack.start().await;
-    let old = stack.create(&client).await;
-    assert_eq!(
-        stack.row(&old.id).await.terminal_kind,
-        TerminalKind::Tmux,
-        "premise: the first supervisor creates tmux terminals"
-    );
-    let tmux_socket = stack.state.join("tmux.sock");
-    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
-    let old_tab = client.open_tab(&old.id).await.expect("open an old tab");
-    assert_eq!(
-        old_tab.kind,
-        Some(farhelm_proto::TerminalKind::Tmux),
-        "premise: the first supervisor opens tabs in tmux"
-    );
-    drop(client);
-    let status = stack.stop(libc::SIGTERM).await;
-    assert!(
-        status.success(),
-        "an orderly stop exits cleanly: {status:?}"
-    );
-
-    stack.kind_args = &[];
-    let client = stack.start().await;
-    let listed = |listing: &farhelm_helm::SessionListing, id: &str| {
-        listing
-            .sessions
-            .iter()
-            .find(|session| session.id == id)
-            .cloned()
-            .unwrap_or_else(|| panic!("session {id} is listed"))
-    };
-    let listing = client.list_sessions().await.expect("list sessions");
-    let old_row = listed(&listing, &old.id);
-    assert_eq!(
-        old_row.agent_terminal,
-        Some(farhelm_proto::TerminalKind::Tmux),
-        "the old session's agent is still in tmux: {old_row:?}"
-    );
-    assert!(
-        old_row.supervisor_creates_host_terminals,
-        "a bare supervisor reports that it creates new terminals: {old_row:?}"
-    );
-    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
-    let (channel, stream) = client
-        .attach_terminal(
-            &old.id,
-            80,
-            24,
-            TerminalSelector::default(),
-            "",
-            ViewerStreams::BytesOrGrid,
-        )
-        .await
-        .expect("attach the old session through the bare supervisor");
-    assert_eq!(
-        stream.stream_kind(),
-        farhelm_proto::StreamKind::Bytes,
-        "the bare supervisor serves the old session from tmux, as a byte stream"
-    );
-    client.detach(channel).await;
-    drop(stream);
-
-    let new = stack.create(&client).await;
-    stack.host_socket(&new.id).await;
-    let listing = client.list_sessions().await.expect("list sessions");
-    assert_eq!(
-        listed(&listing, &new.id).agent_terminal,
-        Some(farhelm_proto::TerminalKind::Host),
-        "a session created now runs in a host"
-    );
-
-    // The old-terminal notification, from the ticker alone.
-    let warning = wait_for_old_terminal_notification(&client, &old.id, false).await;
-    assert!(
-        warning
-            .text
-            .starts_with("This session must be restarted, replaced, stopped or deleted")
-            && warning
-                .text
-                .ends_with("See https://farhelm.io/docs/using/new-terminals/"),
-        "{warning:?}"
-    );
-    assert!(
-        listed(&listing, &new.id).notifications.is_empty(),
-        "a new session has none"
-    );
-    // Closing the old tab leaves the agent, still in tmux, so the warning
-    // stays; stopping the agent (its pane stays, dead) leaves nothing old
-    // running, and the ticker resolves it.
-    client
-        .close_tab(&old.id, &old_tab.id)
-        .await
-        .expect("close the old tab");
-    client
-        .stop_session(&old.id)
-        .await
-        .expect("stop the old agent");
-    let resolved = wait_for_old_terminal_notification(&client, &old.id, true).await;
-    assert_eq!(resolved.seq, warning.seq, "the same warning, resolved");
-    drop(client);
-    stack.finish().await;
-}
-
-/// Wait until session `id` lists exactly one notification and it is
-/// `resolved` or not as asked, and return it; fails with the last listing
-/// after [`WAIT`]. The ticker records and resolves the old-terminal warning
-/// on its own schedule, so there is no event to wait for but the listing.
-async fn wait_for_old_terminal_notification(
-    client: &SupervisorClient,
-    id: &str,
-    resolved: bool,
-) -> farhelm_proto::SessionNotification {
-    let deadline = tokio::time::Instant::now() + WAIT;
-    loop {
-        let listing = client.list_sessions().await.expect("list sessions");
-        let notifications = listing
-            .sessions
-            .iter()
-            .find(|session| session.id == id)
-            .map(|session| session.notifications.clone())
-            .unwrap_or_default();
-        if let [only] = &notifications[..]
-            && only.resolved == resolved
-        {
-            return only.clone();
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "session {id} never listed exactly one notification with resolved={resolved}: \
-             {notifications:?}"
-        );
-        // sleep-ok: polls the listing for the ticker's next pass (every two seconds).
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-}
-
-// ---- The private tmux server only while it holds old terminals -------------------------
+// ---- No tmux of its own ------------------------------------------------------------------
 
 /// A stand-in tmux at `path` that appends each invocation's arguments to
 /// `log`, one line each, and fails. The observable for "the supervisor ran
@@ -760,14 +471,6 @@ fn write_recording_tmux(path: &Path, log: &Path) {
     std::fs::write(path, script).expect("write the recording tmux");
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
         .expect("make the recording tmux executable");
-}
-
-/// Whether a tmux server answers on `socket`, asked with tmux directly.
-async fn tmux_server_runs(socket: &Path) -> bool {
-    tmux_query(socket, &["list-sessions"])
-        .await
-        .status
-        .success()
 }
 
 /// A supervisor whose sessions are all new terminals runs no tmux at all,
@@ -807,7 +510,7 @@ async fn a_supervisor_with_only_new_terminals_runs_no_tmux() {
         "premise-probe\n"
     );
     std::fs::remove_file(&log).expect("reset the log");
-    let mut stack = HostStack::bare().await;
+    let mut stack = HostStack::new().await;
     stack.extra_args = vec!["--tmux".into(), recorder.clone().into_os_string()];
 
     let client = stack.start().await;
@@ -886,148 +589,6 @@ async fn a_supervisor_with_only_new_terminals_runs_no_tmux() {
     stack.finish().await;
 }
 
-/// The private tmux server that holds a host's old terminals is adopted,
-/// keeps serving them, and ends with the last one.
-///
-/// Why: old sessions must keep working after the update that stops
-/// starting tmux, and the server must not outlive them: an earlier build
-/// kept it running with nothing in it forever. Spec: a session a supervisor
-/// started with `--new-terminals tmux` created is, after an orderly stop
-/// and a bare start, still ready in the private server and attaches as a
-/// byte stream; a session created then is a host row; deleting the old
-/// session ends the private server.
-#[farhelm_testtrace::test]
-async fn the_private_tmux_server_ends_with_the_last_old_terminal() {
-    let mut stack = HostStack::new().await;
-    stack.kind_args = EXPLICIT_TMUX;
-    let client = stack.start().await;
-    let old = stack.create(&client).await;
-    let tmux_socket = stack.state.join("tmux.sock");
-    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
-    drop(client);
-    let status = stack.stop(libc::SIGTERM).await;
-    assert!(
-        status.success(),
-        "an orderly stop exits cleanly: {status:?}"
-    );
-
-    stack.kind_args = &[];
-    let client = stack.start().await;
-    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
-    let (channel, stream) = client
-        .attach_terminal(
-            &old.id,
-            80,
-            24,
-            TerminalSelector::default(),
-            "",
-            ViewerStreams::BytesOrGrid,
-        )
-        .await
-        .expect("attach the old session through the bare supervisor");
-    assert_eq!(
-        stream.stream_kind(),
-        farhelm_proto::StreamKind::Bytes,
-        "the adopted server still serves the old session"
-    );
-    client.detach(channel).await;
-    drop(stream);
-    let new = stack.create(&client).await;
-    stack.host_socket(&new.id).await;
-
-    client
-        .delete_session(&old.id)
-        .await
-        .expect("delete the old session");
-    let deadline = tokio::time::Instant::now() + WAIT;
-    while tmux_server_runs(&tmux_socket).await {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the private tmux server must end with the last old terminal"
-        );
-        // sleep-ok: polls a server's exit, which tmux reports to no one.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    drop(client);
-    stack.finish().await;
-}
-
-/// Old terminals whose tmux cannot be used are reported not alive, are
-/// neither deleted nor restarted, and the supervisor still serves new ones.
-///
-/// Why: a supervisor's new terminals need no tmux, so a missing tmux must
-/// not keep it from starting, and an old terminal nothing can reach is not
-/// running as far as anyone can tell. But its agent may well still run in
-/// that server: a Delete that removed the row would leave it running with
-/// nothing that knows to end it (and the server alive for it), and a
-/// Restart would start a second agent beside it. Spec: with an old
-/// session's server still running, a bare supervisor started with `--tmux`
-/// naming a program that does not exist starts, lists the old session as
-/// exited with no terminal, refuses its Delete with a reason naming the
-/// unusable server (the row stays) and its Restart, creates a new session
-/// as a host row, and leaves the server running with the old agent ready.
-#[farhelm_testtrace::test]
-async fn old_terminals_without_a_usable_tmux_are_reported_not_alive() {
-    let mut stack = HostStack::new().await;
-    stack.kind_args = EXPLICIT_TMUX;
-    let client = stack.start().await;
-    let old = stack.create(&client).await;
-    let tmux_socket = stack.state.join("tmux.sock");
-    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
-    drop(client);
-    let status = stack.stop(libc::SIGTERM).await;
-    assert!(
-        status.success(),
-        "an orderly stop exits cleanly: {status:?}"
-    );
-
-    stack.kind_args = &[];
-    stack.extra_args = vec![
-        "--tmux".into(),
-        stack.root.path().join("no-such-tmux").into_os_string(),
-    ];
-    let client = stack.start().await;
-    let listing = client.list_sessions().await.expect("list sessions");
-    let listed = listing
-        .sessions
-        .iter()
-        .find(|session| session.id == old.id)
-        .expect("the old session is still listed");
-    assert_eq!(
-        listed.status,
-        SessionStatus::Exited { exit_code: None },
-        "an old terminal no tmux can reach is not alive: {listed:?}"
-    );
-    assert_eq!(listed.agent_terminal, None, "{listed:?}");
-    let deleted = client
-        .delete_session(&old.id)
-        .await
-        .expect_err("Delete of an agent that may still run is refused");
-    assert!(
-        format!("{deleted:#}").contains("cannot use it"),
-        "{deleted:#}"
-    );
-    stack.row(&old.id).await;
-    // Restart is refused too, but this fixture's agent reports no
-    // conversation, so its refusal comes from an earlier gate than the
-    // unusable server's; what this pins is only that no second agent
-    // starts. The unusable server's own refusal is the driver's
-    // (`tmux::tests::a_running_server_without_a_usable_tmux_is_left_alone_and_absent`).
-    client
-        .restart_session(&old.id, true)
-        .await
-        .expect_err("Restart beside an agent that may still run is refused");
-    let new = stack.create(&client).await;
-    stack.host_socket(&new.id).await;
-    assert!(
-        tmux_server_runs(&tmux_socket).await,
-        "the server holding the old session is left running"
-    );
-    wait_for_tmux_agent_ready(&tmux_socket, &old.id).await;
-    drop(client);
-    stack.finish().await;
-}
-
 // ---- A supervisor restart and a supervisor kill ----------------------------------------
 
 /// Run a host agent through a restart of its supervisor process that ends
@@ -1093,8 +654,8 @@ async fn a_host_agent_survives(signal: libc::c_int) {
 /// Why: this is the restart every update and every `systemctl restart` is.
 /// The in-process tests drive the orderly stop as a function; here it is the
 /// process's own SIGTERM handling, its exit, and a new process's startup
-/// that must find the host by its tag. Spec: a supervisor started with
-/// `--new-terminals host` creates the session in a host (a host row with
+/// that must find the host by its tag. Spec: a supervisor creates the
+/// session in a host (a host row with
 /// the socket's name); after SIGTERM it exits successfully and the host's
 /// process still serves the socket; the next supervisor's grid stream of the
 /// session shows the agent's ready line and the line echoed before the
@@ -1127,8 +688,8 @@ async fn a_host_agent_survives_a_killed_supervisor() {
 /// every state directory that works today works for hosts; a longer name or
 /// a deeper directory would make a long home directory on a Mac fail every
 /// create in a host while the supervisor itself starts fine. Spec: with
-/// `<state>/supervisor.sock` exactly 103 bytes long, a supervisor started
-/// with `--new-terminals host` creates the session in a host whose socket
+/// `<state>/supervisor.sock` exactly 103 bytes long, a supervisor creates
+/// the session in a host whose socket
 /// path is shorter than the supervisor's, its grid stream shows the agent's
 /// ready line, and a line typed into it is echoed.
 #[farhelm_testtrace::test]
@@ -1361,7 +922,7 @@ impl BrowserSocket {
 /// and carries each grid input message up as one frame. The helm's own tests
 /// run against stand-in supervisors and the supervisor's against its own
 /// client; only here do the real processes meet. Spec: with a supervisor
-/// started with `--new-terminals host` and a helm on its state directory, a
+/// and a helm on its state directory, a
 /// session created through the helm's API is a host row; its terminal
 /// socket with `?grid=1` says `{"type":"stream","kind":"grid"}` before any
 /// data, its binary frames are grid messages whose screen shows the agent's

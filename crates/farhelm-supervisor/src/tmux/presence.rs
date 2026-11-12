@@ -15,8 +15,8 @@
 //! is adopted, and its session names become the set of tmux sessions this
 //! process may ask about. From then on the set only shrinks (a listing that
 //! no longer shows a name, a kill, a server that went away) and grows only
-//! when this process itself creates a tmux session, which only the test-only
-//! `--new-terminals tmux` switch does.
+//! when this process itself creates a tmux session, which the supervisor no
+//! longer does (only the driver's own tests create sessions).
 //!
 //! An empty set means no server: the configuration sets `exit-empty on`, so
 //! tmux ends the server with its last session (verified against tmux 3.7c,

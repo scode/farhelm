@@ -1,8 +1,8 @@
 //! Server-enforced create idempotency: dropped-reply retries and
 //! genuine crash-partway-through cases.
 //!
-//! These run on new terminals: a duplicate agent shows as a second running
-//! terminal host (`agent_terminal_names` counts hosts and tmux sessions both),
+//! A duplicate agent shows as a second running terminal host
+//! (`agent_terminal_names` counts hosts and tmux sessions both),
 //! and a reboot is simulated by ending every host. How a retry finds and
 //! settles a host an interrupted attempt started is tested in more depth in
 //! `host_creates.rs`.
@@ -192,20 +192,12 @@ pub(crate) async fn wait_for_state_dir_claim_release(
 /// draining that first, the replacement is constructed alongside a live
 /// predecessor and silently starts read-only — which would make every
 /// assertion below about reload's reconciliation vacuous.
-///
-/// The replacement creates the same kind of terminal `sup` did, so a test
-/// of old terminals keeps them across the restart and one of new terminals
-/// keeps those.
 pub(crate) async fn handoff_to_new_supervisor(
     state: &std::path::Path,
     sup: Arc<Supervisor>,
     client: Arc<SupervisorClient>,
 ) -> Arc<Supervisor> {
-    let seams = SupervisorSeams {
-        new_terminals: sup.new_terminals(),
-        ..SupervisorSeams::default()
-    };
-    handoff_to_new_supervisor_with_seams(state, sup, client, seams).await
+    handoff_to_new_supervisor_with_seams(state, sup, client, SupervisorSeams::default()).await
 }
 
 /// [`handoff_to_new_supervisor`] with the replacement's seams chosen by

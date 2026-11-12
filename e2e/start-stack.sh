@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Boot the real stack for Playwright: TWO supervisors (each creating new
-# terminals in terminal hosts, or old ones in its own private tmux on the
-# suite's old-terminal run) + helm (loopback, on the port FARHELM_E2E_PORT
+# Boot the real stack for Playwright: TWO supervisors (each creating its
+# terminals in terminal hosts) + helm (loopback, on the port FARHELM_E2E_PORT
 # names) + one fake-agent session, then run the helm in the foreground so Playwright's
 # webServer can watch it.
 #
@@ -113,28 +112,6 @@ if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
   exit 1
 fi
 
-# Which kind of terminal BOTH supervisors create, passed on as `farhelm
-# supervisor run --new-terminals` (the supervisor's hidden harness seam;
-# SPEC_impl.md, "Terminal host"). Unset or empty means `host`, a terminal host
-# drawn by the grid component, which is what every shipped supervisor creates
-# and what the main browser suite tests by default. `tmux` is for its
-# old-terminal set (e2e/suite-terminals.ts), whose tests are about old
-# terminals and need sessions created in tmux. The main config always sets it
-# to the run's kind. Given explicitly rather than left to the flag's default,
-# so this stack does not change kind if that default ever does, and so both
-# supervisors' command lines have the same shape (`replacement_state` below
-# and scripts/test-start-stack-cleanup.sh recognise the remote by its leading
-# arguments). A value the flag would refuse is refused here, before anything
-# starts.
-new_terminals="${FARHELM_E2E_NEW_TERMINALS:-host}"
-case "$new_terminals" in
-  tmux | host) ;;
-  *)
-    echo "FARHELM_E2E_NEW_TERMINALS must be tmux or host, got '$new_terminals'" >&2
-    exit 1
-    ;;
-esac
-
 # Reap runs that died without their trap (a SIGKILL, a crashed shell).
 # The sweep lives in the farhelm-teststate crate so there is exactly one
 # implementation of the guards (prefix family only, symlinks excluded,
@@ -148,9 +125,10 @@ state="$(mktemp -d /tmp/fh-e2e.XXXXXX)" || exit 1
 # flock held for this script's whole lifetime, making the state dir
 # unreapable while the stack lives, no matter how long a run takes. Held
 # by THIS process only — the long-lived children below are spawned with
-# `9>&-` because a daemonized tmux server inherits inherited fds and
-# outlives everything; if it held the lock, the exact orphan the sweep
-# exists to reap would keep itself alive forever.
+# `9>&-` because whatever inherits the descriptor holds the lock for as
+# long as it lives, and terminal hosts outlive the supervisors that start
+# them; if an orphan held the lock, the exact orphan the sweep exists to
+# reap would keep itself alive forever.
 #
 # Where flock(1) is unavailable (macOS), the lock FILE must not exist
 # either: the sweep reads an existing-but-unheld lock file as a dead run
@@ -187,9 +165,8 @@ structured_home="$state/structured-home"
 # protocol allowlist makes a missing rewrite fail instead of reaching GitHub.
 checkout_git_config="$state/checkout-git-config"
 # Assigned BEFORE the trap below, not where it is first used. The cleanup
-# expands it, so a signal arriving while it was still unset expanded to
-# `tmux -S /tmux.sock kill-server` — a command aimed at a path outside this
-# run entirely, as the terminal-host stop's `/hosts` would be. Set-then-trap
+# expands it, so a signal arriving while it was still unset would aim the
+# terminal-host stop at `/hosts`, a path outside this run entirely. Set-then-trap
 # is the ordering that makes that unconstructible rather than unlikely.
 remote_state="$state/remote"
 # Where terminal-multihost.spec.ts records a replacement "remote" supervisor
@@ -369,8 +346,8 @@ creators_gone() {
 }
 
 # Trap installed BEFORE anything is spawned: a TERM during the socket
-# wait below would otherwise exit with no trap and orphan the supervisor
-# plus its daemonized tmux server, which nothing reaps until a later
+# wait below would otherwise exit with no trap and orphan the supervisors
+# and any terminal host they started, which nothing reaps until a later
 # run's sweep judges the state dead.
 cleanup() {
   # The orphan watcher dies first, and its death is awaited: a TERM it
@@ -412,21 +389,9 @@ cleanup() {
   # host after the scan, whose socket the removal below would then delete.
   # So the helm and every supervisor must be seen gone first, within a
   # bound that fits inside Playwright's grace. One that is still running
-  # keeps the directory, unscanned and with its tmux servers, for the sweep,
-  # which kills those too.
+  # keeps the directory, unscanned, for the sweep, which ends its hosts.
   hosts_stopped=true
   if creators_gone 3; then
-    # The tmux servers daemonize out of this process group, so killing a
-    # supervisor does not reap its own; each needs its own shutdown, and
-    # the "remote" has one of its own precisely because its state dir is
-    # isolated. Only now that no supervisor can start another one, and
-    # before the host stop, which can take a while: Playwright SIGKILLs
-    # this whole group 5 s after its TERM, and a cheap step must not wait
-    # behind a slow one. A supervisor on new terminals starts no tmux
-    # server, so only a socket that exists (the old-terminal run's) gets a
-    # tmux command at all.
-    [ -S "$state/tmux.sock" ] && tmux -S "$state/tmux.sock" kill-server 2>/dev/null
-    [ -S "$remote_state/tmux.sock" ] && tmux -S "$remote_state/tmux.sock" kill-server 2>/dev/null
     stop_terminal_hosts "$state" "$state/stop-terminal-hosts.log" || hosts_stopped=false
     stop_terminal_hosts "$remote_state" "$state/stop-terminal-hosts-remote.log" || hosts_stopped=false
   else
@@ -505,7 +470,7 @@ stack_mark "watcher $watcher_pid watching spawner $spawner_pid; state $state"
 
 HOME="$structured_home" SHELL="$bash_shell" GIT_CONFIG_GLOBAL="$checkout_git_config" \
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
-  "$bin" supervisor run --state-dir "$state" --new-terminals "$new_terminals" >"$state/supervisor.log" 2>&1 9>&- &
+  "$bin" supervisor run --state-dir "$state" >"$state/supervisor.log" 2>&1 9>&- &
 sup_pid=$!
 
 # A SECOND supervisor, on its own state directory inside this run's
@@ -548,12 +513,8 @@ printf 'boot-1\n' >"$remote_boot_id_file" || exit 1
 remote_supervisor_log="$state/remote-supervisor.log"
 remote_supervisor_rust_log="${RUST_LOG:-},farhelm_supervisor::service::handlers=debug"
 
-# `--new-terminals` last, after the arguments `replacement_state` above and
-# scripts/test-start-stack-cleanup.sh recognise this supervisor by. The same
-# kind as the local supervisor's, published below as `new_terminals` so that
-# terminal-multihost.spec.ts's replacement remote keeps it too.
 RUST_LOG="$remote_supervisor_rust_log" "$bin" supervisor run --state-dir "$remote_state" --boot-id-file "$remote_boot_id_file" \
-  --new-terminals "$new_terminals" >"$remote_supervisor_log" 2>&1 9>&- &
+  >"$remote_supervisor_log" 2>&1 9>&- &
 remote_sup_pid=$!
 
 # Give both supervisors a moment to bind their sockets before the helm
@@ -613,9 +574,8 @@ print(json.dumps({
     "remote_supervisor_log": sys.argv[11],
     "remote_supervisor_rust_log": sys.argv[12],
     "tensorlake_fake": sys.argv[13],
-    "new_terminals": sys.argv[14],
 }))
-' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" "$fixtures" "$remote_replacement_pid" "$remote_supervisor_log" "$remote_supervisor_rust_log" "$tensorlake_fake" "$new_terminals" >"$stack_info" || exit 1
+' "$bin" "$remote_state" "$remote_sup_pid" "$state" "$provisioning_backend" "$remote_boot_id_file" "$checkout_git_config" "$structured_home" "$fixtures" "$remote_replacement_pid" "$remote_supervisor_log" "$remote_supervisor_rust_log" "$tensorlake_fake" >"$stack_info" || exit 1
 
 # Mint before the helm starts so its first protected request sees the same
 # durable token the harness CLI printed. It is captured only long enough to
@@ -624,8 +584,8 @@ print(json.dumps({
 token="$("$bin" helm token show --state-dir "$state")" || exit 1
 
 # The helm runs as a child, NOT via exec: bash does not run EXIT traps
-# across exec, so an exec'd helm would leave the supervisor and the
-# private tmux server orphaned after every run.
+# across exec, so an exec'd helm would leave the supervisors and their
+# terminal hosts orphaned after every run.
 FARHELM_E2E_PROVISIONING_BACKEND_DIR="$provisioning_backend" \
   FARHELM_E2E_TENSORLAKE_DIR="$tensorlake_fake" "$bin" helm run \
   --state-dir "$state" \

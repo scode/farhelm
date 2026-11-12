@@ -33,8 +33,7 @@ import fs from "node:fs";
 import { drainedRoute } from "./helpers/drained-route";
 import { type Page, type APIRequestContext } from "@playwright/test";
 import { localHostId, stubFeed } from "./helpers/fleet";
-import { attachSession, cleanupSession, termText, waitForTermText, terminalInput, terminalLinkPointer, terminalSize } from "./helpers/term";
-import { OLD_TERMINAL_TAG } from "../suite-terminals";
+import { attachSession, cleanupSession, termText, waitForTermText, terminalLinkPointer, terminalSize } from "./helpers/term";
 import {
   addTab,
   createTabSession,
@@ -2033,62 +2032,6 @@ try {
 } finally {
   if (id) await cleanupSession(request, id);
 }
-});
-
-/**
- * A replay marker is attachment evidence only until its socket dies. Hold
- * xterm's completed write callback across that death to prove it cannot
- * erase the successor retry or replace the outage card with a dead screen.
- */
-test("late-replay-flush-keeps-a-new-recovery-alive", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
-  // Holds xterm.js's write callback across a recovery; a grid has none.
-  await reconnectTimingsFromNextLoad(page, { delaysMs: [50, 5_000], probeIntervalMs: 5_000 });
-  let ownId: string | undefined;
-  try {
-    const own = await openOwnTerminal(page, request, `late-flush-${Date.now()}`);
-    ownId = own.id;
-    await waitForSessionRevealed(page, own.id);
-    await rememberSocket(page, "terminal");
-    await page.evaluate(() => {
-      const win = window as any;
-      const original = win.__farhelmIslands.terminal.term;
-      const real = win.Terminal.prototype.write;
-      win.__heldReplayWrites = [];
-      win.__realReplayWrite = real;
-      win.Terminal.prototype.write = function (data: unknown, cb?: () => void) {
-        if (this !== original && cb) {
-          return real.call(this, data, () => win.__heldReplayWrites.push(cb));
-        }
-        return real.call(this, data, cb);
-      };
-      win.__farhelmIslands.terminal.ws.close();
-    });
-    await waitForRemount(page, "terminal");
-    await expect.poll(() => page.evaluate(() => {
-      const win = window as any;
-      const replay = win.__farhelmIslands.terminal.test.replay;
-      return { held: win.__heldReplayWrites.length > 0, reason: replay.revealReason, revealed: replay.revealed };
-    }), { message: "replacement replay must reach its marker while the flush callback is held" })
-      .toEqual({ held: true, reason: "marker", revealed: false });
-    await rememberOpenSocketUntilClose(page, "terminal");
-    await page.evaluate(() => (window as any).__farhelmIslands.terminal.ws.close());
-    await waitForRememberedSocketClose(page, "terminal");
-    await page.evaluate(() => {
-      const win = window as any;
-      win.Terminal.prototype.write = win.__realReplayWrite;
-      for (const cb of win.__heldReplayWrites.splice(0)) cb();
-    });
-    await expect(page.locator("#term-connecting")).toBeVisible();
-    await waitForRemount(page, "terminal", 15_000);
-    await waitForSessionRevealed(page, own.id);
-    const marker = `after-flush-${Date.now()}`;
-    await expect(terminalInput(page)).toBeFocused();
-    await page.keyboard.type(marker);
-    await page.keyboard.press("Enter");
-    await waitForTermText(page, `echo:${marker}`);
-  } finally {
-    if (ownId) await cleanupSession(request, ownId);
-  }
 });
 
 // A frame QUEUED before the evidence-free idle gave up must not confirm

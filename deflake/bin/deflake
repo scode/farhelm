@@ -562,9 +562,7 @@ def phases(profile: str = "full") -> list[Phase]:
 
     This mirrors the AGENTS.md finishing-work inventory minus the checks that
     cannot flake (formatters, clippy, compile-only checks, generated-file
-    parity) and minus `test-tmux-pinned-shutdown.sh`, whose scenarios the
-    workspace nextest run already executes on the same pinned tmux. Doctests
-    are their own phase because nextest does not run them.
+    parity). Doctests are their own phase because nextest does not run them.
 
     The `eval` profile exists to exercise the driver and the agent protocol
     end to end in minutes rather than hours: the same phase kinds, the same

@@ -125,8 +125,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and
   `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh scripts/tensorlake/run-rust-shard.sh` (the
-  Tensorlake harness's own checks, including old-terminal accounting and archive configuration preserving the scoped
-  Podman payload setup while removing the local fixture build). Run the harness only on the maintainer's request, per
+  Tensorlake harness's own checks, including the project list and archive configuration preserving the scoped Podman
+  payload setup while removing the local fixture build). Run the harness only on the maintainer's request, per
   `.agents/tensorlake.md`.
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
 - `python3 -B scripts/test-install-pinned-nextest.py` and `python3 -B scripts/test-install-pinned-dx.py`
@@ -155,10 +155,9 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 
 Deliberately not here: everything the sweep runs (workspace nextest including the e2e suite, the browser suite on both
 engines, desktop nextest, both doctest runs, the two JS harnesses, `test-install-sh.sh`, CentOS provisioning, desktop
-smoke, including the public-to-local session identity boundary), `scripts/test-tmux-pinned-shutdown.sh` (the sweep's
-workspace nextest runs the same tests on the same pinned tmux), and the macOS-only uninstall acceptance (the rehearsal's
-macOS leg runs it in step 4, including legacy upgrade-floor refusal with the old installation preserved and uninstall
-through an indirect Terminal link). Also not here: `scripts/test-start-stack-cleanup.sh`, a by-hand check of
+smoke, including the public-to-local session identity boundary), and the macOS-only uninstall acceptance (the
+rehearsal's macOS leg runs it in step 4, including legacy upgrade-floor refusal with the old installation preserved and
+uninstall through an indirect Terminal link). Also not here: `scripts/test-start-stack-cleanup.sh`, a by-hand check of
 `e2e/start-stack.sh`'s cleanup that `.agents/validation.md` names for changes to it; the sweep's browser phase stops
 every stack it boots through that same cleanup. The focused macOS CI job's terminal host step (the host crate, its entry
 test in the CLI, and the supervisor's spawning, its client, its host terminal runtime, discovery, the test-state cleanup
@@ -213,13 +212,6 @@ Running it in the middle of the sweep competes with the sweep for the machine; p
 its timing-sensitive phases (the nextest and browser phases come first) or after it finishes, and do not count the
 sweep's own pre-fix result as evidence for the fix. A fix waiting for that required check is not ready to land; once the
 check passes, land it without waiting for unrelated work.
-
-The browser suite's old-terminal set (`.agents/validation.md`, the `FARHELM_E2E_SUITE_TERMINALS=tmux` entry) is not part
-of the sweep, whose browser phase is the ordinary run on new terminals: the tests about old terminals alone, on both
-engines, against stacks whose supervisors create tmux terminals. It is small (about a hundred tests), but it boots its
-own stacks, so run it like a runtime phase, after the sweep's timing-sensitive phases or once the sweep finishes,
-through the recorder with `--keep-farhelm-env FARHELM_E2E_SUITE_TERMINALS`, or on Tensorlake sandboxes
-(`sandbox-tests.ts run --suite-terminals tmux`) when the maintainer asked for them.
 
 ## 4. Release gate and CI in GitHub
 

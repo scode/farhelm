@@ -2313,7 +2313,7 @@ mod tests {
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
     use super::super::core::RunCells;
     use super::super::core::tests::{StateDir, a_terminal, agent_tmux, dummy_exe, entry_with};
-    use super::super::core::{NewTerminals, SupervisorSeams, SupervisorTimeouts};
+    use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
     use super::super::status::live_status;
     use super::super::status::session_status;
@@ -7318,12 +7318,12 @@ mod tests {
         pane
     }
 
-    /// Spec (SPEC.md, "Status"): on a supervisor that creates new terminals,
-    /// a session whose agent runs in an old terminal gets one old-terminal
-    /// notification, with the maintainer's text, from the ticker alone (no
-    /// client asks); later passes add no second one; it stays unresolved
-    /// while an old tab is still open after the agent stopped; and it is
-    /// resolved once nothing old runs, the agent's dead pane included.
+    /// Spec (SPEC.md, "Status"): a session whose agent runs in an old
+    /// terminal gets one old-terminal notification, with the maintainer's
+    /// text, from the ticker alone (no client asks); later passes add no
+    /// second one; it stays unresolved while an old tab is still open after
+    /// the agent stopped; and it is resolved once nothing old runs, the
+    /// agent's dead pane included.
     ///
     /// Why: this is how a user hears about a session they never open, and
     /// the notification must not nag about a stopped session that only
@@ -7340,11 +7340,6 @@ mod tests {
             Terminal::tmux("fh-old-run".into(), pane.clone()),
         )
         .await;
-        assert_eq!(
-            sup.new_terminals(),
-            NewTerminals::Host,
-            "premise: the switch is on"
-        );
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
 
@@ -7501,16 +7496,12 @@ mod tests {
     }
 
     /// Spec (SPEC.md, "Status"): no old-terminal notification is recorded or
-    /// resolved when the pass could not ask tmux, and none is recorded on a
-    /// supervisor that still creates old terminals.
+    /// resolved when the pass could not ask tmux.
     ///
     /// Why: a failed probe says nothing about what runs, so it must neither
-    /// invent a warning nor clear a real one; and a supervisor that still
-    /// creates old terminals has nothing to move a session to (the band
-    /// reads the same switch), which also keeps the tests built on old
-    /// terminals free of a notification they never asked about.
+    /// invent a warning nor clear a real one.
     #[farhelm_testtrace::test]
-    async fn no_old_terminal_notification_without_an_answer_or_the_switch() {
+    async fn no_old_terminal_notification_without_an_answer() {
         let state = StateDir::new();
         let failing: Arc<AtomicBool> = Arc::default();
         let sup = {
@@ -7564,22 +7555,6 @@ mod tests {
             old_terminal_rows(&sup, "probe").await,
             vec![(0, false)],
             "nothing resolved blind"
-        );
-
-        let old_state = StateDir::new();
-        let old_sup = supervisor_with(&old_state, SupervisorSeams::tmux_terminals()).await;
-        let pane = spawn_pane(&old_sup, "fh-switch-off", "sleep 600").await;
-        install_durable_running_entry(
-            &old_sup,
-            "switch-off",
-            Terminal::tmux("fh-switch-off".into(), pane),
-        )
-        .await;
-        sample_pass(&old_sup, &mut None, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            old_terminal_rows(&old_sup, "switch-off").await,
-            vec![],
-            "a supervisor on old terminals records none"
         );
     }
 }

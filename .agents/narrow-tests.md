@@ -71,8 +71,7 @@ The shapes, narrowest first:
 - A crate's unit tests only: `cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::)'`.
 - Repetition for a flake: loop the complete recorder invocation, stopping at the first failure and preserving its run
   directory. Choose the count explicitly; twenty attempts are a focused option, not a default gate. Each invocation is a
-  fresh runner invocation, and nextest gives every selected test its own process. The pinned shutdown script retains ten
-  explicit release scenarios; a combined local nextest run already gives those scenarios process isolation.
+  fresh runner invocation, and nextest gives every selected test its own process.
 - Desktop-feature seams: `cargo nextest run -p farhelm-ui --features desktop -E 'test(substring)'` — needs the
   webkit2gtk/gtk dev packages.
 

@@ -29,30 +29,13 @@ pub enum Script {
     Altscreen,
     /// Raw non-UTF-8 output for byte-fidelity tests.
     Binary,
-    /// Numbered records emitted as fast as the pty will take them, for
-    /// backpressure tests (PLAN_M2_5.md). Deliberately unlike `Counter`,
-    /// which paces itself: this one exists to be FASTER than any consumer
-    /// on the path and to emit far more bytes than every bound on it
-    /// combined, so that pausing it genuinely provokes tmux's own
-    /// `pause-after` rather than being absorbed by a buffer somewhere.
-    /// See `flood`'s own docs for the record shape tests key on.
-    Flood,
-    /// Like `Flood`, but blocks after `FAKE-AGENT READY` until it has read
-    /// exactly one input byte before emitting anything. See `flood_gated`'s
-    /// own docs for why this is a SEPARATE script rather than a flag on
-    /// `Flood` itself.
+    /// Numbered records emitted as fast as the pty will take them, once
+    /// one input byte has arrived after `FAKE-AGENT READY`, for flood tests.
+    /// Deliberately unlike `Counter`, which paces itself: this one exists to
+    /// be FASTER than any consumer on the path and to emit far more bytes
+    /// than every bound on it combined. See `flood_gated`'s own docs for the
+    /// record shape tests key on and why it waits for a byte.
     FloodGated,
-    /// Two gated phases for the stalled-viewer RSS test. The first fills
-    /// tmux's fixed history allocation; the second keeps producing past
-    /// tmux's five-second `pause-after` window, so the test can baseline
-    /// after flow control engages and measure whether growth really stops.
-    /// See [`flood_memory`].
-    FloodMemory,
-    /// Output-only child owned by [`flood_memory`]. It acknowledges its
-    /// start through the working directory before writing continuously;
-    /// the controller kills and reaps it when the test releases the final
-    /// gate or the fixture's cleanup deadline expires.
-    FloodMemoryProducer,
     /// Continuous numbered records for replay/live cutover tests.
     Counter,
     /// Raw-mode hex echo of every input byte, for input-fidelity tests.
@@ -202,24 +185,6 @@ pub enum Script {
     ///
     /// See [`agent_relay`] for the markers and the stdin grammar.
     AgentRelay,
-    /// Numbered records scrolled inside a DECSTBM scroll region, with a
-    /// few rows of static banner text held above it — the fixture for
-    /// `terminal-scroll-freeze.spec.ts`'s DECSTBM shapes (see
-    /// [`flood_region`]'s own docs for the exact escape sequences and why
-    /// a scroll region matters: `Flood`/`FloodGated` above never establish
-    /// one, since they scroll the WHOLE screen). Gated on one input byte
-    /// like [`Script::FloodGated`], for the identical reason: the e2e
-    /// suite needs a producer it can start at a moment of its own
-    /// choosing rather than racing an already-running burst.
-    ///
-    /// Paced, not full-speed: unlike `Flood`'s "faster than every
-    /// consumer" design (whose whole point is tripping the byte-based
-    /// watermark), this fixture exists to let a test scroll the viewport
-    /// back at a KNOWN moment relative to how much scrollback exists yet
-    /// — genuinely racing an unpaced full-speed burst against the test's
-    /// own scroll action would make "not yet at the scrollback floor"
-    /// undependable on a fast host.
-    FloodRegion,
     /// Echoes one rc-file-sourced environment variable
     /// ([`RC_MARKER_VAR`]) at startup, then behaves like [`Script::Basic`].
     ///
@@ -327,18 +292,10 @@ pub const RESUME_ENV_VAR: &str = "FARHELM_FAKE_AGENT_RESUME";
 /// otherwise share one tree. `None` is every other script, which writes no
 /// records at all.
 ///
-/// `sync_output` is read only by [`Script::FloodRegion`] (every other
-/// script ignores it, the same tolerance `record_home` gets): it wraps
-/// each emitted chunk in DEC private mode 2026's synchronized-output
-/// bracket (`ESC[?2026h` ... `ESC[?2026l`), for the e2e shape that pins
-/// that a scrolled-back viewport stays honest while xterm.js buffers
-/// refreshes inside a bracket and repaints in full when it closes.
-///
 /// `replay` is read only by [`Script::Replay`], with the same tolerance.
 pub fn run(
     script: Script,
     record_home: Option<std::path::PathBuf>,
-    sync_output: bool,
     replay: ReplayOptions,
 ) -> anyhow::Result<()> {
     match script {
@@ -346,12 +303,8 @@ pub fn run(
         Script::Basic => basic(),
         Script::Altscreen => altscreen(),
         Script::Binary => binary(),
-        Script::Flood => flood(),
         Script::FloodGated => flood_gated(),
-        Script::FloodMemory => flood_memory(),
-        Script::FloodMemoryProducer => flood_memory_producer(),
         Script::Counter => counter(),
-        Script::FloodRegion => flood_region(sync_output),
         Script::Hexecho => hexecho(),
         Script::MouseModes => mouse_modes(),
         // The trailing command prevents shells such as bash from replacing
@@ -1917,24 +1870,22 @@ fn counter() -> anyhow::Result<()> {
     unreachable!("the counter fixture runs until its session is killed")
 }
 
-/// Number of `FLOOD-` records [`flood`] emits. See its docs for the
+/// Number of `FLOOD-` records [`flood_gated`] emits. See its docs for the
 /// sizing argument; at 16 bytes per record this is ~12 MiB.
 pub const FLOOD_RECORDS: u64 = 800_000;
 
-/// Emit [`FLOOD_RECORDS`] numbered records at full speed, then say so and
+/// Block after `FAKE-AGENT READY` until exactly one input byte has arrived,
+/// then emit [`FLOOD_RECORDS`] numbered records at full speed, say so, and
 /// wait to be killed.
 ///
-/// The acceptance fixture for PLAN_M2_5.md's backpressure work, and every
-/// property here is chosen against a specific way the tests could lie:
+/// The flood fixture, and every property here is chosen against a specific
+/// way a test could lie:
 ///
 /// - **Volume.** ~12 MiB exceeds every Farhelm-side bound on the path
 ///   combined (the supervisor's per-connection writer and the helm's
-///   per-terminal queue), so a test that pauses mid-burst is genuinely
-///   provoking flow control rather than watching a queue quietly swallow
-///   the whole run. It says nothing about tmux's own limit: `pause-after`
-///   bounds by the AGE of queued output, not by bytes, so no volume makes
-///   tmux's behavior deterministic — which is why the tests that care
-///   force the pause outright.
+///   per-terminal queue), so a test that stalls a viewer mid-burst is
+///   genuinely provoking flow control rather than watching a queue quietly
+///   swallow the whole run.
 /// - **Speed.** Unpaced writes — unlike [`counter`], which sleeps between
 ///   records so replay-cutover tests can reason about individual PTY
 ///   writes. Buffered through one `BufWriter` for throughput, since this
@@ -1942,50 +1893,24 @@ pub const FLOOD_RECORDS: u64 = 800_000;
 ///   boundaries. A producer slower than the consumer could never fill
 ///   anything.
 /// - **Consecutive, fixed-width record numbers.** This is what makes both
-///   loss and duplication detectable at all: correct delivery across a
-///   pause is exactly `n, n+1, n+2, ...`, so a gap is loss and a repeat
-///   or a step backwards is duplicated replay. A marker without a number
-///   could show neither.
+///   loss and duplication detectable at all: correct delivery is exactly
+///   `n, n+1, n+2, ...`, so a gap is loss and a repeat or a step backwards
+///   is a duplicate. A marker without a number could show neither.
 /// - **A terminal `FLOOD-DONE` marker, then an idle wait.** Tests need a
-///   definite end to assert a tail against, and the process must not exit
-///   — a dead pane would replace the pane's content with tmux's "Pane is
-///   dead" placeholder and destroy the very scrollback under test.
-fn flood() -> anyhow::Result<()> {
-    let mut out = std::io::stdout().lock();
-    writeln!(out, "FAKE-AGENT READY\r")?;
-    out.flush()?;
-    emit_flood_records(&mut out, "FLOOD-DONE")?;
-
-    let mut line = String::new();
-    std::io::stdin().lock().read_line(&mut line)?;
-    Ok(())
-}
-
-/// Identical to [`flood`], except it blocks after `FAKE-AGENT READY` until
-/// exactly one input byte has arrived, and only then emits the burst.
-///
-/// Why a gate at all: `flood`'s whole point (see its own docs) is emitting
-/// fast enough to outrun every consumer on the path, which on a fast host
-/// can mean the ENTIRE burst is already sitting in tmux's pane history
-/// before a test even finishes attaching — the browser-driven watermark
-/// tests (PLAN_M2_5.md, e2e/tests/terminal-flood.spec.ts) need the opposite: a
-/// LIVE producer racing a client that is already attached, instrumented,
-/// and watching, not a sub-watermark replay of a burst that already
-/// finished. Gating on real terminal input — sent only once a test's own
-/// WebSocket is open and its instrumentation installed — removes that race
-/// entirely: nothing streams until the test says so.
-///
-/// Why a SEPARATE script rather than a flag on `Flood` itself: `Flood` is
-/// also the Rust integration suite's own fixture (`crates/farhelm/tests/e2e.rs`'s
-/// `flood_session`), and several of those tests attach and expect output
-/// flowing immediately, with no input round trip at all (their own comments
-/// say so — e.g. "the flood fixture builds a full history quickly"). Gating
-/// `Flood` itself would silently hang every one of them; a distinct script
-/// leaves that fixture's existing contract untouched.
+///   definite end to assert a tail against, and the process must not exit,
+///   which would end the terminal whose history is under test.
+/// - **A gate on one input byte.** Emitting fast enough to outrun every
+///   consumer can mean, on a fast host, that the ENTIRE burst is already
+///   in the terminal's history before a test even finishes attaching; the
+///   browser-driven flood test (e2e/tests/grid-flood.spec.ts) needs the
+///   opposite: a LIVE producer racing a client that is already attached and
+///   watching. Gating on real terminal input — sent only once the test's own
+///   viewer is attached — removes that race entirely: nothing streams until
+///   the test says so.
 fn flood_gated() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
-    // Raw mode BEFORE the ready marker, same reasoning as `hexecho`'s own
-    // docs: terminal mode bits live in the pty's line discipline, not the
+    // Raw mode BEFORE the ready marker, as `hexecho`'s own docs explain:
+    // terminal mode bits live in the pty's line discipline, not the
     // pane, so a test that sends its gate byte the instant it sees READY
     // must always find raw mode already established. Without this, the
     // pty's default canonical mode would hold the gate byte in its own
@@ -2007,341 +1932,11 @@ fn flood_gated() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// How many plain, full-screen lines [`flood_region`] emits BEFORE it ever
-/// sets a scroll region — real, ordinary scrollback that a test can later
-/// scroll back into. See `flood_region`'s own docs for why this phase is
-/// load-bearing rather than throat-clearing: a DECSTBM region whose top is
-/// below row 1 does not feed the terminal's scrollback AT ALL (verified
-/// directly against the vendored xterm.js bundle — writes confined to such
-/// a region left `buffer.active.baseY` at 0 no matter how much was
-/// written), so without this phase there would be nothing to scroll back
-/// into once the region is active.
-const REGION_PRE_RECORDS: u64 = 300;
-
-/// How many `REGION-` records [`flood_region`] emits, inside its scroll
-/// region, before its `REGION-DONE` marker. Deliberately far smaller than
-/// [`FLOOD_RECORDS`]: this fixture paces itself (see `flood_region`'s own
-/// docs), so its volume only has to outlast an e2e test's worst-case
-/// budget for scrolling the viewport back into the PRE-region scrollback
-/// and observing it, not saturate any byte-based bound. At
-/// [`REGION_PACE`] (2ms), 20,000 records is ~40s of phase 2 — comfortably
-/// longer than the calling test's settle/scroll/hold budget, so the
-/// producer is still demonstrably running (not sitting idle past
-/// `REGION-DONE`) for the whole observation window; the caller asserts
-/// that premise directly rather than assuming it from this margin alone.
-pub const REGION_RECORDS: u64 = 20_000;
-
-/// Per-record pacing for both of `flood_region`'s phases — the same
-/// magnitude as `counter`'s own pacing, chosen for the same reason: slow
-/// enough that a test can reliably observe "not yet finished" at a chosen
-/// moment, fast enough that output visibly keeps moving. The fixture's
-/// total duration is governed by [`REGION_RECORDS`], not by this pace.
-const REGION_PACE: std::time::Duration = std::time::Duration::from_millis(2);
-
-/// How many records `flood_region` emits per synchronized-output bracket
-/// when `sync_output` is set — one `ESC[?2026h` ... `ESC[?2026l` pair per
-/// chunk, standing in for a real TUI's per-redraw synchronized update
-/// rather than one bracket around the whole burst (which would tell the
-/// terminal emulator to defer EVERYTHING until the end, unlike a real
-/// agent's per-frame usage).
-const REGION_SYNC_CHUNK: u64 = 50;
-
-/// Read the pty's current size the way an ioctl-aware full-screen TUI
-/// would, rather than assuming a fixed geometry: the scroll region
-/// `flood_region` sets depends on how many rows actually exist. By the time
-/// this runs, phase 1 has been emitting for its whole duration after the
-/// gate byte, which is what gives the client's resize message time to
-/// land on the pty; the gate itself only marks when the burst may start.
-fn terminal_size() -> anyhow::Result<(u16, u16)> {
-    use std::os::fd::AsRawFd;
-
-    let fd = std::io::stdout().as_raw_fd();
-    let mut size: libc::winsize = unsafe { std::mem::zeroed() };
-    // SAFETY: `fd` is stdout's own fd, valid for the process lifetime, and
-    // `size` is a plain-old-data struct `ioctl` fills in completely on
-    // success; zero-initialized so a failed call still leaves it
-    // well-defined.
-    if unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut size) } != 0 {
-        anyhow::bail!("TIOCGWINSZ failed: {}", std::io::Error::last_os_error());
-    }
-    Ok((size.ws_row, size.ws_col))
-}
-
-/// Build ordinary scrollback, THEN hold a few rows of static banner text
-/// above a DECSTBM scroll region and scroll paced, numbered records inside
-/// that region only — the fixture behind `terminal-scroll-freeze.spec.ts`'s
-/// DECSTBM shapes (see that file's header for what those shapes probe).
-///
-/// Two phases, and the ORDER is the whole point:
-///
-/// 1. [`REGION_PRE_RECORDS`] plain, paced, full-screen lines — real
-///    scrollback a test can later scroll back into. A DECSTBM region
-///    whose top sits below row 1 (as this fixture's does, to leave room
-///    for a static banner) does not feed the terminal's scrollback at
-///    all; that is standard terminal-emulator behavior, confirmed directly
-///    against the vendored xterm.js bundle while building this fixture
-///    (writing thousands of lines confined to such a region left
-///    `buffer.active.baseY` at exactly 0). Without this phase there would
-///    be nothing behind the region to scroll into, which is why an
-///    earlier version of this fixture (region output only, no
-///    pre-history) could not be used the way the e2e spec needs it.
-/// 2. The banner, the DECSTBM region, and [`REGION_RECORDS`] paced records
-///    scrolling only inside it — a plain [`flood`]/[`flood_gated`] burst
-///    scrolls the WHOLE screen, which does not exercise a scroll region at
-///    all. The scenario this reproduces is a real one: a TUI that prints
-///    ordinary scrolling output and only later switches on a fixed
-///    header/footer margin (many status-line agents and monitors do
-///    exactly this) leaves a user's PRE-existing scrollback visible while
-///    fresh region-confined output keeps arriving live underneath a
-///    protected band — precisely what an e2e test scrolling back mid-burst
-///    needs to exist at all.
-///
-/// Gated the same way [`flood_gated`] is (see its own docs for why): the
-/// e2e suite needs to control exactly when the burst starts, after its own
-/// instrumentation is installed and the pty is sized. `sync_output` wraps
-/// each [`REGION_SYNC_CHUNK`]-record chunk of PHASE 2 in DEC private mode
-/// 2026's synchronized-output bracket, standing in for a real TUI's
-/// per-frame usage of that mode. Phase 1 is never bracketed: it exists
-/// only to seed scrollback, not to exercise synchronized output.
-fn flood_region(sync_output: bool) -> anyhow::Result<()> {
-    let mut out = std::io::stdout().lock();
-    // Same reasoning as `flood_gated`'s own docs: raw mode must already be
-    // in effect before the ready marker, or the pty's canonical line
-    // discipline could hold the test's single gate byte hostage.
-    set_raw_mode()?;
-    writeln!(out, "FAKE-AGENT READY\r")?;
-    out.flush()?;
-
-    let mut gate = [0u8; 1];
-    std::io::stdin().lock().read_exact(&mut gate)?;
-
-    // Phase 1: plain, paced, full-screen scrolling — see this function's
-    // own docs for why real scrollback must exist BEFORE the region is
-    // ever established.
-    for sequence in 0..REGION_PRE_RECORDS {
-        writeln!(out, "PRE-{sequence:06}\r")?;
-        out.flush()?;
-        std::thread::sleep(REGION_PACE);
-    }
-
-    let (rows, _cols) = terminal_size()?;
-    // Four fixed banner rows, then everything from row 5 to the bottom of
-    // the pane scrolls. `BANNER_ROWS` is arbitrary, small enough to leave a
-    // real scroll region on any terminal size an e2e caller here uses; a
-    // pane shorter than that would make the "fixed" and "scrolling" regions
-    // overlap, which no e2e caller here provokes (the suite's terminals
-    // are sized comfortably larger).
-    const BANNER_ROWS: u16 = 4;
-    let region_top = BANNER_ROWS + 1;
-    let region_bottom = rows.max(region_top + 1);
-
-    // Cursor home, then the banner text. With the cursor on row 1 and no
-    // scroll region yet, these lines overwrite the top rows of whatever
-    // phase 1 left on screen in place (each banner line is longer than any
-    // `PRE-` record, so nothing of the old row shows through) and leave
-    // the cursor on the row below the banner. Nothing scrolls here: no
-    // line feed reaches the bottom row, so `baseY` does not move.
-    write!(out, "\x1b[H")?;
-    for i in 1..=BANNER_ROWS {
-        writeln!(out, "REGION-BANNER-{i}\r")?;
-    }
-
-    // DECSTBM: rows outside [region_top, region_bottom] no longer scroll
-    // at all. Explicitly re-home the cursor into the region's top-left
-    // afterward rather than relying on the exact DECSTBM cursor-placement
-    // rule, which differs by origin-mode state this fixture never touches.
-    write!(out, "\x1b[{region_top};{region_bottom}r")?;
-    write!(out, "\x1b[{region_top};1H")?;
-    out.flush()?;
-
-    // Phase 2: paced records confined to the region.
-    let mut chunk = 0_u64;
-    for sequence in 0..REGION_RECORDS {
-        if sync_output && chunk == 0 {
-            write!(out, "\x1b[?2026h")?;
-        }
-        writeln!(out, "REGION-{sequence:06}\r")?;
-        chunk += 1;
-        if sync_output && chunk == REGION_SYNC_CHUNK {
-            write!(out, "\x1b[?2026l")?;
-        }
-        out.flush()?;
-        std::thread::sleep(REGION_PACE);
-        if sync_output && chunk == REGION_SYNC_CHUNK {
-            chunk = 0;
-        }
-    }
-    if sync_output && chunk != 0 {
-        write!(out, "\x1b[?2026l")?;
-        out.flush()?;
-    }
-    writeln!(out, "REGION-DONE\r")?;
-    out.flush()?;
-
-    let mut line = String::new();
-    std::io::stdin().lock().read_line(&mut line)?;
-    Ok(())
-}
-
-/// Emit two separately gated phases around a stable-memory baseline.
-///
-/// The stalled-viewer RSS test cannot use one burst honestly. Starting its
-/// baseline too early charges tmux for allocating its fixed 12,000-line
-/// history; starting after the burst ends makes the test pass without a
-/// producer. This fixture makes both phases observable: the first gate fills
-/// history and ends at `FLOOD-WARMED`, then the second gate starts a child
-/// producer only after the viewer is paused. The child acknowledges through
-/// `flood-memory-started`, outside the paused terminal path. A third gate
-/// lets the test end production after sampling; a controller deadline still
-/// kills and reaps the child if the test dies before cleanup.
-fn flood_memory() -> anyhow::Result<()> {
-    let mut out = std::io::stdout().lock();
-    set_raw_mode()?;
-    writeln!(out, "FAKE-AGENT READY\r")?;
-    out.flush()?;
-
-    let mut gate = [0_u8; 1];
-    std::io::stdin().lock().read_exact(&mut gate)?;
-    emit_flood_records(&mut out, "FLOOD-WARMED")?;
-
-    std::io::stdin().lock().read_exact(&mut gate)?;
-    drop(out);
-
-    let exe = std::env::current_exe().context("locating the flood producer executable")?;
-    let mut producer = std::process::Command::new(&exe)
-        .args(["fake-agent", "--script", "flood-memory-producer"])
-        .stdin(std::process::Stdio::null())
-        .spawn()
-        .with_context(|| format!("spawning the flood producer {}", exe.display()))?;
-
-    // The controller must remain able to consume the stop gate even if
-    // the producer blocks in a PTY write. Keeping stdin out of the child
-    // is the fixture equivalent of the product's separate input client.
-    let (gate_tx, gate_rx) = std::sync::mpsc::sync_channel(1);
-    std::thread::spawn(move || {
-        let mut gate = [0_u8; 1];
-        let result = std::io::stdin().lock().read_exact(&mut gate);
-        let _ = gate_tx.send(result);
-    });
-
-    const MAX_RUNTIME: std::time::Duration = std::time::Duration::from_secs(60);
-    let started = std::time::Instant::now();
-    let outcome = loop {
-        match gate_rx.try_recv() {
-            Ok(result) => {
-                break result
-                    .context("reading the flood producer stop gate")
-                    .map(|()| true);
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                break Err(anyhow::anyhow!(
-                    "the flood producer stop-gate reader disappeared"
-                ));
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-        }
-        match producer.try_wait().context("polling the flood producer") {
-            Ok(Some(status)) => {
-                break Err(anyhow::anyhow!(
-                    "the flood producer exited before its stop gate: {status}"
-                ));
-            }
-            Err(error) => break Err(error),
-            Ok(None) => {}
-        }
-        if started.elapsed() >= MAX_RUNTIME {
-            break Ok(false);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    };
-
-    if producer
-        .try_wait()
-        .context("checking the flood producer before cleanup")?
-        .is_none()
-    {
-        if let Err(kill_error) = producer.kill() {
-            // A child may exit between `try_wait` and `kill`; that race is
-            // already complete. Any other kill failure must not flow into
-            // an unbounded wait on a producer still blocked in a PTY write.
-            if producer
-                .try_wait()
-                .context("checking the flood producer after kill failed")?
-                .is_none()
-            {
-                return Err(kill_error).context("killing the flood producer");
-            }
-        } else {
-            producer.wait().context("reaping the flood producer")?;
-        }
-    }
-    let released = outcome?;
-    let (acknowledgement, terminal_marker) = if released {
-        (b"released".as_slice(), "FLOOD-DONE")
-    } else {
-        (b"expired".as_slice(), "FLOOD-EXPIRED")
-    };
-    publish_fixture_state("flood-memory-stopped", acknowledgement)
-        .context("acknowledging that the flood producer stopped")?;
-
-    let mut out = std::io::stdout().lock();
-    writeln!(out, "{terminal_marker}\r")?;
-    out.flush()?;
-
-    std::io::stdin().lock().read_line(&mut String::new())?;
-    Ok(())
-}
-
-/// Produce full-speed numbered records for [`flood_memory`]'s RSS window.
-///
-/// `flood-memory-started` is deliberately published before stdout is touched:
-/// it proves the child reached the production phase while terminal delivery
-/// was paused. `flood-memory-progress` advances only after a complete output
-/// batch reaches the PTY, which separately proves that the session sink keeps
-/// draining while the viewer is stalled. The controller owns the runtime
-/// bound and can kill this child even when a later PTY write blocks.
-fn flood_memory_producer() -> anyhow::Result<()> {
-    publish_fixture_state("flood-memory-started", b"started")?;
-    let mut out = std::io::stdout().lock();
-    let mut buffered = std::io::BufWriter::with_capacity(64 * 1024, &mut out);
-    let mut sequence = 0_u64;
-    loop {
-        // One MiB-ish batch keeps the progress file cheap while still
-        // turning a blocked PTY into a prompt, observable stall. Publishing
-        // before `flush` would only prove records entered this process's
-        // userspace buffer, not that the terminal path accepted them.
-        for _ in 0..64 * 1024 {
-            writeln!(buffered, "FLOOD-{sequence:08}\r")?;
-            sequence = sequence.wrapping_add(1);
-        }
-        buffered.flush()?;
-        publish_fixture_state("flood-memory-progress", sequence.to_string().as_bytes())?;
-    }
-}
-
-/// Publish a complete fixture acknowledgement without an observable partial
-/// value.
-///
-/// The integration test runs in another process and polls these paths. A
-/// direct `write` exposes the destination after truncation but before its
-/// contents are complete. Staging beside the destination and renaming means
-/// readers see either the previous complete value or its complete replacement
-/// on the supported Unix hosts. Existence acknowledges a first publication;
-/// repeatedly updated progress requires observing the numeric value advance.
-fn publish_fixture_state(path: &str, value: &[u8]) -> anyhow::Result<()> {
-    let staging = format!("{path}.tmp");
-    std::fs::write(&staging, value)
-        .with_context(|| format!("staging fixture acknowledgement {staging}"))?;
-    std::fs::rename(&staging, path)
-        .with_context(|| format!("publishing fixture acknowledgement {path}"))
-}
-
 /// Emit [`FLOOD_RECORDS`] numbered records at full speed, followed by
 /// `completion`.
 ///
-/// Shared by the ordinary, one-gate, and two-stage flood fixtures. Waiting
-/// for another input belongs to each caller because [`flood_memory`] needs
-/// the first completion to be a gate between bursts rather than shutdown.
+/// What follows the burst (an idle wait for [`flood_gated`]) is the
+/// caller's.
 fn emit_flood_records(out: &mut impl Write, completion: &str) -> anyhow::Result<()> {
     // One buffered writer, flushed once at the end, deliberately: this
     // fixture wants throughput, not per-record write boundaries. Records

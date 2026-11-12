@@ -2,19 +2,17 @@
 //! the tab strip and lookup, closing one, the automatic reap of one whose
 //! shell exited, and finding them again after a supervisor restart.
 //!
-//! Under the supervisor's switch (`SupervisorSeams::new_terminals` set to
-//! `Host`, as `farhelm supervisor run` does by default, or by a test
-//! harness) every new tab is a
-//! host of its own, whatever its session's agent runs in: a tmux agent's
-//! session then holds its old tmux tabs and new host tabs side by side (a
-//! mixed session), and a host agent's session holds only host tabs. A tab never changes kind while it lives.
+//! Every new tab is a host of its own, whatever its session's agent runs
+//! in: a tmux agent's session then holds its old tmux tabs and new host
+//! tabs side by side (a mixed session), and a host agent's session holds
+//! only host tabs. A tab never changes kind while it lives.
 //!
 //! ## What a host tab is
 //!
 //! A host whose child is today's tab chain (the forwarder, then
 //! `farhelm internal tab-shell`, which enters the session's directory and
 //! execs the user's login shell), inside the tab's own scope when there is a
-//! user manager, exactly as a tmux tab window runs it; its environment is
+//! user manager; its environment is
 //! a host child's (`host_launch::host_child_env`: the supervisor's
 //! environment with Farhelm's terminal variables), with the tab's markers
 //! and credential, which reach the child only. The host itself
@@ -40,12 +38,11 @@
 //! ## Opening
 //!
 //! [`Supervisor::open_host_tab`], under the session's lifecycle claim on a
-//! supervisor-owned task (`Supervisor::open_tab` decides the gate and the
-//! kind): the host starts at the size of the agent's terminal (its tmux
-//! window, or its host's emulator), so the first attach repaints nothing;
-//! the open then waits up to `TAB_LAUNCH_SETTLE` for the shell to die, as a
-//! tmux tab's does, but from the runtime's view of the child rather than a
-//! poll of tmux, and a shell dead by then is a refused open whose detail is
+//! supervisor-owned task (`Supervisor::open_tab` decides the gate): the host
+//! starts at the size of the agent's terminal (its tmux window, or its
+//! host's emulator), so the first attach repaints nothing; the open then
+//! waits up to `TAB_LAUNCH_SETTLE` for the shell to die, from the runtime's
+//! view of the child, and a shell dead by then is a refused open whose detail is
 //! the emulator's screen once the host's exit record has been processed (its
 //! last words); `host_scan` is let go as soon as the shell is seen not
 //! alive. Any failure after the host started ends it (its `Shutdown`, else
@@ -126,9 +123,7 @@ use crate::hosts::{
     HostTag, HostTerminal, HostTerminalOptions, LiveHost, Liveness, NamedHost, ScanOptions,
     SpawnError, Unavailability,
 };
-use crate::service::terminals::{
-    TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TmuxTerminal,
-};
+use crate::service::terminals::{TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal};
 use crate::terminal_process::{TabScope, TerminalProbe};
 
 // ---- The session's host tabs -----------------------------------------------------
@@ -373,13 +368,6 @@ fn next_creation_stamp(cell: &HostTabs) -> u64 {
     }
 }
 
-/// What `Supervisor::open_tab` opens: a window in the agent's tmux session,
-/// or a terminal host of the tab's own (module docs).
-pub(crate) enum NewTab {
-    Window(TmuxTerminal),
-    Host,
-}
-
 // ---- Opening ---------------------------------------------------------------------
 
 /// The size a new tab starts at when the agent's terminal gives none: the
@@ -480,11 +468,23 @@ impl Supervisor {
             retry_at: None,
         };
 
-        // The dead-at-reply refusal (`ControlMsg::OpenTab`'s contract), as
-        // for a tmux tab: see `open_tab_window` for why the open waits at
-        // all, and why the gate exists. The wait reads the runtime's pinned
-        // child (`Self::settled_host_tab`), which says dead as soon as the
-        // child stops running, before the host has even reported it.
+        // The dead-at-reply refusal (`ControlMsg::OpenTab`'s contract).
+        //
+        // A bounded settle rather than one instantaneous read, and the
+        // difference is the promise itself: a shell that cannot start dies
+        // in microseconds, but a single check fired the moment the host is
+        // adopted can race that death, and losing the race means reporting
+        // a SUCCESSFUL open holding a corpse, which is exactly what this
+        // refusal exists to prevent. "Already dead when the open would
+        // reply" is a statement about when the supervisor chooses to reply,
+        // so it chooses to reply late enough for the answer to mean
+        // something. A healthy open pays the whole window, so it is sized
+        // for a hand-driven operation; the settle ends early the moment the
+        // shell IS dead. The wait reads the runtime's pinned child
+        // (`Self::settled_host_tab`), which says dead as soon as the child
+        // stops running, before the host has even reported it. The gate is
+        // the test-only handle on the "already dead" side of that window
+        // ([`super::TabSettleGate`]); production installs none.
         if let Some(gate) = self.seams.faults.tab_settle_gate() {
             gate().await;
         }
@@ -624,8 +624,8 @@ impl Supervisor {
         shell: &str,
     ) -> Result<StartedTab, TabStartFailure> {
         let shell_variable = self.host_shell_variable(shell).await;
-        // Only host terminals receive the managed value. Shared tab env also
-        // feeds tmux -e, whose arguments must never contain this credential.
+        // The managed value reaches the child's environment only, never the
+        // host's command line or environment.
         let mut child_env = host_child_env(std::env::vars_os(), env, &shell_variable, cwd);
         crate::github_token::inject(
             &mut child_env,
@@ -829,9 +829,8 @@ impl Supervisor {
     }
 
     /// Tear down a tab host an open decided not to keep, and turn `because`
-    /// into the error that open reports: the tmux discard's counterpart
-    /// (`Supervisor::discard_failed_tab_window`), with the same aggregation
-    /// of what could not be cleaned up. The tab's process tree is reaped
+    /// into the error that open reports, aggregating what could not be
+    /// cleaned up. The tab's process tree is reaped
     /// first (rooted at the child while it runs), then its host is ended,
     /// its record is removed once that end is confirmed, and what outlived
     /// the hangup is swept by the tab's marker and scope. The caller must

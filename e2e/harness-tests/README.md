@@ -31,7 +31,7 @@ For helper changes that need the real product stack, these existing selections e
 takeover. Each names both engines without widening to the full product battery:
 
 ```sh
-npx playwright test --project=chromium-terminal-replay-rename --project=webkit-terminal-replay-rename -g 'replay-degrades-on-detach: a takeover mid-catch-up shows what arrived, under the banner$'
+npx playwright test --project=chromium-terminal-replay-rename --project=webkit-terminal-replay-rename -g 'reattach-lands-at-tail \(agent terminal\)'
 npx playwright test --project=chromium-terminal-reconnect --project=webkit-terminal-reconnect -g 'manual-reconnect-takes-the-session-back$'
 ```
 

@@ -52,12 +52,6 @@ filter = "test(=merged_hosts::two_real_hosts_serve_one_merged_list_and_both_are_
 threads-required = 2
 
 [[profile.default.overrides]]
-# This test measures memory growth while deliberately blocking a viewer.
-# Reserve the default global budget rather than measuring alongside other tests.
-filter = "test(terminal_backpressure::memory_stays_flat_while_a_viewer_is_stalled)"
-threads-required = 4
-
-[[profile.default.overrides]]
 # One real recipe build runs apt and both official installers before the
 # lifecycle scenario. Its 30-minute bound and five-minute cleanup need room
 # to finish before nextest ends the process, with all shared slots reserved.

@@ -1,37 +1,23 @@
-// The new-terminal run's premise, checked rather than assumed: on the main
-// suite's ordinary run (e2e/suite-terminals.ts) both of every stack's
-// supervisors create terminals in terminal hosts, so every terminal socket
-// for a real session attaches as a grid stream. A byte stream (an old
+// The browser suite's premise, checked rather than assumed: both of every
+// stack's supervisors create terminals in terminal hosts, so every terminal
+// socket for a real session attaches as a grid stream. A byte stream (an old
 // terminal, drawn by xterm.js) is a failure, whichever host the session is on.
 //
 // Why: every spec helper reads whichever component an attachment holds, so
-// a create, tab or remount path that fell back to tmux would pass its specs on
-// xterm.js and the run would claim coverage of new terminals it never
-// exercised. Global setup checks each stack once; this module checks every
-// terminal socket opened in a browser context the test observes (the default
-// context, every context `observeContext` observes, `newObservedContext`'s
-// among them, and any a test registers with `watchHostPremise`), from the
-// stream notice the helm sends on it (the one fact that decides the
-// component), through an automatic fixture in evidence.ts, with the readiness
-// waits in terminal-readiness.ts as an earlier signal. The old-terminal run has no
-// per-socket check: its tests read xterm.js directly and fail on a grid.
+// a create, tab or remount path that ended up on a byte stream would pass
+// its specs on xterm.js and the run would claim coverage of new terminals it
+// never exercised. This module checks every terminal socket opened in a browser
+// context the test observes (the default context, every context
+// `observeContext` observes, `newObservedContext`'s among them, and any a
+// test registers with `watchHostPremise`), from the stream notice the helm
+// sends on it (the one fact that decides the component), through an
+// automatic fixture in evidence.ts, with the readiness waits in
+// terminal-readiness.ts as an earlier signal.
 
 import type { APIRequestContext, BrowserContext, Page, TestInfo, WebSocket } from "@playwright/test";
-import { SUITE_TERMINALS_METADATA, type SuiteTerminals } from "../../suite-terminals";
 
 /** How long one premise lookup may take: a stalled helm fails the check rather than the test's timing. */
 const LOOKUP_TIMEOUT_MS = 5_000;
-
-/**
- * The main suite's run kind as its config's metadata names it
- * (playwright.config.ts), or null for any other config: a capture config
- * whose runner merely inherited an exported variable is never held to a
- * premise.
- */
-export function suiteTerminalsOf(config: { metadata?: Record<string, unknown> }): SuiteTerminals | null {
-  const kind = config.metadata?.[SUITE_TERMINALS_METADATA];
-  return kind === "host" || kind === "tmux" ? kind : null;
-}
 
 /** The session and tab a terminal socket's URL names, or null for any other socket. */
 export function terminalSocketTarget(url: string): { id: string; tabId?: string } | null {
@@ -67,7 +53,7 @@ export interface PremiseOptions {
 
 /**
  * Why session `id`'s old terminal (a byte stream, xterm.js) breaks the
- * new-terminal run's premise, or null when it does not: only a session the
+ * browser suite's premise, or null when it does not: only a session the
  * caller declared fabricated (`options.fabricated`), which the helm then does
  * not list, is allowed one. Every real session is on a supervisor that
  * creates terminals in hosts, so the answer is otherwise always a problem;
@@ -92,7 +78,7 @@ export async function oldTerminalProblem(
     return `${what}, and its row could not be read: ${error}`;
   }
   if (!row || row.id !== target.id) return `${what}, and its row is malformed`;
-  return `${what} on a run whose supervisors create terminals in terminal hosts ` +
+  return `${what} on a stack whose supervisors create terminals in terminal hosts ` +
     `(its row: host ${JSON.stringify(row.host)}, agent_terminal ${JSON.stringify(row.agent_terminal)}, ` +
     `supervisor_creates_host_terminals ${JSON.stringify(row.supervisor_creates_host_terminals)})`;
 }
@@ -187,15 +173,15 @@ export function setActiveHostPremiseWatch(watch: HostPremiseWatch | null): void 
   activeWatch = watch;
 }
 
-/** The running test's watch, if this is the new-terminal run. */
+/** The running test's watch, or null between tests. */
 export function activeHostPremiseWatch(): HostPremiseWatch | null {
   return activeWatch;
 }
 
 /**
- * Put `context` under the running test's watch, if this is the new-terminal
- * run: for a context a test makes itself without `observeContext`, before it
- * opens any page there. Idempotent.
+ * Put `context` under the running test's watch: for a context a test makes
+ * itself without `observeContext`, before it opens any page there.
+ * Idempotent, and nothing between tests.
  */
 export function watchHostPremise(context: BrowserContext): void {
   activeWatch?.watchContext(context);

@@ -22,8 +22,7 @@
 /// Per-agent supervisor behavior, one file per kind (see its own docs).
 mod vendor;
 
-/// Starting a create's agent in a terminal host, behind
-/// [`SupervisorSeams::new_terminals`] (see its own docs).
+/// Starting a create's agent in a terminal host (see its own docs).
 mod host_launch;
 pub(crate) use host_launch::{AtRecordedSocket, host_child_env, read_launch_record};
 use host_launch::{HostLeft, HostSpawnFailure, SpawnedInHost};
@@ -38,7 +37,7 @@ use host_handover::{GoneHosts, HostDiscovery, RowHost};
 /// them, and finding them again after a restart (see its own docs).
 mod host_tabs;
 pub(crate) use host_tabs::{
-    HostTab, HostTabs, NewTab, find_host_tab, host_tab_cell, host_tabs_of, listed_host_tabs,
+    HostTab, HostTabs, find_host_tab, host_tab_cell, host_tabs_of, listed_host_tabs,
     reap_due_host_tabs,
 };
 /// Restarting a host agent into a new terminal host that keeps the old
@@ -76,8 +75,8 @@ use super::sweep::{
 };
 use super::terminals::{
     ActiveAttach, AttachmentKey, DiscoveredTab, OutputReapRegistry, SINK_READY_TIMEOUT,
-    SinkRegistry, TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal, TerminalId, TmuxTerminal,
-    agent_pane_from_states, resolve_terminal_for_close, tabs_from_pane_states, tmux_tab_home,
+    SinkRegistry, Terminal, TerminalId, TmuxTerminal, agent_pane_from_states,
+    resolve_terminal_for_close, tabs_from_pane_states, tmux_tab_home,
 };
 use super::ticker::{
     ACTIVITY_STAMP_QUANTUM, ActivitySample, REAP_BUDGET_PER_TICK, SAMPLING_ADMISSION_PERMITS,
@@ -92,10 +91,7 @@ use crate::store::{
     Settlement, StoredSession, TerminalKind, Transition, now_unix,
 };
 use crate::terminal_process::{TabScope, TerminalProbe};
-use crate::tmux::{
-    AGENT_WINDOW_OPTION, LaunchExcerptFence, PaneState, TAB_SCOPED_WINDOW_OPTION,
-    TAB_WINDOW_OPTION, TmuxDriver,
-};
+use crate::tmux::{LaunchExcerptFence, PaneState, TmuxDriver};
 use anyhow::Context;
 use farhelm_proto::{
     AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, RestartOffer, SessionInfo, SessionLaunch,
@@ -741,21 +737,20 @@ pub type ForwarderCleanupGate = SinkReservationGate;
 /// Production installs none.
 pub type DeletedSessionCleanupGate = SinkReservationGate;
 
-/// A hook awaited after a tab's window exists and is marked, but before the
-/// dead-at-open-reply settle looks at its pane.
+/// A hook awaited after a tab's host is adopted, but before the
+/// dead-at-open-reply settle looks at its shell.
 ///
 /// The refusal it guards is defined by a race the SUPERVISOR is supposed to
 /// win — a shell that cannot start dies within the settle window, so the open
 /// refuses — and a test cannot arrange the losing side of that race from
-/// outside: the pane it needs to watch does not exist until `new-window`
-/// returns, and between that and the settle (sizing, marking) there was no
-/// boundary a test could hold — the settle began whenever the open reached
-/// it, bounded only by [`TAB_LAUNCH_SETTLE`]. Under enough load the fixture shell's death has been
-/// observed landing after the settle (2026-08-18, three concurrent e2e
-/// binaries on a four-core box), turning the refusal test into a successful
-/// open of a live tab. Holding this boundary lets a test wait for tmux itself
-/// to report the pane dead before the settle runs, so "already dead by reply
-/// time" is a fact rather than a bet.
+/// outside: the shell it needs to watch does not exist until the tab's host
+/// starts, and the settle begins whenever the open reaches it, bounded only
+/// by [`TAB_LAUNCH_SETTLE`]. Under enough load the fixture shell's death has
+/// been observed landing after the settle (2026-08-18, three concurrent e2e
+/// binaries on a four-core box, with the tmux tabs of the time), turning the
+/// refusal test into a successful open of a live tab. Holding this boundary
+/// lets a test wait for the shell's death before the settle runs, so
+/// "already dead by reply time" is a fact rather than a bet.
 ///
 /// Production installs none, so the cost is one `Option` check per open, and
 /// the settle's own timing is untouched.
@@ -917,8 +912,6 @@ fault_hooks! {
     tab_close_gate: SinkReservationGate,
     /// See [`DeletedSessionCleanupGate`]. `None` in production.
     deleted_session_cleanup_gate: DeletedSessionCleanupGate,
-    /// See [`ReplacementFault`]. `None` in production.
-    replacement_fault: ReplacementFault,
     /// See [`RestartWindowGate`]. `None` in production.
     restart_window_gate: RestartWindowGate,
     /// See [`HostStartInterrupt`]. `None` in production.
@@ -1220,36 +1213,17 @@ pub struct SupervisorSeams {
     /// takes (and [`Supervisor::new`], which delegates to it), sets
     /// [`STATE_DIR_CLAIM_WAIT`].
     pub state_dir_claim_wait: Duration,
-    /// Which kind of terminal a create starts its agent in, a new tab opens
-    /// in, and a Restart of a tmux session moves its agent into: a pane in
-    /// the private tmux server, or a terminal host of its own
-    /// ([`NewTerminals`]).
-    ///
-    /// This field is the one place a running supervisor keeps the switch,
-    /// and everything that asks reads it here (through
-    /// [`Supervisor::new_terminals`] from outside this module). Two things
-    /// set it, and neither is a user setting or the environment: a real
-    /// supervisor process takes it from `farhelm supervisor run`'s hidden
-    /// `--new-terminals` flag ([`SupervisorStartup::new_terminals`]), whose
-    /// default, terminal hosts, is what every shipped launch gets; and the
-    /// in-process harnesses set it here, never through their own process
-    /// environment.
-    ///
-    /// `Self::default()` is [`NewTerminals::Host`], the same as the
-    /// command line's default, so an in-process test creates new terminals
-    /// unless it asks for old ones by name ([`Self::tmux_terminals`]). The
-    /// old path keeps an explicitly named set of tests for as long as old
-    /// terminals exist; everything else runs on what the release runs. A
-    /// supervisor inside a test binary has no `internal terminal-host` of
-    /// its own, so creating a host terminal there also takes `host_program`
-    /// (below): the Rust e2e harness points it at the built `farhelm`, and
-    /// the supervisor's own unit tests, which have no such binary, point it
-    /// at their own test binary, which runs a host when started as one
-    /// (`hosts::test_program`).
-    pub new_terminals: NewTerminals,
     /// The program terminal hosts are started from, in place of the
     /// supervisor's own executable
     /// ([`crate::hosts::spawn::own_host_program`]).
+    ///
+    /// Every terminal a supervisor creates is a terminal host, so a
+    /// supervisor inside a test binary, which has no `internal
+    /// terminal-host` of its own, needs this to create any terminal: the
+    /// Rust e2e harness points it at the built `farhelm`, and the
+    /// supervisor's own unit tests, which have no such binary, point it at
+    /// their own test binary, which runs a host when started as one
+    /// (`hosts::test_program`).
     ///
     /// For tests that start hosts from a program of their choosing (a
     /// wrapper around `farhelm`, a stand-in). With `None`, a supervisor that
@@ -1270,52 +1244,14 @@ pub struct SupervisorSeams {
     pub readoption_passes: Option<Arc<std::sync::atomic::AtomicUsize>>,
 }
 
-/// Which kind of terminal a supervisor creates new agent terminals in (the
-/// plan's D-2): [`SupervisorSeams::new_terminals`], set for a real
-/// supervisor process by `farhelm supervisor run --new-terminals`, which
-/// defaults to [`NewTerminals::Host`].
-///
-/// Named for the two kinds rather than on and off, because with terminal
-/// hosts the default the old kind stays selectable for the tests and media
-/// harnesses that keep using tmux, and "new terminals: tmux" reads as what
-/// it does. The derived `Default` is [`NewTerminals::Host`], the release's
-/// kind, and the in-process harnesses' default too
-/// ([`SupervisorSeams::default`]): old terminals are what a test asks for
-/// by name.
-///
-/// A new create, a new tab and a Restart consult it; a retried create
-/// launches in the kind its launching row already records, whatever this
-/// says then. A terminal never changes kind while it lives: a Restart starts
-/// a new one. Under `Host` a Restart of a tmux session starts its new launch
-/// in a host, which is how an old session moves to a new terminal
-/// (`host_restart`, "From a tmux pane"), and under `Tmux` it stays in tmux
-/// exactly as before; a Restart of a host agent starts a new host under
-/// either. Under `Host` every new tab is a host, beside a tmux agent too (a
-/// mixed session, whose old tmux tabs stay where they are); under `Tmux` a
-/// host agent's session cannot get a tab, since it has no tmux session to
-/// open one in.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum NewTerminals {
-    /// A pane in the supervisor's private tmux server, as every terminal was
-    /// before terminal hosts: an old terminal, for the tests and harnesses
-    /// whose subject is one.
-    Tmux,
-    /// A terminal host per agent terminal (SPEC_impl.md, "Terminal host").
-    #[default]
-    Host,
-}
-
 /// Where an [`TabOpenFault`] can fail a tab open.
 ///
-/// One stage per kind of tab, because each has one unwind worth proving:
-/// the terminal exists and its shell is already running, but the tab has
-/// no identity yet. Nothing else can reach that state on demand — the tmux
-/// call that creates the window, and the start of a tab's host, either work
-/// or leave nothing behind.
+/// Each stage is a state a tab open must unwind that nothing else reaches
+/// on demand: the tab's host exists and its shell may already run, but the
+/// tab has no identity yet. The start of a tab's host itself either works
+/// or leaves nothing behind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabOpenStage {
-    /// Immediately after `new-window`, before the window is marked.
-    BeforeMarking,
     /// For a tab in a terminal host: once its host reported ready (its
     /// child started) and before the supervisor's runtime adopts it. The
     /// host may remain and its shell may have started processes, with no
@@ -1332,36 +1268,13 @@ pub enum TabOpenStage {
 
 /// A failure injected into an `OpenTab` at one of its stages.
 ///
-/// A seam rather than a fault-injecting tmux wrapper because what needs
-/// exercising is the SUPERVISOR's unwind: a window that exists but was
-/// never marked is invisible to rediscovery, so leaving it would strand a
-/// live shell nothing can list or close — and the only way to reach that
-/// state deliberately is to fail the marking step. Production installs
-/// none, so the call site is one `Option` check.
+/// A seam rather than a fault-injecting host wrapper because what needs
+/// exercising is the SUPERVISOR's unwind: a tab host whose shell runs but
+/// that no tab names yet would strand a live shell nothing can list or
+/// close, and the only way to reach that state deliberately is to fail the
+/// open between its steps. Production installs none, so each call site is
+/// one `Option` check.
 pub type TabOpenFault = Arc<dyn Fn(TabOpenStage) -> anyhow::Result<()> + Send + Sync>;
-
-/// A deterministic failure boundary for the dead-agent replacement path.
-///
-/// Production installs no callback. Tests use these boundaries to prove that
-/// a preserved session is not torn down when replacement creation fails, and
-/// that a window created before marking or confirmation failure is cleaned up
-/// without touching the session's existing tabs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(
-    clippy::enum_variant_names,
-    reason = "fault injection runs before each named side effect, not after it"
-)]
-pub enum ReplacementStage {
-    /// Immediately before adding the replacement window.
-    BeforeCreation,
-    /// Immediately before marking the replacement as the agent window.
-    BeforeMarking,
-    /// Immediately before recording the replacement pane as running.
-    BeforeConfirmation,
-}
-
-/// Injects one replacement-stage failure for focused lifecycle tests.
-pub type ReplacementFault = Arc<dyn Fn(ReplacementStage) -> anyhow::Result<()> + Send + Sync>;
 
 impl Default for SupervisorSeams {
     fn default() -> Self {
@@ -1380,29 +1293,10 @@ impl Default for SupervisorSeams {
             launch_shell: None,
             upload_fs: Arc::new(crate::files::RealFs),
             state_dir_claim_wait: Duration::ZERO,
-            new_terminals: NewTerminals::Host,
             #[cfg(any(test, feature = "test-seams"))]
             host_program: None,
             #[cfg(test)]
             readoption_passes: None,
-        }
-    }
-}
-
-#[cfg(any(test, feature = "test-seams"))]
-impl SupervisorSeams {
-    /// The default seams with [`NewTerminals::Tmux`]: a supervisor that
-    /// creates old terminals, in its private tmux server.
-    ///
-    /// The one named way an in-process test asks for old terminals, so that
-    /// a reader can tell from the construction alone that a test runs on
-    /// them: the default is the release's kind, terminal hosts. For tests
-    /// whose subject exists only for old terminals (the tmux driver, tmux
-    /// tabs, moving old sessions into hosts).
-    pub fn tmux_terminals() -> Self {
-        SupervisorSeams {
-            new_terminals: NewTerminals::Tmux,
-            ..SupervisorSeams::default()
         }
     }
 }
@@ -3506,33 +3400,19 @@ fn same_launch_entry(
 
 /// The terminal a failed relaunch's re-published entry names.
 ///
-/// A definitive failure changed nothing in tmux, and a relaunch into the
-/// surviving pane keeps that pane whatever happened, so both keep the prior
-/// terminal. An ambiguous failure of a relaunch that had to build a fresh
-/// tmux session may have left a live agent in a NEW pane this code never
-/// learned, while the prior pane is gone: naming it would make opening the
-/// session target nothing, and make a later Delete read the stale pane as
-/// gone and skip its "still running" confirmation, reaping the new agent
-/// unasked. No terminal instead puts the entry under the existing
-/// terminal-less guard (`terminal_less_launch_may_be_live`) until a reload
-/// rediscovers the pane.
-///
-/// A host agent never survives (`terminal_survives` is false for it), so
-/// the same rule holds: a definitive failure puts the previous host back as
-/// the session's terminal, and an ambiguous one (a replacement host that
-/// could not be confirmed ended) names none, since the previous host's
-/// exited child would otherwise be read as the new generation's exit; the
-/// hosts of both generations stay reachable by their launch records.
-fn republished_terminal(
-    definitive: bool,
-    terminal_survives: bool,
-    prior: Option<Terminal>,
-) -> Option<Terminal> {
-    if definitive || terminal_survives {
-        prior
-    } else {
-        None
-    }
+/// Every relaunch starts a new terminal host, so the previous terminal is
+/// never where the new generation runs. A definitive failure changed
+/// nothing outside this process and puts the previous terminal back. An
+/// ambiguous one (a replacement host that could not be confirmed ended)
+/// may have left a live agent this code cannot name, so it names no
+/// terminal: the previous one's exited program would otherwise be read as
+/// the new generation's exit, and a later Delete would read the session as
+/// gone, skip its "still running" confirmation and reap the new agent
+/// unasked. No terminal puts the entry under the terminal-less guard
+/// (`terminal_less_launch_may_be_live`); the hosts of both generations stay
+/// reachable by their launch records.
+fn republished_terminal(definitive: bool, prior: Option<Terminal>) -> Option<Terminal> {
+    if definitive { prior } else { None }
 }
 
 /// Build the entry that describes a session's NEW launch generation,
@@ -3969,45 +3849,17 @@ fn relaunch_argv(snapshot: &SessionSnapshot) -> anyhow::Result<Vec<String>> {
     Ok(argv)
 }
 
-/// What a successful [`Supervisor::spawn_agent`] produced: the pane the
-/// agent is starting in, its optional excerpt fence, and the files this launch owns —
-/// which a caller that later fails to confirm the launch has to clean up,
-/// and whose spec the shim normally consumes on its way to `exec`.
-///
-/// The owner is RETURNED rather than recomputed by callers so nothing
-/// downstream can derive a path the spawn did not actually use — the
-/// spec's own `status_file` field is what the shim writes to, and a caller
-/// cleaning up a differently-derived path would leave the real sentinel in
-/// place for the next launch to misread.
-struct Spawned {
-    pane: String,
-    artifacts: LaunchArtifacts,
-    /// Proof that a later dead-pane excerpt can belong only to this launch.
-    /// Optional diagnostics never turn a successful spawn into a refusal.
-    launch_excerpt: Option<LaunchExcerptFence>,
-    /// Whether this launch's argv carried the conversation hook — see
-    /// [`Supervisor::with_farhelm_args`], which decided it.
-    ///
-    /// Returned rather than left on the supervisor because the cell that
-    /// records it, [`RunCells::hooked`], belongs to the entry
-    /// PUBLISHED for this launch, and on the create path that entry does
-    /// not exist until the launch is confirmed. Both callers carry this
-    /// value forward to that publication; nothing else reads it.
-    hooked: bool,
-}
-
 /// A launch whose spec is published and whose command is composed, ready to
-/// start in a terminal of either kind: what [`Supervisor::prepare_launch`]
-/// hands [`Supervisor::spawn_agent`] (tmux) and
-/// [`Supervisor::spawn_agent_in_host`] (a terminal host).
+/// start in its terminal host: what [`Supervisor::prepare_launch`] hands
+/// [`Supervisor::spawn_agent_in_host`].
 ///
-/// Everything here is decided once, before any terminal exists, so the two
-/// kinds cannot drift on the spec, the hook policy, the login shell or the
-/// shim command line; they differ only in what runs `cmd`.
+/// Everything here is decided once, before any terminal exists, so a
+/// create and a Restart cannot drift on the spec, the hook policy, the
+/// login shell or the shim command line.
 struct PreparedLaunch {
     /// The verified directory the terminal starts in.
     cwd: String,
-    /// The files this launch owns (see [`Spawned`]).
+    /// The files this launch owns (see [`SpawnedInHost::artifacts`]).
     artifacts: LaunchArtifacts,
     /// The login shell `cmd` runs, resolved for this launch.
     shell: String,
@@ -4021,93 +3873,34 @@ struct PreparedLaunch {
     hook_skip: Option<super::notifications::HookSkip>,
 }
 
-/// Where one launch should place its agent process.
-///
-/// A dead-agent restart can retain the tmux session and add one replacement
-/// window beside the user's tabs. Keeping that case explicit prevents the
-/// old `None` meaning (create an entire session) from accidentally regressing
-/// into a session-wide teardown.
-enum SpawnTarget<'a> {
-    /// Respawn inside the existing recorded pane, retaining its scrollback.
-    Reuse(&'a TmuxTerminal),
-    /// Add a replacement agent window to this already-existing session.
-    ExistingSession(&'a str),
-    /// Create a new tmux session for the first launch or a missing session.
-    NewSession,
-}
-
-/// Why a launch's side effects did not complete, split by what the caller
-/// may conclude from it — see [`Supervisor::spawn_agent`] for why the two
-/// cannot be unwound the same way.
-enum SpawnFailure {
-    /// The spec never landed, so nothing external happened at all. Carries
-    /// no path to clean up on purpose: the write helper's own contract is
-    /// that a failed staged write leaves neither a temp file nor a
-    /// published one (`files::write_staged`), so there is nothing here for
-    /// a caller to remove.
-    Spec(anyhow::Error),
-    /// tmux refused, or answered ambiguously. The agent may or may not be
-    /// running; only a probe can say. The spec DID land, and the shim may
-    /// never run to consume it. The artifact owner lets the caller remove that
-    /// credential-bearing input only after establishing what happened in tmux.
-    Tmux {
-        artifacts: LaunchArtifacts,
-        error: anyhow::Error,
-        /// A replacement window that was created before a later tmux step
-        /// failed. Its pane handle makes single-window cleanup safe.
-        replacement: Option<TmuxTerminal>,
-        /// The agent terminal of a NEW session that tmux created before a
-        /// later step (marking its window) failed. Kept apart from
-        /// `replacement`, whose cleanup semantics differ: a create that
-        /// retains its row publishes this as the session's terminal, since
-        /// the agent may be running in it and the entry is the only handle
-        /// that can open, stop, or delete it.
-        created: Option<TmuxTerminal>,
-        /// Whether the tmux operation was actually attempted. A fault seam
-        /// before `new-window` is a confirmed no-op even though the preserved
-        /// session itself still exists.
-        tmux_attempted: bool,
-    },
-}
-
-/// A create's agent started in its terminal, of either kind: what
-/// `launch_reserved` confirms and publishes.
+/// A create's agent started in its terminal host: what `launch_reserved`
+/// confirms and publishes.
 struct StartedLaunch {
     /// The terminal the agent runs in, which the published entry holds.
     terminal: Terminal,
-    /// The files this launch owns (see [`Spawned`]).
+    /// The files this launch owns (see [`SpawnedInHost`]).
     artifacts: LaunchArtifacts,
-    /// See [`Spawned::hooked`].
+    /// See [`SpawnedInHost::hooked`].
     hooked: bool,
-    /// See [`Spawned::launch_excerpt`]; always `None` for a host.
-    launch_excerpt: Option<LaunchExcerptFence>,
-    /// For a host, `Supervisor::host_scan` held shared since just before
-    /// its first stage started (`host_launch::SpawnedInHost::spawning`):
-    /// kept until the entry is published, released before the host is
-    /// given up. `None` for tmux.
+    /// `Supervisor::host_scan` held shared since just before the host's
+    /// first stage started (`host_launch::SpawnedInHost::spawning`): kept
+    /// until the entry is published, released before the host is given up.
     spawning: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
 }
 
 /// Why a create's agent did not start, in the one shape `launch_reserved`
-/// rolls back from, whichever kind of terminal it was starting in.
+/// rolls back from.
 enum FailedStart {
     /// The spec never landed: nothing was started.
     Spec(anyhow::Error),
-    /// The spec landed and the terminal's start failed. `left` is `None`
-    /// when nothing of the start is left (tmux has no such session, or no
-    /// host remains), which is the one case the create may roll back from;
-    /// otherwise it says what may be left, as the context the retained
-    /// launching record's error carries.
+    /// The spec landed and the host's start failed. `left` is `None` when
+    /// nothing of the start is left (no host remains), which is the one case
+    /// the create may roll back from; otherwise it says what may be left, as
+    /// the context the retained launching record's error carries.
     Terminal {
         artifacts: LaunchArtifacts,
         error: anyhow::Error,
         left: Option<String>,
-        /// The terminal to publish on the retained entry, when one is known
-        /// (a tmux session created before its window could be marked).
-        retained: Option<Terminal>,
-        /// How the failed start reads at the head of a retained create
-        /// refusal's message.
-        refused: &'static str,
     },
 }
 
@@ -4340,17 +4133,14 @@ pub(crate) fn truncate_for_error(id: &str) -> std::borrow::Cow<'_, str> {
 /// type-checking.
 struct Relaunched {
     terminal: Terminal,
-    /// The successful spawn's process-local excerpt boundary. Publication
-    /// installs it on the new generation before any observer can read it.
-    launch_excerpt: Option<LaunchExcerptFence>,
     /// The cgroup scope the NEW generation launched into.
     scope: Option<String>,
     /// The outcome that actually committed, which is not always the one
     /// the relaunch intended — see the call sites.
     outcome: LastOutcome,
     /// Whether THIS relaunch's argv carried the conversation hook, as
-    /// [`Supervisor::with_farhelm_args`] decided and [`Spawned::hooked`]
-    /// reported back.
+    /// [`Supervisor::with_farhelm_args`] decided and
+    /// [`SpawnedInHost::hooked`] reported back.
     ///
     /// It travels with the publication rather than being applied to
     /// `entry` because [`RunCells::hooked`] is per-LAUNCH: the entry
@@ -4387,16 +4177,16 @@ struct RelaunchPlan {
     clear_capture: bool,
     argv: Vec<String>,
     launch_cwd: String,
+    /// Whether the old agent's tmux pane is still this session's: a
+    /// session moving out of tmux then removes its old agent window once the
+    /// new host starts with its history (`relaunch_into_terminal`). Always
+    /// false for a host agent, whose host runs one child and is never
+    /// reused.
     terminal_survives: bool,
-    /// Whether the new launch starts in a terminal host: always for a host
-    /// row, and for a tmux row when the internal switch is on, which moves
-    /// the session to a new terminal (`host_restart`, "From a tmux pane").
-    /// The generation claim writes the matching kind into the row.
-    into_host: bool,
     restart_with: Option<RestartWithBundle>,
     /// The new host's history seed, read from the old host or the old tmux
-    /// pane before the generation was claimed; `None` for a launch that
-    /// stays in tmux, and for a restart with no old terminal to read.
+    /// pane before the generation was claimed; `None` for a restart with no
+    /// old terminal to read.
     seed: Option<host_restart::RestartSeed>,
 }
 
@@ -4706,7 +4496,7 @@ pub(crate) struct RunCells {
     /// the new generation, not on the previous entry a relaunch was
     /// computed from. The two writers honour that in the two shapes their
     /// paths allow: a create builds its entry only after the launch is
-    /// confirmed and seeds the cell from [`Spawned::hooked`] directly,
+    /// confirmed and seeds the cell from [`SpawnedInHost::hooked`] directly,
     /// while a restart's entry is minted by `relaunched_entry` inside
     /// [`Supervisor::publish_relaunched`], which raises the flag there when
     /// the new launch was injected. Reload and retained-row publication
@@ -5731,24 +5521,6 @@ pub struct SupervisorStartup {
     /// variable would also be one more thing a systemd unit could inherit
     /// by accident.
     pub boot_id_file: Option<PathBuf>,
-    /// Which kind of terminal this supervisor creates new agent terminals
-    /// in: `farhelm supervisor run --new-terminals <tmux|host>`, a hidden
-    /// harness seam whose default, [`NewTerminals::Host`], is what every
-    /// production launch gets (none passes the flag).
-    ///
-    /// It lands in [`SupervisorSeams::new_terminals`], the one value the
-    /// rest of the supervisor reads, so a real supervisor process and an
-    /// in-process harness choose the kind through the same field. The flag
-    /// exists so that the tests and harnesses that keep testing old
-    /// terminals can still ask for tmux from a real `farhelm supervisor
-    /// run`, and so that a harness can name hosts explicitly where its
-    /// meaning depends on them. A command-line option and never an
-    /// environment variable, for `boot_id_file`'s reasons: tests never
-    /// change their own process's environment, and a variable is one more
-    /// thing a systemd unit or an agent's shell could inherit by accident.
-    /// Not a user setting either: which kind new terminals are is decided
-    /// by the release, not by each install.
-    pub new_terminals: NewTerminals,
 }
 
 /// Remove a socket left by a supervisor that no longer holds the state-dir
@@ -6359,8 +6131,7 @@ impl Supervisor {
     /// through [`Self::new_for_startup`] with the options it resolved. What
     /// calls this today are lib tests that need no launch (their
     /// `current_exe` is the libtest runner, so a harness that launches
-    /// agents uses `new_with_exe` instead). New terminals here are host
-    /// ones, the release's kind, which such a test never starts.
+    /// agents uses `new_with_exe` instead).
     pub async fn new(state_dir: &Path) -> anyhow::Result<Arc<Supervisor>> {
         Self::new_for_startup(
             state_dir,
@@ -6369,7 +6140,6 @@ impl Supervisor {
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
                 boot_id_file: None,
-                new_terminals: NewTerminals::Host,
             },
         )
         .await
@@ -6401,7 +6171,6 @@ impl Supervisor {
             agent_hooks,
             agent_instructions,
             boot_id_file,
-            new_terminals,
         } = startup;
         let exe = std::env::current_exe().context("resolving own binary path")?;
         let defaults = SupervisorSeams::default();
@@ -6424,7 +6193,6 @@ impl Supervisor {
                 agent_instructions,
                 boot_id,
                 state_dir_claim_wait: STATE_DIR_CLAIM_WAIT,
-                new_terminals,
                 ..defaults
             },
             claim,
@@ -6660,9 +6428,8 @@ impl Supervisor {
         // Adopt a private tmux server only if one already runs: it holds
         // the old terminals an earlier supervisor created, and without one
         // there are none, so nothing here starts a server or needs a usable
-        // tmux (`TmuxDriver::adopt_running_server`). A server is started
-        // again only by an old terminal's create under the test-only
-        // `--new-terminals tmux` switch.
+        // tmux (`TmuxDriver::adopt_running_server`). The supervisor creates
+        // no old terminals, so it never starts a server.
         tmux.adopt_running_server(ownership.is_some()).await?;
         // Anything attached to the private server at this instant
         // predates this supervisor, and a control client whose owner
@@ -7779,7 +7546,7 @@ impl Supervisor {
                         notifications: Vec::new(),
                         // Both answered at reply time rather than stored here: the
                         // agent's terminal kind by `entry_info` from the entry's own
-                        // terminal, the switch by `report_new_terminals`.
+                        // terminal, the host terminals report by `report_new_terminals`.
                         agent_terminal: None,
                         supervisor_creates_host_terminals: false,
                     },
@@ -8173,19 +7940,6 @@ impl Supervisor {
     /// for the wrong reason. Also honest diagnostics for an embedder.
     pub fn owns_state_dir(&self) -> bool {
         self.ownership.is_some()
-    }
-
-    /// Which kind of terminal this supervisor creates new agent terminals
-    /// in, as it was started ([`SupervisorSeams::new_terminals`]).
-    ///
-    /// The one reading of the switch for code outside the constructor: a
-    /// create decides its kind from the same field, and anything that must
-    /// agree with that decision (whether to tell the user that a session
-    /// still runs in an old terminal, say) asks here rather than keeping a
-    /// copy. Fixed for the supervisor's lifetime; a new value takes a
-    /// restart.
-    pub fn new_terminals(&self) -> NewTerminals {
-        self.seams.new_terminals
     }
 
     /// The supervisor's unix socket path within a state dir. Shared with
@@ -10894,8 +10648,9 @@ impl Supervisor {
                     github_repo: None,
                     working_copy: None,
                     notifications: replayed_notifications,
-                    // The live entry's kind (above); the switch is added by
-                    // `with_checkout_metadata` below (`report_new_terminals`).
+                    // The live entry's kind (above); the host terminals report
+                    // is added by `with_checkout_metadata` below
+                    // (`report_new_terminals`).
                     agent_terminal,
                     supervisor_creates_host_terminals: false,
                 };
@@ -11011,16 +10766,15 @@ impl Supervisor {
     /// can stop or delete an agent which may already be running. Every
     /// create exit that retains such a row publishes through this helper.
     ///
-    /// `terminal` is present only when the failed path already received a
-    /// pane from tmux. No discovery belongs here: an unknown pane stays
-    /// unknown, and Delete uses the tmux session its id names to tear down a
-    /// terminal-less entry. `outcome` is `Launching` for the ambiguous arms
+    /// `terminal` is present only when the failed path already holds the
+    /// host it started (its confirmation failed after the start). No
+    /// discovery belongs here: an unknown terminal stays unknown, and Delete
+    /// finds a terminal-less entry's hosts by their launch records.
+    /// `outcome` is `Launching` for the ambiguous arms
     /// (the error path has not established whether the agent started, only
     /// that it is unsafe to discard its record) and `Error` for the
     /// retained-create-refusal arms (R1.2), where the launch provably never
     /// happened and the row is the retained refusal's visible evidence.
-    /// An excerpt fence is carried only when spawn actually succeeded and
-    /// confirmation failed later; an ambiguous tmux failure proves no boundary.
     #[allow(clippy::too_many_arguments)]
     async fn publish_retained_launch(
         &self,
@@ -11031,7 +10785,6 @@ impl Supervisor {
         outcome: LastOutcome,
         generation: i64,
         scope: Option<String>,
-        launch_excerpt: Option<LaunchExcerptFence>,
     ) {
         // This failed create cannot confirm its launch, so both memory and
         // reload keep its hook diagnostic unarmed. Clearing only memory would
@@ -11058,11 +10811,11 @@ impl Supervisor {
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
-                    launch_excerpt: Arc::new(std::sync::Mutex::new(launch_excerpt)),
+                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(outcome)),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-                    // The tmux error path does not return whether hook flags
+                    // A failed create's error does not say whether hook flags
                     // reached the attempted argv. This flag is diagnostic only,
                     // so an honest unknown is safer than arming its tripwire for
                     // a hook that may never have run.
@@ -11302,26 +11055,22 @@ impl Supervisor {
         // committed with the launching row, before anything is started: a
         // crash between the start and its confirmation then leaves a row
         // that already says where to look for what it started (a host by
-        // its tag, never a tmux pane), and a retried create takes over only
-        // a row of the same kind (`SessionStore::restart_pending_launch`).
+        // its tag), and a retried create takes over only a row of the same
+        // kind (`SessionStore::restart_pending_launch`).
         //
-        // A retry launches in the kind its row already records, whatever the
-        // switch says now: the evidence that let it take the launch over was
-        // gathered for that kind (a tmux session, or a host by its launch
-        // record), so only that kind is known to hold nothing of the earlier
-        // attempt, and the takeover refuses a row of another kind anyway.
-        let switched = match self.seams.new_terminals {
-            NewTerminals::Tmux => TerminalKind::Tmux,
-            NewTerminals::Host => TerminalKind::Host,
-        };
+        // Every new launch is a host's. A retry keeps the kind its row
+        // already records, so that the takeover compares like with like: a
+        // row an older supervisor started in tmux that turns out to have
+        // launched is replayed as itself, and one the takeover claims is
+        // refused right after the takeover (`refuse_retried_tmux_launch`).
         let terminal_kind = match reserved {
             Reserved::Retry(reservation) => self
                 .store
                 .session(&reservation.session_id)
                 .await
                 .context("reading the interrupted attempt's terminal kind")?
-                .map_or(switched, |row| row.terminal_kind),
-            Reserved::New { .. } | Reserved::Unkeyed(_) => switched,
+                .map_or(TerminalKind::Host, |row| row.terminal_kind),
+            Reserved::New { .. } | Reserved::Unkeyed(_) => TerminalKind::Host,
         };
         // Sampled HERE, after `scope_selected`'s await — not before it —
         // because that call's FIRST invocation anywhere in the process can
@@ -11411,8 +11160,8 @@ impl Supervisor {
             // process serves disagreeing until the next reload.
             //
             // The claim is released the moment this block ends, well before
-            // the tmux round trips further down. Holding one across a wedged
-            // tmux would take this session's stop, restart and delete down
+            // the host's start further down. Holding one across a start that
+            // hangs would take this session's stop, restart and delete down
             // with it, and nothing past the map removal needs it: with no
             // entry on the map there is nothing left for a claim-holder to
             // resolve.
@@ -11473,6 +11222,22 @@ impl Supervisor {
                 RetryClaim::Resolved(settled) => return self.answer_from(&settled).await,
                 RetryClaim::Launched => return self.settle_and_replay(reservation).await,
             }
+        }
+        // A takeover of a row an older supervisor started in tmux is refused
+        // here, before the checkout's allocation and every other side
+        // effect: this supervisor creates no tmux terminals, and the evidence
+        // that let the retry take the launch over was gathered for tmux, so
+        // starting it in a host instead would be a guess.
+        if terminal_kind == TerminalKind::Tmux {
+            return Err(self
+                .refuse_retried_tmux_launch(
+                    reserved,
+                    fresh_plan.as_ref(),
+                    retained_snapshot
+                        .as_ref()
+                        .expect("a retry's takeover keeps the row it took over"),
+                )
+                .await);
         }
 
         // The durable launching record, committed BEFORE any external side
@@ -11923,9 +11688,9 @@ impl Supervisor {
             working_copy: None,
             notifications: Vec::new(),
             // The create's reply gets the kind of the terminal it publishes
-            // (set where it publishes, below) and the switch at the reply
-            // boundary (`report_new_terminals`); every later reply answers
-            // from the entry's terminal (`entry_info`).
+            // (set where it publishes, below) and the host terminals report
+            // at the reply boundary (`report_new_terminals`); every later
+            // reply answers from the entry's terminal (`entry_info`).
             agent_terminal: None,
             supervisor_creates_host_terminals: false,
         };
@@ -11952,7 +11717,6 @@ impl Supervisor {
                 LastOutcome::Launching,
                 generation,
                 launch_scope.clone(),
-                None,
             )
             .await;
             return Err(anyhow::anyhow!(
@@ -11979,186 +11743,87 @@ impl Supervisor {
                 text,
             )
         });
-        // Both kinds share everything but the start itself (see
-        // `Self::prepare_launch`), and their failures are brought to one
-        // shape here: the spec never landed, or the start failed and either
-        // nothing of it is left or something may be.
-        let started = match terminal_kind {
-            // The tmux session is named from the id alone (`session_tmux_name`),
-            // so nothing about it is stored or minted before this arm.
-            TerminalKind::Tmux => {
-                let tmux_name = session_tmux_name(&id);
-                match self
-                    .spawn_agent(
-                        &id,
-                        &session_token,
-                        generation,
-                        &tmux_name,
-                        argv,
-                        shell_source,
-                        // The very snapshot the entry published below carries, so
-                        // the kind that chose this launch's hook flags is the kind
-                        // the session is durably recorded as. Re-deriving it here
-                        // would be a second classifier for one decision.
-                        &snapshot,
-                        args_mode,
-                        // The VERIFIED directory, not the caller's spelling: see
-                        // [`LaunchRequest::launch_cwd`]. They differ only on the
-                        // retry path, and only there because that path had an
-                        // identity to check.
-                        &launch_cwd,
-                        cols,
-                        rows,
-                        SpawnTarget::NewSession,
-                        launch_scope.as_deref(),
-                        preparation,
-                        initial_prompt,
-                    )
-                    .await
-                {
-                    Ok(Spawned {
-                        pane,
-                        artifacts,
-                        hooked,
-                        launch_excerpt,
-                    }) => Ok(StartedLaunch {
-                        terminal: Terminal::Tmux(TmuxTerminal {
-                            tmux_name: tmux_name.clone(),
-                            pane,
-                        }),
-                        artifacts,
-                        hooked,
-                        launch_excerpt,
-                        spawning: None,
-                    }),
-                    Err(SpawnFailure::Spec(error)) => Err(FailedStart::Spec(error)),
-                    Err(SpawnFailure::Tmux {
-                        artifacts,
-                        error,
-                        created,
-                        ..
-                    }) => {
-                        // A tmux failure is AMBIGUOUS in a way the spec write is
-                        // not: `new-session` can fail after the session already
-                        // exists (a lost reply, a timeout mid-command), so
-                        // deleting the row on the strength of the error alone
-                        // would orphan a running agent — no row, no id, nothing
-                        // left that knows to reap it. Ask tmux instead, and only
-                        // roll back on a CONFIRMED absence; an ambiguous or failed
-                        // probe keeps the row, which is the only record anything
-                        // will ever have of that launch.
-                        let left = match self.tmux.has_session(&tmux_name).await {
-                            Ok(false) => None,
-                            Ok(true) => Some(format!(
-                                "the tmux session {tmux_name} exists despite the failure, so \
-                                 session {id} is kept as a launching record rather than deleted; \
-                                 stop or delete it to reap whatever is running there"
+        // A create's failures are brought to one shape here: the spec never
+        // landed, or the host's start failed and either nothing of it is
+        // left or something may be.
+        let started = match self
+            .spawn_agent_in_host(
+                &id,
+                &session_token,
+                generation,
+                argv,
+                shell_source,
+                &snapshot,
+                args_mode,
+                &launch_cwd,
+                cols,
+                rows,
+                launch_scope.as_deref(),
+                preparation,
+                initial_prompt,
+                // A create's terminal starts empty; only Restart seeds
+                // a new host with the history it keeps.
+                None,
+            )
+            .await
+        {
+            Ok(SpawnedInHost {
+                host,
+                artifacts,
+                hooked,
+                spawning,
+            }) => Ok(StartedLaunch {
+                terminal: Terminal::Host(host),
+                artifacts,
+                hooked,
+                spawning: Some(spawning),
+            }),
+            Err(HostSpawnFailure::Spec(error)) => Err(FailedStart::Spec(error)),
+            // A simulated crash: return as a killed supervisor would,
+            // with no cleanup (`HostStartInterrupt`).
+            #[cfg(any(test, feature = "test-seams"))]
+            Err(HostSpawnFailure::Interrupted(error)) => return Err(error),
+            Err(HostSpawnFailure::Host {
+                artifacts,
+                error,
+                left,
+            }) => {
+                // The spawn already said whether a host can be left
+                // (`HostLeft`). One that may be is this launch's own (its
+                // socket name was drawn fresh for it), so it is ended
+                // here rather than kept: the first stage did not report
+                // it ready, or this supervisor cannot use it, and a
+                // failed create leaves nothing running. Only a host that
+                // cannot be confirmed ended keeps the row.
+                let left = match left {
+                    HostLeft::Nothing => None,
+                    HostLeft::MayRemain { socket } => {
+                        match self.end_launch_host(None, &socket, &id).await {
+                            Ok(()) => None,
+                            Err(why) => Some(format!(
+                                "a terminal host may still be running at {} ({why}), so \
+                             session {id} is kept as a launching record rather than \
+                             deleted; delete it to end the host and reap the agent's \
+                             processes",
+                                socket.display()
                             )),
-                            Err(probe) => Some(format!(
-                                "could not determine whether tmux session {tmux_name} was created \
-                                 ({probe:#}), so session {id} is kept as a launching record rather \
-                                 than deleted"
-                            )),
-                        };
-                        Err(FailedStart::Terminal {
-                            artifacts,
-                            error,
-                            left,
-                            // The pane tmux handed back, when the failure came
-                            // after `new-session` (marking the window): without
-                            // it the running agent could not be opened until a
-                            // reload rediscovered the pane.
-                            retained: created.map(Terminal::Tmux),
-                            refused: "tmux refused to create the session",
-                        })
+                        }
                     }
-                }
-            }
-            TerminalKind::Host => match self
-                .spawn_agent_in_host(
-                    &id,
-                    &session_token,
-                    generation,
-                    argv,
-                    shell_source,
-                    &snapshot,
-                    args_mode,
-                    &launch_cwd,
-                    cols,
-                    rows,
-                    launch_scope.as_deref(),
-                    preparation,
-                    initial_prompt,
-                    // A create's terminal starts empty; only Restart seeds
-                    // a new host with the history it keeps.
-                    None,
-                )
-                .await
-            {
-                Ok(SpawnedInHost {
-                    host,
-                    artifacts,
-                    hooked,
-                    spawning,
-                }) => Ok(StartedLaunch {
-                    terminal: Terminal::Host(host),
-                    artifacts,
-                    hooked,
-                    // A host runs one child, so its whole screen belongs to
-                    // this launch and needs no fence.
-                    launch_excerpt: None,
-                    spawning: Some(spawning),
-                }),
-                Err(HostSpawnFailure::Spec(error)) => Err(FailedStart::Spec(error)),
-                // A simulated crash: return as a killed supervisor would,
-                // with no cleanup (`HostStartInterrupt`).
-                #[cfg(any(test, feature = "test-seams"))]
-                Err(HostSpawnFailure::Interrupted(error)) => return Err(error),
-                Err(HostSpawnFailure::Host {
+                };
+                Err(FailedStart::Terminal {
                     artifacts,
                     error,
                     left,
-                }) => {
-                    // The spawn already said whether a host can be left
-                    // (`HostLeft`). One that may be is this launch's own (its
-                    // socket name was drawn fresh for it), so it is ended
-                    // here rather than kept: the first stage did not report
-                    // it ready, or this supervisor cannot use it, and a
-                    // failed create leaves nothing running. Only a host that
-                    // cannot be confirmed ended keeps the row.
-                    let left = match left {
-                        HostLeft::Nothing => None,
-                        HostLeft::MayRemain { socket } => {
-                            match self.end_launch_host(None, &socket, &id).await {
-                                Ok(()) => None,
-                                Err(why) => Some(format!(
-                                    "a terminal host may still be running at {} ({why}), so \
-                                     session {id} is kept as a launching record rather than \
-                                     deleted; delete it to end the host and reap the agent's \
-                                     processes",
-                                    socket.display()
-                                )),
-                            }
-                        }
-                    };
-                    Err(FailedStart::Terminal {
-                        artifacts,
-                        error,
-                        left,
-                        retained: None,
-                        refused: "the session's terminal host did not start",
-                    })
-                }
-            },
+                })
+            }
         };
-        let (terminal, artifacts, hooked, launch_excerpt, mut spawning) = match started {
+        let (terminal, artifacts, hooked, mut spawning) = match started {
             Ok(StartedLaunch {
                 terminal,
                 artifacts,
                 hooked,
-                launch_excerpt,
                 spawning,
-            }) => (terminal, artifacts, hooked, launch_excerpt, spawning),
+            }) => (terminal, artifacts, hooked, spawning),
             Err(FailedStart::Spec(error)) => {
                 // For an ordinary launch the spec was the FIRST external side
                 // effect and did not land, so its row can be rolled back. A
@@ -12203,8 +11868,6 @@ impl Supervisor {
                 artifacts,
                 error,
                 left,
-                retained,
-                refused,
             }) => {
                 let mut error = error;
                 match left {
@@ -12240,7 +11903,6 @@ impl Supervisor {
                                 LastOutcome::Launching,
                                 generation,
                                 launch_scope.clone(),
-                                None,
                             )
                             .await;
                             return Err(error.context(format!(
@@ -12262,10 +11924,10 @@ impl Supervisor {
                         // must never drop the last ownership record after an
                         // allocation.
                         if allocated_checkout.is_some() {
-                            return Err(self.retain_create_refusal(reserved, error.context(format!(
-                                "{refused}; the managed checkout itself was allocated and is kept \
-                                 for inspection and deletion",
-                            )), retained_snapshot.as_ref().expect("the allocator follows the durable session insert")).await);
+                            return Err(self.retain_create_refusal(reserved, error.context(
+                                "the session's terminal host did not start; the managed checkout \
+                                 itself was allocated and is kept for inspection and deletion",
+                            ), retained_snapshot.as_ref().expect("the allocator follows the durable session insert")).await);
                         }
                         error = self
                             .abandon_launching_record(
@@ -12291,13 +11953,12 @@ impl Supervisor {
                         error = error.context(kept);
                         self.publish_retained_launch(
                             &info,
-                            retained,
+                            None,
                             &snapshot,
                             canonical_cwd.as_deref(),
                             LastOutcome::Launching,
                             generation,
                             launch_scope.clone(),
-                            None,
                         )
                         .await;
                     }
@@ -12305,30 +11966,27 @@ impl Supervisor {
                 return Err(error);
             }
         };
-        // The launch reached its terminal — the tmux session and its pane,
-        // or the host and its child, exist, and the shim is on its way to
-        // `exec` (whether the agent itself then starts is a separate
-        // question this create never answers) — but nothing durable says so
-        // yet: the row is still `Launching` with no pane, and the
-        // reservation still pending. Placed before the
-        // confirmation below rather than after it so a simulated crash
-        // leaves precisely that state for reload's pane rediscovery to
+        // The launch reached its terminal — the host and its child exist,
+        // and the shim is on its way to `exec` (whether the agent itself
+        // then starts is a separate question this create never answers) —
+        // but nothing durable says so yet: the row is still `Launching` with
+        // no terminal address, and the reservation still pending. Placed
+        // before the confirmation below rather than after it so a simulated
+        // crash leaves precisely that state for reload's host discovery to
         // reconcile.
         self.simulate_crash(CreateStage::DuringLaunch)?;
 
-        // Launch confirmed: the pane exists, so the durable record moves
-        // from launching to running and gains the pane id it could not
-        // know before (PLAN_M3.md item 2's "confirmed running once the
+        // Launch confirmed: the host exists, so the durable record moves
+        // from launching to running and gains the terminal address it could
+        // not know before (PLAN_M3.md item 2's "confirmed running once the
         // pane exists"). A failure here still fails the whole create — the
         // row would otherwise stay launching while a real agent runs under
         // it, and the caller would be told a create succeeded whose
-        // terminal handle was never recorded — so the tmux session just
-        // created is torn back down (best effort). If teardown cannot prove
-        // it is gone, the launching row and entry remain as the caller's
-        // handle for stopping or deleting it.
-        // The row's terminal address is the tmux pane id or, for a host, the
-        // socket's name (the plan's D-14); the kind it is read by was
-        // committed with the launching row.
+        // terminal handle was never recorded — so the host just started is
+        // ended again (best effort). If teardown cannot prove it is gone,
+        // the launching row and entry remain as the caller's handle for
+        // stopping or deleting it. The row's terminal address is the host
+        // socket's name (the plan's D-14).
         let address = terminal.recorded_address().to_string();
         let confirmed = self
             .store
@@ -12362,9 +12020,9 @@ impl Supervisor {
                     truncate_for_error(&id)
                 ),
             ));
-            // The PROCESS tree first, the terminal second. Killing the tmux
-            // session (or ending the host, which hangs up its child) ends the
-            // pane's own process group and nothing else:
+            // The PROCESS tree first, the terminal second. Ending the host
+            // (which hangs up its child) ends the child's own process group
+            // and nothing else:
             // the agent's daemonized descendants — and, on a scoped launch,
             // everything in its cgroup — outlive it, and the row that could
             // have found them again is about to be gone for good. A failed
@@ -12518,7 +12176,6 @@ impl Supervisor {
                     LastOutcome::Launching,
                     generation,
                     launch_scope.clone(),
-                    launch_excerpt,
                 )
                 .await;
             }
@@ -12550,12 +12207,12 @@ impl Supervisor {
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
-                    launch_excerpt: Arc::new(std::sync::Mutex::new(launch_excerpt)),
+                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                     // Input starts only the diagnostic timer, never identity admission.
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-                    // What `spawn_agent` actually did to this launch's argv,
+                    // What the launch actually did to this launch's argv,
                     // recorded on the entry that describes that launch. A
                     // create publishes exactly once, so this is the only
                     // moment the flag can be set for its launch generation.
@@ -12627,7 +12284,7 @@ impl Supervisor {
     /// Single-session counterpart of the listing's batched registry snapshot.
     /// Kept outside `entry_info`, whose status projection performs no I/O.
     ///
-    /// Also the single-session half of the terminal switch report
+    /// Also the single-session half of the host terminals report
     /// ([`super::status::report_new_terminals`]): every single-session reply
     /// (create, restart, rename, a detail read) passes through here, as every
     /// listing passes through `listing::list_all`, so no reply can leave the
@@ -12638,7 +12295,7 @@ impl Supervisor {
     ) -> anyhow::Result<SessionInfo> {
         let mut projected = self.store.project_checkout_metadata(vec![info]).await?;
         let mut info = projected.remove(0);
-        super::status::report_new_terminals(self.new_terminals(), &mut info);
+        super::status::report_new_terminals(&mut info);
         Ok(info)
     }
 
@@ -13313,19 +12970,14 @@ impl Supervisor {
                 format!("not restarting: {refusal:#}"),
             )));
         }
-        // Where the new launch goes: a host agent stays in hosts, and with
-        // the switch on a tmux session moves into one (`host_restart`, "From
-        // a tmux pane"; `Self::new_terminals` is the one reading of the
-        // switch). A tmux session that moves is settled too: a host
-        // start an earlier move left (one that failed definitively keeps
-        // the row tmux) would otherwise go unseen.
-        let into_host = host_agent || self.new_terminals() == NewTerminals::Host;
-        let outstanding = if into_host {
-            self.settle_outstanding_launches(session_id, entry.terminal.as_ref())
-                .await?
-        } else {
-            Vec::new()
-        };
+        // Every new launch goes to a new terminal host: a host agent stays
+        // in hosts, and a tmux session moves into one (`host_restart`, "From
+        // a tmux pane"). A tmux session that moves is settled too: a host
+        // start an earlier move left (one that failed definitively keeps the
+        // row tmux) would otherwise go unseen.
+        let outstanding = self
+            .settle_outstanding_launches(session_id, entry.terminal.as_ref())
+            .await?;
         // No pane to probe is not proof of no agent: an ambiguous create
         // (`terminal_less_launch_may_be_live`) may have left one running.
         // Restart no longer asks about it, though. Its status reads unknown,
@@ -13405,7 +13057,7 @@ impl Supervisor {
         // session's now, has nothing of this session to keep.
         let seed = match entry.terminal.as_ref() {
             Some(Terminal::Host(old)) => Some(self.restart_seed(session_id, old).await?),
-            Some(Terminal::Tmux(old)) if into_host && pane_state.is_some() => {
+            Some(Terminal::Tmux(old)) if pane_state.is_some() => {
                 Some(self.tmux_restart_seed(session_id, old).await?)
             }
             Some(Terminal::Tmux(_)) | None => None,
@@ -13418,16 +13070,12 @@ impl Supervisor {
         // disconnects mid-restart loses only its reply.
         let sup = Arc::clone(self);
         let entry_for_task = Arc::clone(&entry);
-        // "Survives" means the recorded pane is still THIS session's to
-        // respawn into. A recognized foreign owner already collapsed to
-        // `None` above precisely so it lands here as "did not survive" —
-        // not because reuse would be dangerous (it could not even happen:
-        // `relaunch_in_pane` targets `pane_in_session(session, pane)`, and
-        // tmux rejects a mismatched session/pane pairing atomically, see
-        // that method's docs), but because reuse would be a GUARANTEED
-        // failure. Saying "did not survive" is what lets a fresh terminal
-        // be created instead; the driver's session-paired target remains
-        // the cross-session safety barrier either way.
+        // "Survives" means the recorded tmux pane is still THIS session's,
+        // so that a move into a host may remove its old agent window once
+        // the new host holds its history. A recognized foreign owner already
+        // collapsed to `None` above precisely so it lands here as "did not
+        // survive": a pane another session owns is never this session's to
+        // remove.
         //
         // A host terminal never survives in this sense: a host runs one
         // child and cannot start another, so a Restart never reuses it.
@@ -13479,7 +13127,6 @@ impl Supervisor {
                     argv,
                     launch_cwd,
                     terminal_survives,
-                    into_host,
                     restart_with,
                     seed,
                 },
@@ -13543,7 +13190,6 @@ impl Supervisor {
             argv,
             launch_cwd,
             terminal_survives,
-            into_host,
             restart_with,
             seed,
         } = plan;
@@ -13565,17 +13211,14 @@ impl Supervisor {
                 // previous run's answer is simply the wrong one.
                 self.scope_selected(&id).await,
                 clear_capture,
-                // A host launch's kind goes into the row with its generation,
-                // as a create's goes in with its launching row: from here on
-                // a host may start for it, and a supervisor that dies before
-                // the confirmation must look for it by its host's tag. For a
-                // tmux session that moves this is where the row becomes a
-                // host row; a definitive failure's abort makes it tmux again.
-                Some(if into_host {
-                    TerminalKind::Host
-                } else {
-                    TerminalKind::Tmux
-                }),
+                // The new launch's kind goes into the row with its
+                // generation, as a create's goes in with its launching row:
+                // from here on a host may start for it, and a supervisor that
+                // dies before the confirmation must look for it by its host's
+                // tag. For a tmux session that moves this is where the row
+                // becomes a host row; a definitive failure's abort makes it
+                // tmux again.
+                Some(TerminalKind::Host),
             )
             .await
             .context("opening a new launch generation for this restart")?;
@@ -13690,7 +13333,6 @@ impl Supervisor {
                     argv,
                     launch_cwd,
                     terminal_survives,
-                    into_host,
                     seed,
                 )
                 .await
@@ -13878,15 +13520,12 @@ impl Supervisor {
                 // terminals it closes (`Self::publishable`, as for a
                 // successful relaunch): the runtime was off the map while the
                 // stop gathered, so nothing else would close it.
-                // A launch that went to a host never ran in the old pane, so
-                // an ambiguous one leaves no terminal to name even when that
-                // pane survives (a tmux session that was moving into a host).
+                // A launch went to a new host, never into the old terminal,
+                // so an ambiguous one leaves no terminal to name even when
+                // the old one survives (a tmux session that was moving into a
+                // host).
                 let terminal = if still_exists {
-                    self.publishable(republished_terminal(
-                        definitive,
-                        terminal_survives && !into_host,
-                        entry.terminal.clone(),
-                    ))
+                    self.publishable(republished_terminal(definitive, entry.terminal.clone()))
                 } else {
                     None
                 };
@@ -13933,13 +13572,11 @@ impl Supervisor {
     }
 
     /// The launch itself, once the generation is claimed and the session is
-    /// off the map: publish this launch's spec, hand it to tmux (into the
-    /// surviving pane, or a fresh session), confirm it durably, and
-    /// republish the entry. With `into_host` (a host agent, or a tmux
-    /// session the internal switch moves to a new terminal) it goes to a new
-    /// terminal host instead ([`Supervisor::relaunch_into_host`]), replacing
-    /// the old host, or the old tmux agent window when `terminal_survives`
-    /// says its pane is still this session's.
+    /// off the map: start it in a new terminal host
+    /// ([`Supervisor::relaunch_into_host`]), confirm it durably, and
+    /// republish the entry, replacing the old host, or the old tmux agent
+    /// window when `terminal_survives` says its pane is still this
+    /// session's and the new host starts with its history.
     ///
     /// `launch` and `snapshot` describe the selected execution, including
     /// Restart with's replacement before it is durably published. Reading
@@ -13949,16 +13586,8 @@ impl Supervisor {
     ///
     /// `launch_cwd` is the directory the caller VERIFIED against this
     /// session's recorded identity ([`ensure_cwd_identity`]), which is what
-    /// tmux is given — never `entry.info.cwd`, whose symlinks could be
-    /// repointed between that check and this launch.
-    ///
-    /// `terminal_survives` is the caller's own pane probe: `true` means the
-    /// pane still exists (alive or dead-but-retained) and the relaunch
-    /// respawns into it, keeping only the scrollback tmux had already
-    /// retained — the prior run's visible grid is wiped by the respawn and
-    /// deliberately not preserved (SPEC.md, Lifecycle operations/Restart);
-    /// `false` means the terminal is gone — an interrupted session, or one
-    /// whose tmux server died — and a fresh one is built.
+    /// the new host is given — never `entry.info.cwd`, whose symlinks could
+    /// be repointed between that check and this launch.
     ///
     /// Every failure says whether it is DEFINITIVE (nothing outside this
     /// process changed) so the caller knows whether the previous outcome
@@ -13974,625 +13603,39 @@ impl Supervisor {
         argv: Vec<String>,
         launch_cwd: String,
         terminal_survives: bool,
-        into_host: bool,
         seed: Option<host_restart::RestartSeed>,
     ) -> Result<SessionInfo, RelaunchFailure> {
-        let id = entry.info.id.clone();
-        let terminal = entry.terminal.as_ref();
-        // Read the tab strip before any side effect as a preflight. The
-        // preserved-session path re-discovers it after replacement; the
-        // snapshot remains useful for pane reuse and for failure reporting.
-        // A read failure refuses the restart before anything destructive.
+        // Read the tab strip before any side effect as a preflight. A read
+        // failure refuses the restart before anything destructive.
         let tabs = self.session_tabs(entry).await.map_err(|e| {
             RelaunchFailure::definitive(
                 e.context("reading this session's terminal tabs before relaunching it"),
             )
         })?;
-        // Every target below is tmux's: the surviving pane, a replacement
-        // window beside the session's tabs, or a fresh tmux session. A host
-        // launch goes to a new host instead (a host runs one child): a host
+        // A host runs one child, so every launch goes to a new host: a host
         // agent's, whether or not its session still holds the old host's
-        // runtime, and, with the switch on, a tmux session's, whose old tabs
-        // stay in its tmux session while only the agent window goes. An
-        // existing tmux session must not pull such a launch into a window
-        // beside its tabs (the inventory's old-to-new rows). This is the one
-        // route into a host. The old agent window goes once the new launch
-        // is published only when the new host starts with its history: a
-        // seed read without history (the pane not this session's any more,
-        // or too large to seed) leaves the window, which may hold the only
-        // copy, for the session's Delete.
-        if into_host {
-            let replacing = match terminal {
-                Some(Terminal::Host(old)) => host_restart::Replacing::Host(old),
-                Some(Terminal::Tmux(old))
-                    if terminal_survives
-                        && seed
-                            .as_ref()
-                            .is_some_and(host_restart::RestartSeed::holds_history) =>
-                {
-                    host_restart::Replacing::TmuxWindow(old)
-                }
-                Some(Terminal::Tmux(_)) | None => host_restart::Replacing::Nothing,
-            };
-            return self
-                .relaunch_into_host(
-                    entry, replacing, launch, snapshot, generation, scope, argv, launch_cwd, tabs,
-                    seed,
-                )
-                .await;
-        }
-        // A host agent always sets `into_host` (`restart_session_named`,
-        // under the same claim), so a host terminal here is a bug; refused
-        // definitively, since nothing was started, rather than relaunched in
-        // tmux, which would leave a host row naming a tmux pane.
-        let terminal = match terminal {
-            Some(Terminal::Tmux(terminal)) => Some(terminal),
-            Some(Terminal::Host(_)) => {
-                return Err(RelaunchFailure::definitive(anyhow::anyhow!(
-                    "session {} has its agent in a terminal host, but its relaunch was not \
-                     routed to one; nothing was relaunched",
-                    truncate_for_error(&id)
-                )));
-            }
-            None => None,
-        };
-        let tmux_name = match terminal {
-            Some(terminal) => terminal.tmux_name.clone(),
-            // A session whose terminal did not survive relaunches under the
-            // tmux session its id names, the only name any tmux launch of it
-            // has used (`session_tmux_name`): a relaunch is the same session,
-            // not a new one. A row that vanished meanwhile is caught by the
-            // credential read below.
-            //
-            // The row is a tmux row: the claim wrote `tmux` for a launch
-            // that is not `into_host`, and a host row with no terminal is
-            // `into_host` (`restart_session_named`).
-            None => session_tmux_name(&id),
-        };
-        // Read every fallible durable launch input before killing a tmux
-        // husk or touching the reusable pane. A credential read failure
-        // must leave the previous terminal exactly as it was.
-        let session_token = match self.store.session_token(&id).await {
-            Ok(Some(token)) => token,
-            Ok(None) => {
-                return Err(RelaunchFailure::definitive(anyhow::anyhow!(
-                    "session {} vanished before its spawn credential could be read",
-                    truncate_for_error(&id)
-                )));
-            }
-            Err(error) => {
-                return Err(RelaunchFailure::definitive(
-                    error.context("reading this session's spawn credential for a relaunch"),
-                ));
-            }
-        };
-        let reuse = terminal.filter(|_| terminal_survives);
-        // A dead recorded pane does not imply a dead tmux session: tabs may
-        // still be running beside it. Preserve that session and add one
-        // replacement window; only the absent-session case creates a new
-        // substrate.
-        let existing_session = if reuse.is_none() {
-            match self.tmux.has_session(&tmux_name).await {
-                Ok(true) => Some(tmux_name.clone()),
-                Ok(false) => None,
-                Err(e) => {
-                    return Err(RelaunchFailure::definitive(e.context(
-                        "checking whether the relaunch can preserve the existing tmux session",
-                    )));
-                }
-            }
-        } else {
-            None
-        };
-        // Capture a pane in the old agent window before adding the
-        // replacement. The recorded pane is the only identity safe enough
-        // for destructive cleanup; markers can report that an old window may
-        // remain, but panes can forge those markers from inside tmux.
-        let (old_agent_anchor, old_agent_window_present) = if existing_session.is_some() {
-            self.old_agent_window_anchor(&tmux_name, &id, terminal.map(|t| t.pane.as_str()))
-                .await
-                .map_err(|e| {
-                    RelaunchFailure::definitive(
-                        e.context("identifying the old agent window before replacement"),
-                    )
-                })?
-        } else {
-            (None, false)
-        };
-        // Nothing is done to the reused pane's visible screen before the
-        // respawn. `respawn-pane` keeps the pane's scrollback history but
-        // reinitializes its visible grid, and that loss is accepted
-        // (SPEC.md, Lifecycle operations/Restart): the pane stays blank
-        // until the new agent draws. Farhelm once pushed the grid into
-        // history by shrinking the window, and captured an alt-screen
-        // frame for the launch shim to paint back — both removed, because
-        // a painted frame with no process behind it looks live and accepts
-        // typing, which is worse than blank.
-        let spawned = self
-            .spawn_agent(
-                &id,
-                &session_token,
-                generation,
-                &tmux_name,
-                argv,
-                ShellSource::of(launch, crate::agent_kind::LaunchPhase::Resume),
-                // The session's own immutable snapshot: a restart is a new
-                // generation of the SAME session, so the kind that decides
-                // the hook flags is the one the session was created with,
-                // never re-derived from this relaunch's argv (which for a
-                // resume is `claude --resume <id>`, not the original
-                // invocation at all).
-                snapshot,
-                // A relaunch always runs the resume command. Restart with
-                // keeps the launch kind, so the stored launch answers
-                // whether this session is legacy.
-                FarhelmArgsMode::of(launch, crate::agent_kind::LaunchPhase::Resume),
-                // The path `restart_session` VERIFIED against this
-                // session's recorded identity, not `entry.info.cwd` — see
-                // `ensure_cwd_identity` for the check-then-repoint window
-                // that closes.
-                &launch_cwd,
-                RELAUNCH_COLS,
-                RELAUNCH_ROWS,
-                match reuse {
-                    Some(terminal) => SpawnTarget::Reuse(terminal),
-                    None => match existing_session.as_deref() {
-                        Some(session) => SpawnTarget::ExistingSession(session),
-                        None => SpawnTarget::NewSession,
-                    },
-                },
-                scope.as_deref(),
-                // A user RESTART never re-runs checkout preparation (Design
-                // D: restart of a non-Ready checkout is refused, and of a
-                // Ready one never clones again) — this parameter belongs to
-                // the create path only. The refusal wiring arrives with the
-                // restart-against-preparation slice.
-                None,
-                None,
-            )
-            .await;
-        let Spawned {
-            pane,
-            artifacts,
-            hooked,
-            launch_excerpt,
-            ..
-        } = match spawned {
-            Ok(spawned) => spawned,
-            Err(SpawnFailure::Spec(error)) => {
-                return Err(RelaunchFailure::definitive(
-                    error.context("publishing this restart's launch spec"),
-                ));
-            }
-            Err(SpawnFailure::Tmux {
-                artifacts,
-                error,
-                replacement,
-                tmux_attempted,
-                // A restart whose old tmux session is gone does create a
-                // new one, and `created` can then be set. This path keeps
-                // its own recovery (`unwind_failed_relaunch`) rather than
-                // publishing that pane; only the initial create consumes
-                // `created`.
-                created: _,
-            }) => {
-                return Err(self
-                    .unwind_failed_relaunch(
-                        &id,
-                        &tmux_name,
-                        scope.as_deref(),
-                        reuse,
-                        replacement.as_ref(),
-                        existing_session.is_some(),
-                        tmux_attempted,
-                        &artifacts,
-                        error,
-                    )
-                    .await);
-            }
-        };
-        // Launch confirmed: the pane exists, so the durable record moves
-        // from launching to running and gains the pane it could not know
-        // before — the same transition a create commits, for the same
-        // reason, and fenced on this launch's own generation so a racing
-        // observer cannot have moved it first.
-        let confirmation_fault = if existing_session.is_some() {
-            self.seams
-                .faults
-                .replacement_fault()
-                .as_ref()
-                .and_then(|fault| fault(ReplacementStage::BeforeConfirmation).err())
-                .map(|error| error.context("injected replacement confirmation failure"))
-        } else {
-            None
-        };
-        let confirmed = match confirmation_fault {
-            Some(error) => Err(error),
-            None => {
-                self.store
-                    .transition(
-                        &id,
-                        generation,
-                        Transition::ConfirmRunning {
-                            address: pane.clone(),
-                        },
-                    )
-                    .await
-            }
-        };
-        let confirmed = match confirmed {
-            Ok(confirmed) => confirmed,
-            Err(e) => {
-                if existing_session.is_some() {
-                    let replacement = TmuxTerminal {
-                        tmux_name: tmux_name.clone(),
-                        pane: pane.clone(),
-                    };
-                    return match self
-                        .cleanup_replacement_window(&id, scope.as_deref(), &replacement)
-                        .await
-                    {
-                        Ok(()) => Err(RelaunchFailure::definitive(e.context(
-                            "confirming the replacement agent in the preserved session failed; the replacement was removed and the old session remains recoverable",
-                        ))),
-                        Err(cleanup) => Err(RelaunchFailure::ambiguous(e.context(format!(
-                            "confirming the replacement agent failed and its replacement window could not be cleaned up ({cleanup:#}); the launching record is retained",
-                        )))),
-                    };
-                }
-                // The agent IS running and this process could not record
-                // it. Publishing the new terminal as `Launching` keeps the
-                // session reachable — attachable, stoppable, deletable —
-                // which is strictly better than reporting a failure that
-                // leaves an untracked agent behind; the next list or reload
-                // confirms what this write could not.
-                warn!(
-                    session = %id, error = %format!("{e:#}"),
-                    "could not confirm this relaunch durably; publishing it as launching so \
-                     the agent stays reachable"
-                );
-                self.publish_relaunched(
-                    entry,
-                    generation,
-                    Relaunched {
-                        terminal: Terminal::Tmux(TmuxTerminal {
-                            tmux_name: tmux_name.clone(),
-                            pane: pane.clone(),
-                        }),
-                        launch_excerpt,
-                        scope: scope.clone(),
-                        outcome: LastOutcome::Launching,
-                        hooked,
-                        tabs: tabs.clone(),
-                    },
-                )
-                .await;
-                // PUBLISHED, not merely ambiguous: the entry above is on
-                // the map with the new terminal and generation, and the
-                // generic recovery would immediately replace it with the
-                // pre-restart one — throwing away the very reachability
-                // this branch just went out of its way to preserve.
-                return Err(RelaunchFailure::published(e.context(
-                    "confirming the relaunch in the database; the agent is running and the \
-                     session lists as unknown until the next observation",
-                )));
-            }
-        };
-        match confirmed {
-            Some(LastOutcome::Running) => {}
-            // The row is GONE: a delete resolved this session's entry
-            // before the removal above and committed while the relaunch was
-            // mid-flight. The delete wins — it was a deliberate action
-            // against a session that existed when it was issued — so this
-            // relaunch tears its own work back down rather than leaving an
-            // agent running with no row that knows about it.
-            None => {
-                let mut teardown = Vec::new();
-                if let Err(e) = reap_process_tree(
-                    &self.seams.scopes,
-                    ScopeUnits::recorded(scope.clone()),
-                    None,
-                    &id,
-                    &SweepTarget::AgentOnly,
-                    ScopeKillFailure::Warn,
-                )
-                .await
-                {
-                    teardown.push(format!("the new agent's process tree ({e:#})"));
-                }
-                let teardown_result = if existing_session.is_some() {
-                    self.cleanup_replacement_window(
-                        &id,
-                        scope.as_deref(),
-                        &TmuxTerminal {
-                            tmux_name: tmux_name.clone(),
-                            pane: pane.clone(),
-                        },
-                    )
-                    .await
-                    .map_err(|e| format!("its replacement window ({e:#})"))
-                } else {
-                    self.tmux
-                        .kill_session(&tmux_name)
-                        .await
-                        .map_err(|e| format!("its tmux session {tmux_name} ({e:#})"))
-                };
-                if let Err(e) = teardown_result {
-                    teardown.push(e);
-                }
-                artifacts
-                    .remove_deleted_relaunch_fail_closed(&mut teardown)
-                    .await;
-                let message = if teardown.is_empty() {
-                    format!(
-                        "session {} was deleted while it was being relaunched, so the new \
-                         agent was torn back down",
-                        truncate_for_error(&id)
-                    )
-                } else {
-                    // Never "was torn back down" over a failure: a caller
-                    // reading that would believe nothing survives, and
-                    // something does.
-                    format!(
-                        "session {} was deleted while it was being relaunched, and the new \
-                         agent could NOT be fully torn back down: {}",
-                        truncate_for_error(&id),
-                        teardown.join("; ")
-                    )
-                };
-                return Err(RelaunchFailure::ambiguous(
-                    RequestError::new(ErrorKind::Conflict, message).into(),
-                ));
-            }
-            // Anything else means another writer moved this generation's
-            // outcome between the spawn and this line — a lost race rather
-            // than a success. Published as what actually committed, never
-            // as a fabricated `Running`.
-            Some(other) => {
-                warn!(
-                    session = %id, outcome = ?other,
-                    "this relaunch's confirmation lost a race; publishing what committed"
-                );
-                let info = self
-                    .publish_relaunched(
-                        entry,
-                        generation,
-                        Relaunched {
-                            terminal: Terminal::Tmux(TmuxTerminal {
-                                tmux_name: tmux_name.clone(),
-                                pane: pane.clone(),
-                            }),
-                            launch_excerpt,
-                            scope,
-                            outcome: other,
-                            hooked,
-                            tabs,
-                        },
-                    )
-                    .await;
-                return self.restart_reply(info).await;
-            }
-        }
-
-        let mut cleanup_error = None;
-        let mut identity_error = None;
-        if let Some(old_pane) = old_agent_anchor.as_deref() {
-            if let Err(error) = self.tmux.kill_window(&tmux_name, old_pane).await {
-                cleanup_error = Some(error.context(
-                    "the replacement agent is running, but the old dead agent window could not be removed",
-                ));
-            }
-        } else if old_agent_window_present {
-            identity_error = Some(anyhow::anyhow!(
-                "the replacement agent is running, but the old agent window had no safe pane identity"
-            ));
-            warn!(
-                session = %id,
-                "the replacement agent is running, but the old agent window had no safe pane identity; preserving it for later cleanup"
-            );
-        }
-        // Re-discover after replacement so the reply describes the tabs that
-        // actually remain in the preserved session, rather than trusting the
-        // pre-restart snapshot after an operation that changed one window.
-        let tabs = if existing_session.is_some() {
-            match self
-                .replacement_session_tabs(
-                    entry,
-                    &TmuxTerminal {
-                        tmux_name: tmux_name.clone(),
-                        pane: pane.clone(),
-                    },
-                )
-                .await
+        // runtime, and a tmux session's, whose old tabs stay in its tmux
+        // session while only the agent window goes. The old agent window
+        // goes once the new launch is published only when the new host
+        // starts with its history: a seed read without history (the pane
+        // not this session's any more, or too large to seed) leaves the
+        // window, which may hold the only copy, for the session's Delete.
+        let replacing = match entry.terminal.as_ref() {
+            Some(Terminal::Host(old)) => host_restart::Replacing::Host(old),
+            Some(Terminal::Tmux(old))
+                if terminal_survives
+                    && seed
+                        .as_ref()
+                        .is_some_and(host_restart::RestartSeed::holds_history) =>
             {
-                Ok(tabs) => tabs,
-                Err(error) => {
-                    self.publish_relaunched(
-                        entry,
-                        generation,
-                        Relaunched {
-                            terminal: Terminal::Tmux(TmuxTerminal {
-                                tmux_name: tmux_name.clone(),
-                                pane: pane.clone(),
-                            }),
-                            launch_excerpt,
-                            scope,
-                            outcome: LastOutcome::Running,
-                            hooked,
-                            tabs: Vec::new(),
-                        },
-                    )
-                    .await;
-                    return Err(RelaunchFailure::published(error.context(
-                        "the replacement agent is running, but surviving tabs could not be re-discovered",
-                    )));
-                }
+                host_restart::Replacing::TmuxWindow(old)
             }
-        } else {
-            // Pane reuse does not change the session's window set, so the
-            // preflight snapshot remains the honest reply. Only a
-            // replacement in a surviving session needs a post-operation
-            // rediscovery.
-            tabs
+            Some(Terminal::Tmux(_)) | None => host_restart::Replacing::Nothing,
         };
-
-        info!(session = %id, tmux = %tmux_name, %pane, reused = reuse.is_some(), "session restarted");
-        let info = self
-            .publish_relaunched(
-                entry,
-                generation,
-                Relaunched {
-                    terminal: Terminal::Tmux(TmuxTerminal { tmux_name, pane }),
-                    launch_excerpt,
-                    scope,
-                    outcome: LastOutcome::Running,
-                    hooked,
-                    tabs,
-                },
-            )
-            .await;
-        if let Some(error) = cleanup_error.or(identity_error) {
-            return Err(RelaunchFailure::published(error));
-        }
-        self.restart_reply(info).await
-    }
-
-    /// Unwind a relaunch whose tmux command failed — but only once it is
-    /// established that the launch did NOT take.
-    ///
-    /// tmux failures are ambiguous in a way the spec write is not: a
-    /// respawn (or a `new-session`) can fail after tmux has already applied
-    /// it, so removing this launch's spec on the strength of the error
-    /// alone would leave a REAL agent running with the shim's own spec
-    /// deleted underneath it — which the shim then reports as a launch
-    /// failure, converting a live session into a fabricated exec error.
-    /// This probes first, exactly as the create path does, and only cleans
-    /// up on confirmed absence.
-    ///
-    /// `scope` is the FAILED launch's own cgroup unit, not the previous
-    /// run's: `systemd-run` can have created the scope and placed processes
-    /// in it before whatever made tmux fail, so the sweep this performs
-    /// must be able to reach them.
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "cleanup needs the failed attempt state and the preserved terminal identities together"
-    )]
-    async fn unwind_failed_relaunch(
-        &self,
-        id: &str,
-        tmux_name: &str,
-        scope: Option<&str>,
-        reuse: Option<&TmuxTerminal>,
-        replacement: Option<&TmuxTerminal>,
-        preserved_session: bool,
-        tmux_attempted: bool,
-        artifacts: &LaunchArtifacts,
-        error: anyhow::Error,
-    ) -> RelaunchFailure {
-        let error = error.context(format!(
-            "relaunching session {} in tmux",
-            truncate_for_error(id)
-        ));
-        // For a reused pane the question is "is a process running in it
-        // now"; for a fresh terminal it is "does the session exist". Either
-        // answer being unavailable is itself ambiguity — hence the inner
-        // `Option`: `None` is "tmux answered, but not about our pane".
-        let applied = if let Some(replacement) = replacement {
-            // A replacement pane belongs to this session and was created by
-            // this launch. Tear down only its window; tabs in the preserved
-            // session remain untouched.
-            match self
-                .cleanup_replacement_window(id, scope, replacement)
-                .await
-            {
-                Ok(()) => Ok(Some(false)),
-                Err(probe) => Err(probe),
-            }
-        } else if preserved_session && !tmux_attempted {
-            // The replacement fault seam fired before `new-window`, so the
-            // surviving session says nothing about this launch's side effect.
-            // Treating that session as proof of acceptance would strand the
-            // new generation's credential-bearing spec and launching row.
-            Ok(Some(false))
-        } else {
-            match reuse {
-                Some(terminal) => self
-                    .tmux
-                    .pane_process(&terminal.tmux_name, &terminal.pane)
-                    .await
-                    .map(|probe| match probe {
-                        TerminalProbe::Owned(pane) => Some(!pane.dead),
-                        TerminalProbe::Gone => Some(false),
-                        // Ambiguous for EITHER kind of foreign owner, which is
-                        // why this is the one site that does not ask
-                        // `known_session_tmux_name` which kind it has. The
-                        // lifecycle verbs ask "is this session's agent
-                        // running", and a recognized owner answers that no;
-                        // here the question is "did the respawn we just issued
-                        // into THIS pane apply", and nothing about the owner's
-                        // identity answers it — the respawn may have landed
-                        // before whatever rearranged ownership, whichever
-                        // rearrangement it was. Unwinding on a guess would
-                        // delete a live agent's spec out from under it, so
-                        // this stays conservative and keeps the launching
-                        // record.
-                        TerminalProbe::ForeignOwner { .. } => None,
-                    }),
-                None if preserved_session => Ok(None),
-                None => self.tmux.has_session(tmux_name).await.map(Some),
-            }
-        };
-        match applied {
-            Ok(Some(false)) => {}
-            Ok(Some(true)) => {
-                return RelaunchFailure::ambiguous(error.context(
-                    "tmux reports a live process for this session despite the failure, so the \
-                     launch may have taken; it is kept as a launching record rather than \
-                     unwound",
-                ));
-            }
-            Ok(None) => {
-                return RelaunchFailure::ambiguous(error.context(
-                    "the pane this relaunch reused now belongs to a different tmux session, so \
-                     whether the launch took cannot be established; it is kept as a launching \
-                     record rather than unwound",
-                ));
-            }
-            Err(probe) => {
-                return RelaunchFailure::ambiguous(error.context(format!(
-                    "could not determine whether the relaunch took ({probe:#}), so it is kept \
-                     as a launching record rather than unwound"
-                )));
-            }
-        }
-        // Confirmed absent: nothing is running under this launch, so its
-        // spec — which holds the agent's full command line, credentials
-        // included — must not be left for nothing to consume. A removal
-        // that itself fails is reported rather than swallowed. Remove the
-        // empty waypoint too. This path retains the sentinel, contextualizes both
-        // removal failures and cleans before the sweep; retake clearing instead
-        // removes the sentinel and stops at its first failure.
-        let error = artifacts
-            .remove_unconsumed_relaunch_fail_closed(error)
-            .await;
-        // Reap ownership, not just the tmux pane: a launch can have left
-        // descendants even though tmux reports nothing running. The shared
-        // reaper chooses confirmed containment or the portable fallback.
-        if let Err(sweep) = reap_process_tree(
-            &self.seams.scopes,
-            ScopeUnits::recorded(scope.map(str::to_string)),
-            None,
-            id,
-            &SweepTarget::AgentOnly,
-            ScopeKillFailure::Warn,
+        self.relaunch_into_host(
+            entry, replacing, launch, snapshot, generation, scope, argv, launch_cwd, tabs, seed,
         )
         .await
-        {
-            return RelaunchFailure::ambiguous(error.context(format!(
-                "and the failed launch's process tree could not be swept ({sweep:#})"
-            )));
-        }
-        RelaunchFailure::definitive(error)
     }
 
     /// Finish a successful relaunch's reply by projecting its checkout
@@ -14629,32 +13672,6 @@ impl Supervisor {
         })
     }
 
-    /// Reap and remove one replacement window after confirmation failed.
-    ///
-    /// The existing session may contain user tabs, so this deliberately
-    /// addresses only the replacement pane and never calls `kill_session`.
-    async fn cleanup_replacement_window(
-        &self,
-        id: &str,
-        scope: Option<&str>,
-        replacement: &TmuxTerminal,
-    ) -> anyhow::Result<()> {
-        reap_process_tree(
-            &self.seams.scopes,
-            ScopeUnits::recorded(scope.map(str::to_string)),
-            None,
-            id,
-            &SweepTarget::AgentOnly,
-            ScopeKillFailure::Warn,
-        )
-        .await
-        .context("reaping the replacement agent process tree")?;
-        self.tmux
-            .kill_window(&replacement.tmux_name, &replacement.pane)
-            .await
-            .context("removing the unconfirmed replacement agent window")
-    }
-
     /// Put a relaunched session back on the map under its NEW generation,
     /// and build the reply that describes it.
     ///
@@ -14671,7 +13688,6 @@ impl Supervisor {
     ) -> SessionInfo {
         let Relaunched {
             terminal,
-            launch_excerpt,
             scope,
             outcome,
             hooked,
@@ -14738,8 +13754,8 @@ impl Supervisor {
             notifications: Vec::new(),
             // The terminal this relaunch runs in, so that the reply already
             // says which kind it is; `entry_info` answers from the same
-            // terminal for every later reply. The switch is added at the
-            // reply boundary (`report_new_terminals`).
+            // terminal for every later reply. The host terminals report is
+            // added at the reply boundary (`report_new_terminals`).
             agent_terminal: Some(terminal.wire_kind()),
             supervisor_creates_host_terminals: false,
         };
@@ -14761,14 +13777,6 @@ impl Supervisor {
                 outcome,
                 false,
             );
-            // The new entry is not observable until map insertion below.
-            // Install only this spawn's boundary while late writers still
-            // hold the old generation's separate cell.
-            *published
-                .run
-                .launch_excerpt
-                .lock()
-                .expect("launch excerpt mutex poisoned") = launch_excerpt;
             // Raised on the NEW entry, whose cell `relaunched_entry` has just
             // minted `false` — this launch's own injection is the ONLY thing
             // that may raise it, whatever the previous launch did. The
@@ -15138,52 +14146,6 @@ impl Supervisor {
             || !host_tabs::listed_host_tabs(&entry.session.host_tabs, false).is_empty())
     }
 
-    /// Rediscover tabs after adding a replacement agent window.
-    ///
-    /// This read is deliberately narrower than the ordinary tab resolver:
-    /// the replacement pane identifies the one window that must stay out of
-    /// the reply, while a surviving user tab may carry a forged agent marker.
-    /// Clearing that untrusted marker on cloned facts lets the restart reply
-    /// keep naming the tab; close and teardown continue to use the ordinary
-    /// agent-prioritized resolver and therefore do not inherit this
-    /// presentation-only exception. The session's tabs in terminal hosts,
-    /// which no window replacement touches, follow the tmux ones as in
-    /// [`Self::session_tabs`].
-    async fn replacement_session_tabs(
-        &self,
-        entry: &SessionEntry,
-        replacement: &TmuxTerminal,
-    ) -> anyhow::Result<Vec<TabInfo>> {
-        let states = self.tmux.pane_states_with_markers().await?;
-        let replacement_window = states
-            .get(&replacement.pane)
-            .map(|state| state.window_ordinal);
-        let mut candidates = Vec::new();
-        for (pane, state) in &states {
-            if state.session_name != replacement.tmux_name
-                || pane == &replacement.pane
-                || replacement_window.is_some_and(|window| state.window_ordinal == window)
-                || state.tab.is_none()
-            {
-                continue;
-            }
-            let mut state = (*state).clone();
-            state.agent = None;
-            candidates.push(state);
-        }
-        let mut tabs: Vec<TabInfo> = tabs_from_pane_states(
-            candidates.iter(),
-            &replacement.tmux_name,
-            Some(&replacement.pane),
-        )
-        .into_iter()
-        .filter(|tab| !tab.dead)
-        .map(DiscoveredTab::tab_info)
-        .collect();
-        tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, false));
-        Ok(tabs)
-    }
-
     /// [`Self::session_tabs`] with dead tabs INCLUDED — the teardown
     /// spelling. Delete enumerates per-tab cgroup scopes from
     /// this list, and a tab whose shell exited a moment ago still owns a
@@ -15311,42 +14273,6 @@ impl Supervisor {
                 failures.join("; ")
             )
         })
-    }
-
-    /// Find a pane through which the dead agent window can be removed after
-    /// its replacement is confirmed.
-    ///
-    /// The durable pane is the only identity safe enough for destructive
-    /// cleanup. A marker can establish that an old window may remain, but it
-    /// is writable by any process inside the private tmux server and therefore
-    /// cannot authorize killing that window. A missing anchor is deliberately
-    /// acceptable: preserving user tabs matters more than guessing which
-    /// unmarked window was the agent.
-    async fn old_agent_window_anchor(
-        &self,
-        tmux_name: &str,
-        session_id: &str,
-        recorded_pane: Option<&str>,
-    ) -> anyhow::Result<(Option<String>, bool)> {
-        let states = self.tmux.pane_states_with_markers().await?;
-        if let Some(pane) = recorded_pane
-            && states
-                .get(pane)
-                .is_some_and(|state| state.session_name == tmux_name)
-        {
-            return Ok((Some(pane.to_string()), true));
-        }
-        let marker_window_present = states.iter().any(|(_, state)| {
-            state.session_name == tmux_name && state.agent.as_deref() == Some(session_id)
-        });
-        // A pane-less old window can carry no marker in sessions created by
-        // older builds. Treat an unmarked, non-tab window as present but
-        // unidentifiable; an absent window (only tab panes remain) is safe to
-        // report as no cleanup needed.
-        let unmarked_window_present = states.values().any(|state| {
-            state.session_name == tmux_name && state.agent.is_none() && state.tab.is_none()
-        });
-        Ok((None, marker_window_present || unmarked_window_present))
     }
 
     /// Rename a session: the durable row and the in-memory entry that must
@@ -15562,66 +14488,49 @@ impl Supervisor {
         }
     }
 
-    /// Open a terminal tab: a new tmux window on the session's tmux
-    /// session, or under the switch (`SupervisorSeams::new_terminals`,
-    /// `--new-terminals host`) a terminal host of its own (`host_tabs`), running the
-    /// user's login shell in the session's working directory (PLAN_M4.md
-    /// item 2, `ControlMsg::OpenTab`'s contract). The steps below are the
-    /// tmux window's; a host tab's are the same in kind, and its own module
-    /// says how each is done for a host.
+    /// Open a terminal tab: a terminal host of its own (`host_tabs`),
+    /// running the user's login shell in the session's working directory
+    /// (PLAN_M4.md item 2, `ControlMsg::OpenTab`'s contract), whatever the
+    /// session's agent runs in. A tmux agent's session then holds its old
+    /// tmux tabs and new host tabs side by side (a mixed session).
     ///
     /// ## Ordering, and what each step buys
     ///
     /// 1. **Resolve the session's agent terminal.** Not because a tab
-    ///    needs it, but because it is where the tmux session name lives
-    ///    (and, for a host tab, the size to start at) — and its absence IS
-    ///    the restart-first refusal: a session whose terminal no longer
-    ///    exists has no tmux session to add a window to, and building a
-    ///    tab-only substrate for an agent-less session is not a state this
-    ///    system has. For a host agent the same question is asked of its
-    ///    host.
+    ///    needs it, but because its absence IS the restart-first refusal:
+    ///    building a tab-only substrate for an agent-less session is not a
+    ///    state this system has. The new host starts at the agent
+    ///    terminal's size.
     /// 2. **Check the working directory.** The same `ensure_cwd_usable`
     ///    precondition restart makes, so the two refusals read the same
     ///    (M3's error shape, reused unchanged per PLAN_M4.md item 1).
-    /// 3. **Mint the id and create the window.** The id is minted BEFORE
-    ///    the window so it can go into the window's environment as the tab
-    ///    marker (`FARHELM_TAB_ID`) in the very same `new-window` — every
-    ///    process the shell ever forks then carries it, which is what
-    ///    close reaps by.
-    /// 4. **Mark the window.** This is the tab's only record (tabs are not
-    ///    durable metadata), so a failure here is a FAILED OPEN with the
-    ///    window cleaned up — the alternative is a live shell nothing can
-    ///    ever find again, list, or close.
-    /// 5. **Check the pane is alive.** SPEC.md's every-failed-operation
-    ///    rule: a shell already dead by reply time is a refused open
-    ///    carrying the pane's last words, not a successful open holding a
-    ///    corpse. A shell that starts and later exits is a different thing
-    ///    entirely: an established tab, which the listing paths hide and
-    ///    the ticker reaps (SPEC.md's automatic tab reap).
+    /// 3. **Start the tab's host and settle its shell** (`host_tabs`, which
+    ///    says how each step is done): the tab id goes into the shell's
+    ///    environment as its marker, which close reaps by, and a shell
+    ///    already dead by reply time is a refused open carrying its last
+    ///    words, not a successful open holding a corpse.
     ///
-    /// Nothing here WRITES to supervisor.db or the sessions map. That is
-    /// the point: rediscovery from window markers is the honest
-    /// implementation of "tabs are not durable metadata", and a tab that
-    /// survives a supervisor restart does so by the same mechanism the
-    /// agent terminal does — tmux outliving the supervisor.
+    /// Nothing here WRITES to supervisor.db: a tab is recognized by its
+    /// host's tag, and its launch record is how a host no runtime holds is
+    /// found again.
     ///
     /// ## Two safety properties, both structural
     ///
     /// It takes the session's LIFECYCLE claim, for the same reason
     /// `StopSession` and `DeleteSession` do (see
     /// `Supervisor::lifecycle_locks`). Without it a delete could complete
-    /// its process-tree sweep, and this could then start a shell in the
-    /// tmux session the delete is about to tear down — leaving that
-    /// shell's daemonized children alive with no row left to reap them
-    /// from. Serialized, both orders are correct: an open that wins is
-    /// swept by the delete that follows, and an open that loses finds no
-    /// session at all.
+    /// its process-tree sweep, and this could then start a shell beside the
+    /// session the delete is about to tear down — leaving that shell's
+    /// daemonized children alive with no row left to reap them from.
+    /// Serialized, both orders are correct: an open that wins is swept by
+    /// the delete that follows, and an open that loses finds no session at
+    /// all.
     ///
     /// And everything from the first side effect onward runs on a
     /// SUPERVISOR-OWNED task. A client that disconnects mid-open cancels
-    /// the await, not the work: a cancellation between `new-window` and
-    /// the marking would otherwise strand a live, unmarked, unfindable
-    /// shell forever.
+    /// the await, not the work: a cancellation between the host's start and
+    /// the tab's publication would otherwise strand a live shell nothing
+    /// names.
     pub(crate) async fn open_tab(
         self: &Arc<Self>,
         session_id: &str,
@@ -15661,9 +14570,8 @@ impl Supervisor {
         // terminal substrate here") and get the same restart-first advice; a
         // raw tmux diagnostic would be honest and useless. Anything else
         // propagates as itself, because "we could not ask" is not "it is
-        // gone". A host agent has no tmux session at all (a session created
-        // in a host has one only while it has tmux tabs, and losing the last
-        // of those ends it), so its gate is its host: one still running,
+        // gone". A host agent has no tmux session at all, so its gate is its
+        // host: one still running,
         // with its program or its final screen, takes tabs as a tmux session
         // with a dead agent pane does, one that has ended is the restart
         // gap, and one that cannot be read is "could not tell" (the plan's
@@ -15690,30 +14598,6 @@ impl Supervisor {
                 }
             },
         }
-        // What the new tab is: a window in the agent's tmux session, or a
-        // terminal host of its own, as the supervisor's switch says
-        // (`SupervisorSeams::new_terminals`), whatever the agent's own kind,
-        // so a tmux agent gets host tabs beside its old tmux ones once the
-        // switch is on (a mixed session). Under the old setting a host
-        // agent's session has no tmux session to add a window to, so it is
-        // refused before anything is created. Only a supervisor that made
-        // host agents and was then restarted with `--new-terminals tmux`
-        // reaches that, which no shipped launch does: none passes the flag,
-        // and its default is hosts.
-        let target = match (self.seams.new_terminals, &agent) {
-            (NewTerminals::Tmux, Terminal::Tmux(tmux)) => NewTab::Window(tmux.clone()),
-            (NewTerminals::Host, Terminal::Tmux(_) | Terminal::Host(_)) => NewTab::Host,
-            (NewTerminals::Tmux, Terminal::Host(_)) => {
-                return Err(RequestError::new(
-                    ErrorKind::Conflict,
-                    format!(
-                        "session {}'s agent runs in a terminal host, and this supervisor opens \
-                         terminal tabs in tmux, where the session has nothing to open one in",
-                        truncate_for_error(session_id)
-                    ),
-                ));
-            }
-        };
         let cwd = entry.info.cwd.clone();
         ensure_cwd_usable(&cwd)
             .await
@@ -15735,19 +14619,11 @@ impl Supervisor {
         // into it. Awaiting the handle is itself cancellable; the work is
         // not.
         let sup = Arc::clone(self);
-        let session_id = session_id.to_string();
         let task = tokio::spawn(async move {
             let _lifecycle = lifecycle;
-            let opened = match &target {
-                NewTab::Window(tmux) => {
-                    sup.open_tab_window(&session_id, &session_token, tmux, &cwd)
-                        .await
-                }
-                NewTab::Host => {
-                    sup.open_host_tab(&entry, &session_token, &agent, &cwd)
-                        .await
-                }
-            };
+            let opened = sup
+                .open_host_tab(&entry, &session_token, &agent, &cwd)
+                .await;
             // Hinted here on the owned task rather than by the handler that
             // awaits it: that waiter can be abandoned while this finishes.
             if opened.is_ok() {
@@ -15806,9 +14682,8 @@ impl Supervisor {
     /// `cwd` and execs the user's login shell. The
     /// helper runs at once and immediately execs the shell. It starts
     /// through the forwarder in the app's version layout, so its version is
-    /// claimed from before it runs (see `Self::session_farhelm_exe`). The
-    /// same for both kinds of tab: a tmux window and a tab host run it
-    /// alike.
+    /// claimed from before it runs (see `Self::session_farhelm_exe`). A tab
+    /// host runs it as its child.
     async fn tab_command(&self, cwd: &str, scope_prefix: Vec<String>) -> (Vec<String>, String) {
         let shell = self.launch_shell().await;
         (self.tab_window_command(&shell, cwd, scope_prefix), shell)
@@ -15884,214 +14759,6 @@ impl Supervisor {
             .load(std::sync::atomic::Ordering::Relaxed)
             .then(|| crate::launch::browser_forwarding_command(&self.session_farhelm_exe))
             .flatten()
-    }
-
-    /// Open and publish a shell window after its complete environment is fixed.
-    async fn open_tab_window(
-        &self,
-        session_id: &str,
-        session_token: &str,
-        agent: &TmuxTerminal,
-        cwd: &str,
-    ) -> Result<TabInfo, RequestError> {
-        let tab_id = uuid::Uuid::new_v4().to_string();
-        let (scope_prefix, unit) = self.tab_scope_prefix(session_id, &tab_id).await;
-        // The selection this open made, in the form close reads it back:
-        // written onto the window below, and handed straight to every
-        // failed-open unwind, which must not depend on the marker having
-        // been written.
-        let tab_scope = if scope_prefix.is_empty() {
-            TabScope::Unscoped
-        } else {
-            TabScope::Scoped
-        };
-        let env = self.tab_environment(session_id, session_token, &tab_id);
-        let (window_cmd, shell) = self.tab_command(cwd, scope_prefix).await;
-        let (window, pane) = self
-            .tmux
-            .new_window(&agent.tmux_name, cwd, &env, &window_cmd)
-            .await
-            .map_err(|e| {
-                RequestError::new(
-                    error_kind(&e),
-                    format!("could not open a terminal tab for session {session_id}: {e:#}"),
-                )
-            })?;
-        let terminal = TmuxTerminal {
-            tmux_name: agent.tmux_name.clone(),
-            pane,
-        };
-
-        // Size the new window like the AGENT's before anything can attach
-        // to it (BUGS_BURNDOWN.md issue 4). `new-window` inherits the
-        // session default size — not the agent window's, since resize is
-        // per-window (PLAN_M4.md item 3) — so without this, a tab's first
-        // attach almost always carries a REAL resize, and the shell's
-        // SIGWINCH repaint can race the attach's snapshot capture: the
-        // captured content and the separately sampled cursor can disagree,
-        // and the leading explanation for issue 4's reported symptom (a
-        // stale duplicate of the prompt beside the live one; never
-        // reproduced under instrumentation, so the mechanism is inferred)
-        // is exactly that torn frame. The agent window's size is the best
-        // available stand-in for the island about to attach (same client,
-        // same pane area). Best effort on the size read and the resize
-        // alike: a failure of either only restores the old
-        // resize-at-attach behavior, so it is not worth failing the open.
-        match self.tmux.window_size(&agent.tmux_name, &agent.pane).await {
-            Ok(Some((cols, rows))) => {
-                if let Err(e) = self
-                    .tmux
-                    .resize_window(&terminal.tmux_name, &terminal.pane, cols, rows)
-                    .await
-                {
-                    debug!(
-                        session = %session_id, tab = %tab_id, error = %format!("{e:#}"),
-                        "could not pre-size the new tab window; the first attach will resize it"
-                    );
-                }
-            }
-            Ok(None) => {}
-            Err(e) => {
-                debug!(
-                    session = %session_id, tab = %tab_id, error = %format!("{e:#}"),
-                    "could not read the agent window's size; the first attach will resize the tab"
-                );
-            }
-        }
-
-        // The seam stands in for the marking itself when installed: what
-        // it exists to reach is the state AFTER this call fails — a live,
-        // unmarked, unfindable window — which no other input can produce.
-        let marked = match self.seams.faults.tab_open_fault() {
-            Some(fault) => fault(TabOpenStage::BeforeMarking),
-            None => Ok(()),
-        };
-        // The scope answer goes on first, so any window that rediscovery
-        // can see as a tab (it keys on the tab marker) also says whether
-        // close must find a scope for it.
-        let marked = match marked {
-            Ok(()) => {
-                self.tmux
-                    .mark_window(
-                        &terminal.tmux_name,
-                        &terminal.pane,
-                        TAB_SCOPED_WINDOW_OPTION,
-                        crate::tmux::tab_scoped_option_value(tab_scope == TabScope::Scoped),
-                    )
-                    .await
-            }
-            Err(e) => Err(e),
-        };
-        let marked = match marked {
-            Ok(()) => {
-                self.tmux
-                    .mark_window(
-                        &terminal.tmux_name,
-                        &terminal.pane,
-                        TAB_WINDOW_OPTION,
-                        &tab_id,
-                    )
-                    .await
-            }
-            Err(e) => Err(e),
-        };
-        if let Err(e) = marked {
-            // An unmarked window is invisible to rediscovery, so leaving
-            // it would strand a live shell nothing can list or close.
-            return Err(self
-                .discard_failed_tab_window(
-                    session_id,
-                    &terminal,
-                    &tab_id,
-                    tab_scope,
-                    format!("could not mark the new terminal tab's window: {e:#}"),
-                )
-                .await);
-        }
-
-        // The dead-at-reply refusal (`ControlMsg::OpenTab`'s contract).
-        //
-        // Bounded settle rather than one instantaneous read, and the
-        // difference is the promise itself. A shell that cannot start dies
-        // in microseconds, but tmux marks the pane dead only once it has
-        // reaped the child and drained the pty — measured at 4–18 ms on an
-        // idle host (tmux 3.7b), and load only widens that. A single check
-        // fired the moment `new-window` returns therefore races tmux's own
-        // bookkeeping, and losing that race means reporting a SUCCESSFUL
-        // open holding a corpse, which is exactly what this refusal
-        // exists to prevent. "Already dead when the open would reply" is a
-        // statement about when the supervisor chooses to reply, so it
-        // chooses to reply late enough for the answer to mean something.
-        //
-        // Bounded on the other side too: a healthy open pays the whole
-        // window, so it is sized for a hand-driven operation rather than a
-        // hot path. The settle ends early the moment the pane IS dead, so
-        // the failing case stays fast.
-        //
-        // The gate is the test-only handle on the "already dead" side of
-        // that window: the window and its marker exist here, so a waiting
-        // test can watch tmux for the pane's death and only then let the
-        // settle run. See [`TabSettleGate`]; production installs none.
-        if let Some(gate) = self.seams.faults.tab_settle_gate() {
-            gate().await;
-        }
-        match self.settled_tab_pane(&terminal).await {
-            Ok(Some(state)) if !state.dead => {}
-            Ok(state) => {
-                // Captured BEFORE the window is destroyed — it is the
-                // whole point of the refusal — and the three outcomes stay
-                // distinguishable: what the shell said, that it said
-                // nothing, and that we could not look.
-                //
-                // Only when the pane still EXISTS, though: a capture
-                // addressed at a vanished pane falls back to the session's
-                // current one (see `tmux::pane_in_session`), which would
-                // quote the agent terminal's screen into this refusal.
-                let (gone, detail) = match state {
-                    None => (" (its pane was already gone)", String::new()),
-                    Some(_) => (
-                        "",
-                        match self.tab_pane_last_words(&terminal).await {
-                            Ok(words) if !words.trim().is_empty() => {
-                                format!(": {}", words.trim())
-                            }
-                            Ok(_) => " and printed nothing".to_string(),
-                            Err(e) => format!(", and its output could not be read ({e:#})"),
-                        },
-                    ),
-                };
-                return Err(self
-                    .discard_failed_tab_window(
-                        session_id,
-                        &terminal,
-                        &tab_id,
-                        tab_scope,
-                        format!(
-                            "the terminal tab's shell ({shell}) was already dead when the tab \
-                             opened{gone}{detail}"
-                        ),
-                    )
-                    .await);
-            }
-            Err(e) => {
-                return Err(self
-                    .discard_failed_tab_window(
-                        session_id,
-                        &terminal,
-                        &tab_id,
-                        tab_scope,
-                        format!("could not confirm the new terminal tab's shell is running: {e:#}"),
-                    )
-                    .await);
-            }
-        }
-
-        info!(
-            session = %session_id, tab = %tab_id, tmux = %terminal.tmux_name, %window,
-            pane = %terminal.pane, scoped = unit.is_some(),
-            "terminal tab opened"
-        );
-        Ok(terminal.tab_info(tab_id))
     }
 
     /// Close a terminal tab: reap its shell and everything that shell left
@@ -16532,154 +15199,6 @@ impl Supervisor {
         Ok(())
     }
 
-    /// Tear down a window an `OpenTab` decided not to keep, and turn
-    /// `because` into the error that open reports.
-    ///
-    /// Reaps before killing the window, for the same reason `close_tab`
-    /// does (the live pane anchors the descendant walk) — and it is not
-    /// merely symmetry: the failure that brings us here can be the MARKING
-    /// step, by which point the shell has been running for a round trip
-    /// and may already have forked.
-    ///
-    /// Cleanup failures are AGGREGATED INTO the returned error rather than
-    /// logged past it. The open has failed either way, but "the tab was
-    /// removed again" and "a shell you cannot see is still running" are
-    /// very different things to tell a user, and the second one has to
-    /// name the tab id — it is the only handle left for cleaning it up by
-    /// hand, since an unmarked or unlisted window is exactly what
-    /// rediscovery cannot see.
-    async fn discard_failed_tab_window(
-        &self,
-        session_id: &str,
-        terminal: &TmuxTerminal,
-        tab_id: &str,
-        tab_scope: TabScope,
-        because: String,
-    ) -> RequestError {
-        info!(session = %session_id, tab = %tab_id, pane = %terminal.pane,
-            reason = "failed_open", "discarding a terminal tab that did not finish opening");
-        let mut left_behind: Vec<String> = Vec::new();
-        if let Err(e) = self
-            .reap_tab_tree(
-                session_id,
-                &Terminal::Tmux(terminal.clone()),
-                tab_id,
-                tab_scope,
-                TabReapAnchor::PaneIfLive,
-            )
-            .await
-        {
-            left_behind.push(format!("its processes ({e:#})"));
-        }
-        if let Err(e) = self
-            .tmux
-            .kill_window(&terminal.tmux_name, &terminal.pane)
-            .await
-        {
-            left_behind.push(format!("its window ({e:#})"));
-        }
-        if left_behind.is_empty() {
-            return RequestError::new(
-                ErrorKind::Internal,
-                format!("{because}, so the tab was removed again"),
-            );
-        }
-        warn!(
-            session = %session_id, tab = %tab_id, pane = %terminal.pane,
-            "a failed terminal-tab open could not be fully unwound"
-        );
-        RequestError::new(
-            ErrorKind::Internal,
-            format!(
-                "{because}, and it could not be cleaned up: {} of terminal tab {} may still \
-                 exist (pane {})",
-                left_behind.join(" and "),
-                truncate_for_error(tab_id),
-                terminal.pane
-            ),
-        )
-    }
-
-    /// Watch a freshly-created tab pane until it is either confirmed dead
-    /// or has survived [`TAB_LAUNCH_SETTLE`] — see the `OpenTab` handler's
-    /// own comment for why the open waits at all.
-    ///
-    /// Returns the LAST observation, so the caller's `None`/`dead`
-    /// branches read exactly as they would from a bare `pane_process`
-    /// call. A query error ends the settle immediately: an open that
-    /// cannot ask tmux anything must not spend the whole window
-    /// re-asking, and the caller refuses on it either way.
-    ///
-    /// A FOREIGN owner is an error here whoever the owner is — the one
-    /// call site that does not consult
-    /// [`Supervisor::known_session_tmux_name`] at all. This pane was
-    /// created by this process moments ago, in this session, so ANY other
-    /// owner is an invariant violation rather than the staleness the
-    /// lifecycle verbs classify: a recycled id cannot explain it either,
-    /// because the recycle story needs a server generation to have passed
-    /// since the pane was recorded, and none has. Erroring routes it into
-    /// the caller's refusal-and-unwind path instead of letting the open
-    /// report success over a pane it does not own.
-    async fn settled_tab_pane(
-        &self,
-        terminal: &TmuxTerminal,
-    ) -> anyhow::Result<Option<crate::terminal_process::TerminalProcess>> {
-        let deadline = tokio::time::Instant::now() + TAB_LAUNCH_SETTLE;
-        loop {
-            let observed = match self
-                .tmux
-                .pane_process(&terminal.tmux_name, &terminal.pane)
-                .await?
-            {
-                TerminalProbe::Owned(state) => Some(state),
-                TerminalProbe::Gone => None,
-                TerminalProbe::ForeignOwner { owner } => {
-                    anyhow::bail!(
-                        "pane {} belongs to session {owner:?}, not {:?}; refusing to treat it \
-                         as this tab's terminal (a stale or reused pane id would otherwise \
-                         cross-wire two sessions' process trees)",
-                        terminal.pane,
-                        terminal.tmux_name
-                    );
-                }
-            };
-            let alive = observed.is_some_and(|state| !state.dead);
-            if !alive || tokio::time::Instant::now() >= deadline {
-                return Ok(observed);
-            }
-            tokio::time::sleep(TAB_LAUNCH_SETTLE_STEP).await;
-        }
-    }
-
-    /// The last thing a failed tab shell printed, for the refused open's
-    /// error detail.
-    ///
-    /// Thin over [`crate::tmux::TmuxDriver::capture_pane_text`], which
-    /// does the work worth knowing about: it reads SCROLLBACK rather than
-    /// the visible grid (a dead pane's grid is replaced by tmux's own
-    /// "Pane is dead" banner, which would restate the exit code and lose
-    /// the shell's actual complaint), keeps the TAIL when the text is over
-    /// cap, and pairs the pane with its session so a stale pane id cannot
-    /// quote a stranger's terminal into this session's error.
-    ///
-    /// The `Err` is passed through rather than flattened into an empty
-    /// capture, because the refusal distinguishes all three outcomes: what
-    /// the shell said, that it said nothing, and that we could not look.
-    /// A cap far below the snapshot cap, because this ends up inside a
-    /// protocol error message rather than a replay frame.
-    async fn tab_pane_last_words(&self, terminal: &TmuxTerminal) -> anyhow::Result<String> {
-        const MAX_LAST_WORDS: usize = 4 * 1024;
-        self.tmux
-            .capture_pane_text(&terminal.tmux_name, &terminal.pane, MAX_LAST_WORDS)
-            .await
-            .inspect_err(|e| {
-                debug!(
-                    pane = %terminal.pane, error = %format!("{e:#}"),
-                    "could not capture a failed tab pane's output for the refusal's detail"
-                );
-            })
-    }
-
     /// Reap one tab through its own cgroup scope where sufficient, otherwise
     /// retain the portable sweep keyed on that tab's marker.
     ///
@@ -16875,7 +15394,7 @@ impl Supervisor {
     ///
     /// ## Placement in the launch
     ///
-    /// Called from [`Supervisor::spawn_agent`], which both launch paths
+    /// Called from [`Supervisor::prepare_launch`], which both launch paths
     /// funnel through — so the create path and the restart path cannot
     /// disagree about whether a launch is hooked, and a resumed launch
     /// (`relaunch_argv`'s `claude --resume <id>` shape) is hooked exactly
@@ -16953,16 +15472,15 @@ impl Supervisor {
     }
 
     /// Publish one launch's spec and compose the command its terminal runs:
-    /// everything about a launch that does not depend on the kind of
-    /// terminal it starts in, shared by create (PLAN_M3.md items 2/6),
-    /// restart (item 9) and both kinds of terminal ([`Self::spawn_agent`]
-    /// for tmux, [`Self::spawn_agent_in_host`] for a terminal host).
+    /// everything about a launch except starting its terminal host
+    /// ([`Self::spawn_agent_in_host`]), shared by create (PLAN_M3.md items
+    /// 2/6) and restart (item 9).
     ///
     /// Shared deliberately, and this is the seam that keeps a relaunch from
     /// becoming a second, subtly different launch implementation: the spec
     /// contents, its 0600 publication, the shim path, the login-shell
-    /// window command, the `{cwd}` placeholder fill, and the tmux
-    /// invocation are all decided in exactly one place. A relaunch that
+    /// window command and the `{cwd}` placeholder fill are all decided in
+    /// exactly one place. A relaunch that
     /// built its own would be free to drift on any of them — a missing
     /// session-id marker (silently breaking the kill sweep), a different
     /// shell resolution (breaking SPEC.md's environment contract), a spec
@@ -16975,7 +15493,7 @@ impl Supervisor {
     /// injecting in each caller — is the same argument the rest of this
     /// function rests on: two callers doing it themselves is two places
     /// for the decision to drift. Whether the hook actually went on is
-    /// reported back through [`Spawned::hooked`], because the entry that
+    /// reported back through [`SpawnedInHost::hooked`], because the entry that
     /// records it does not exist yet on the create path.
     ///
     /// `scope` is the cgroup unit this launch was ALREADY recorded as
@@ -16987,9 +15505,9 @@ impl Supervisor {
     ///
     /// An error here means the spec never landed, which proves this attempt
     /// started nothing, so it carries no artifact owner: publication did not
-    /// complete. Each kind's start classifies its own failures beyond that
-    /// ([`SpawnFailure`], `HostSpawnFailure`), because a failed start is
-    /// AMBIGUOUS where a failed spec is not.
+    /// complete. The host's start classifies its own failures beyond that
+    /// (`HostSpawnFailure`), because a failed start is AMBIGUOUS where a
+    /// failed spec is not.
     ///
     /// `shell_source` selects command phase text or a wrapped agent's raw prefix.
     /// Its literal `argv` has already decoded the resume identity but still
@@ -17248,244 +15766,6 @@ impl Supervisor {
         })
     }
 
-    /// Start one launch's agent in tmux: publish its spec
-    /// ([`Self::prepare_launch`]) and run the composed window command in a
-    /// pane.
-    ///
-    /// `target` distinguishes pane reuse, an additional replacement window
-    /// in a surviving session, and a brand-new session. Keeping those cases
-    /// explicit prevents a dead-pane restart from tearing down tabs.
-    ///
-    /// Failures are classified rather than flattened, because the two
-    /// classes cannot be unwound the same way: a spec that never landed
-    /// proves this attempt started no pane, while a tmux failure is AMBIGUOUS
-    /// (the session can exist despite the error) and the caller must probe
-    /// before deciding anything. Successful spawns and tmux failures carry the
-    /// artifact owner so an unwind can remove the published files; a spec failure
-    /// carries none because publication did not complete.
-    #[allow(clippy::too_many_arguments)]
-    #[allow(
-        clippy::result_large_err,
-        reason = "one launch per call, never a hot path; the tmux failure hands the caller owned \
-                  cleanup handles (artifact owner, replacement or created terminal) by value"
-    )]
-    async fn spawn_agent(
-        &self,
-        id: &str,
-        session_token: &str,
-        generation: i64,
-        tmux_name: &str,
-        argv: Vec<String>,
-        shell_source: Option<ShellSource<'_>>,
-        snapshot: &IntegrationSnapshot,
-        args_mode: FarhelmArgsMode,
-        cwd: &str,
-        cols: u16,
-        rows: u16,
-        target: SpawnTarget<'_>,
-        scope: Option<&str>,
-        preparation: Option<crate::launch::CheckoutPreparation>,
-        initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
-    ) -> Result<Spawned, SpawnFailure> {
-        let PreparedLaunch {
-            cwd,
-            artifacts,
-            shell: _,
-            cmd,
-            hooked,
-            hook_skip,
-        } = self
-            .prepare_launch(
-                id,
-                session_token,
-                generation,
-                argv,
-                shell_source,
-                snapshot,
-                args_mode,
-                cwd,
-                scope,
-                preparation,
-                initial_prompt,
-            )
-            .await
-            .map_err(SpawnFailure::Spec)?;
-        let cwd = cwd.as_str();
-        // Counted from before tmux starts the window until it is tracked
-        // below (or this launch fails), so a stop in between still waits;
-        // once the stop's wait has ended, nothing is started at all.
-        let _starting = match self.starting_launch() {
-            Ok(starting) => starting,
-            Err(LaunchesClosed) => {
-                return Err(SpawnFailure::Tmux {
-                    artifacts,
-                    error: anyhow::anyhow!(
-                        "Farhelm's supervisor is stopping, so no new window was started"
-                    ),
-                    replacement: None,
-                    created: None,
-                    tmux_attempted: false,
-                });
-            }
-        };
-        // The tmux session the window lands in, for the shutdown wait's pane
-        // checks (`track_pending_hold`).
-        let window_session = match &target {
-            SpawnTarget::Reuse(terminal) => terminal.tmux_name.clone(),
-            SpawnTarget::ExistingSession(session) => (*session).to_string(),
-            SpawnTarget::NewSession => tmux_name.to_string(),
-        };
-        let fresh_target = !matches!(&target, SpawnTarget::Reuse(_));
-        let existing_session = match &target {
-            SpawnTarget::ExistingSession(session) => Some((*session).to_string()),
-            SpawnTarget::Reuse(_) | SpawnTarget::NewSession => None,
-        };
-        let started = match target {
-            SpawnTarget::Reuse(terminal) => self
-                .tmux
-                .relaunch_in_pane_with_excerpt_fence(
-                    &terminal.tmux_name,
-                    &terminal.pane,
-                    cwd,
-                    &self.seams.launch_env,
-                    &cmd,
-                )
-                .await
-                .map(|fence| (terminal.pane.clone(), fence)),
-            SpawnTarget::ExistingSession(session) => {
-                if let Some(fault) = self.seams.faults.replacement_fault()
-                    && let Err(error) = fault(ReplacementStage::BeforeCreation)
-                {
-                    return Err(SpawnFailure::Tmux {
-                        artifacts,
-                        error: error.context("injected replacement-window creation failure"),
-                        replacement: None,
-                        created: None,
-                        tmux_attempted: false,
-                    });
-                }
-                self.tmux
-                    .new_window(session, cwd, &self.seams.launch_env, &cmd)
-                    .await
-                    .map(|(_, pane)| (pane, None))
-                    .map_err(|e| e.context("creating the replacement agent window"))
-            }
-            SpawnTarget::NewSession => self
-                .tmux
-                .create_session(tmux_name, cwd, cols, rows, &self.seams.launch_env, &cmd)
-                .await
-                .map(|pane| (pane, None))
-                .map_err(|e| e.context("creating the session's tmux session")),
-        };
-        match started {
-            Ok((pane, mut launch_excerpt)) => {
-                // Mark the agent's window (PLAN_M4.md item 2). Only on the
-                // fresh-session path: a REUSED pane's window was marked
-                // when its session was created, and `respawn-pane` keeps
-                // the window (and so its options) intact.
-                //
-                // After the launch rather than before it, because the
-                // window does not exist until then — and FATAL, not best
-                // effort. The marker is what a pane-less reload uses to
-                // tell this session's agent window from its tabs
-                // (`agent_pane_from_states`), so an unmarked agent window
-                // is a session that can later recover onto a tab's pane
-                // and reap it. `SpawnFailure::Tmux` is the right shape for
-                // it too: the tmux session genuinely exists at this point,
-                // which is exactly what that variant's unwind expects.
-                if fresh_target
-                    && existing_session.is_some()
-                    && let Some(fault) = self.seams.faults.replacement_fault()
-                    && let Err(error) = fault(ReplacementStage::BeforeMarking)
-                {
-                    return Err(SpawnFailure::Tmux {
-                        artifacts,
-                        error: error.context("injected replacement-window marking failure"),
-                        replacement: existing_session.map(|session| TmuxTerminal {
-                            tmux_name: session,
-                            pane: pane.clone(),
-                        }),
-                        created: None,
-                        tmux_attempted: true,
-                    });
-                }
-                if fresh_target
-                    && let Err(error) = self
-                        .tmux
-                        .mark_window(tmux_name, &pane, AGENT_WINDOW_OPTION, id)
-                        .await
-                {
-                    return Err(SpawnFailure::Tmux {
-                        artifacts,
-                        error: error.context(
-                            "marking the session's agent window, without which a later reload \
-                            could not tell it apart from a terminal tab",
-                        ),
-                        created: existing_session.is_none().then(|| TmuxTerminal {
-                            tmux_name: tmux_name.to_string(),
-                            pane: pane.clone(),
-                        }),
-                        replacement: existing_session.map(|session| TmuxTerminal {
-                            tmux_name: session,
-                            pane: pane.clone(),
-                        }),
-                        tmux_attempted: true,
-                    });
-                }
-                // A fresh window contains no prior conversation. Stamp it
-                // after the mandatory ownership mark, before publication;
-                // failure costs only this optional diagnostic, never the
-                // launch or its lifecycle handle. Reused panes obtained their
-                // boundary atomically with respawn above.
-                if fresh_target {
-                    match self
-                        .tmux
-                        .establish_launch_excerpt_fence(tmux_name, &pane)
-                        .await
-                    {
-                        Ok(fence) => launch_excerpt = Some(fence),
-                        Err(error) => warn!(session = %id, error = %format!("{error:#}"),
-                            "could not fence this launch's optional startup-error excerpt"),
-                    }
-                }
-                // A hook Farhelm could not add, told to the user once the
-                // launch is known to be running. The store fences the record
-                // on this generation, which the row already carries (see the
-                // provenance write above), and a create's entry picks it up
-                // when it is published.
-                if let Some(skip) = hook_skip {
-                    self.notify_session(
-                        id,
-                        generation,
-                        super::notifications::NotificationKind::HookNotAdded,
-                        &skip.text(),
-                    )
-                    .await;
-                }
-                self.track_pending_hold(
-                    artifacts.spec(),
-                    Terminal::Tmux(TmuxTerminal {
-                        tmux_name: window_session,
-                        pane: pane.clone(),
-                    }),
-                );
-                Ok(Spawned {
-                    pane,
-                    artifacts,
-                    hooked,
-                    launch_excerpt,
-                })
-            }
-            Err(error) => Err(SpawnFailure::Tmux {
-                artifacts,
-                error,
-                replacement: None,
-                created: None,
-                tmux_attempted: true,
-            }),
-        }
-    }
-
     /// Drop the durable launching record for a create this process is
     /// about to report as failed, and — in the SAME transaction — record
     /// that failure against the create's intent key.
@@ -17556,7 +15836,6 @@ impl Supervisor {
                     LastOutcome::Launching,
                     generation,
                     scope,
-                    None,
                 )
                 .await;
                 let removal = format!(
@@ -17568,6 +15847,79 @@ impl Supervisor {
                 } else {
                     error.context(removal)
                 }
+            }
+        }
+    }
+
+    /// Refuse a retried create whose interrupted row, which the retry's
+    /// takeover just claimed, is an older supervisor's tmux launch: this
+    /// supervisor creates no tmux terminals. Called before any side effect
+    /// of the retry, so nothing was started or created on disk; the refusal
+    /// is settled against the intent key, so every later retry replays it.
+    ///
+    /// What happens to the row follows what already exists. With no fresh
+    /// checkout, or one still only planned, the row (and the plan) is rolled
+    /// back like any create that never launched. A fresh checkout the older
+    /// attempt had already allocated keeps its directory and becomes a
+    /// visible error row, as every refusal after an allocation does (Design
+    /// C): deleting the last ownership record would orphan the checkout.
+    async fn refuse_retried_tmux_launch(
+        &self,
+        reserved: &Reserved,
+        fresh_plan: Option<&crate::working_copies::PlannedWorkingCopy>,
+        row: &StoredSession,
+    ) -> anyhow::Error {
+        let id = reserved.session_id();
+        let refusal = anyhow::Error::new(RequestError::new(
+            ErrorKind::Conflict,
+            format!(
+                "session {} was being created in an old terminal (tmux) when an earlier \
+                 supervisor stopped, and this supervisor creates only new terminals, so the \
+                 create was not retried; create the session again",
+                truncate_for_error(id)
+            ),
+        ));
+        let Some(plan) = fresh_plan else {
+            let settlement = reserved.settlement(ReservationOutcome::Failed {
+                kind: error_kind(&refusal),
+                message: format!("{refusal:#}"),
+            });
+            let keyed = settlement.is_some();
+            return match self.store.delete_session(id, settlement).await {
+                Ok(()) => refusal,
+                Err(e) => {
+                    self.publish_retained_stored_session(row, true).await;
+                    let removal = format!(
+                        "additionally, the launching record for session {id} could not be \
+                         removed ({e:#}); it will list as unknown until it is deleted"
+                    );
+                    if keyed {
+                        unrecorded_outcome(refusal, anyhow::anyhow!(removal))
+                    } else {
+                        refusal.context(removal)
+                    }
+                }
+            };
+        };
+        match self.store.origin_working_copy(id).await {
+            Ok(Some(plan_row))
+                if plan_row.allocation_state == crate::working_copies::AllocationState::Planned =>
+            {
+                self.abandon_fresh_pre_mkdir(reserved, &plan.id, refusal, row)
+                    .await
+            }
+            // Allocated by the older attempt, or unreadable: fail closed and
+            // keep every record of the checkout.
+            Ok(_) | Err(_) => {
+                self.retain_create_refusal(
+                    reserved,
+                    refusal.context(
+                        "the managed checkout an earlier attempt may have allocated is kept for \
+                         inspection and deletion",
+                    ),
+                    row,
+                )
+                .await
             }
         }
     }
@@ -17725,7 +16077,7 @@ impl Supervisor {
             notifications: Vec::new(),
             // Both answered at reply time rather than stored here: the
             // agent's terminal kind by `entry_info` from the entry's own
-            // terminal, the switch by `report_new_terminals`.
+            // terminal, the host terminals report by `report_new_terminals`.
             agent_terminal: None,
             supervisor_creates_host_terminals: false,
         };
@@ -18386,49 +16738,6 @@ impl Supervisor {
         .expect("the test conversation is recorded");
     }
 
-    /// Make the host at `socket` session `id`'s agent terminal, in place of
-    /// the terminal its create made, and return the runtime it now runs
-    /// through.
-    ///
-    /// This is how tests reach the switch points' host arms with a host
-    /// whose child they choose (started by the test from the real `farhelm`
-    /// binary, never inside the test process, since a host forks) rather
-    /// than an agent's launch chain: one whose processes carry no session
-    /// markers, say.
-    /// It adopts the host as freshly spawned, with this supervisor's
-    /// liveness notifier, publishes an entry that keeps the created one's
-    /// run and session cells, generation and scope and differs only in its
-    /// terminal, records the row as a host row whose `pane` holds the
-    /// socket's name (the plan's D-14), and then ends the terminal the
-    /// create made: a host the create started (the default, new terminals)
-    /// is shut down, and the tmux session of a supervisor of old terminals
-    /// is killed, so the session looks like one created in the test's host.
-    /// The entry is swapped before the old terminal ends, so nothing ever
-    /// observes the session without a terminal. Compiled only for tests and
-    /// the `test-seams` feature.
-    #[cfg(any(test, feature = "test-seams"))]
-    pub async fn install_host_agent_for_test(
-        &self,
-        id: &str,
-        socket: &Path,
-    ) -> anyhow::Result<crate::hosts::HostTerminal> {
-        self.move_agent_into_host_for_test(id, socket, false).await
-    }
-
-    /// [`Self::install_host_agent_for_test`] for a session whose tmux tabs
-    /// stay: only the created agent's window is killed, so the session
-    /// keeps its tmux session with its tabs in it, as a session whose agent
-    /// moved into a host while its old tabs stayed in tmux has (a mixed
-    /// session). Compiled only for tests and the `test-seams` feature.
-    #[cfg(any(test, feature = "test-seams"))]
-    pub async fn migrate_agent_to_host_for_test(
-        &self,
-        id: &str,
-        socket: &Path,
-    ) -> anyhow::Result<crate::hosts::HostTerminal> {
-        self.move_agent_into_host_for_test(id, socket, true).await
-    }
-
     /// The host runtime of session `id`'s tab `tab_id`, when that tab runs
     /// in a terminal host: for tests that observe a tab host the supervisor
     /// started (its screen, its size, its socket) or type into it, without a
@@ -18444,16 +16753,29 @@ impl Supervisor {
         find_host_tab(&entry.session.host_tabs, tab_id).map(|tab| tab.host)
     }
 
-    /// The two helpers above: adopt the host at `socket` as session `id`'s
-    /// agent terminal, and end the terminal the create made: a host it
-    /// started is shut down; a tmux agent loses its whole tmux session, or
-    /// with `keep_tabs` only its window.
+    /// Make the host at `socket` session `id`'s agent terminal, in place of
+    /// the host its create started, and return the runtime it now runs
+    /// through.
+    ///
+    /// This is how tests reach the switch points' host arms with a host
+    /// whose child they choose (started by the test from the real `farhelm`
+    /// binary, never inside the test process, since a host forks) rather
+    /// than an agent's launch chain: one whose processes carry no session
+    /// markers, say.
+    /// It adopts the host as freshly spawned, with this supervisor's
+    /// liveness notifier, publishes an entry that keeps the created one's
+    /// run and session cells, generation and scope and differs only in its
+    /// terminal, records the row as a host row whose `terminal_address`
+    /// holds the socket's name (the plan's D-14), and then shuts down the
+    /// host the create started, so the session looks like one created in the
+    /// test's host. The entry is swapped before the old terminal ends, so
+    /// nothing ever observes the session without a terminal. Compiled only
+    /// for tests and the `test-seams` feature.
     #[cfg(any(test, feature = "test-seams"))]
-    async fn move_agent_into_host_for_test(
+    pub async fn install_host_agent_for_test(
         &self,
         id: &str,
         socket: &Path,
-        keep_tabs: bool,
     ) -> anyhow::Result<crate::hosts::HostTerminal> {
         let host = crate::hosts::HostTerminal::adopt(
             socket,
@@ -18490,10 +16812,13 @@ impl Supervisor {
             .set_terminal_for_test(id, crate::store::TerminalKind::Host, &socket_name)
             .await?;
         match replaced {
-            Some(Terminal::Tmux(tmux)) if keep_tabs => {
-                self.tmux.kill_window(&tmux.tmux_name, &tmux.pane).await?;
-            }
-            Some(Terminal::Tmux(tmux)) => self.tmux.kill_session(&tmux.tmux_name).await?,
+            // No test can create a tmux terminal, so a tmux agent here is a
+            // session this supervisor adopted, which is not what this helper
+            // replaces.
+            Some(Terminal::Tmux(tmux)) => anyhow::bail!(
+                "session {id}'s agent runs in tmux session {}, which this helper does not replace",
+                tmux.tmux_name
+            ),
             // The created host's runtime is no longer on the entry; ending
             // it through that runtime hangs its agent up and removes its
             // socket, as a confirmed shutdown does.
@@ -19310,7 +17635,8 @@ pub(crate) mod tests {
 
     /// The shim spec must execute original source while the earlier launch
     /// phases keep literal argv. Check start and already-decoded resume at the
-    /// existing pre-tmux seam, so quoting cannot be accidentally replaced by
+    /// spec's publication (`prepare_launch`, which every launch runs before
+    /// its terminal starts), so quoting cannot be accidentally replaced by
     /// joining the projection or by rescanning a hostile conversation value.
     /// Old quoted markers must refuse before spec publication and identify
     /// whether the invalid source is the start command or the resume command.
@@ -19323,13 +17649,6 @@ pub(crate) mod tests {
             SupervisorTimeouts::default(),
             SupervisorSeams {
                 agent_hooks: crate::agent_kind::AgentHooks::None,
-                faults: FaultHooks {
-                    replacement_fault: Some(Arc::new(|stage| {
-                        assert_eq!(stage, ReplacementStage::BeforeCreation);
-                        Err(anyhow::anyhow!("stop before tmux"))
-                    })),
-                    ..FaultHooks::default()
-                },
                 ..SupervisorSeams::default()
             },
         )
@@ -19366,33 +17685,22 @@ pub(crate) mod tests {
                     }
                 })
                 .collect();
-            let result = sup
-                .spawn_agent(
+            let PreparedLaunch { artifacts, .. } = sup
+                .prepare_launch(
                     "command-shell-spec",
                     "credential",
                     generation,
-                    "unused",
                     argv,
                     Some(ShellSource::Command(source)),
                     &snapshot,
                     FarhelmArgsMode::Expand(phase),
                     state.path().to_str().unwrap(),
-                    80,
-                    24,
-                    SpawnTarget::ExistingSession("unused"),
                     None,
                     None,
                     None,
                 )
-                .await;
-            let Err(SpawnFailure::Tmux {
-                artifacts,
-                tmux_attempted: false,
-                ..
-            }) = result
-            else {
-                panic!("the fixture must reach spec publication and stop before tmux");
-            };
+                .await
+                .expect("the fixture must reach spec publication");
             let spec: crate::launch::LaunchSpec =
                 serde_json::from_slice(&std::fs::read(artifacts.spec()).unwrap()).unwrap();
             let expected = if generation == 1 {
@@ -19415,25 +17723,21 @@ pub(crate) mod tests {
             (crate::agent_kind::LaunchPhase::Resume, "resume command"),
         ] {
             let invalid = sup
-                .spawn_agent(
+                .prepare_launch(
                     "old-command",
                     "credential",
                     0,
-                    "unused",
                     vec!["agent".into(), "{cwd}".into()],
                     Some(ShellSource::Command("agent '{cwd}'")),
                     &IntegrationSnapshot::of(&named_test_launch()),
                     FarhelmArgsMode::Expand(phase),
                     state.path().to_str().unwrap(),
-                    80,
-                    24,
-                    SpawnTarget::ExistingSession("unused"),
                     None,
                     None,
                     None,
                 )
                 .await;
-            let Err(SpawnFailure::Spec(error)) = invalid else {
+            let Err(error) = invalid else {
                 panic!("an old quoted marker must refuse before publishing a spec");
             };
             assert!(
@@ -19622,9 +17926,11 @@ pub(crate) mod tests {
     /// The published shim spec is the execution boundary: a prompt matching
     /// a placeholder must stay literal after both cwd and hook expansion. The same
     /// builder must carry the exact cwd for Create, retry, Restart and Replace so
-    /// the shim can enforce it after shell startup rather than trust tmux's hint.
-    /// Stop at the existing pre-tmux fault seam so this test starts no vendor
-    /// process; a later launch without a prompt must publish none of its text.
+    /// the shim can enforce it after shell startup rather than trust the
+    /// terminal's starting directory. The spec is published by
+    /// `prepare_launch`, which every launch runs before its terminal starts,
+    /// so this test starts no terminal and no vendor process; a later launch
+    /// without a prompt must publish none of its text.
     #[farhelm_testtrace::test]
     async fn initial_prompt_is_appended_after_expansion_only_for_its_create() {
         let state = StateDir::new();
@@ -19634,13 +17940,6 @@ pub(crate) mod tests {
             SupervisorTimeouts::default(),
             SupervisorSeams {
                 launch_shell: Some("/bin/sh".into()),
-                faults: FaultHooks {
-                    replacement_fault: Some(Arc::new(|stage| {
-                        assert_eq!(stage, ReplacementStage::BeforeCreation);
-                        Err(anyhow::anyhow!("stop before tmux"))
-                    })),
-                    ..FaultHooks::default()
-                },
                 ..SupervisorSeams::default()
             },
         )
@@ -19657,33 +17956,22 @@ pub(crate) mod tests {
         .into_iter()
         .enumerate()
         {
-            let outcome = sup
-                .spawn_agent(
+            let PreparedLaunch { artifacts, .. } = sup
+                .prepare_launch(
                     "prompt-spec",
                     "credential",
                     generation as i64,
-                    "unused",
                     vec!["agent".into(), "{cwd}".into(), "{farhelm_args}".into()],
                     None,
                     &snapshot,
                     FarhelmArgsMode::of(&launch, crate::agent_kind::LaunchPhase::Start),
                     state.path().to_str().unwrap(),
-                    80,
-                    24,
-                    SpawnTarget::ExistingSession("unused"),
                     None,
                     None,
                     prompt.map(|text| (LaunchHarness::Claude, text)),
                 )
-                .await;
-            let Err(SpawnFailure::Tmux {
-                artifacts,
-                tmux_attempted: false,
-                ..
-            }) = outcome
-            else {
-                panic!("the fixture must stop after spec publication and before tmux");
-            };
+                .await
+                .expect("the fixture must reach spec publication");
             let spec: crate::launch::LaunchSpec =
                 serde_json::from_slice(&std::fs::read(artifacts.spec()).unwrap()).unwrap();
             assert_eq!(spec.working_directory.as_deref(), Some(state.path()));
@@ -20527,26 +18815,6 @@ pub(crate) mod tests {
         PathBuf::from("/nonexistent/farhelm")
     }
 
-    /// A supervisor with default timeouts that creates old terminals, in
-    /// its private tmux server: [`Supervisor::new_with_exe`] with
-    /// [`SupervisorSeams::tmux_terminals`].
-    ///
-    /// Only for the unit tests whose subject is tmux itself (its windows as
-    /// tabs, its markers, its panes); every other test that needs a real
-    /// terminal uses [`host_supervisor`].
-    pub(crate) async fn tmux_supervisor(
-        state_dir: &Path,
-        farhelm_exe: PathBuf,
-    ) -> anyhow::Result<Arc<Supervisor>> {
-        Supervisor::new_with_seams(
-            state_dir,
-            farhelm_exe,
-            SupervisorTimeouts::default(),
-            SupervisorSeams::tmux_terminals(),
-        )
-        .await
-    }
-
     /// The default seams with real terminal hosts for a unit test: new
     /// terminals, as a shipped supervisor creates, started from this test
     /// binary ([`crate::hosts::test_program`]), which runs a host when the
@@ -20720,37 +18988,6 @@ pub(crate) mod tests {
             sup.deletes_in_progress.lock().unwrap().is_empty(),
             "the mark is gone with the Delete"
         );
-    }
-
-    /// Keep agent launches failing while allowing real terminal tabs in core tests.
-    /// These fixtures need dead or replaceable agent panes alongside live tabs; a
-    /// nonexistent program can no longer provide both because tabs now use a helper.
-    /// Dispatch only tab-shell to the production Rust helper in an isolated test
-    /// child. Everything else still fails, and dummy_exe stays unchanged for tests
-    /// whose premise is specifically a missing program.
-    fn tab_capable_dummy_exe(state: &StateDir) -> PathBuf {
-        let child = std::env::current_exe().expect("the supervisor test binary");
-        let child = shell_words::quote(child.to_str().expect("UTF-8 test executable"));
-        let shim = state.path().join("tab-capable-farhelm");
-        std::fs::write(
-            &shim,
-            format!(
-                "#!/bin/sh\ncase \"$1:$2:$3\" in\ninternal:tab-shell:--)\n  exec env FARHELM_TAB_SHELL_CHILD_DIRECTORY=\"$4\" FARHELM_TAB_SHELL_CHILD_SHELL=\"$5\" {child} --exact launch::tests::tab_shell_child --ignored --nocapture\n  ;;\nesac\nexit 127\n"
-            ),
-        )
-        .expect("write the tab-capable stand-in");
-        std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-            .expect("make the stand-in executable");
-        assert_eq!(
-            std::process::Command::new(&shim)
-                .args(["internal", "launch", "unused-spec"])
-                .status()
-                .expect("probe the failing agent-launch premise")
-                .code(),
-            Some(127),
-            "the stand-in must not launch agents"
-        );
-        shim
     }
 
     /// Restart with keeps the launch kind and agent type, refuses a legacy
@@ -21554,71 +19791,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// Opening a tab records on its window whether its shell got a scope,
-    /// and the marker reads back only for that exact pane and tab.
-    ///
-    /// Why it matters: close decides whether an unconfirmable scope fails it
-    /// from this marker, so an open that forgot to write it would silently
-    /// fall back to the session inference, and a read that answered for a
-    /// different tab (a vanished pane's target resolves to the session's
-    /// current pane) would apply a sibling's verdict. Specified: after a real
-    /// open, the marker matches whether this host's scope manager is usable,
-    /// and asking with another tab id yields `Unknown`.
-    #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn an_opened_tab_records_whether_it_was_scoped() {
-        let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
-            .await
-            .expect("supervisor");
-        let created = sup
-            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-            .await
-            .expect("agent session");
-        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("session entry");
-        let agent = agent_tmux(&entry);
-        let tab_pane = sup
-            .tmux
-            .pane_states_with_markers()
-            .await
-            .expect("pane states")
-            .into_iter()
-            .find(|(_, state)| state.tab.as_deref() == Some(tab.id.as_str()))
-            .map(|(pane, _)| pane)
-            .expect("the opened tab's pane");
-
-        let expected = if sup.seams.scopes.available().await {
-            TabScope::Scoped
-        } else {
-            TabScope::Unscoped
-        };
-        assert_eq!(
-            sup.tmux
-                .tab_scope_marker(&agent.tmux_name, &tab_pane, &tab.id)
-                .await
-                .expect("read the marker"),
-            expected
-        );
-        assert_eq!(
-            sup.tmux
-                .tab_scope_marker(
-                    &agent.tmux_name,
-                    &tab_pane,
-                    &uuid::Uuid::new_v4().to_string()
-                )
-                .await
-                .expect("read the marker"),
-            TabScope::Unknown,
-            "the marker must not answer for a different tab"
-        );
-    }
-
     /// A checkout preview refuses a path too long to archive later, and
     /// accepts one exactly at the limit.
     ///
@@ -21688,29 +19860,20 @@ pub(crate) mod tests {
         );
     }
 
-    /// A failed restart that may have left a new agent in a fresh tmux
-    /// session re-publishes the entry with no terminal rather than the old,
-    /// gone pane; every other failure keeps the prior terminal.
+    /// A failed restart that may have left a new agent in its new terminal
+    /// re-publishes the entry with no terminal rather than the old one; a
+    /// definitive failure keeps the prior terminal.
     ///
-    /// Why it matters: a stale pane made opening the session target nothing,
-    /// and made a later Restart read the pane as gone, skip its "still
-    /// running" confirmation, and reap the possibly-live new agent. With no
-    /// terminal the existing terminal-less guard applies instead. Specified:
-    /// ambiguous and not surviving gives `None`; definitive, or a surviving
-    /// pane, gives the prior terminal back.
+    /// Why it matters: the old terminal made a later Restart or Delete read
+    /// the session as gone, skip its "still running" confirmation, and reap
+    /// the possibly-live new agent. With no terminal the existing
+    /// terminal-less guard applies instead. Specified: ambiguous gives
+    /// `None`; definitive gives the prior terminal back.
     #[farhelm_testtrace::test]
-    fn an_ambiguous_fresh_relaunch_republishes_no_terminal() {
+    fn an_ambiguous_relaunch_republishes_no_terminal() {
         let prior = Some(a_terminal());
-        assert_eq!(republished_terminal(false, false, prior.clone()), None);
-        assert_eq!(
-            republished_terminal(true, false, prior.clone()),
-            prior.clone()
-        );
-        assert_eq!(
-            republished_terminal(false, true, prior.clone()),
-            prior.clone()
-        );
-        assert_eq!(republished_terminal(true, true, prior.clone()), prior);
+        assert_eq!(republished_terminal(false, prior.clone()), None);
+        assert_eq!(republished_terminal(true, prior.clone()), prior);
     }
 
     /// Browsing is a host-side discovery operation, so its canonical answer
@@ -23160,113 +21323,6 @@ pub(crate) mod tests {
         }
     }
 
-    /// Why this matters: the unconfirmed-delete guard exists so a delete the
-    /// user did not confirm never kills something alive. Its tab check once
-    /// used the ordinary tab listing, which skips the marker read when no
-    /// session has more than one window, so with the agent's window gone a
-    /// lone surviving tab was invisible and the guard let the delete kill
-    /// it. The ordinary listing now reads the markers whenever any window
-    /// carries one (`marker_query_needed`), so it sees the lone tab too; this
-    /// test keeps pinning the guard's own answer, which must not depend on
-    /// which listing it uses. Spec: with the agent pane gone and one live tab
-    /// left as the session's only window, `still_alive_for_delete` reports the
-    /// tab under
-    /// `DeleteGuard::NothingAlive`, including with no agent terminal after a
-    /// reload; the ordinary session list must still show that same tab.
-    /// The guard reports nothing under `AgentEnded`
-    /// (a prompt that warned about tabs covers closing this one) or
-    /// `Unconditional`.
-    #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn the_delete_guard_sees_a_lone_tab_after_the_agent_window_is_gone() {
-        let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
-            .await
-            .expect("supervisor");
-        let created = sup
-            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-            .await
-            .expect("agent session");
-        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("session entry");
-        let agent = agent_tmux(&entry);
-        sup.tmux
-            .kill_pane_for_test(&agent.pane)
-            .await
-            .expect("remove the agent pane");
-        // Premises: the agent pane is gone, the tab keeps the tmux session
-        // alive as its only window, and the ordinary listing still finds that
-        // tab (it once did not; see the docstring).
-        assert!(
-            !sup.tmux
-                .pane_states()
-                .await
-                .expect("post-kill pane states")
-                .contains_key(&agent.pane)
-        );
-        assert!(
-            sup.tmux
-                .has_session(&agent.tmux_name)
-                .await
-                .expect("session liveness")
-        );
-        assert_eq!(
-            sup.session_tabs(&entry)
-                .await
-                .expect("ordinary listing")
-                .len(),
-            1,
-            "fixture premise: the lone tab is the session's only window and the ordinary listing finds it"
-        );
-
-        let (alive, _) = sup
-            .still_alive_for_delete(&entry, farhelm_proto::DeleteGuard::NothingAlive)
-            .await
-            .expect("guard check");
-        assert_eq!(
-            alive.as_deref(),
-            Some("this session has 1 terminal tab open")
-        );
-        for guard in [
-            farhelm_proto::DeleteGuard::AgentEnded,
-            farhelm_proto::DeleteGuard::Unconditional,
-        ] {
-            assert_eq!(
-                sup.still_alive_for_delete(&entry, guard)
-                    .await
-                    .expect("guard check")
-                    .0,
-                None,
-                "{guard:?} covers a lone tab beside an ended agent"
-            );
-        }
-        // A reload can lose the agent terminal while keeping this tab's session.
-        // Preserve the same launch so refusal cannot come from an unsettled create.
-        let mut entry = same_launch_entry(&entry, entry.info.clone(), entry.snapshot.clone());
-        Arc::get_mut(&mut entry).unwrap().terminal = None;
-        assert!(!terminal_less_launch_may_be_live(&entry));
-        *sup.sessions.lock().await.get_mut(&created.id).unwrap() = Arc::clone(&entry);
-        assert_eq!(sup.session_tabs(&entry).await.unwrap(), vec![tab.clone()]);
-        let listed = crate::service::listing::list_all(&sup)
-            .await
-            .expect("terminal-less listing");
-        assert_eq!(listed.sessions.len(), 1);
-        assert_eq!(listed.sessions[0].tabs, vec![tab]);
-        assert_eq!(
-            sup.still_alive_for_delete(&entry, farhelm_proto::DeleteGuard::NothingAlive)
-                .await
-                .unwrap()
-                .0
-                .as_deref(),
-            Some("this session has 1 terminal tab open")
-        );
-    }
-
     /// Create an owned raw-input recorder without a vendor binary or launch
     /// shim. These tests exercise delivery, not launch compilation. The state
     /// directory owns the private tmux server until all diagnostics finish.
@@ -23838,322 +21894,6 @@ pub(crate) mod tests {
         );
     }
 
-    /// A dead agent pane must be replaced inside its surviving tmux session.
-    /// The tab's marker, window, and shell pid are the fixture premises that
-    /// distinguish preservation from merely receiving a non-empty tab list.
-    #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn restart_replaces_only_the_dead_agent_window() {
-        let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
-            .await
-            .expect("supervisor");
-        let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
-        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("session entry");
-        let agent = agent_tmux(&entry);
-        let states = sup.tmux.pane_states().await.expect("pane states");
-        let tab_pane = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
-            .into_iter()
-            .find(|candidate| candidate.id == tab.id)
-            .expect("tab marker is discoverable")
-            .pane;
-        let tab_pid = match sup
-            .tmux
-            .pane_process(&agent.tmux_name, &tab_pane)
-            .await
-            .expect("tab process probe")
-        {
-            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                pid: Some(pid),
-                dead: false,
-            }) => pid,
-            other => panic!("tab process premise failed: {other:?}"),
-        };
-
-        sup.tmux
-            .kill_pane_for_test(&agent.pane)
-            .await
-            .expect("remove only the dead agent pane");
-        assert!(
-            !sup.tmux
-                .pane_states()
-                .await
-                .expect("post-kill pane states")
-                .contains_key(&agent.pane),
-            "fixture premise: the recorded agent pane is gone"
-        );
-        assert!(
-            sup.tmux
-                .has_session(&agent.tmux_name)
-                .await
-                .expect("session liveness"),
-            "fixture premise: the tab kept the tmux session alive"
-        );
-
-        let restarted = sup
-            .restart_session(&created.id, true, None, None)
-            .await
-            .expect("restart with a surviving tab");
-        assert_eq!(
-            restarted.tabs,
-            vec![tab.clone()],
-            "the reply reports the surviving tab"
-        );
-        let after_pid = match sup
-            .tmux
-            .pane_process(&agent.tmux_name, &tab_pane)
-            .await
-            .expect("tab process after restart")
-        {
-            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                pid: Some(pid),
-                dead: false,
-            }) => pid,
-            other => panic!("preserved tab process disappeared: {other:?}"),
-        };
-        assert_eq!(after_pid, tab_pid, "restart must not replace the tab shell");
-    }
-
-    /// Stop's tab phase still sees and closes a lone tmux tab after losing
-    /// the agent terminal. Reusing the interactive resolver here would
-    /// refuse the close solely because the unrelated agent handle is gone.
-    #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn stop_closes_a_lone_tmux_tab_without_an_agent_terminal() {
-        let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
-            .await
-            .expect("supervisor");
-        let created = sup
-            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-            .await
-            .expect("session");
-        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
-        let old_entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("entry");
-        let agent = agent_tmux(&old_entry);
-        let tmux_name = agent.tmux_name.clone();
-        sup.tmux
-            .kill_pane_for_test(&agent.pane)
-            .await
-            .expect("remove agent pane");
-        assert!(
-            sup.tmux
-                .has_session(&tmux_name)
-                .await
-                .expect("tmux liveness"),
-            "premise: the tab keeps its tmux session alive"
-        );
-        sup.forget_agent_terminal_for_test(&created.id)
-            .await
-            .expect("lose the agent terminal");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("entry without agent");
-        assert!(entry.terminal.is_none());
-        assert!(sup.has_open_tabs_for_stop(&entry).await.expect("tab guard"));
-        let lifecycle = sup.lifecycle_locks.claim(&created.id).await;
-        assert_eq!(sup.close_tabs_for_stop(&lifecycle, &entry).await, None);
-        assert!(
-            !sup.tmux
-                .has_session(&tmux_name)
-                .await
-                .expect("tmux liveness"),
-            "closing the only tab ends its tmux session"
-        );
-        assert!(
-            !sup.has_open_tabs_for_stop(&entry)
-                .await
-                .expect("empty tab guard")
-        );
-        assert!(
-            sup.close_tab_under_claim(&lifecycle, &created.id, &tab.id, false)
-                .await
-                .is_err(),
-            "the tab really was removed"
-        );
-    }
-
-    /// A same-account pane can remove the agent marker and forge a tab marker
-    /// on the live agent window. Listing and explicit close must still use
-    /// the durable pane identity, while an unrelated genuine tab keeps its
-    /// ordinary discover-and-close behavior.
-    #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn a_forged_tab_on_the_agent_window_cannot_be_listed_or_closed() {
-        let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
-            .await
-            .expect("supervisor");
-        let created = sup
-            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-            .await
-            .expect("agent session");
-        let genuine = sup.open_tab(&created.id).await.expect("terminal tab");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("session entry");
-        let agent = agent_tmux(&entry);
-        let forged = uuid::Uuid::new_v4().to_string();
-
-        // A malformed agent marker parses as absent, and the forged tab
-        // marker is otherwise shaped exactly like a supervisor-minted id.
-        sup.tmux
-            .mark_window(
-                &agent.tmux_name,
-                &agent.pane,
-                AGENT_WINDOW_OPTION,
-                "malformed-agent-marker",
-            )
-            .await
-            .expect("corrupt the mutable agent marker");
-        sup.tmux
-            .mark_window(&agent.tmux_name, &agent.pane, TAB_WINDOW_OPTION, &forged)
-            .await
-            .expect("forge a tab marker on the agent window");
-
-        let listed = sup.session_tabs(&entry).await.expect("tab listing");
-        assert_eq!(
-            listed,
-            vec![genuine.clone()],
-            "the forged marker must not expose the agent window as a tab"
-        );
-        let close = sup
-            .close_tab(&created.id, &forged)
-            .await
-            .expect_err("closing the forged agent tab must refuse");
-        assert_eq!(close.kind, ErrorKind::NotFound);
-        assert!(
-            sup.tmux
-                .has_session(&agent.tmux_name)
-                .await
-                .expect("session liveness"),
-            "refusing the forged tab must retain the agent's tmux session"
-        );
-        assert!(
-            sup.tmux
-                .pane_states()
-                .await
-                .expect("agent pane probe")
-                .contains_key(&agent.pane),
-            "refusing the forged tab must not destroy the agent window"
-        );
-
-        // A genuine tab still follows the ordinary close path after the
-        // forged marker has been rejected.
-        sup.close_tab(&created.id, &genuine.id)
-            .await
-            .expect("close genuine tab");
-        assert!(
-            sup.session_tabs(&entry)
-                .await
-                .expect("tab listing after genuine close")
-                .is_empty(),
-            "the genuine tab remains closeable"
-        );
-    }
-
-    /// Restarting while the recorded agent pane is still live reuses that
-    /// pane, so the tab list must come from the preflight snapshot and the
-    /// tab shell must remain untouched.
-    #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn restart_reuses_live_agent_and_preserves_tabs() {
-        let state = StateDir::new();
-        // A real long-lived stand-in reaches the live-agent branch. The
-        // nonexistent shim leaves only a transient shell, then a dead pane.
-        let shim = state.path().join("restart-shim");
-        std::fs::write(&shim, "#!/bin/sh\nexec sleep 300\n").expect("write restart stand-in");
-        std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-            .expect("make restart stand-in executable");
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            shim,
-            SupervisorTimeouts::default(),
-            SupervisorSeams {
-                launch_shell: Some("/bin/sh".into()),
-                ..SupervisorSeams::tmux_terminals()
-            },
-        )
-        .await
-        .expect("supervisor");
-        let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
-        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("session entry");
-        let agent = agent_tmux(&entry);
-        assert!(
-            matches!(
-                sup.tmux.pane_process(&agent.tmux_name, &agent.pane).await.expect("agent probe"),
-                TerminalProbe::Owned(process) if !process.dead
-            ),
-            "fixture premise: the agent pane must be live before Restart"
-        );
-        let states = sup.tmux.pane_states().await.expect("pane states");
-        let tab = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
-            .into_iter()
-            .find(|candidate| candidate.id == tab.id)
-            .expect("tab marker is discoverable");
-        let tab_pid = match sup
-            .tmux
-            .pane_process(&agent.tmux_name, &tab.pane)
-            .await
-            .expect("tab process probe")
-        {
-            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                pid: Some(pid),
-                dead: false,
-            }) => pid,
-            other => panic!("tab process premise failed: {other:?}"),
-        };
-
-        let restarted = sup
-            .restart_session(&created.id, true, None, None)
-            .await
-            .expect("restart with a live agent pane");
-        assert_eq!(
-            restarted.tabs,
-            vec![TabInfo {
-                id: tab.id.clone(),
-                kind: Some(farhelm_proto::TerminalKind::Tmux)
-            }]
-        );
-        let after_pid = match sup
-            .tmux
-            .pane_process(&agent.tmux_name, &tab.pane)
-            .await
-            .expect("tab process after restart")
-        {
-            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                pid: Some(pid),
-                dead: false,
-            }) => pid,
-            other => panic!("preserved tab process disappeared: {other:?}"),
-        };
-        assert_eq!(after_pid, tab_pid, "restart must not replace the tab shell");
-    }
-
     /// Named Goose Restart with must retire the old capture everywhere, but
     /// a definitive failure before spawn must restore it everywhere.
     ///
@@ -24461,267 +22201,6 @@ pub(crate) mod tests {
             .await
             .expect_err("plain Restart must not reopen the old conversation");
         assert!(format!("{refusal:#}").contains("this session cannot be restarted"));
-    }
-
-    /// A tmux process can forge the agent marker on a user tab, so that
-    /// marker may report an ambiguous old window but must never authorize
-    /// killing it when the recorded agent pane has disappeared.
-    #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn forged_agent_marker_cannot_authorize_old_tab_cleanup() {
-        let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), tab_capable_dummy_exe(&state))
-            .await
-            .expect("supervisor");
-        let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
-        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("session entry");
-        let agent = agent_tmux(&entry);
-        let states = sup.tmux.pane_states().await.expect("pane states");
-        let tab = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
-            .into_iter()
-            .find(|candidate| candidate.id == tab.id)
-            .expect("tab marker is discoverable");
-        let tab_pane = tab.pane.clone();
-        let tab_window = states
-            .get(&tab_pane)
-            .expect("tab pane state")
-            .window
-            .clone();
-        let tab_pid = match sup
-            .tmux
-            .pane_process(&agent.tmux_name, &tab_pane)
-            .await
-            .expect("tab process probe")
-        {
-            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                pid: Some(pid),
-                dead: false,
-            }) => pid,
-            other => panic!("tab process premise failed: {other:?}"),
-        };
-
-        sup.tmux
-            .kill_pane_for_test(&agent.pane)
-            .await
-            .expect("remove the recorded agent pane");
-        // This simulates a process in the surviving tab writing the marker;
-        // tmux window options are intentionally not an authenticated source
-        // of ownership.
-        sup.tmux
-            .mark_window(
-                &agent.tmux_name,
-                &tab_pane,
-                AGENT_WINDOW_OPTION,
-                &created.id,
-            )
-            .await
-            .expect("forge the agent marker on the tab");
-
-        sup.restart_session(&created.id, true, None, None)
-            .await
-            .expect_err("ambiguous old-window identity must be reported");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("published replacement session");
-        assert_eq!(entry.info.tabs.len(), 1);
-        assert_eq!(entry.info.tabs[0].id.as_str(), tab.id.as_str());
-        assert_ne!(
-            entry
-                .terminal
-                .as_ref()
-                .map(|terminal| &terminal.expect_tmux().pane),
-            Some(&agent.pane),
-            "the replacement must be the published terminal"
-        );
-        let states = sup.tmux.pane_states().await.expect("surviving pane states");
-        let tab_state = states
-            .get(&tab_pane)
-            .expect("the forged-marker tab remains addressable");
-        assert_eq!(tab_state.window, tab_window);
-        assert_eq!(
-            match sup
-                .tmux
-                .pane_process(&agent.tmux_name, &tab_pane)
-                .await
-                .expect("tab process after restart")
-            {
-                TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                    pid: Some(pid),
-                    dead: false,
-                }) => pid,
-                other => panic!("forged-marker tab process disappeared: {other:?}"),
-            },
-            tab_pid,
-            "a forged marker must not make restart kill the tab"
-        );
-    }
-
-    /// Creation, marking, and durable-confirmation failures all leave the
-    /// preserved tab alive. Marking and confirmation create a replacement
-    /// first, so the absence of an agent marker after failure also proves
-    /// their temporary window was cleaned up rather than stranded.
-    #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn replacement_failures_preserve_tabs_and_clean_temporary_windows() {
-        for stage in [
-            ReplacementStage::BeforeCreation,
-            ReplacementStage::BeforeMarking,
-            ReplacementStage::BeforeConfirmation,
-        ] {
-            let state = StateDir::new();
-            let fault = Arc::new(move |observed| {
-                if observed == stage {
-                    Err(anyhow::anyhow!("injected replacement failure at {stage:?}"))
-                } else {
-                    Ok(())
-                }
-            });
-            let sup = Supervisor::new_with_seams(
-                state.path(),
-                tab_capable_dummy_exe(&state),
-                SupervisorTimeouts::default(),
-                SupervisorSeams {
-                    launch_shell: Some("/bin/bash".to_string()),
-                    faults: FaultHooks {
-                        replacement_fault: Some(fault),
-                        ..FaultHooks::default()
-                    },
-                    ..SupervisorSeams::tmux_terminals()
-                },
-            )
-            .await
-            .expect("supervisor");
-            let created = create_resumable_session(&sup, "/tmp", "sleep 300").await;
-            let tab = sup.open_tab(&created.id).await.expect("terminal tab");
-            let entry = sup
-                .sessions
-                .lock()
-                .await
-                .get(&created.id)
-                .cloned()
-                .expect("session entry");
-            let agent = agent_tmux(&entry);
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            let tab = tabs_from_pane_states(states.values(), &agent.tmux_name, None)
-                .into_iter()
-                .find(|candidate| candidate.id == tab.id)
-                .expect("tab marker is discoverable");
-            let tab_pane = tab.pane.clone();
-            let tab_window = states
-                .get(&tab_pane)
-                .expect("tab pane state")
-                .window
-                .clone();
-            let tab_pid = match sup
-                .tmux
-                .pane_process(&agent.tmux_name, &tab_pane)
-                .await
-                .expect("tab process probe")
-            {
-                TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                    pid: Some(pid),
-                    dead: false,
-                }) => pid,
-                other => panic!("tab process premise failed: {other:?}"),
-            };
-            sup.tmux
-                .kill_pane_for_test(&agent.pane)
-                .await
-                .expect("remove the recorded agent pane");
-            assert!(
-                sup.tmux
-                    .has_session(&agent.tmux_name)
-                    .await
-                    .expect("session liveness"),
-                "fixture premise: the tab kept the session alive"
-            );
-
-            sup.restart_session(&created.id, true, None, None)
-                .await
-                .expect_err("the injected replacement stage must fail");
-            if stage == ReplacementStage::BeforeCreation {
-                let durable = sup
-                    .store
-                    .session(&created.id)
-                    .await
-                    .expect("durable session lookup")
-                    .expect("durable session remains");
-                assert_eq!(durable.generation, 1);
-                assert_ne!(durable.outcome, LastOutcome::Launching);
-                assert!(
-                    !crate::launch::spec_path_for_launch(state.path(), &created.id, 1).exists(),
-                    "a replacement never attempted must not strand its launch spec"
-                );
-            }
-            let entry = sup
-                .sessions
-                .lock()
-                .await
-                .get(&created.id)
-                .cloned()
-                .expect("failed restart restores the old entry");
-            let states = sup.tmux.pane_states().await.expect("surviving pane states");
-            let tab_state = states
-                .get(&tab_pane)
-                .expect("the preserved tab pane remains addressable");
-            assert_eq!(
-                tab_state.session_name, agent.tmux_name,
-                "{stage:?}: the preserved pane remains in the session"
-            );
-            assert_eq!(
-                tab_state.window, tab_window,
-                "{stage:?}: the preserved pane remains in its original window"
-            );
-            assert!(
-                !tab_state.dead,
-                "{stage:?}: the preserved tab shell remains live"
-            );
-            let after_pid = match sup
-                .tmux
-                .pane_process(&agent.tmux_name, &tab_pane)
-                .await
-                .expect("tab process after failed restart")
-            {
-                TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                    pid: Some(pid),
-                    dead: false,
-                }) => pid,
-                other => panic!("{stage:?}: preserved tab process disappeared: {other:?}"),
-            };
-            assert_eq!(after_pid, tab_pid, "{stage:?}: tab shell was not replaced");
-            assert_eq!(
-                entry
-                    .terminal
-                    .as_ref()
-                    .map(|terminal| &terminal.expect_tmux().pane),
-                Some(&agent.pane)
-            );
-            let surviving_windows: HashSet<String> = states
-                .values()
-                .filter(|state| state.session_name == agent.tmux_name)
-                .map(|state| state.window.clone())
-                .collect();
-            assert_eq!(
-                surviving_windows,
-                HashSet::from([tab_window]),
-                "{stage:?}: no temporary replacement window remains"
-            );
-            assert!(
-                states
-                    .values()
-                    .all(|state| state.agent.as_deref() != Some(created.id.as_str())),
-                "{stage:?}: no temporary replacement agent marker remains"
-            );
-        }
     }
 
     /// The tmux handles of `entry`'s agent terminal, for a test whose
@@ -28828,17 +26307,15 @@ exit 0
         living.wait().expect("reap the living child");
     }
 
-    /// Releases the ordering test's held-open fake-tmux start on every
+    /// Releases the ordering test's held-open fake host start on every
     /// exit path, not just the passing one.
     ///
-    /// The fake blocks inside `new-session` until `release-start`
-    /// appears, and the `spawn_agent` under test drives it through
-    /// `run_bytes`, which is `Command::output()` without
-    /// `kill_on_drop`: dropping that future — as the `join!` does
-    /// when the observer fails — leaves the shell running. The only
-    /// thing that ends it is the release file, so the release is a
-    /// guard established before the concurrent operation rather than
-    /// a write after the assertions. The ordinary path releases
+    /// The fake host program blocks as it starts until `release-start`
+    /// appears, and the host start under test (`spawn_agent_in_host`)
+    /// waits for the fake's exit as its first stage. While the observer
+    /// runs, the only thing that ends the hold is the release file, so
+    /// the release is a guard established before the concurrent
+    /// operation rather than a write after the assertions. The ordinary path releases
     /// explicitly once the observation is collected (see
     /// [`release`](Self::release)); cancellation of the test future
     /// lands in [`drop`](Self::drop) instead, which publishes the
@@ -28857,8 +26334,8 @@ exit 0
     /// before anything can remove it.
     ///
     /// What this does NOT do: kill anything. The shell's pid is
-    /// inside the driver's `output()` future where the fixture cannot
-    /// name it, so the fallback for a release that cannot land at all
+    /// inside the host start where the fixture cannot name it, so the
+    /// fallback for a release that cannot land at all
     /// (the scratch directory is gone, so the write has nowhere to
     /// go) or is never acknowledged (the 5s ack bound expires) is the
     /// fake's own iteration cap, which touches no files and ends the
@@ -28931,16 +26408,16 @@ exit 0
         .await
     }
 
-    /// OMP launch provenance is durable before tmux can start anything:
-    /// the fake tmux publishes an entered-start signal from INSIDE the
-    /// session start and blocks there, and the test reads the committed
-    /// row while the start is held open — then releases it. Driven
-    /// through the real `spawn_agent` with initially empty provenance,
-    /// so the test pins the actual boundary — publish, then start —
-    /// rather than the store call in isolation.
+    /// OMP launch provenance is durable before the terminal host can start
+    /// anything: the fake host program (the host's first stage) publishes
+    /// an entered-start signal as it starts and blocks there, and the test
+    /// reads the committed row while the start is held open — then releases
+    /// it. Driven through the real `spawn_agent_in_host` with initially
+    /// empty provenance, so the test pins the actual boundary — publish,
+    /// then start — rather than the store call in isolation.
     ///
     /// Why this test matters: a report requires a live agent, which
-    /// requires the tmux start. Reading the durable row while the start
+    /// requires the host's start. Reading the durable row while the start
     /// is still held open proves the write preceded it: a publish moved
     /// to just after the start returns — before the result is even
     /// matched — would leave the held-open read empty while still
@@ -28948,55 +26425,46 @@ exit 0
     /// old post-spawn publish, this same launch would leave both
     /// columns empty at the hold point.
     #[farhelm_testtrace::test]
-    async fn omp_launch_provenance_is_published_before_tmux_starts() {
+    async fn omp_launch_provenance_is_published_before_the_host_starts() {
         let state = StateDir::new();
         let scratch = farhelm_teststate::tempdir().expect("fixture directory");
-        let fake_tmux = scratch.path().join("fake-tmux.sh");
+        let fake_host = scratch.path().join("fake-host.sh");
         std::fs::write(
-            &fake_tmux,
+            &fake_host,
             r#"#!/bin/sh
-# Fake tmux for the provenance-ordering test: version probes answer
-# with the pinned shape, the session start publishes that it was
-# entered and then blocks until released, everything else succeeds.
+# Fake host program for the provenance-ordering test: started as the
+# host's first stage, it publishes that it was entered and then blocks
+# until released, and then fails the start, as a host that did not start.
 here=$(dirname "$0")
-for arg in "$@"; do
-  case "$arg" in
-    -V) echo "tmux 3.7c"; exit 0;;
-    *version*) echo "3.7c"; exit 0;;
-    new-session)
-      : > "$here/entered-start"
-      # Finite failure bound: a release that never lands (the guard's
-      # write has nowhere to go once the scratch directory is gone)
-      # still ends the shell. The count touches no files, so it
-      # survives scratch removal; exit 42 names the cap-hit for
-      # anyone reading a failure, distinct from the expected exit 1.
-      n=0
-      while [ ! -e "$here/release-start" ]; do
-        n=$((n + 1))
-        if [ "$n" -gt 1500 ]; then exit 42; fi
-        sleep 0.02
-      done
-      # Ack: delete the release to prove it was observed, and leave a
-      # consumed-release marker proving the release path — not the cap
-      # path — ended the hold. The failure path waits for the deletion
-      # before letting teardown delete the directory — without the
-      # wait, the file's microsecond lifetime would end inside one
-      # 20ms sleep and the shell would never see it. No ack or marker
-      # on the cap path: nothing waits there, and the post-join marker
-      # assertion must fail if the cap freed the start ahead of the
-      # observation.
-      : > "$here/consumed-release"
-      rm -f "$here/release-start"
-      exit 1;;
-  esac
+: > "$here/entered-start"
+# Finite failure bound: a release that never lands (the guard's write
+# has nowhere to go once the scratch directory is gone) still ends the
+# shell. The count touches no files, so it survives scratch removal;
+# exit 42 names the cap-hit for anyone reading a failure, distinct from
+# the expected exit 1.
+n=0
+while [ ! -e "$here/release-start" ]; do
+  n=$((n + 1))
+  if [ "$n" -gt 1500 ]; then exit 42; fi
+  sleep 0.02
 done
-exit 0
+# Ack: delete the release to prove it was observed, and leave a
+# consumed-release marker proving the release path — not the cap path —
+# ended the hold. The failure path waits for the deletion before letting
+# teardown delete the directory — without the wait, the file's
+# microsecond lifetime would end inside one 20ms sleep and the shell
+# would never see it. No ack or marker on the cap path: nothing waits
+# there, and the post-join marker assertion must fail if the cap freed
+# the start ahead of the observation.
+: > "$here/consumed-release"
+rm -f "$here/release-start"
+exit 1
 "#,
         )
-        .expect("fake tmux");
+        .expect("fake host program");
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&fake_tmux, std::fs::Permissions::from_mode(0o755))
+            std::fs::set_permissions(&fake_host, std::fs::Permissions::from_mode(0o755))
                 .expect("fixture executable");
         }
         let sup = Supervisor::new_with_seams(
@@ -29004,14 +26472,12 @@ exit 0
             dummy_exe(),
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                tmux_program: fake_tmux,
+                host_program: Some(fake_host),
                 ..SupervisorSeams::default()
             },
         )
         .await
         .expect("supervisor");
-        // The fake answers for a server that does not exist.
-        sup.tmux.forget_presence_for_test();
         let id = uuid::Uuid::new_v4().to_string();
         sup.store
             .insert_session(
@@ -29034,7 +26500,7 @@ exit 0
                         ]),
                     },
                     terminal_address: String::new(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -29051,7 +26517,6 @@ exit 0
             )
             .await
             .expect("seed the launching row");
-        let tmux_name = format!("fh-{id}");
         let snapshot = hook_snapshot(AgentKind::Omp);
         let entered = scratch.path().join("entered-start");
         // The guard is established BEFORE the concurrent operation, so
@@ -29067,11 +26532,10 @@ exit 0
         // the start until the read below releases it, so the row the
         // read observes provably precedes anything the start could run.
         let (outcome, observed) = tokio::join!(
-            sup.spawn_agent(
+            sup.spawn_agent_in_host(
                 &id,
                 "test-spawn-credential",
                 0,
-                &tmux_name,
                 vec!["omp".to_string()],
                 None,
                 &snapshot,
@@ -29079,7 +26543,7 @@ exit 0
                 state.path().to_str().unwrap(),
                 80,
                 24,
-                SpawnTarget::NewSession,
+                None,
                 None,
                 None,
                 None,
@@ -29100,7 +26564,7 @@ exit 0
                         }
                         assert!(
                             std::time::Instant::now() < deadline,
-                            "the fake tmux never entered the session start"
+                            "the fake host program never entered the host's start"
                         );
                         // sleep-ok: the spawn runs concurrently on this same task; retry file readability at a fixed cadence inside the original bound.
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -29157,10 +26621,10 @@ exit 0
             }
         );
         assert!(
-            matches!(outcome, Err(SpawnFailure::Tmux { .. })),
-            "the fake's failed start must surface as a tmux failure"
+            matches!(outcome, Err(HostSpawnFailure::Host { .. })),
+            "the fake's failed start must surface as a host that did not start"
         );
-        // The cap-hit exit is the same Tmux error as the expected one,
+        // The cap-hit exit is the same host error as the expected one,
         // so the assertion above cannot tell them apart — and a cap-hit
         // means the start finished before the held-open read, which is
         // exactly the ordering this test exists to pin. The marker is
@@ -29187,7 +26651,7 @@ exit 0
         // below for the wrong reason.
         assert!(
             crate::launch::spec_path_for_launch(&sup.state_dir, &id, 0).exists(),
-            "the launch spec publishes before the tmux start is attempted"
+            "the launch spec publishes before the host's start is attempted"
         );
         let row = sup
             .store
@@ -29198,12 +26662,12 @@ exit 0
         assert_eq!(
             row.omp_reporter_asset.as_deref(),
             Some(crate::pi_extension::OMP_ASSET.file_name),
-            "the asset marker is durable although tmux never started anything"
+            "the asset marker is durable although the host never started anything"
         );
         assert_eq!(
             row.omp_launch_program.as_deref(),
             Some("omp"),
-            "the retained program is durable although tmux never started anything"
+            "the retained program is durable although the host never started anything"
         );
     }
 
@@ -30242,7 +27706,6 @@ exit 0
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
                 boot_id_file: None,
-                new_terminals: NewTerminals::Tmux,
             },
         )
         .await
@@ -31075,7 +28538,7 @@ exit 0
     /// observe. Driven through the REAL `create_session` call site (a
     /// genuine `EACCES` from an unwritable `launch/` directory, not a
     /// synthetic seam substitution), so this pins the actual ordering
-    /// `spawn_agent` relies on (`?` on the spec write, strictly before
+    /// `prepare_launch` relies on (`?` on the spec write, strictly before
     /// `self.tmux.create_session`) rather than only the write helper's
     /// own atomicity in isolation.
     #[farhelm_testtrace::test]
@@ -32416,10 +29879,10 @@ exit 0
 
     /// `{cwd}` is legal anywhere past the program slot, and by design
     /// filling it is spawn-time's job (`agent_kind::fill_cwd`, meant to be
-    /// called only from `Supervisor::spawn_agent`, once the launch cwd is
+    /// called only from `Supervisor::prepare_launch`, once the launch cwd is
     /// known) rather than validation's — so a wrapper invocation must
     /// validate successfully with the placeholder still literally present
-    /// in the resulting `LaunchRequest`. `spawn_agent` does not wire up the
+    /// in the resulting `LaunchRequest`. `prepare_launch` does not wire up the
     /// fill in this commit (that lands in the next commit of the stack);
     /// this test pins the half already in place: "argv shape is
     /// acceptable" is checked here and must not eagerly substitute the
@@ -33416,7 +30879,7 @@ exit 0
                         })),
                         ..FaultHooks::default()
                     },
-                    ..SupervisorSeams::default()
+                    ..host_seams()
                 },
             )
             .await
@@ -33450,7 +30913,7 @@ exit 0
                         resume_template: None,
                     },
                     terminal_address: String::new(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -33970,112 +31433,6 @@ exit 0
         );
     }
 
-    /// The opposite rollback rule, and the one that costs something to
-    /// get wrong: when a create fails AMBIGUOUSLY, the launching row is
-    /// KEPT.
-    ///
-    /// `tmux new-session` can fail after the session already exists (a
-    /// lost reply, a timeout mid-command), so deleting the row on the
-    /// strength of the error alone would orphan a running agent — no row,
-    /// no id, nothing left that knows to reap it. Provoked here by making
-    /// the private socket unreachable, which makes both the create AND the
-    /// has-session probe that follows it fail;
-    /// with the probe unable to confirm absence, the row must survive and
-    /// the error must say so. The surviving row must also remain published:
-    /// lifecycle operations resolve through the in-memory map, so durability
-    /// alone would leave a possibly-running agent unlisted and unstoppable.
-    #[farhelm_testtrace::test]
-    async fn an_ambiguous_tmux_failure_keeps_the_launching_record() {
-        let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let work = tempfile::tempdir().expect("workdir");
-        // Put a symlink loop where the socket belongs: tmux can then
-        // neither connect to it nor create it, so `new-session` fails AND
-        // the has-session probe that decides the rollback fails too, with
-        // a diagnostic ("Symbolic link loop") that says
-        // nothing about whether a session exists — an unconfirmable
-        // failure. Not a directory: connecting to one is refused like a
-        // stale socket, which tmux reports as "no server running", and no
-        // server is a definitive absence. Deliberately not done by freezing
-        // the state directory, which would break SQLite (its journal lives
-        // there) and fail the create before a row was ever written,
-        // testing nothing.
-        let sock = state.path().join("tmux.sock");
-        std::fs::remove_file(&sock).ok();
-        std::os::unix::fs::symlink(&sock, &sock).expect("block the socket path");
-
-        let error = sup
-            .create_session_without_overrides(
-                &work.path().to_string_lossy(),
-                "sh -c 'sleep 300'",
-                None,
-                80,
-                24,
-                Some(IntentClaim {
-                    intent_key: "key".to_string(),
-                    fingerprint: command_fingerprint(
-                        &work.path().to_string_lossy(),
-                        "sh -c 'sleep 300'",
-                        None,
-                    ),
-                    dedup_scope: DedupScope::Permanent,
-                }),
-            )
-            .await
-            .expect_err("tmux cannot create a session without a socket");
-
-        let rows = sup.store.load_all().await.expect("load");
-        assert_eq!(
-            rows.len(),
-            1,
-            "an unconfirmable tmux failure must keep the only record of a possibly-running \
-             agent; error was: {error:#}"
-        );
-        assert_eq!(rows[0].outcome, LastOutcome::Launching);
-        assert!(
-            sup.sessions.lock().await.contains_key(&rows[0].id),
-            "a retained launching row must stay listed so its possible agent can be stopped or deleted"
-        );
-        let rendered = format!("{error:#}");
-        assert!(
-            rendered.contains("kept as a launching record"),
-            "the caller must be told the row survives and why: {rendered}"
-        );
-        // The idempotency half of the same rule (PLAN_M3.md item 6 meeting
-        // the retention rules above): a failure that RETAINED evidence must
-        // leave its reservation pending. Settling it `Failed` would tell
-        // every later retry the intent is closed while an agent may still
-        // be running under that retained row — hiding it until the next
-        // restart, when the reload that would have reconciled it finds a
-        // reservation that no longer wants reconciling.
-        assert_eq!(
-            sup.store
-                .reservation("key")
-                .await
-                .expect("read")
-                .expect("the claim committed with the launching row")
-                .outcome,
-            ReservationOutcome::Pending,
-            "an ambiguous failure is exactly the reconcile-me state, not a recorded failure"
-        );
-        assert!(
-            !sup.ordinary_create_was_refused(&IntentClaim {
-                intent_key: "key".into(),
-                fingerprint: command_fingerprint(
-                    &work.path().to_string_lossy(),
-                    "sh -c 'sleep 300'",
-                    None
-                ),
-                dedup_scope: DedupScope::Permanent,
-            })
-            .await
-            .unwrap(),
-            "uncertain launch evidence must keep its retry identity"
-        );
-    }
-
     /// A confirmed-absent create must remove the whole attempt before its
     /// Failed reservation makes the error final. The fake host program
     /// refuses the start only after witnessing the real published spec and
@@ -34402,7 +31759,7 @@ exit 1
                         resume_template: None,
                     },
                     terminal_address: String::new(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -35116,7 +32473,7 @@ exit 1
     #[farhelm_testtrace::test]
     async fn a_retry_publishes_the_title_its_takeover_preserved() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let cwd = state.path().to_string_lossy().to_string();
@@ -35141,7 +32498,7 @@ exit 1
                 resume_template: None,
             },
             terminal_address: String::new(),
-            terminal_kind: crate::store::TerminalKind::Tmux,
+            terminal_kind: crate::store::TerminalKind::Host,
             outcome: LastOutcome::Launching,
             canonical_cwd: Some(cwd.clone()),
             captured_conversation: None,
@@ -35551,7 +32908,7 @@ exit 1
                         })),
                         ..FaultHooks::default()
                     },
-                    ..SupervisorSeams::default()
+                    ..host_seams()
                 },
             )
             .await
@@ -35582,7 +32939,7 @@ exit 1
                         resume_template: None,
                     },
                     terminal_address: String::new(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: Some(canonical_original.clone()),
                     captured_conversation: None,
@@ -37217,7 +34574,6 @@ exit 1
             agent_hooks,
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             boot_id_file: None,
-            new_terminals: NewTerminals::Tmux,
         };
         let argv = vec!["claude".to_string()];
 
@@ -37276,7 +34632,6 @@ exit 1
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions,
             boot_id_file: None,
-            new_terminals: NewTerminals::Tmux,
         };
         let argv = vec!["claude".to_string()];
 
@@ -37339,7 +34694,6 @@ exit 1
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             boot_id_file: Some(boot_file.clone()),
-            new_terminals: NewTerminals::Tmux,
         };
 
         std::fs::write(&boot_file, "boot-first\n").expect("write boot id");
@@ -37375,47 +34729,6 @@ exit 1
         );
     }
 
-    /// The terminal kind a supervisor was STARTED with is the switch it
-    /// runs with, and the one its accessor reports.
-    ///
-    /// Why: `farhelm supervisor run --new-terminals` is the only way a real
-    /// supervisor process turns terminal hosts on, and anything that must
-    /// agree with a create's choice (the migration notice, for one) reads
-    /// [`Supervisor::new_terminals`]. A startup value dropped on the way to
-    /// [`SupervisorSeams::new_terminals`] would leave a harness believing it
-    /// tests terminal hosts while every create lands in tmux. Spec: a
-    /// supervisor built through `new_for_startup` with `Host` reports
-    /// `Host` and holds it in its seams, and one built with `Tmux` on the
-    /// same state directory afterwards reports `Tmux`, so the value is the
-    /// startup's and not left over from the directory or a default.
-    /// (Lib tests cannot run a create in a host: a supervisor here has the
-    /// test binary as its own program, which starts no host. The process
-    /// tests in `crates/farhelm/tests/e2e/host_processes.rs` show the flag
-    /// reaching a real create.)
-    #[farhelm_testtrace::test]
-    async fn a_startup_terminal_kind_is_the_switch_the_supervisor_runs_with() {
-        let state = StateDir::new();
-        let startup = |new_terminals| SupervisorStartup {
-            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
-            agent_hooks: crate::agent_kind::AgentHooks::default(),
-            agent_instructions: crate::agent_kind::AgentInstructions::default(),
-            boot_id_file: None,
-            new_terminals,
-        };
-
-        let hosts = Supervisor::new_for_startup(state.path(), startup(NewTerminals::Host))
-            .await
-            .expect("supervisor");
-        assert_eq!(hosts.new_terminals(), NewTerminals::Host);
-        assert_eq!(hosts.seams.new_terminals, NewTerminals::Host);
-        drop(hosts);
-
-        let tmux = Supervisor::new_for_startup(state.path(), startup(NewTerminals::Tmux))
-            .await
-            .expect("supervisor");
-        assert_eq!(tmux.new_terminals(), NewTerminals::Tmux);
-    }
-
     /// End to end through a real create: a Claude session's launch spec on
     /// disk carries the hook flags, and its entry records the launch as
     /// hooked, including its durable flag for a later supervisor reload.
@@ -37424,7 +34737,7 @@ exit 1
     ///
     /// The pure tests above prove the DECISION; this one proves the
     /// WIRING, which is the part with somewhere to go wrong — the snapshot
-    /// has to be threaded into `spawn_agent`, the injection has to happen
+    /// has to be threaded into `prepare_launch`, the injection has to happen
     /// before the spec is serialized (the spec is what the shim execs, so
     /// flags added afterwards would never reach the agent), and the
     /// returned bool has to land on the entry the create publishes rather
@@ -41125,6 +38438,102 @@ exit 1
         );
     }
 
+    /// A retried fresh-checkout create whose interrupted row is an older
+    /// supervisor's tmux launch is refused before the checkout is allocated:
+    /// no directory is made, and the row, plan and intent are rolled back
+    /// and settled together.
+    ///
+    /// Why: this supervisor creates no tmux terminals, so the retry is
+    /// refused (`refuse_retried_tmux_launch`); refusing it only after the
+    /// allocation would make a managed checkout on disk for a create it then
+    /// refuses, and report the refusal as a failed spec write. Spec: a keyed
+    /// fresh create interrupted after its launching row (plan `Planned`, no
+    /// directory), its row then written as a tmux row as an older
+    /// supervisor would have left it, is refused on retry with a conflict
+    /// naming the old terminal; the planned directory does not exist; the
+    /// row and its plan are gone; and the intent is settled `Failed`.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_retried_fresh_checkout_interrupted_in_tmux_is_refused_before_its_mkdir() {
+        let state = StateDir::new();
+        let root = state.path().join("checkouts");
+        std::fs::create_dir_all(&root).unwrap();
+        let checkout = checkout_fixture(&root);
+        let claim = IntentClaim {
+            intent_key: "tmux-retry".into(),
+            fingerprint: checkout_fingerprint(&checkout),
+            dedup_scope: DedupScope::Permanent,
+        };
+        let sup = checkout_crash_supervisor(&state, CreateStage::AfterRecord).await;
+        let crash = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("the first attempt crashes after its row");
+        assert!(crash.is::<SimulatedCrash>(), "{crash:#}");
+        let reservation = sup
+            .store
+            .reservation(&claim.intent_key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reservation.outcome, ReservationOutcome::Pending);
+        let original = sup
+            .store
+            .session(&reservation.session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let plan = sup
+            .store
+            .origin_working_copy(&original.id)
+            .await
+            .unwrap()
+            .expect("premise: the plan is recorded");
+        assert_eq!(
+            plan.allocation_state,
+            crate::working_copies::AllocationState::Planned,
+            "premise: the checkout is only planned"
+        );
+        assert!(
+            !std::path::Path::new(&original.cwd).exists(),
+            "premise: no directory yet"
+        );
+        sup.store
+            .set_terminal_for_test(&original.id, crate::store::TerminalKind::Tmux, "")
+            .await
+            .unwrap();
+
+        let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
+            .await
+            .expect_err("a create interrupted in tmux is not retried");
+        assert!(
+            format!("{refusal:#}").contains("old terminal (tmux)"),
+            "{refusal:#}"
+        );
+        assert!(
+            !std::path::Path::new(&original.cwd).exists(),
+            "the refused retry made no checkout directory"
+        );
+        assert!(sup.store.session(&original.id).await.unwrap().is_none());
+        assert!(
+            sup.store
+                .origin_working_copy(&original.id)
+                .await
+                .unwrap()
+                .is_none(),
+            "the plan is rolled back with its row"
+        );
+        let settled = sup
+            .store
+            .reservation(&claim.intent_key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(settled.outcome, ReservationOutcome::Failed { .. }),
+            "{:?}",
+            settled.outcome
+        );
+    }
+
     /// Canonical spelling can change while both captured inodes still match.
     /// A late cwd refusal must settle the original Error/Failed pair even when
     /// a borrower would make ordinary session rollback legal. Restoring paths
@@ -42135,7 +39544,6 @@ exit 1
                     argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
                     launch_cwd: "/tmp".into(),
                     terminal_survives: false,
-                    into_host: false,
                     restart_with: None,
                     seed: None,
                 },

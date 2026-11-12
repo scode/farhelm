@@ -139,13 +139,6 @@ type StackInfo = {
    */
   remote_supervisor_log: string;
   remote_supervisor_rust_log: string;
-  /**
-   * The `--new-terminals` value both of the stack's supervisors run with
-   * (`host`, or `tmux` on the old-terminal set's run). A replacement remote
-   * passes the same, so the host keeps creating the kind of terminal the
-   * run is about.
-   */
-  new_terminals: "host" | "tmux";
 };
 
 /**
@@ -744,9 +737,7 @@ async function restoreRemoteSupervisor(request: APIRequestContext) {
   // The same test-only boot-id seam start-stack.sh launched it with: a
   // respawn that dropped the option would read the machine's real boot id,
   // and every session of the harness's "boot-1" would come back interrupted
-  // on a host that never rebooted. And the same `--new-terminals`, last as
-  // there, so a replacement creates the same kind of terminal as the
-  // supervisor it replaces.
+  // on a host that never rebooted.
   //
   // Detached and recorded in the stack's pidfile rather than held as a child
   // handle: the replacement is the stack's remote from now on, for every
@@ -765,8 +756,6 @@ async function restoreRemoteSupervisor(request: APIRequestContext) {
         info.remote_state,
         "--boot-id-file",
         info.remote_boot_id_file,
-        "--new-terminals",
-        info.new_terminals,
       ],
       {
         stdio: ["ignore", log, log],
@@ -3545,7 +3534,7 @@ test.describe("multi-host", () => {
 
   // A REBOOT of the remote host, simulated the way the Rust suite's reboot
   // tests define one: the supervisor and every terminal it had go away (its
-  // terminal hosts, and its tmux server if it has one), the boot id the
+  // terminal hosts), the boot id the
   // supervisor reads changes (start-stack.sh's `--boot-id-file` seam,
   // rewritten between the kill and the respawn), and the supervisor comes
   // back on the same state directory. A changed boot id alone is not a
@@ -3608,10 +3597,8 @@ test.describe("multi-host", () => {
      * The terminals are ended with the command an uninstall uses,
      * `farhelm internal stop-terminal-hosts` (as start-stack.sh's cleanup
      * does), and its exit status is checked, because it succeeds only once
-     * every host in the state directory is confirmed gone; a supervisor on
-     * old terminals also has its tmux server killed, checked both ways (the
-     * command ran, and the server is gone afterwards). The classification
-     * does not depend on either: with the boot id changed, every live row
+     * every host in the state directory is confirmed gone. The
+     * classification does not depend on it: with the boot id changed, every live row
      * converts to interrupted whether or not its terminal survived, and a
      * test that let the terminals live would pass while the agents kept
      * running in them.
@@ -3624,22 +3611,6 @@ test.describe("multi-host", () => {
       });
       expect(stopped.error, "farhelm must be runnable from the test process").toBeUndefined();
       expect(stopped.status, `stopping the remote's terminal hosts: ${stopped.stdout}${stopped.stderr}`).toBe(0);
-      const sock = path.join(info.remote_state, "tmux.sock");
-      if (fs.existsSync(sock)) {
-        // The same tmux the supervisor drives: it honors `FARHELM_TMUX` ahead
-        // of PATH, and a client from a different build fails the socket
-        // handshake with a protocol-version mismatch rather than killing
-        // anything.
-        const tmux = process.env.FARHELM_TMUX || "tmux";
-        const killed = spawnSync(tmux, ["-S", sock, "kill-server"], { encoding: "utf8" });
-        expect(killed.error, "tmux must be runnable from the test process").toBeUndefined();
-        expect(
-          killed.status === 0 || /no server running|No such file/.test(killed.stderr),
-          `kill-server on the remote's tmux: ${killed.stderr}`,
-        ).toBe(true);
-        const probe = spawnSync(tmux, ["-S", sock, "list-sessions"], { encoding: "utf8" });
-        expect(probe.status, `the remote's tmux server must be gone: ${probe.stdout}${probe.stderr}`).not.toBe(0);
-      }
       fs.writeFileSync(info.remote_boot_id_file, `reboot-${process.pid}-${Date.now()}\n`);
       await restoreRemoteSupervisor(request);
     }

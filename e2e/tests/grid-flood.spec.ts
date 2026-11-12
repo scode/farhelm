@@ -2,8 +2,7 @@
 // in the real app: the supervisor's emulator takes the program's output at
 // full speed, and the browser gets the emulator's rows and history as a grid
 // stream, paced by the helm and the supervisor rather than by the page's own
-// write callbacks (which is what terminal-flood.spec.ts checks for xterm.js,
-// in the old-terminal set). The Rust tests of the supervisor's grid streams and of the
+// write callbacks. The Rust tests of the supervisor's grid streams and of the
 // helm's relay check the pause itself against stand-ins; this is the same
 // path end to end, judged by what a viewer ends up with.
 import path from "node:path";
