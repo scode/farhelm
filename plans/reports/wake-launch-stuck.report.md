@@ -134,3 +134,69 @@ Each PR had one fresh-context review by Opus 5.5 at high effort, as the plan req
   launch that already saw its connection; the softened SPEC_impl.md sentence; a repeated "nothing was created" check at
   the end of the test; a corrected test comment; and a unit test that the error's "60 seconds" matches the timer. Not
   applied: remembering that the limit passed (the narrow case above).
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round, and main gained nothing since the stack was based. The plan already sits on top of
+sandbox-suspend-overlap (#3339, #3341), which recently changed the step before this plan's 60-second limit: the wake's
+own request now waits out a "host is busy" refusal and fails at once if the host is suspended again. The landing's
+review checked how the two compose. They run one after the other, never at once: this plan's timer starts only once the
+wake's own wait has succeeded, and the two give different messages. Before the checkout preview and the create, which
+keep their own deadlines, a hidden launch can now wait up to about four and a half minutes (up to a minute of the wake's
+waiting, up to two and a half minutes for its Resume request, then this plan's minute), apart from the narrow unbounded
+case below.
+
+#### Fix made while landing
+
+SPEC_impl.md's new sentence said the 60-second limit "runs once" and that a host showing Connecting again after the
+launch saw it connected is not bounded. The code checks the wait again when the 60 seconds run out, so a launch that saw
+the host connect and lost it again before that point is still dropped, with the "did not see it connect" error; only a
+drop back that starts after that point is unbounded. The sentence now says so, and that the wait ends at most, not
+exactly, 60 seconds after the wake. Text only, in #3357.
+
+#### What the report says that is not quite right
+
+- The second "Things you should know" item describes the narrow unbounded case too broadly, as above: it is a host that
+  drops back to waiting only after the 60 seconds are up, not any time after the launch first saw it connected. The
+  changelog entry's "instead of waiting forever" overstates the same way. When the host drops back before that point,
+  the error says the window did not see it connect, which is not quite true for that launch.
+- The third item says a host suspended again while the launch waits for this window to see it connect ends in the same
+  60-second error. The independent review, from reading the code (no test covers it), found otherwise: a suspended host
+  does not count as a connection still pending, so such a launch is most likely dropped at once with "The launch setup
+  changed while the host was waking", or goes on to its checkout preview. Nothing is left stuck either way.
+
+#### Possible follow-ups
+
+- The report's own: whether to drop "The session was not launched;" from the timeout error, which now reads "not
+  launched" twice; and the narrow unbounded case above.
+- The browser test for a launch that saw its host connect within the limit would not catch a limit that wrongly drops a
+  launch still waiting for its checkout preview, because by the 60-second mark that launch has already moved on to
+  creating the session. A unit test covers that case; I recommend leaving it there, since the report explains why a
+  browser test of it cannot tell the limit from the preview's own deadline.
+
+#### Checks
+
+Browser runs were on Tensorlake sandboxes at the maintainer's request; the sandboxes run Node 24.16 where the
+development machine runs 24.20, which these tests do not depend on, and each shard is recorded in the recorder's mode
+for arbitrary commands. Everything ran on the stack as delivered; the one landing fix changed only SPEC_impl.md text,
+checked afterwards with `dprint check` and `python3 scripts/check-agents-md.py`.
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `cargo clippy -p farhelm-ui --all-targets -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop` passed.
+- `cargo nextest run -p farhelm-ui --lib`: 975 passed (run `fac93d8d-32fa-4b65-9c86-bfb860f1f2c5`).
+- The browser specs that drive the launcher, which the executor did not re-run (Clone, launch progress and refusals, the
+  launcher's Enter handling and template shortcuts, the nonblocking launch, quick launch, Replace, restart and replace
+  progress, templates), and the Tensorlake host, lifecycle and sandbox-session specs and the container sessions spec,
+  all on both engines, from a fresh build: 630 passed, none failed or skipped (runs
+  `03e4dd2c-d225-49ac-bd6f-8dca53af58f1`, `9445f385-a598-4fc0-984b-92e8090a516f`,
+  `23805eef-e695-4b94-b9a2-d4c872e287f4`, `4aa1b332-0f0a-415a-887d-658475fa2467`,
+  `d01e1a5d-bddc-4883-885c-f187a8a5c738`, `b9426d07-4a73-487e-9b5b-aa1b8dfd3922`,
+  `3b357b91-11c1-4f7d-94f5-94845a0346ed`, `b66d587c-c43d-44e3-abe5-1f61a62eaa9c`, `e7934319-045f-4547-b6b0-9090f8745a2e`
+  and `aeec62cb-dbbf-4dd7-af57-8e8e55dd7572`).
+
+Skipped: the rest of the browser suite and the workspace Rust tests. Only the launcher's web code, its unit tests, one
+browser spec and documentation changed, and both fixes act only after a launch has woken a host; the specs above cover
+the launcher and every Tensorlake and container flow.
