@@ -36,13 +36,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `plans/queue/sandbox-suspend-overlap.md`.
 
 - **Revisit raising sandbox-suspend-overlap's size gate to about 1,000 lines.** Decided on the maintainer's behalf on
-  2026-11-11 when that plan blocked: its first PR (#3339, the host-scoped Suspend and Resume rule) came to about 600
+  2026-11-12 when that plan blocked: its first PR (#3339, the host-scoped Suspend and Resume rule) came to about 600
   changed lines against a gate of about 400 for the whole plan, because the estimate was low rather than the scope
   growing. The plan was told to build the second PR (a launch's wake waiting out a "host is busy" refusal and failing at
   once when its host is suspended again) as planned, with the gate raised to about 1,000 lines for both, roughly 900
   expected. The alternatives were landing #3339 alone and dropping that hardening, or landing it alone and planning the
   hardening separately; both leave a same-host launch racing a Suspend or Resume able to fail needlessly or time out
   misleadingly.
+
+- **Revisit accepting sandbox-suspend-overlap at about 1,215 lines.** Decided on the maintainer's behalf on 2026-11-12
+  when that plan blocked a second time, finished, over the raised limit of about 1,000: #3339 is about 600 changed lines
+  and the wake hardening (#3341) about 615 against an estimate of 300, mostly the wake logic's comments and unit tests
+  and three browser tests. Both PRs were accepted as they are. The alternative was trimming comments and folding unit
+  tests first, which would save perhaps 100 to 150 lines, still be over 1,000, and likely shorten the explanation of why
+  a stale suspended state right after a Resume is not a new suspension.
 
 ## Near term
 
