@@ -466,6 +466,7 @@ impl PeerBehavior {
     fn list_reply(&self, gate: &ListGate, host: HostId, req_id: u64) -> ControlMsg {
         let list = gate.lists.lock().expect("list mutex").get(&host).cloned();
         ControlMsg::SessionList {
+            sealed: false,
             req_id,
             sessions: list
                 .as_ref()

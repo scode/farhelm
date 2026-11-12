@@ -88,7 +88,7 @@ use subtle::ConstantTimeEq;
 /// database has ever had, and the template every later one follows.
 /// Public because the supervisor's hello reports it and the helm's Update
 /// refuses a host whose reported schema is above this build's.
-pub const SCHEMA_VERSION: i64 = 34;
+pub const SCHEMA_VERSION: i64 = 35;
 
 /// Random payload size behind one URL-safe session bearer.
 const SESSION_TOKEN_BYTES: usize = 32;
@@ -1049,6 +1049,9 @@ fn error_kind_column(kind: farhelm_proto::ErrorKind) -> &'static str {
         // An attach refusal, never a create outcome; spelled for the same
         // no-panic-on-write reason as the two above.
         K::TakenOver => "taken_over",
+        // A sealed supervisor's create refusal records nothing, so this is
+        // never written today; spelled for the same no-panic reason.
+        K::Sealed => "sealed",
     }
 }
 
@@ -1507,6 +1510,15 @@ pub struct LateRelease {
     pub reason: String,
 }
 
+/// What [`SessionStore::seal_unless_other_sessions`] found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SealCount {
+    /// Other session rows exist (this many); nothing was written.
+    Others(u32),
+    /// No other row existed, and the seal is now committed.
+    Sealed,
+}
+
 /// The supervisor's session database.
 ///
 /// Wraps the connection in `Arc<Mutex<..>>` (a std, not tokio, mutex —
@@ -1661,6 +1673,10 @@ pub(crate) struct StoredSessionNotification {
 ///   loses its `'tmux'` default. One-way like every step: a build at 33
 ///   refuses the database (SPEC.md, "Upgrade compatibility and client
 ///   scale").
+/// - 35: `supervisor_meta.sealed`, the environment seal
+///   ([`SessionStore::seal_unless_other_sessions`]). A column rather than a
+///   file beside the database so that a build from before the seal, which
+///   would accept creates on a sealed supervisor, refuses the database.
 ///
 /// `may_migrate` is the caller's assertion that it holds this state
 /// directory's exclusivity (see `service::StateDirOwnership`). Upgrading a
@@ -1726,7 +1742,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  id            INTEGER PRIMARY KEY CHECK (id = 0),
                  boot_id       TEXT,
                  host_identity TEXT,
-                 last_creation_seq INTEGER NOT NULL DEFAULT 0
+                 last_creation_seq INTEGER NOT NULL DEFAULT 0,
+                 sealed        INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1))
              ) STRICT;
              CREATE TABLE create_reservations (
                  intent_key   TEXT PRIMARY KEY,
@@ -1778,7 +1795,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 34;
+             PRAGMA user_version = 35;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2489,6 +2506,41 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
     if version == 33 {
         migrate_to_terminal_address(conn).context("migrating schema from version 33 to 34")?;
         version = 34;
+    }
+    if version == 34 {
+        // Every existing supervisor is unsealed. The CHECK keeps the flag a
+        // flag, which matters because nothing ever clears it: a stray value
+        // would otherwise read as sealed (or not) by whichever rule a later
+        // reader guessed.
+        //
+        // Added only when missing. No database written at 34 has the
+        // column, so for every real database this is the plain step. The
+        // schema tests, though, build their older databases from a current
+        // one and rewind only the tables each is about, so their metadata
+        // table already has it; tolerating that here keeps those fixtures
+        // about their own tables instead of each learning to undo this step.
+        let has_column: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('supervisor_meta') WHERE name = 'sealed'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .context("checking for the seal column")?
+            > 0;
+        let add = if has_column {
+            ""
+        } else {
+            "ALTER TABLE supervisor_meta
+                 ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1));"
+        };
+        conn.execute_batch(&format!(
+            "BEGIN;
+             {add}
+             PRAGMA user_version = 35;
+             COMMIT;"
+        ))
+        .context("migrating schema from version 34 to 35")?;
+        version = 35;
     }
     if version == SCHEMA_VERSION {
         return Ok(());
@@ -3757,9 +3809,11 @@ impl SessionStore {
         &self,
         id: &str,
         released: &[String],
+        discard: &[String],
     ) -> anyhow::Result<DeleteSettlement> {
         let id = id.to_string();
         let released = released.to_vec();
+        let discard = discard.to_vec();
         self.conn
             .call(
                 "session delete task panicked",
@@ -3810,6 +3864,17 @@ impl SessionStore {
                                 crate::working_copies::AllocationState::ArchivePending => {
                                     crate::working_copies::retire(&tx, &working_copy_id)
                                         .context("retiring the archived checkout's record")?;
+                                    // A discarded checkout (an environment
+                                    // Delete keeping its environment) is
+                                    // journaled for removal in this same
+                                    // transaction, never left an archive.
+                                    if discard.contains(&working_copy_id) {
+                                        crate::checkout_trash::journal_removal(
+                                            &tx,
+                                            &working_copy_id,
+                                        )
+                                        .context("journaling the discarded checkout's removal")?;
+                                    }
                                 }
                                 crate::working_copies::AllocationState::Planned => {
                                     crate::working_copies::delete_planned(&tx, &working_copy_id)
@@ -5831,6 +5896,98 @@ impl SessionStore {
             .await
     }
 
+    /// Whether this supervisor is sealed (schema 35): a Delete found its
+    /// environment's last session and closed it to new sessions for good.
+    /// A database whose metadata row does not exist yet is unsealed.
+    ///
+    /// Read once, at construction, into the supervisor's in-memory flag;
+    /// the flag is what every refusal checks. Nothing clears the column.
+    pub async fn is_sealed(&self) -> anyhow::Result<bool> {
+        self.conn
+            .call(
+                "seal read task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<bool> {
+                    let stored: Option<i64> = conn
+                        .query_row(
+                            "SELECT sealed FROM supervisor_meta WHERE id = ?1",
+                            rusqlite::params![META_ROW_ID],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("reading the seal")?;
+                    Ok(stored == Some(1))
+                },
+            )
+            .await
+    }
+
+    /// Seal this supervisor unless a session other than `deleting` has a
+    /// row, in one transaction, and say which happened
+    /// ([`ControlMsg::DeleteSessionOrSeal`](farhelm_proto::ControlMsg)).
+    ///
+    /// The count is of rows in `sessions`, in any state, never of the
+    /// in-memory map: a `Launching` row is written before its terminal
+    /// starts, and a Restart or a keyed retry's takeover keeps its row while
+    /// its entry is off the map. A pending create reservation with no row
+    /// is not a session yet; once sealed, its retry is refused at the
+    /// create door. Counting and writing the seal in one transaction keeps
+    /// the decision whole even if a future create path forgot the directory
+    /// admission that the caller holds today, under which a create is
+    /// either already counted or will be refused.
+    ///
+    /// Writes nothing when other sessions remain. An error leaves the
+    /// supervisor unsealed, and the caller must not have destroyed anything
+    /// yet. Sealing an already sealed supervisor answers [`SealCount::Sealed`].
+    pub async fn seal_unless_other_sessions(&self, deleting: &str) -> anyhow::Result<SealCount> {
+        let deleting = deleting.to_string();
+        self.conn
+            .call(
+                "seal task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<SealCount> {
+                    let tx = conn
+                        .transaction()
+                        .context("beginning the seal transaction")?;
+                    // A seal is never undone, so a repeat answers sealed
+                    // whatever has rows: a sealed supervisor's leftover row
+                    // (a teardown that failed after the seal) must not read
+                    // as "others remain".
+                    let already: Option<i64> = tx
+                        .query_row(
+                            "SELECT sealed FROM supervisor_meta WHERE id = ?1",
+                            rusqlite::params![META_ROW_ID],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .context("reading the seal")?;
+                    if already == Some(1) {
+                        return Ok(SealCount::Sealed);
+                    }
+                    let others: i64 = tx
+                        .query_row(
+                            "SELECT COUNT(*) FROM sessions WHERE id <> ?1",
+                            rusqlite::params![deleting],
+                            |r| r.get(0),
+                        )
+                        .context("counting the environment's other sessions")?;
+                    if others > 0 {
+                        // Read-only so far; dropping the transaction rolls nothing back.
+                        return Ok(SealCount::Others(u32::try_from(others).unwrap_or(u32::MAX)));
+                    }
+                    // The metadata row is created lazily by whichever writer
+                    // comes first, so this upserts like `record_boot` does.
+                    tx.execute(
+                        "INSERT INTO supervisor_meta (id, sealed) VALUES (?1, 1) \
+                         ON CONFLICT(id) DO UPDATE SET sealed = 1",
+                        rusqlite::params![META_ROW_ID],
+                    )
+                    .context("recording the seal")?;
+                    tx.commit().context("committing the seal")?;
+                    Ok(SealCount::Sealed)
+                },
+            )
+            .await
+    }
+
     /// Read this host's identity, minting and persisting a fresh UUIDv4 on
     /// the row's first read — SPEC.md's promise that a supervisor's
     /// identity is "generated by its supervisor at install time" and, per
@@ -7660,6 +7817,58 @@ mod tests {
             .expect("a current database needs no migration rights");
     }
 
+    /// Why: the environment seal is decided from this count, and a wrong
+    /// count either seals an environment over a live session or leaves an
+    /// empty one running (and billing). Spec: a row in any state other than
+    /// the deleted session's own counts, and with one present nothing is
+    /// written; with none, the seal is committed (on a database whose
+    /// metadata row does not exist yet, too) and survives reopening; sealing
+    /// again answers sealed.
+    #[farhelm_testtrace::test]
+    async fn the_seal_counts_every_other_row_and_is_written_only_when_none_remain() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("supervisor.db");
+        let store = SessionStore::open(&path, true).await.expect("open");
+        assert!(
+            !store.is_sealed().await.unwrap(),
+            "a fresh database is unsealed"
+        );
+        let mut exited = launching_row("exited");
+        exited.outcome = LastOutcome::Exited {
+            exit_code: Some(0),
+            annotation: None,
+        };
+        store.insert_session(exited, None).await.unwrap();
+        store
+            .insert_session(launching_row("deleting"), None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.seal_unless_other_sessions("deleting").await.unwrap(),
+            SealCount::Others(1),
+            "an exited session still counts"
+        );
+        assert!(
+            !store.is_sealed().await.unwrap(),
+            "nothing is written while others remain"
+        );
+
+        store.delete_session("exited", None).await.unwrap();
+        assert_eq!(
+            store.seal_unless_other_sessions("deleting").await.unwrap(),
+            SealCount::Sealed
+        );
+        assert_eq!(
+            store.seal_unless_other_sessions("anything").await.unwrap(),
+            SealCount::Sealed,
+            "sealing again answers sealed"
+        );
+        drop(store);
+        let reopened = SessionStore::open(&path, true).await.expect("reopen");
+        assert!(reopened.is_sealed().await.unwrap(), "the seal is durable");
+    }
+
     /// A migrated database and a freshly created one must end up with the
     /// SAME schema, or every later migration has two divergent starting
     /// points to reason about — the classic way a migration ladder rots.
@@ -7672,7 +7881,6 @@ mod tests {
     /// `sessions.terminal_kind`. DDL text is deliberately
     /// not compared: `ALTER TABLE ADD COLUMN` produces differently
     /// punctuated SQL for an identical result.
-    ///
     #[farhelm_testtrace::test]
     async fn migrated_and_fresh_schemas_agree() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -7726,6 +7934,10 @@ mod tests {
                 [],
             )
             .expect_err("a second metadata row must be refused");
+            // The seal's CHECK (schema 35) keeps it a flag on both paths:
+            // nothing ever clears it, so a stray value must never be stored.
+            conn.execute("INSERT INTO supervisor_meta (id, sealed) VALUES (0, 2)", [])
+                .expect_err("a seal other than 0 or 1 must be refused");
             // The terminal kind's CHECK is the other constraint
             // `table_info` cannot see; the migration adds it with
             // `ALTER TABLE`, so it is the one most easily lost on that path.
@@ -12850,7 +13062,7 @@ mod tests {
         );
 
         store
-            .delete_session_archiving_memberships("origin", &[])
+            .delete_session_archiving_memberships("origin", &[], &[])
             .await
             .unwrap();
         assert!(store.session("origin").await.unwrap().is_none());

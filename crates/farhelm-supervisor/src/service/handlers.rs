@@ -613,24 +613,18 @@ async fn handle_list_sessions(
             .acquire_owned()
             .await
             .expect("list admission semaphore is never closed");
-        let reply = match list_all(&sup).await {
-            Ok(list) => ControlMsg::SessionList {
+        let sealed = sup.sealed.load(std::sync::atomic::Ordering::SeqCst);
+        let mut reply = list_reply(req_id, list_all(&sup).await, sealed);
+        // The send would replace a listing too large for one frame with an
+        // error, and with it the seal; a sealed supervisor sends the minimal
+        // sealed listing instead (see `list_reply`).
+        if sealed && Frame::control(&reply).exceeds_max_len() {
+            reply = list_reply(
                 req_id,
-                sessions: list.sessions,
-                truncated: list.truncated,
-            },
-            // Every failure the listing can hit — an unreadable launch
-            // sentinel, an unclassified tmux failure — is an `Internal`
-            // carrying the original error verbatim: see `list_all`'s own
-            // docs for why each of them fails the whole request rather
-            // than degrading one entry.
-            Err(e) => ControlMsg::Error {
-                create_unaccepted: false,
-                req_id,
-                message: format!("{e:#}"),
-                kind: ErrorKind::Internal,
-            },
-        };
+                Err(anyhow::anyhow!("the listing exceeds a frame")),
+                true,
+            );
+        }
         // The limit bounds what building a list costs, not delivering it.
         // Sending awaits this connection's bounded writer queue, and a peer
         // that has stopped reading would otherwise hold every list permit
@@ -639,6 +633,54 @@ async fn handle_list_sessions(
         drop(permit);
         send_reply(&tx, &reply).await;
     });
+}
+
+/// The reply to `ListSessions`: the listing, or the error that ended it,
+/// except that a sealed supervisor always reports its seal (see the arm).
+/// Apart from the handler so the rule can be tested without a listing that
+/// really fails, which takes a tmux failure.
+fn list_reply(
+    req_id: u64,
+    listed: anyhow::Result<super::listing::ListReply>,
+    sealed: bool,
+) -> ControlMsg {
+    match listed {
+        Ok(list) => ControlMsg::SessionList {
+            req_id,
+            sessions: list.sessions,
+            truncated: list.truncated,
+            // A snapshot is enough: the seal only ever turns on, and the
+            // seal itself hints a listing change, so a helm that read
+            // "unsealed" here lists again and sees it.
+            sealed,
+        },
+        // A sealed supervisor's environment is about to be destroyed,
+        // and the seal is what tells the helm to do it, so it must not
+        // depend on describing the sessions: one whose teardown failed
+        // after the seal may no longer be describable. No sessions, cut
+        // short (so the helm infers no removals from it), and sealed.
+        Err(e) if sealed => {
+            warn!(error = %format!("{e:#}"),
+                "a sealed supervisor could not describe its sessions; listing only the seal");
+            ControlMsg::SessionList {
+                req_id,
+                sessions: Vec::new(),
+                truncated: true,
+                sealed: true,
+            }
+        }
+        // Every failure the listing can hit — an unreadable launch
+        // sentinel, an unclassified tmux failure — is an `Internal`
+        // carrying the original error verbatim: see `list_all`'s own
+        // docs for why each of them fails the whole request rather
+        // than degrading one entry.
+        Err(e) => ControlMsg::Error {
+            create_unaccepted: false,
+            req_id,
+            message: format!("{e:#}"),
+            kind: ErrorKind::Internal,
+        },
+    }
 }
 
 /// Run host-directory browsing outside the connection loop. The supervisor
@@ -1310,30 +1352,7 @@ async fn handle_delete_session(
                 .teardown_session_with_hosts(&entry, &mutation_id, _directory_admission, hosts)
                 .await
                 .map_err(|error| {
-                let message = match error {
-                    TeardownError::TerminalProbe(error) => {
-                        format!("querying pane process: {error:#}")
-                    }
-                    TeardownError::TabRediscovery(error) => format!(
-                        "could not determine this session's terminal tabs, so nothing was \
-                         deleted: {error:#}"
-                    ),
-                    TeardownError::TabScopeEnumeration(error) => format!(
-                        "this host has a systemd user manager but its terminal-tab scopes could \
-                         not be enumerated, so nothing was deleted: {error:#}"
-                    ),
-                    TeardownError::Sweep(error) => format!("killing process tree: {error:#}"),
-                    TeardownError::HostDiscovery(error) => format!(
-                        "could not find this session's terminal hosts, so nothing was deleted: \
-                         {error:#}"
-                    ),
-                    TeardownError::HostShutdown(message) => format!(
-                        "could not confirm that this session's terminal hosts ended, so the \
-                         session was kept for a retry: {message}"
-                    ),
-                    TeardownError::FailClosed(message) => message,
-                };
-                RequestError::new(ErrorKind::Internal, message)
+                    RequestError::new(ErrorKind::Internal, teardown_failure_message(error))
                 })
         }
         .await;
@@ -1362,6 +1381,228 @@ async fn handle_delete_session(
                     req_id,
                     ErrorKind::Internal,
                     format!("the session delete task failed: {join}"),
+                )
+                .await;
+            }
+        }
+    });
+}
+
+/// What a Delete whose teardown failed tells its caller. Shared by the
+/// ordinary Delete and the environment Delete, so the two never word the
+/// same failure differently.
+fn teardown_failure_message(error: TeardownError) -> String {
+    match error {
+        TeardownError::TerminalProbe(error) => format!("querying pane process: {error:#}"),
+        TeardownError::TabRediscovery(error) => format!(
+            "could not determine this session's terminal tabs, so nothing was deleted: {error:#}"
+        ),
+        TeardownError::TabScopeEnumeration(error) => format!(
+            "this host has a systemd user manager but its terminal-tab scopes could not be \
+             enumerated, so nothing was deleted: {error:#}"
+        ),
+        TeardownError::Sweep(error) => format!("killing process tree: {error:#}"),
+        TeardownError::HostDiscovery(error) => format!(
+            "could not find this session's terminal hosts, so nothing was deleted: {error:#}"
+        ),
+        TeardownError::HostShutdown(message) => format!(
+            "could not confirm that this session's terminal hosts ended, so the session was kept \
+             for a retry: {message}"
+        ),
+        TeardownError::FailClosed(message) => message,
+    }
+}
+
+/// The environment Delete ([`ControlMsg::DeleteSessionOrSeal`]; SPEC_impl.md,
+/// "Environment Delete and the seal"): delete this session and, if no other
+/// session remains on this supervisor, seal it.
+///
+/// Owned like [`handle_delete_session`] and taking the same locks in the
+/// same order (agent fence, admission, directory admission, lifecycle
+/// claim), so the session's in-flight agent requests finish first and a
+/// create is either already recorded or will meet the seal. Unlike it, the
+/// waits before the decision are bounded (`SupervisorTimeouts::
+/// seal_delete_wait`): a helm with its own deadline is waiting, and a
+/// decision taken after it gave up would contradict the "nothing was
+/// decided" it showed the user. The fence is waited for, never refused: an
+/// agent request in flight is what a user Delete waits behind.
+///
+/// The decision sits between teardown's two halves: after every preflight
+/// that could refuse, before anything destructive. A failure to record the
+/// seal therefore leaves the session whole and the supervisor open. Once
+/// sealed the reply is `Sealed` whatever the rest of the teardown does; a
+/// failure there becomes the notice, the row stays, and the seal refuses to
+/// restart it until the environment's destruction ends it.
+async fn handle_delete_session_or_seal(
+    sup: &Arc<Supervisor>,
+    tx: &mpsc::Sender<Frame>,
+    tasks: &mut tokio::task::JoinSet<()>,
+    req_id: u64,
+    session_id: String,
+) {
+    let mutation_sup = Arc::clone(sup);
+    let mutation_id = session_id;
+    let mutation = tokio::spawn(async move {
+        let already_sealed = || Ok((farhelm_proto::SealOutcome::Sealed, None));
+        // A seal is never undone, so a repeat (a lost reply's retry, the
+        // other window's Delete) is answered at once, without waiting behind
+        // the cleanup that the environment's destruction supersedes.
+        if mutation_sup.sealed.load(Ordering::SeqCst) {
+            return (already_sealed(), None);
+        }
+        let bound = mutation_sup.timeouts.seal_delete_wait;
+        // Every lock this Delete waits for before deciding is inside the
+        // bound, the session's lifecycle claim included: a Restart keeps that
+        // claim through its slow relaunch, and a tab open takes it without
+        // directory admission, so either could otherwise hold the decision
+        // past the helm's deadline.
+        let waited = tokio::time::timeout(bound, async {
+            let fence = mutation_sup.agent_request_locks.claim(&mutation_id).await;
+            let permit = Arc::clone(&mutation_sup.admission)
+                .acquire_owned()
+                .await
+                .expect("admission semaphore is never closed");
+            let directory = Arc::clone(&mutation_sup.working_copy_operations)
+                .lock_owned()
+                .await;
+            let lifecycle = mutation_sup.lifecycle_locks.claim(&mutation_id).await;
+            (fence, permit, directory, lifecycle)
+        })
+        .await;
+        let Ok((_agent_fence, permit, directory_admission, _lifecycle)) = waited else {
+            // Another Delete may have sealed while this one waited.
+            if mutation_sup.sealed.load(Ordering::SeqCst) {
+                return (already_sealed(), None);
+            }
+            return (
+                Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    "this environment is busy with other work (a launch, a delete, a restart or \
+                     an agent command); nothing was deleted, try again",
+                )),
+                None,
+            );
+        };
+        let decided = async {
+            if mutation_sup.sealed.load(Ordering::SeqCst) {
+                // Any repeat, a lost reply's retry included, gets the same
+                // answer: the environment is to be destroyed.
+                return already_sealed();
+            }
+            let entry = mutation_sup
+                .sessions
+                .lock()
+                .await
+                .get(&mutation_id)
+                .cloned()
+                .ok_or_else(|| {
+                    // On an unsealed supervisor this means an earlier
+                    // attempt deleted only this session: Delete waits for
+                    // directory admission, which a create holds until its
+                    // launch settles, and for the lifecycle claim, which a
+                    // Restart holds throughout.
+                    RequestError::new(
+                        ErrorKind::NotFound,
+                        format!("no such session: {}", truncate_for_error(&mutation_id)),
+                    )
+                })?;
+            let prepared = mutation_sup
+                .prepare_teardown(&entry, &mutation_id, None)
+                .await
+                .map_err(|error| {
+                    RequestError::new(ErrorKind::Internal, teardown_failure_message(error))
+                })?;
+            let count = mutation_sup
+                .store
+                .seal_unless_other_sessions(&mutation_id)
+                .await
+                .map_err(|error| {
+                    RequestError::new(
+                        ErrorKind::Internal,
+                        format!(
+                            "could not count this environment's other sessions or record its \
+                             seal, so nothing was deleted: {error:#}"
+                        ),
+                    )
+                })?;
+            match count {
+                crate::store::SealCount::Others(remaining) => {
+                    let done = mutation_sup
+                        .finish_teardown(
+                            &entry,
+                            &mutation_id,
+                            directory_admission,
+                            prepared,
+                            super::teardown::CheckoutDisposition::Discard,
+                        )
+                        .await
+                        .map_err(|error| {
+                            RequestError::new(ErrorKind::Internal, teardown_failure_message(error))
+                        })?;
+                    Ok((
+                        farhelm_proto::SealOutcome::Deleted { remaining },
+                        done.notice,
+                    ))
+                }
+                crate::store::SealCount::Sealed => {
+                    // Only after the commit, so no refusal is ever based on
+                    // a seal a crash could still take back.
+                    mutation_sup.sealed.store(true, Ordering::SeqCst);
+                    // The helm learns of the seal from listings; teardown
+                    // hints again on success, but a failure below would not.
+                    mutation_sup.hint_sessions_changed();
+                    let notice = match mutation_sup
+                        .finish_teardown(
+                            &entry,
+                            &mutation_id,
+                            directory_admission,
+                            prepared,
+                            super::teardown::CheckoutDisposition::Abandon,
+                        )
+                        .await
+                    {
+                        Ok(done) => done.notice,
+                        Err(error) => {
+                            let message = teardown_failure_message(error);
+                            warn!(session = %mutation_id, error = %message,
+                                "the environment is sealed but its last session's teardown failed; \
+                                 the environment's destruction is left to end it");
+                            Some(format!(
+                                "The environment was sealed for deletion, but this session's \
+                                 cleanup inside it failed: {message}"
+                            ))
+                        }
+                    };
+                    Ok((farhelm_proto::SealOutcome::Sealed, notice))
+                }
+            }
+        }
+        .await;
+        (decided, Some(permit))
+    });
+    let tx = tx.clone();
+    tasks.spawn(async move {
+        match mutation.await {
+            Ok((Ok((outcome, notice)), _permit)) => {
+                send_reply(
+                    &tx,
+                    &ControlMsg::SessionDeletedOrSealed {
+                        req_id,
+                        outcome,
+                        notice,
+                    },
+                )
+                .await;
+            }
+            Ok((Err(error), _permit)) => {
+                reply_error(&tx, req_id, error.kind, error.message).await;
+            }
+            Err(join) => {
+                reply_error(
+                    &tx,
+                    req_id,
+                    ErrorKind::Internal,
+                    format!("the environment delete task failed: {join}"),
                 )
                 .await;
             }
@@ -3142,6 +3383,9 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             )
             .await
         }
+        ControlMsg::DeleteSessionOrSeal { req_id, session_id } => {
+            handle_delete_session_or_seal(sup, ctx.tx, ctx.tasks, req_id, session_id).await
+        }
         ControlMsg::Attach {
             req_id,
             session_id,
@@ -3334,6 +3578,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
         | ControlMsg::GithubRepoResults { .. }
         | ControlMsg::SessionStopped { .. }
         | ControlMsg::SessionDeleted { .. }
+        | ControlMsg::SessionDeletedOrSealed { .. }
         | ControlMsg::SessionRestarted { .. }
         | ControlMsg::PromptTarget { .. }
         | ControlMsg::SessionPrompted { .. }
@@ -7795,6 +8040,12 @@ mod tests {
                 accepted: 1,
                 channel: 9,
             },
+            // Sealing is the helm's to ask for, on the user's Delete; a
+            // session could otherwise close its own environment for good.
+            ControlMsg::DeleteSessionOrSeal {
+                req_id: 47,
+                session_id: "parent-session".into(),
+            },
         ] {
             let req_id = request.request_req_id().unwrap();
             handle_restricted_control(&sup, request, &tx, &auth).await;
@@ -10280,6 +10531,7 @@ mod tests {
             req_id,
             sessions,
             truncated,
+            ..
         } = decoded2
         else {
             panic!("expected a normal ControlMsg::SessionList, got {decoded2:?}");
@@ -11790,5 +12042,981 @@ mod tests {
                 detail: "durable failure".into()
             }
         );
+    }
+
+    /// The environment Delete (`ControlMsg::DeleteSessionOrSeal`; SPEC_impl.md,
+    /// "Environment Delete and the seal"), driven through the connection's
+    /// dispatch as a helm's request would be. Sessions are planted as rows
+    /// with no terminal (a session whose agent ended and whose host is
+    /// gone), which an unconditional Delete tears down without any terminal
+    /// or process fixture: what these tests are about is the count, the seal
+    /// and its refusals, not the teardown they share with plain Delete.
+    mod environment_seal {
+        use super::super::super::core::tests::host_terminals::host_row;
+        use super::*;
+
+        /// Record session `id` the way a reload that found no terminal
+        /// leaves one: a row in the store and an entry in the map.
+        async fn plant(sup: &Arc<Supervisor>, id: &str) {
+            plant_row(sup, id).await;
+            sup.sessions.lock().await.insert(
+                id.to_string(),
+                Arc::new(entry_with(None, LastOutcome::Running)),
+            );
+        }
+
+        /// Only the row, with no map entry: what a session looks like to
+        /// the count while a Restart or a keyed retry's takeover has its
+        /// entry off the map.
+        async fn plant_row(sup: &Arc<Supervisor>, id: &str) {
+            let socket = std::path::PathBuf::from(format!("/nonexistent/hosts/{id}"));
+            sup.store
+                .insert_session(host_row(id, &socket), None)
+                .await
+                .expect("insert the session's row");
+        }
+
+        fn seal_delete(req_id: u64, id: &str) -> ControlMsg {
+            ControlMsg::DeleteSessionOrSeal {
+                req_id,
+                session_id: id.to_string(),
+            }
+        }
+
+        /// Dispatch one request and return its one reply.
+        async fn ask(sup: &Arc<Supervisor>, message: ControlMsg) -> ControlMsg {
+            let (mut tasks, mut rx) = dispatch_for_test(sup, message).await;
+            while tokio::time::timeout(Duration::from_secs(20), tasks.join_next())
+                .await
+                .expect("the request must finish")
+                .is_some()
+            {}
+            serde_json::from_slice(&rx.try_recv().expect("one reply").body).expect("decode reply")
+        }
+
+        async fn listing_says_sealed(sup: &Arc<Supervisor>) -> bool {
+            match ask(sup, ControlMsg::ListSessions { req_id: 90 }).await {
+                ControlMsg::SessionList { sealed, .. } => sealed,
+                other => panic!("expected a session list, got {other:?}"),
+            }
+        }
+
+        /// The refusal kind a sealed supervisor gives, whatever the entry
+        /// point; anything else fails with what came back.
+        fn assert_sealed_refusal(reply: &ControlMsg, what: &str) {
+            assert!(
+                matches!(
+                    reply,
+                    ControlMsg::Error {
+                        kind: ErrorKind::Sealed,
+                        ..
+                    }
+                ),
+                "{what} on a sealed supervisor must be refused as sealed, got {reply:?}"
+            );
+        }
+
+        fn unkeyed_create(cwd: &std::path::Path) -> ControlMsg {
+            let ControlMsg::CreateSession {
+                prompt,
+                named_start,
+                parent,
+                cwd,
+                launch,
+                inherit_agent,
+                title,
+                cols,
+                rows,
+                confirm_yolo,
+                github_checkout,
+                key_lives_with_session,
+                request_fingerprint,
+                ..
+            } = queued_create(cwd, "unused", false)
+            else {
+                unreachable!("queued_create builds a create");
+            };
+            ControlMsg::CreateSession {
+                req_id: 42,
+                prompt,
+                named_start,
+                parent,
+                cwd,
+                launch,
+                inherit_agent,
+                title,
+                cols,
+                rows,
+                intent_key: None,
+                confirm_yolo,
+                github_checkout,
+                key_lives_with_session,
+                request_fingerprint,
+            }
+        }
+
+        /// Why: deleting a finished helper session must not destroy the
+        /// environment the session that spawned it still works in (the
+        /// maintainer's 2026-11-12 decision). Spec: with other sessions on
+        /// the supervisor, the Delete removes only the chosen session,
+        /// answers `Deleted` with how many others it counted, and leaves the
+        /// supervisor unsealed: its listing says so and a create is not
+        /// refused as sealed.
+        #[farhelm_testtrace::test]
+        async fn a_delete_with_other_sessions_left_removes_only_that_one_and_counts_the_rest() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            for id in ["s1", "s2", "s3"] {
+                plant(&sup, id).await;
+            }
+
+            let reply = ask(&sup, seal_delete(1, "s1")).await;
+            assert!(
+                matches!(
+                    reply,
+                    ControlMsg::SessionDeletedOrSealed {
+                        req_id: 1,
+                        outcome: farhelm_proto::SealOutcome::Deleted { remaining: 2 },
+                        ..
+                    }
+                ),
+                "{reply:?}"
+            );
+            assert!(
+                sup.store.session("s1").await.unwrap().is_none(),
+                "s1's row is gone"
+            );
+            assert!(
+                !sup.sessions.lock().await.contains_key("s1"),
+                "s1's entry is gone"
+            );
+            for id in ["s2", "s3"] {
+                assert!(sup.store.session(id).await.unwrap().is_some(), "{id} stays");
+            }
+            assert!(!sup.store.is_sealed().await.unwrap());
+            assert!(!listing_says_sealed(&sup).await);
+            let create = ask(&sup, unkeyed_create(state.path())).await;
+            assert!(
+                !matches!(
+                    create,
+                    ControlMsg::Error {
+                        kind: ErrorKind::Sealed,
+                        ..
+                    }
+                ),
+                "an unsealed supervisor must not refuse a create as sealed: {create:?}"
+            );
+        }
+
+        /// Why: once the environment's last session is gone the helm destroys
+        /// the environment, and nothing may start inside it in the meantime,
+        /// or a session (and for Tensorlake, its bill) would be destroyed
+        /// unseen. Spec: the last session's Delete answers `Sealed`; the seal
+        /// is durable, reported on every listing, and refuses a create with
+        /// and without an intent key, a Restart, a Restart with and a tab
+        /// open as `Sealed`; a repeat of the Delete, for any session, answers
+        /// `Sealed` again.
+        #[farhelm_testtrace::test]
+        async fn the_last_sessions_delete_seals_and_refuses_every_new_session_or_run() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            plant(&sup, "s1").await;
+            assert!(
+                !listing_says_sealed(&sup).await,
+                "premise: unsealed at first"
+            );
+
+            let reply = ask(&sup, seal_delete(1, "s1")).await;
+            assert!(
+                matches!(
+                    reply,
+                    ControlMsg::SessionDeletedOrSealed {
+                        req_id: 1,
+                        outcome: farhelm_proto::SealOutcome::Sealed,
+                        notice: None,
+                    }
+                ),
+                "{reply:?}"
+            );
+            assert!(
+                sup.store.session("s1").await.unwrap().is_none(),
+                "s1's row is gone"
+            );
+            assert!(
+                sup.store.is_sealed().await.unwrap(),
+                "the seal is in the store"
+            );
+            assert!(
+                listing_says_sealed(&sup).await,
+                "the listing carries the seal"
+            );
+
+            assert_sealed_refusal(&ask(&sup, unkeyed_create(state.path())).await, "a create");
+            assert_sealed_refusal(
+                &ask(&sup, queued_create(state.path(), "after-the-seal", false)).await,
+                "a keyed create",
+            );
+            assert_sealed_refusal(
+                &ask(
+                    &sup,
+                    ControlMsg::RestartSession {
+                        req_id: 3,
+                        named_start: None,
+                        session_id: "s1".into(),
+                        stop_if_running: true,
+                        with: None,
+                        expected_launch: None,
+                    },
+                )
+                .await,
+                "a Restart",
+            );
+            assert_sealed_refusal(
+                &ask(
+                    &sup,
+                    ControlMsg::RestartSession {
+                        req_id: 4,
+                        named_start: None,
+                        session_id: "s1".into(),
+                        stop_if_running: true,
+                        with: Some(SessionLaunch::plain_command("agent")),
+                        expected_launch: None,
+                    },
+                )
+                .await,
+                "a Restart with",
+            );
+            let tab = sup.open_tab("s1").await;
+            assert!(
+                matches!(&tab, Err(error) if error.kind == ErrorKind::Sealed),
+                "a tab open on a sealed supervisor must be refused as sealed"
+            );
+            for (req_id, id) in [(5, "s1"), (6, "never-existed")] {
+                let again = ask(&sup, seal_delete(req_id, id)).await;
+                assert!(
+                    matches!(
+                        again,
+                        ControlMsg::SessionDeletedOrSealed {
+                            outcome: farhelm_proto::SealOutcome::Sealed,
+                            ..
+                        }
+                    ),
+                    "a repeat for {id} must answer sealed: {again:?}"
+                );
+            }
+        }
+
+        /// Why: a supervisor restart between the seal and the environment's
+        /// destruction (an Update, a crash, the host rebooting the container)
+        /// must not reopen the environment. Spec: a supervisor started again
+        /// on a sealed state directory lists itself as sealed and refuses a
+        /// create.
+        #[farhelm_testtrace::test]
+        async fn the_seal_outlives_a_supervisor_restart() {
+            let state = StateDir::new();
+            {
+                let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                    .await
+                    .unwrap();
+                plant(&sup, "s1").await;
+                let reply = ask(&sup, seal_delete(1, "s1")).await;
+                assert!(
+                    matches!(
+                        reply,
+                        ControlMsg::SessionDeletedOrSealed {
+                            outcome: farhelm_proto::SealOutcome::Sealed,
+                            ..
+                        }
+                    ),
+                    "premise: sealed, got {reply:?}"
+                );
+            }
+            let again = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            assert!(listing_says_sealed(&again).await);
+            assert_sealed_refusal(&ask(&again, unkeyed_create(state.path())).await, "a create");
+        }
+
+        /// Plant a pending create reservation under `key` for session `id`,
+        /// with no session row. That is the only shape a pending attempt can
+        /// have on a sealed supervisor: an attempt that recorded its row is
+        /// counted like any other session and keeps the supervisor unsealed.
+        /// `scope` is the stored `dedup_scope` spelling, which decides whether
+        /// resolving a retry relaunches the attempt (`permanent`) or prunes
+        /// it as an orphan and starts fresh (`session_lifetime`).
+        fn plant_pending_reservation(
+            sup: &Arc<Supervisor>,
+            key: &str,
+            id: &str,
+            fingerprint: &str,
+            scope: &str,
+        ) {
+            sup.store
+                .conn
+                .lock()
+                .execute(
+                    "INSERT INTO create_reservations \
+                     (intent_key, fingerprint, state, session_id, created_at, dedup_scope) \
+                     VALUES (?1, ?2, 'pending', ?3, ?4, ?5)",
+                    rusqlite::params![key, fingerprint, id, crate::store::now_unix(), scope],
+                )
+                .expect("plant the pending reservation");
+        }
+
+        /// Why: a create whose earlier attempt left a pending reservation but
+        /// no session row is not counted by the seal (the maintainer's
+        /// 2026-11-12 decision), so a retry under its key is a way to start a
+        /// session inside an environment that is being destroyed unless the
+        /// sealed supervisor refuses it. The check sits after reservation
+        /// resolution, so that a pure replay still answers, which makes the
+        /// retry a separate path from the fresh keyed create the test above
+        /// covers. Spec: with only such an attempt beside it, the last
+        /// session's Delete still seals; a retry of that attempt is then
+        /// refused as `Sealed` both when resolution relaunches it (a
+        /// permanent reservation, left as it was) and when resolution prunes
+        /// it as an orphan and starts fresh (a session-lifetime one, pruned);
+        /// the refusal is not marked `create_unaccepted` and launches nothing.
+        #[farhelm_testtrace::test]
+        async fn a_create_retry_after_the_seal_is_refused() {
+            for scope in ["permanent", "session_lifetime"] {
+                let state = StateDir::new();
+                let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                    .await
+                    .unwrap();
+                plant(&sup, "s1").await;
+                // An agent's create, because its fingerprint is the helm's
+                // request digest and so can be planted without resolving
+                // the launch the way the handler would.
+                let digest = "a".repeat(64);
+                let key = "earlier-attempt";
+                plant_pending_reservation(
+                    &sup,
+                    key,
+                    "never-recorded",
+                    &super::super::super::core::agent_create_fingerprint(&digest, None),
+                    scope,
+                );
+                let before = sup
+                    .store
+                    .reservation(key)
+                    .await
+                    .unwrap()
+                    .expect("premise: the earlier attempt is recorded");
+                assert_eq!(
+                    before.outcome,
+                    crate::store::ReservationOutcome::Pending,
+                    "{scope}: premise: still pending"
+                );
+                assert!(
+                    sup.store.session("never-recorded").await.unwrap().is_none(),
+                    "{scope}: premise: the attempt recorded no row"
+                );
+
+                let reply = ask(&sup, seal_delete(1, "s1")).await;
+                assert!(
+                    matches!(
+                        reply,
+                        ControlMsg::SessionDeletedOrSealed {
+                            outcome: farhelm_proto::SealOutcome::Sealed,
+                            ..
+                        }
+                    ),
+                    "{scope}: an attempt without a row is not counted: {reply:?}"
+                );
+
+                let mut retry = queued_create(state.path(), key, false);
+                if let ControlMsg::CreateSession {
+                    request_fingerprint,
+                    ..
+                } = &mut retry
+                {
+                    *request_fingerprint = Some(digest);
+                }
+                let refused = ask(&sup, retry).await;
+                assert_sealed_refusal(&refused, &format!("a {scope} create retry"));
+                assert!(
+                    matches!(
+                        refused,
+                        ControlMsg::Error {
+                            create_unaccepted: false,
+                            ..
+                        }
+                    ),
+                    "{scope}: a sealed refusal records nothing to prove non-acceptance with"
+                );
+                let after = sup.store.reservation(key).await.unwrap();
+                match scope {
+                    "permanent" => assert_eq!(
+                        after,
+                        Some(before),
+                        "resolution relaunched it, and the refusal left it as it was"
+                    ),
+                    _ => assert_eq!(after, None, "resolution pruned the orphan to start fresh"),
+                }
+                assert!(
+                    sup.store.load_all().await.unwrap().is_empty(),
+                    "{scope}: nothing was launched"
+                );
+            }
+        }
+
+        /// Why: after a lost reply the helm recovers an accepted
+        /// managed-checkout launch by asking the supervisor to inspect it and
+        /// then launch it behind a recovery card. On a sealed supervisor the
+        /// inspection must not offer a card for a launch the create door
+        /// would refuse, and the launch must be refused, or recovery would
+        /// clone a checkout and start a session inside an environment that
+        /// is being destroyed. Spec: an accepted checkout launch pending with
+        /// no session row is offered for recovery while unsealed; after the
+        /// last session's Delete seals, both an inspection and a
+        /// launch-capable recovery of its key are refused as `Sealed`, the
+        /// reservation is left as it was and no checkout is cloned.
+        #[farhelm_testtrace::test]
+        async fn recovering_an_accepted_checkout_launch_after_the_seal_is_refused() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            plant(&sup, "s1").await;
+            let root = state.path().join("checkouts");
+            std::fs::create_dir_all(&root).unwrap();
+            let canonical_root = root.canonicalize().unwrap().to_string_lossy().into_owned();
+            let checkout = farhelm_proto::ResolvedGithubCheckout {
+                client_identity: "accepted-checkout-request".into(),
+                agent_wrapper_supplied: false,
+                wrapper_approved: false,
+                repo: farhelm_proto::GithubRepo {
+                    owner: "acme".into(),
+                    name: "bar".into(),
+                },
+                root: canonical_root.clone(),
+                post_clone: None,
+                claude_trust: false,
+                keep_spare: false,
+                preview: farhelm_proto::CheckoutPreviewBinding {
+                    canonical_root: canonical_root.clone(),
+                    basename: "bar-1".into(),
+                    cwd: format!("{canonical_root}/bar-1"),
+                    config_revision: 1,
+                },
+            };
+            let key = "accepted-checkout";
+            let fingerprint = create_fingerprint(
+                Some(&checkout),
+                None,
+                "",
+                &SessionLaunch::plain_command("agent"),
+                None,
+                None,
+            );
+            plant_pending_reservation(&sup, key, "never-recorded", &fingerprint, "permanent");
+            let before = sup.store.reservation(key).await.unwrap();
+            let reconcile = |req_id, inspect_only: bool| ControlMsg::ReconcileGithubCheckout {
+                req_id,
+                intent_key: key.into(),
+                client_identity: checkout.client_identity.clone(),
+                cols: 80,
+                rows: 24,
+                refuse_unknown: false,
+                inspect_only,
+                expected_fingerprint: (!inspect_only).then(|| fingerprint.clone()),
+                approve_wrapper_recovery: false,
+            };
+            let offered = ask(&sup, reconcile(1, true)).await;
+            assert!(
+                matches!(
+                    offered,
+                    ControlMsg::GithubCheckoutReconciled {
+                        session: None,
+                        snapshot: Some(_),
+                        ..
+                    }
+                ),
+                "premise: an unsealed supervisor offers the launch for recovery: {offered:?}"
+            );
+
+            let reply = ask(&sup, seal_delete(2, "s1")).await;
+            assert!(
+                matches!(
+                    reply,
+                    ControlMsg::SessionDeletedOrSealed {
+                        outcome: farhelm_proto::SealOutcome::Sealed,
+                        ..
+                    }
+                ),
+                "premise: sealed, got {reply:?}"
+            );
+            for (req_id, inspect_only, what) in [
+                (3, true, "a checkout recovery inspection"),
+                (4, false, "a checkout recovery launch"),
+            ] {
+                assert_sealed_refusal(&ask(&sup, reconcile(req_id, inspect_only)).await, what);
+                assert_eq!(
+                    sup.store.reservation(key).await.unwrap(),
+                    before,
+                    "{what} leaves the reservation as it was"
+                );
+            }
+            assert_eq!(
+                std::fs::read_dir(&root).unwrap().count(),
+                0,
+                "no checkout was cloned"
+            );
+            assert!(sup.store.working_copy_rows().await.unwrap().is_empty());
+            assert!(sup.store.load_all().await.unwrap().is_empty());
+        }
+
+        /// Why: a Restart takes its session off the in-memory map for the
+        /// whole relaunch, so a count of the map would call the environment
+        /// empty and seal it under a session that is about to run again.
+        /// Spec: a session with a row but no map entry counts.
+        #[farhelm_testtrace::test]
+        async fn a_session_whose_entry_is_off_the_map_still_counts() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            plant(&sup, "s1").await;
+            plant_row(&sup, "mid-restart").await;
+
+            let reply = ask(&sup, seal_delete(1, "s1")).await;
+            assert!(
+                matches!(
+                    reply,
+                    ControlMsg::SessionDeletedOrSealed {
+                        outcome: farhelm_proto::SealOutcome::Deleted { remaining: 1 },
+                        ..
+                    }
+                ),
+                "{reply:?}"
+            );
+            assert!(!sup.store.is_sealed().await.unwrap());
+        }
+
+        /// Why: an agent in the session being deleted may have a spawn in
+        /// flight; deciding before it lands would seal the environment over
+        /// the session it creates. Spec: the Delete waits for the session's
+        /// agent-request fence (held here the way an approved spawn's relay
+        /// holds it) without answering, and counts the session the spawn
+        /// recorded meanwhile.
+        #[farhelm_testtrace::test]
+        async fn a_delete_waits_for_the_sessions_agent_request_and_counts_what_it_created() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            plant(&sup, "asker").await;
+            let fence = sup.agent_request_locks.claim("asker").await;
+
+            let (mut tasks, mut rx) = dispatch_for_test(&sup, seal_delete(1, "asker")).await;
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                sup.agent_request_locks.claims_reached_for_test("asker", 2),
+            )
+            .await
+            .expect("the delete never reached the agent-request fence");
+            assert!(
+                matches!(
+                    rx.try_recv(),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+                ),
+                "the delete must not decide while the asker's request is in flight"
+            );
+            // The spawn's create records its row before its reply goes back
+            // up the relay that holds the fence.
+            plant(&sup, "spawned").await;
+            drop(fence);
+            while tasks.join_next().await.is_some() {}
+            let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
+            assert!(
+                matches!(
+                    reply,
+                    ControlMsg::SessionDeletedOrSealed {
+                        outcome: farhelm_proto::SealOutcome::Deleted { remaining: 1 },
+                        ..
+                    }
+                ),
+                "{reply:?}"
+            );
+        }
+
+        /// Why: a create holds directory admission until its launch settles;
+        /// a Delete deciding meanwhile could seal the environment over it.
+        /// Spec: the Delete waits for directory admission (held here as a
+        /// launching create holds it) and counts the session that create
+        /// recorded.
+        #[farhelm_testtrace::test]
+        async fn a_delete_waits_for_a_create_holding_directory_admission_and_counts_it() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            plant(&sup, "s1").await;
+            let admission = Arc::clone(&sup.working_copy_operations).lock_owned().await;
+
+            let (mut tasks, mut rx) = dispatch_for_test(&sup, seal_delete(1, "s1")).await;
+            // The delete is in flight once it holds the session's fence;
+            // whether it then waits at the permit or at directory admission,
+            // it cannot decide before the admission held here is released.
+            // The outcome is the proof: deciding early would have sealed.
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !sup.agent_request_locks.claimed_for_test("s1") {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("the delete never claimed the session's fence");
+            plant(&sup, "launching").await;
+            drop(admission);
+            while tasks.join_next().await.is_some() {}
+            let reply: ControlMsg = serde_json::from_slice(&rx.try_recv().unwrap().body).unwrap();
+            assert!(
+                matches!(
+                    reply,
+                    ControlMsg::SessionDeletedOrSealed {
+                        outcome: farhelm_proto::SealOutcome::Deleted { remaining: 1 },
+                        ..
+                    }
+                ),
+                "{reply:?}"
+            );
+        }
+
+        /// Why: two windows deleting an environment's last two sessions at
+        /// once must end with the environment sealed and nothing left, never
+        /// two "the environment stays" answers over an empty, unsealed
+        /// environment that keeps running (and billing). Spec: two
+        /// concurrent Deletes of the only two sessions answer one `Deleted
+        /// { remaining: 1 }` and one `Sealed`.
+        #[farhelm_testtrace::test]
+        async fn two_deletes_of_the_last_two_sessions_end_with_one_deleted_and_one_sealed() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            plant(&sup, "s1").await;
+            plant(&sup, "s2").await;
+
+            let (first, second) = tokio::join!(
+                ask(&sup, seal_delete(1, "s1")),
+                ask(&sup, seal_delete(2, "s2"))
+            );
+            let outcomes: Vec<_> = [first, second]
+                .into_iter()
+                .map(|reply| match reply {
+                    ControlMsg::SessionDeletedOrSealed { outcome, .. } => outcome,
+                    other => panic!("expected an environment delete reply, got {other:?}"),
+                })
+                .collect();
+            assert!(
+                outcomes.contains(&farhelm_proto::SealOutcome::Deleted { remaining: 1 })
+                    && outcomes.contains(&farhelm_proto::SealOutcome::Sealed),
+                "{outcomes:?}"
+            );
+            assert!(sup.store.is_sealed().await.unwrap());
+        }
+
+        /// Why: the helm waiting on this Delete has a deadline and tells the
+        /// user nothing was decided when it passes; a supervisor that still
+        /// decided later would make that untrue. Spec: with the session's
+        /// agent fence held past the wait bound, the Delete answers a
+        /// `Conflict` saying nothing was deleted, and the session and the
+        /// supervisor are as they were.
+        #[farhelm_testtrace::test]
+        async fn a_delete_that_cannot_get_its_locks_in_time_refuses_and_changes_nothing() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe_and_timeouts(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts {
+                    seal_delete_wait: Duration::from_millis(200),
+                    ..SupervisorTimeouts::default()
+                },
+            )
+            .await
+            .unwrap();
+            plant(&sup, "s1").await;
+            let _fence = sup.agent_request_locks.claim("s1").await;
+
+            let reply = ask(&sup, seal_delete(1, "s1")).await;
+            assert!(
+                matches!(
+                    &reply,
+                    ControlMsg::Error { kind: ErrorKind::Conflict, message, .. }
+                        if message.contains("nothing was deleted")
+                ),
+                "{reply:?}"
+            );
+            assert!(sup.store.session("s1").await.unwrap().is_some(), "s1 stays");
+            assert!(!sup.store.is_sealed().await.unwrap(), "nothing was sealed");
+        }
+
+        /// Why: once the seal is durable the environment is going to be
+        /// destroyed whatever happens to this session's cleanup inside it,
+        /// so the helm must still hear "sealed" (and destroy it), and the
+        /// session left behind must not be restarted into a doomed
+        /// environment. Spec: with the teardown failing after the seal (its
+        /// attachment quarantine blocked by a file where the quarantine
+        /// directory goes), the reply is `Sealed` with a notice, the row
+        /// stays, and a Restart of it is refused as sealed.
+        #[farhelm_testtrace::test]
+        async fn a_teardown_failing_after_the_seal_still_answers_sealed() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            plant(&sup, "s1").await;
+            let attachments = crate::attachments::attachments_root(state.path());
+            std::fs::create_dir_all(attachments.join("s1")).expect("an attachment directory");
+            std::fs::write(attachments.join(".quarantine"), b"not a directory")
+                .expect("block the quarantine");
+
+            let reply = ask(&sup, seal_delete(1, "s1")).await;
+            assert!(
+                matches!(
+                    &reply,
+                    ControlMsg::SessionDeletedOrSealed {
+                        outcome: farhelm_proto::SealOutcome::Sealed,
+                        notice: Some(notice),
+                        ..
+                    } if notice.contains("sealed for deletion")
+                ),
+                "{reply:?}"
+            );
+            assert!(
+                sup.store.session("s1").await.unwrap().is_some(),
+                "the row stays"
+            );
+            assert!(sup.store.is_sealed().await.unwrap());
+            assert_sealed_refusal(
+                &ask(
+                    &sup,
+                    ControlMsg::RestartSession {
+                        req_id: 2,
+                        named_start: None,
+                        session_id: "s1".into(),
+                        stop_if_running: true,
+                        with: None,
+                        expected_launch: None,
+                    },
+                )
+                .await,
+                "a Restart of the session left behind",
+            );
+        }
+
+        /// Why: a Restart keeps the session's lifecycle claim through its
+        /// whole relaunch, and the helm waiting on this Delete has a deadline;
+        /// a Delete that waited on that claim unbounded could still seal after
+        /// the helm told the user nothing was decided. Spec: with only the
+        /// session's lifecycle claim held past the bound, the Delete answers
+        /// "nothing was deleted", and releasing the claim afterwards deletes
+        /// and seals nothing.
+        #[farhelm_testtrace::test]
+        async fn a_held_lifecycle_claim_ends_in_a_refusal_not_a_late_decision() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe_and_timeouts(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts {
+                    seal_delete_wait: Duration::from_millis(200),
+                    ..SupervisorTimeouts::default()
+                },
+            )
+            .await
+            .unwrap();
+            plant(&sup, "s1").await;
+            let lifecycle = sup.lifecycle_locks.claim("s1").await;
+
+            let reply = ask(&sup, seal_delete(1, "s1")).await;
+            assert!(
+                matches!(
+                    &reply,
+                    ControlMsg::Error { kind: ErrorKind::Conflict, message, .. }
+                        if message.contains("nothing was deleted")
+                ),
+                "{reply:?}"
+            );
+            drop(lifecycle);
+            // `ask` joined every task the request started, so nothing of it
+            // can act once the claim is free.
+            assert!(sup.store.session("s1").await.unwrap().is_some(), "s1 stays");
+            assert!(!sup.store.is_sealed().await.unwrap(), "nothing was sealed");
+        }
+
+        /// Why: the first Delete keeps its locks through cleanup that can be
+        /// slow, and that cleanup is superseded by the environment's
+        /// destruction; a repeat (the retry of a lost reply) must hear
+        /// "sealed" at once, not "busy, nothing was deleted". Spec: with the
+        /// sealing Delete held in its post-seal cleanup, a repeat for the
+        /// same session answers `Sealed` while it is still held.
+        #[farhelm_testtrace::test]
+        async fn a_repeat_during_post_seal_cleanup_answers_sealed_at_once() {
+            let state = StateDir::new();
+            let reached = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(tokio::sync::Semaphore::new(0));
+            let gate: super::super::super::core::DeletedSessionCleanupGate = {
+                let reached = Arc::clone(&reached);
+                let release = Arc::clone(&release);
+                Arc::new(move || {
+                    let reached = Arc::clone(&reached);
+                    let release = Arc::clone(&release);
+                    Box::pin(async move {
+                        reached.notify_one();
+                        release
+                            .acquire()
+                            .await
+                            .expect("the gate is never closed")
+                            .forget();
+                    })
+                })
+            };
+            let sup = Supervisor::new_with_seams(
+                state.path(),
+                dummy_exe(),
+                SupervisorTimeouts::default(),
+                SupervisorSeams {
+                    faults: crate::service::FaultHooks {
+                        deleted_session_cleanup_gate: Some(gate),
+                        ..crate::service::FaultHooks::default()
+                    },
+                    ..SupervisorSeams::default()
+                },
+            )
+            .await
+            .unwrap();
+            plant(&sup, "s1").await;
+
+            let (mut first_tasks, mut first_rx) =
+                dispatch_for_test(&sup, seal_delete(1, "s1")).await;
+            tokio::time::timeout(Duration::from_secs(20), reached.notified())
+                .await
+                .expect("the sealing Delete never reached its post-seal cleanup");
+            assert!(
+                sup.store.is_sealed().await.unwrap(),
+                "premise: sealed before cleanup"
+            );
+
+            let repeat =
+                tokio::time::timeout(Duration::from_secs(5), ask(&sup, seal_delete(2, "s1")))
+                    .await
+                    .expect("a repeat must not wait behind the first Delete's cleanup");
+            assert!(
+                matches!(
+                    repeat,
+                    ControlMsg::SessionDeletedOrSealed {
+                        req_id: 2,
+                        outcome: farhelm_proto::SealOutcome::Sealed,
+                        ..
+                    }
+                ),
+                "{repeat:?}"
+            );
+            release.add_permits(1);
+            while first_tasks.join_next().await.is_some() {}
+            let first: ControlMsg =
+                serde_json::from_slice(&first_rx.try_recv().unwrap().body).unwrap();
+            assert!(
+                matches!(
+                    first,
+                    ControlMsg::SessionDeletedOrSealed {
+                        outcome: farhelm_proto::SealOutcome::Sealed,
+                        ..
+                    }
+                ),
+                "{first:?}"
+            );
+        }
+
+        /// Why: the seal is what tells the helm to destroy the environment;
+        /// if listing the sessions fails (a session whose teardown failed
+        /// after the seal may no longer be describable) the helm must still
+        /// learn of it. Spec: a sealed supervisor whose listing fails answers
+        /// a listing with no sessions, marked cut short so no removal is
+        /// inferred, and sealed; an unsealed one answers the error.
+        #[farhelm_testtrace::test]
+        fn a_sealed_supervisor_reports_the_seal_even_when_its_listing_fails() {
+            let failed = || Err(anyhow::anyhow!("tmux stopped answering"));
+            assert!(matches!(
+                list_reply(1, failed(), false),
+                ControlMsg::Error {
+                    req_id: 1,
+                    kind: ErrorKind::Internal,
+                    ..
+                }
+            ));
+            let sealed = list_reply(2, failed(), true);
+            assert!(
+                matches!(
+                    &sealed,
+                    ControlMsg::SessionList { req_id: 2, sessions, truncated: true, sealed: true }
+                        if sessions.is_empty()
+                ),
+                "{sealed:?}"
+            );
+        }
+
+        /// Why: the send replaces a listing too large for one frame with an
+        /// error, which would take the seal with it; a session left behind by
+        /// a teardown that failed after the seal can be that large. Spec:
+        /// through the real call site (`handle_list_sessions`, `send_reply`),
+        /// a sealed supervisor whose only session's title alone exceeds a
+        /// frame answers the minimal sealed listing.
+        #[farhelm_testtrace::test]
+        async fn a_sealed_listing_too_large_for_a_frame_still_reports_the_seal() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            let mut entry = entry_with(None, LastOutcome::Running);
+            entry.info.id = "s1".to_string();
+            entry.info.title = "x".repeat(farhelm_proto::MAX_FRAME_LEN as usize);
+            sup.sessions
+                .lock()
+                .await
+                .insert("s1".to_string(), Arc::new(entry));
+            sup.sealed.store(true, Ordering::SeqCst);
+
+            let reply = ask(&sup, ControlMsg::ListSessions { req_id: 3 }).await;
+            assert!(
+                matches!(
+                    &reply,
+                    ControlMsg::SessionList { req_id: 3, sessions, truncated: true, sealed: true }
+                        if sessions.is_empty()
+                ),
+                "{reply:?}"
+            );
+        }
+
+        /// Why: a retry of a Delete whose reply was lost must not be read as
+        /// a failure on an unsealed supervisor; the helm treats `NotFound`
+        /// here as "that attempt deleted only this session". Spec: a
+        /// session that does not exist on an unsealed supervisor answers
+        /// `NotFound`, and nothing is sealed.
+        #[farhelm_testtrace::test]
+        async fn a_missing_session_on_an_unsealed_supervisor_is_not_found() {
+            let state = StateDir::new();
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .unwrap();
+            plant(&sup, "s2").await;
+            let reply = ask(&sup, seal_delete(1, "gone")).await;
+            assert!(
+                matches!(
+                    reply,
+                    ControlMsg::Error {
+                        kind: ErrorKind::NotFound,
+                        ..
+                    }
+                ),
+                "{reply:?}"
+            );
+            assert!(!sup.store.is_sealed().await.unwrap());
+        }
     }
 }

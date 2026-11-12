@@ -851,6 +851,7 @@ mod tests {
             };
             writer
                 .write_control(&ControlMsg::SessionList {
+                    sealed: false,
                     req_id,
                     sessions: vec![],
                     truncated: false,
@@ -1166,6 +1167,7 @@ mod tests {
         };
         writer
             .write_control(&ControlMsg::SessionList {
+                sealed: false,
                 req_id: list_id,
                 sessions: vec![],
                 truncated: false,
@@ -1230,6 +1232,7 @@ mod tests {
                 };
                 writer
                     .write_control(&ControlMsg::SessionList {
+                        sealed: false,
                         req_id: list_id,
                         sessions: vec![],
                         truncated: false,
@@ -1266,6 +1269,7 @@ mod tests {
         };
         writer
             .write_control(&ControlMsg::SessionList {
+                sealed: false,
                 req_id,
                 sessions: vec![],
                 truncated: false,
@@ -1305,6 +1309,7 @@ mod tests {
         };
         writer
             .write_control(&ControlMsg::SessionList {
+                sealed: false,
                 req_id: list_id,
                 sessions: vec![],
                 truncated: false,

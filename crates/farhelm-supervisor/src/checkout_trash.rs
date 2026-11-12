@@ -53,6 +53,64 @@ pub(crate) fn is_removing(row: &WorkingCopyRow) -> bool {
         .is_some_and(|name| name.starts_with(REMOVING_PREFIX))
 }
 
+/// Journal the removal of the zero-member retired archive `id` inside the
+/// caller's transaction: the same journal [`retire_archive`] writes before its
+/// rename, which is durable deletion intent that startup resumes
+/// ([`resume_retirements`]) and that a listing shows as being removed.
+///
+/// For a Delete that discards its checkout instead of archiving it (an
+/// environment Delete that keeps the environment): written in the very
+/// transaction that retires the row, so no committed state ever offers the
+/// checkout back as an ordinary archive, even across a crash right after it.
+/// The rename itself is finished afterwards by [`resume_journaled`].
+pub(crate) fn journal_removal(conn: &rusqlite::Connection, id: &str) -> anyhow::Result<()> {
+    let row = working_copies::get_working_copy(conn, id)?
+        .with_context(|| format!("the discarded checkout {id} has no registry row"))?;
+    let destination = format!("{REMOVING_PREFIX}{}", archive_name(&row)?);
+    working_copies::repoint_retired(conn, &row, &destination)?;
+    Ok(())
+}
+
+/// Finish journaled removals of `ids` the way startup does ([`resume_retirements`]),
+/// returning the ids ready for the background remover and each failure. The
+/// caller holds directory admission, as startup's caller does; a failure
+/// keeps its journal, so the next startup retries it.
+pub(crate) fn resume_journaled(
+    db: &Db,
+    ids: &[String],
+    session_directories: &[PathBuf],
+) -> (Vec<String>, Vec<(String, anyhow::Error)>) {
+    let mut queued = Vec::new();
+    let mut failed = Vec::new();
+    for id in ids {
+        let row = match working_copies::get_working_copy(&db.lock(), id) {
+            Ok(Some(row))
+                if row.allocation_state == AllocationState::Retired && is_removing(&row) =>
+            {
+                row
+            }
+            Ok(_) => {
+                failed.push((
+                    id.clone(),
+                    anyhow::anyhow!("the checkout is no longer journaled for removal"),
+                ));
+                continue;
+            }
+            Err(error) => {
+                failed.push((id.clone(), error.into()));
+                continue;
+            }
+        };
+        let mut rename_started = false;
+        match resume_retirement(db, &row, session_directories, &mut rename_started) {
+            Ok(true) => queued.push(row.id),
+            Ok(false) => {}
+            Err(error) => failed.push((row.id, error)),
+        }
+    }
+    (queued, failed)
+}
+
 /// Fence both sides of an accepted rename against new session admission. The
 /// legacy spelling stays protected too: migration preserves recorded cwds.
 /// These are recorded spellings; admission also derives their current canonical

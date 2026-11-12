@@ -264,6 +264,10 @@ declare_execution_classes! {
             only_if_agent_ended: false,
             refuse_if_agent_request_in_flight: false,
         };
+        DeleteSessionOrSeal => OwnedDelete => |c| ControlMsg::DeleteSessionOrSeal {
+            req_id: c.req_id,
+            session_id: c.session_id.into(),
+        };
         RestartSession => OwnedMutation => |c| ControlMsg::RestartSession {
             req_id: c.req_id,
             named_start: None,
@@ -342,6 +346,7 @@ declare_execution_classes! {
         ControlMsg::GithubRepoResults { .. },
         ControlMsg::SessionStopped { .. },
         ControlMsg::SessionDeleted { .. },
+        ControlMsg::SessionDeletedOrSealed { .. },
         ControlMsg::SessionRestarted { .. },
         ControlMsg::PromptTarget { .. },
         ControlMsg::SessionPrompted { .. },

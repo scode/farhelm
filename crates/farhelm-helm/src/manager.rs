@@ -867,6 +867,7 @@ pub async fn drain_sessions(
     Ok(SessionListing {
         sessions: checked,
         truncated: listing.truncated,
+        sealed: listing.sealed,
     })
 }
 
@@ -4832,6 +4833,10 @@ impl HostActor {
         let SessionListing {
             sessions: mut entries,
             truncated,
+            // Nothing on this helm sends the request that seals a
+            // supervisor yet, so no listing it reads can carry a seal of its
+            // making; acting on one comes with the environment Delete.
+            sealed: _,
         } = match drained.await {
             Err(_) => {
                 warn!(
@@ -7380,6 +7385,7 @@ mod tests {
             };
         }
         ControlMsg::SessionList {
+            sealed: false,
             req_id,
             sessions: script.sessions.clone(),
             truncated: script.truncated,

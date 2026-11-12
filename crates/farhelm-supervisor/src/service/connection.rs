@@ -2529,6 +2529,7 @@ mod tests {
         let req_id = 42;
         let oversized = ControlMsg::SessionList {
             req_id,
+            sealed: false,
             sessions: vec![SessionInfo {
                 screen_yolo: false,
                 claude_trust_prompt: false,

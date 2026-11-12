@@ -2816,9 +2816,10 @@ fn helm_status(kind: ErrorKind) -> axum::http::StatusCode {
         // fingerprint. 409 is the standard HTTP reading of "this identifier
         // already means something else"; `error_kind`'s own docs are where
         // the full classification table lives.
-        ErrorKind::Conflict | ErrorKind::CheckoutConflict | ErrorKind::TakenOver => {
-            axum::http::StatusCode::CONFLICT
-        }
+        ErrorKind::Conflict
+        | ErrorKind::CheckoutConflict
+        | ErrorKind::TakenOver
+        | ErrorKind::Sealed => axum::http::StatusCode::CONFLICT,
         ErrorKind::Unauthorized => axum::http::StatusCode::UNAUTHORIZED,
         ErrorKind::Unavailable => axum::http::StatusCode::SERVICE_UNAVAILABLE,
         ErrorKind::Timeout => axum::http::StatusCode::GATEWAY_TIMEOUT,
@@ -2867,6 +2868,11 @@ fn supervisor_reply_status(kind: ErrorKind) -> axum::http::StatusCode {
         // refusal, is signalled by a helm-only header, never by status or
         // body, so a supervisor's 409 cannot trigger it.
         ErrorKind::Conflict | ErrorKind::TakenOver => axum::http::StatusCode::CONFLICT,
+        // A sealed environment refusing a new session or run: a conflict
+        // with the supervisor's own state like the arm above. Clients that
+        // act on it (Replace, the environment Delete) read the kind from the
+        // helm's own handling, never from this status.
+        ErrorKind::Sealed => axum::http::StatusCode::CONFLICT,
         // The supervisor performs the checkout mkdir, so it is the
         // authority on whether that create was accepted. `http_error` adds
         // the definitely-unaccepted header for this kind; a supervisor

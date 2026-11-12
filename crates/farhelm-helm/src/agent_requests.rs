@@ -7800,7 +7800,8 @@ mod tests {
                     reply: AgentReply::Deleted {
                         outcome: farhelm_proto::SessionDeleteOutcome {
                             notice: Some(_),
-                            archived: false
+                            archived: false,
+                            ..
                         }
                     }
                 }

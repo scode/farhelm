@@ -1610,6 +1610,7 @@ fn delete_transmits_consent_reports_notices_and_keeps_lost_outcomes_unknown() {
                     outcome: farhelm_proto::SessionDeleteOutcome {
                         notice: Some("checkout preserved\ninspect it".into()),
                         archived: false,
+                        environment_remaining: None,
                     },
                 },
             },
