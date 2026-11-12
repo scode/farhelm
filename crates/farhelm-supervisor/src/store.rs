@@ -1171,8 +1171,9 @@ pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 /// schema 32 decode the kind but do not act on it everywhere (they were
 /// built while the host arms were still being added, and none of them can
 /// be started with host terminals on), and would misread a host row the
-/// same way. So the change that lets `farhelm supervisor run` turn host
-/// terminals on (`--new-terminals host`) bumped the schema again, to 33,
+/// same way. So the change that let `farhelm supervisor run` turn host
+/// terminals on (its since-removed `--new-terminals host`) bumped the
+/// schema again, to 33,
 /// with nothing else in the step: every build at 32 refuses a database a
 /// supervisor that may have created host rows has opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2491,8 +2492,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         // Nothing to change: every table is as 32 left it. The bump itself
         // is the step, because what it fences out is a build, not a shape.
         // Builds at 32 store the terminal kind but cannot all act on a host
-        // row, and from this version on a supervisor can be started with
-        // host terminals on (`--new-terminals host`), so a database this
+        // row, and from this version on a supervisor may create host
+        // terminals, so a database this
         // build has opened may hold host rows. Those builds refuse anything
         // above 32, which is exactly the downgrade this must stop.
         conn.execute_batch(
@@ -8881,9 +8882,8 @@ mod tests {
     /// A host row must come back as a host row, with its socket name as its
     /// terminal address, through every read path and across a restart that
     /// is aborted.
-    /// Only a create under the switch (`farhelm supervisor run`'s default,
-    /// or an in-process harness that turns it on) writes `host`, and its
-    /// own tests read the row back through the service; this
+    /// A create writes `host`, and its own tests read the row back through
+    /// the service; this
     /// round trip pins the store's half of that on its own.
     ///
     /// Specified: a [`TerminalKind::Host`] row inserted with a socket name

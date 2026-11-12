@@ -1507,15 +1507,10 @@ async fn a_report_survives_a_supervisor_restart() {
         hook_log(&h, &session.id)
     );
 
-    // `_tmux` LAST in the destructuring: these become ordinary locals that
-    // drop in reverse declaration order, so listing the guard before
-    // `state` would delete the state tempdir — and the socket the guard
-    // kills through — before the guard ran, leaking the tmux server.
     let Harness {
         client,
         sup,
         state,
-        _tmux,
         _slot,
     } = h;
     serving.stop().await;
@@ -2409,7 +2404,6 @@ async fn a_historical_identity_survives_restart_and_reaches_resume_argv() {
         client,
         sup,
         state,
-        _tmux,
         _slot,
     } = h;
     serving.stop().await;
@@ -2446,7 +2440,7 @@ async fn a_historical_identity_survives_restart_and_reaches_resume_argv() {
 // their reports must wait on disk for the supervisor that starts next rather
 // than being lost. These tests stop the supervisor for real, type into the
 // still-running agent directly (its terminal host over a connection of the
-// test's own, or its tmux pane; there is no supervisor to attach through),
+// test's own; there is no supervisor to attach through),
 // and start a successor on the same state directory.
 // ---------------------------------------------------------------------
 
@@ -2462,14 +2456,12 @@ async fn stop_supervisor(
     serving: ServeTask,
 ) -> (
     farhelm_teststate::TestDir,
-    Option<TmuxServerGuard>,
     tokio::sync::SemaphorePermit<'static>,
 ) {
     let Harness {
         client,
         sup,
         state,
-        _tmux,
         _slot,
     } = h;
     serving.stop().await;
@@ -2481,18 +2473,17 @@ async fn stop_supervisor(
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     drop(sup);
-    (state, _tmux, _slot)
+    (state, _slot)
 }
 
 /// Type `line` and Enter into the session's agent while no supervisor
 /// runs, the way a person types into a terminal whose supervisor is down:
-/// straight to the session's terminal host when its row is a host row, and
-/// through tmux itself for an old terminal.
+/// straight to the session's terminal host.
 ///
-/// For a host, the input goes over a connection of the test's own, which
-/// the host allows since nothing else is connected, and waits for the host
-/// to say it wrote every byte to the program, then closes it so that the
-/// next supervisor's adoption finds the host free.
+/// The input goes over a connection of the test's own, which the host
+/// allows since nothing else is connected, and waits for the host to say it
+/// wrote every byte to the program, then closes it so that the next
+/// supervisor's adoption finds the host free.
 pub(crate) async fn type_without_supervisor(state: &std::path::Path, session_id: &str, line: &str) {
     let row = SessionStore::open(&state.join("supervisor.db"), false)
         .await
@@ -2501,56 +2492,43 @@ pub(crate) async fn type_without_supervisor(state: &std::path::Path, session_id:
         .await
         .expect("read the row")
         .expect("the row exists");
-    if row.terminal_kind == farhelm_supervisor::store::TerminalKind::Host {
-        let socket = farhelm_supervisor::hosts::hosts_dir(state).join(&row.terminal_address);
-        let mut connection = farhelm_supervisor::hosts::HostConnection::connect(&socket)
-            .await
-            .expect("connect to the session's terminal host");
-        let ticket = connection
-            .send_input(format!("{line}\r").as_bytes())
-            .await
-            .expect("type into the session's terminal host");
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                match connection.next_event().await.expect("the host answers") {
-                    farhelm_supervisor::hosts::HostEvent::InputAcknowledged(counts)
-                        if counts.written + counts.discarded >= ticket.end =>
-                    {
-                        assert!(
-                            counts.written >= ticket.end,
-                            "the host discarded the typed line"
-                        );
-                        return;
-                    }
-                    _ => {}
-                }
-            }
-        })
-        .await
-        .expect("the host acknowledges the typed line");
-        return;
-    }
-    let sent = tmux_query(
-        &state.join("tmux.sock"),
-        &[
-            "send-keys",
-            "-t",
-            &format!("fh-{session_id}"),
-            line,
-            "Enter",
-        ],
-    )
-    .await;
-    assert!(
-        sent.status.success(),
-        "typing into the agent through tmux failed: {}",
-        String::from_utf8_lossy(&sent.stderr)
+    assert_eq!(
+        row.terminal_kind,
+        farhelm_supervisor::store::TerminalKind::Host,
+        "premise: the session runs in a terminal host"
     );
+    let socket = farhelm_supervisor::hosts::hosts_dir(state).join(&row.terminal_address);
+    let mut connection = farhelm_supervisor::hosts::HostConnection::connect(&socket)
+        .await
+        .expect("connect to the session's terminal host");
+    let ticket = connection
+        .send_input(format!("{line}\r").as_bytes())
+        .await
+        .expect("type into the session's terminal host");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match connection.next_event().await.expect("the host answers") {
+                farhelm_supervisor::hosts::HostEvent::InputAcknowledged(counts)
+                    if counts.written + counts.discarded >= ticket.end =>
+                {
+                    assert!(
+                        counts.written >= ticket.end,
+                        "the host discarded the typed line"
+                    );
+                    return;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("the host acknowledges the typed line");
 }
 
 /// Wait until the session's hook log holds `count` lines whose outcome word
-/// is `word`. Hook runs fired through tmux leave no other witness this test
-/// can wait on: there is no supervisor to attach a terminal through.
+/// is `word`. Hook runs fired while no supervisor runs leave no other
+/// witness this test can wait on: there is no supervisor to attach a
+/// terminal through.
 async fn wait_for_hook_log_words(
     state: &std::path::Path,
     session_id: &str,
@@ -2622,7 +2600,7 @@ async fn a_report_made_while_no_supervisor_runs_is_applied_when_one_starts() {
     );
     drop(rx);
 
-    let (state, _tmux, _slot) = stop_supervisor(h, serving).await;
+    let (state, _slot) = stop_supervisor(h, serving).await;
     type_without_supervisor(state.path(), &session.id, "report conv-offline").await;
     wait_for_hook_log_words(state.path(), &session.id, "written", 2).await;
     let waiting = farhelm_supervisor::hook_report::session_dir(state.path(), &session.id)
@@ -2718,7 +2696,7 @@ async fn grok_selection_survives_enrichments_made_while_no_supervisor_runs() {
     wait_for(&mut rx, &mut seen, "GROK-CONVERSATION READY", 20).await;
     drop(rx);
 
-    let (state, _tmux, _slot) = stop_supervisor(h, serving).await;
+    let (state, _slot) = stop_supervisor(h, serving).await;
     let uuid = "019a0000-0000-7000-8000-00000000c0de";
     type_without_supervisor(state.path(), &session.id, &format!("select {uuid}")).await;
     wait_for_hook_log_words(state.path(), &session.id, "written", 1).await;

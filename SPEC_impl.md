@@ -1526,18 +1526,18 @@ variation-selector emoji, as two cells; xterm's default Unicode 6 table counts t
 shift cursor-addressed redraws. The pinned tmux enables `variation-selector-always-wide` by default, so live output and
 replayed rows use the same widths without an extra generated configuration setting.
 
-Vendored xterm.js 6.0.0 has an observed, reproduced defect (`terminal-scroll-freeze.spec.ts` pins it): a scrolled-back
-viewport can paint stale rows during sustained output, both once scrollback is already full and when output is confined
-to a DECSTBM scroll region. What is established from the bundle: `BufferService.scroll` decrements `ydisp` by one per
-evicted line while scrolled back with the buffer full, and the parser's per-write repaint maps dirty screen rows to
-viewport rows via `(ybase - ydisp)`, skipping the refresh once that offset reaches the row count. On their own both are
-correct behavior (the viewport's lines do not change under either), so they rule out the per-write path as the repainter
-rather than explain the stale DOM; the exact xterm-internal step that leaves stale content is not established from
-source. `terminal.js` compensates with a throttled, unconditional `term.refresh()` while the viewport sits away from the
-tail, rather than patching the vendored bundle. The bundle is deliberately never patched: keeping the vendored file
-byte-identical to upstream is what makes its provenance checkable and a future version bump a plain swap. Decided
-2026-10-10: non-security bugs inside the bundle are fixed by upgrading it, not worked around in Farhelm, unless a
-workaround is already recorded here (the refresh above is one).
+Vendored xterm.js 6.0.0 has an observed, reproduced defect: a scrolled-back viewport can paint stale rows during
+sustained output, both once scrollback is already full and when output is confined to a DECSTBM scroll region. What is
+established from the bundle: `BufferService.scroll` decrements `ydisp` by one per evicted line while scrolled back with
+the buffer full, and the parser's per-write repaint maps dirty screen rows to viewport rows via `(ybase - ydisp)`,
+skipping the refresh once that offset reaches the row count. On their own both are correct behavior (the viewport's
+lines do not change under either), so they rule out the per-write path as the repainter rather than explain the stale
+DOM; the exact xterm-internal step that leaves stale content is not established from source. `terminal.js` compensates
+with a throttled, unconditional `term.refresh()` while the viewport sits away from the tail, rather than patching the
+vendored bundle. The bundle is deliberately never patched: keeping the vendored file byte-identical to upstream is what
+makes its provenance checkable and a future version bump a plain swap. Decided 2026-10-10: non-security bugs inside the
+bundle are fixed by upgrading it, not worked around in Farhelm, unless a workaround is already recorded here (the
+refresh above is one).
 
 JetBrains Mono Nerd Font is vendored alongside xterm.js for the same self-contained reason, and terminal.js gives it to
 both kinds of terminal as their `fontFamily`. The terminal and the interface's technical values share the same two
@@ -2021,18 +2021,17 @@ other Farhelm crate, no Farhelm concepts in its code, `libc` its only runtime de
 every update: the protocol only grows, and every client release must keep working with every host ever shipped (its
 "Change policy"). It ships inside the `farhelm` binary as `farhelm internal terminal-host`, which takes no version lock
 (a host lives for weeks and must keep neither pruning nor uninstall waiting) and runs before anything starts a thread,
-since the host forks. A create starts its agent in a host, a new tab opens in one, and a Restart moves an agent out of
-tmux into one, only under the supervisor's switch ("Creating agents in hosts", "Tabs in hosts" and "Moving an old
-session into a host" below), which every shipped launch has on: new terminals run in hosts, and old tmux terminals keep
-running in tmux until they are closed or their session moves; an agent already in a host restarts into a new host
-whatever the switch says. Each session row records its agent terminal's kind (the supervisor schema 32 column
-`terminal_kind`), which is `tmux` unless a create or a Restart under that switch wrote `host`, and where that terminal
-is (`terminal_address`: a tmux pane id, or a host's socket name). Schema 33 changes nothing stored: it came with the
-flag that turns the switch on, so that every build at 32, which stores the kind without handling a host row everywhere,
-refuses a database such a supervisor has opened. Schema 34 stores no tmux concepts for a terminal that is not a tmux
-one: no row stores a tmux session name (a session's is `fh-` and its id, derived where tmux code needs it, for a tmux
-row's agent and for the old tmux tabs of a session moved into a host), and the address that held a host's socket name in
-a column named `pane` has a name of its own.
+since the host forks. Every create starts its agent in a host, every new tab opens in one, and a Restart moves an agent
+out of tmux into one ("Creating agents in hosts", "Tabs in hosts" and "Moving an old session into a host" below): new
+terminals run in hosts, and old tmux terminals, which earlier supervisors created, keep running in tmux until they are
+closed or their session moves; an agent already in a host restarts into a new host. Each session row records its agent
+terminal's kind (the supervisor schema 32 column `terminal_kind`), which is `tmux` unless a create or a Restart wrote
+`host`, and where that terminal is (`terminal_address`: a tmux pane id, or a host's socket name). Schema 33 changes
+nothing stored: it came with the flag that first turned host terminals on (since removed), so that every build at 32,
+which stores the kind without handling a host row everywhere, refuses a database such a supervisor has opened. Schema 34
+stores no tmux concepts for a terminal that is not a tmux one: no row stores a tmux session name (a session's is `fh-`
+and its id, derived where tmux code needs it, for a tmux row's agent and for the old tmux tabs of a session moved into a
+host), and the address that held a host's socket name in a column named `pane` has a name of its own.
 
 The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
 
@@ -2288,143 +2287,128 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   wait compares the "held" mark with the child's pid. An attach is refused for a client that cannot show grids,
   permanently, with `InvalidRequest`; one that can gets a grid stream (below). A host agent's session has no tmux
   session of its own; tmux tabs of such a session are looked for in the tmux session its row names, which is always
-  `fh-` and its id. Only a create, a tab open or a Restart under the switch (below) makes a host terminal, which a
-  restarted supervisor finds again ("Across supervisor restarts" below); a Restart replaces a host agent's host with a
-  new one ("Restarting a host agent" below), moves a tmux agent into one ("Moving an old session into a host" below),
-  and leaves the session's tab hosts, and its tmux tabs, as they are.
-- **Turning terminal hosts on.** The switch is `SupervisorSeams::new_terminals` (`Tmux` or `Host`), the one value a
-  running supervisor reads it from (`Supervisor::new_terminals` for code outside the constructor). A real supervisor
-  process takes it from `farhelm supervisor run --new-terminals <tmux|host>`, a hidden flag that defaults to `host`; no
-  shipped launch passes the flag, so `farhelm helm setup`'s units, the desktop app and a hand-started supervisor all
-  create new terminals in hosts. The in-process test harnesses set the field directly, and `SupervisorSeams::default()`
-  is `Host` too, so a test runs on what the release runs unless it asks for old terminals by name
-  (`SupervisorSeams::tmux_terminals()`; the e2e suite's `harness_tmux` and `supervisor_process_tmux`), which a test does
-  when its subject exists only for old terminals (byte-stream attachments and their escape sequences, tmux's flow
-  control and replay, tmux windows as tabs and the session sink, pane ids, moving old sessions into hosts). A few e2e
-  tests stay on old terminals for now with their reason in their docs (for example a byte-stream backlog measurement,
-  and those whose docs record a behavior new terminals showed differently: a create or a tab open in a directory that
-  cannot be entered, a 0x0 attach); those are known gaps, not old-terminal subjects. A supervisor inside a test binary
-  cannot start a host from its own executable; in builds with test seams, one whose launch shim program is not its own
-  executable starts hosts from that program (the built `farhelm` for the e2e suite's in-process supervisors) unless
-  `SupervisorSeams::host_program` names another, while a real `farhelm supervisor run` starts them the shipped way even
-  when built with test seams. The e2e harness's terminal helpers read either kind of terminal (a grid stream's rows as
-  text, typing as grid `text` input). The supervisor crate's own unit tests have no `farhelm`, so their test binary is
-  its own host program: started with a host's command line (`internal terminal-host --socket <path>`), a loader
-  initializer in it runs the host crate's entry point before libtest's `main` starts any thread, and exits
-  (`hosts::test_program`). It is registered on glibc Linux only; elsewhere every host start from a unit test is refused
-  (libtest rejects the arguments), so those tests fail by name rather than run on another kind of terminal. Those that
-  need a real terminal run on such hosts (`tests::host_supervisor`); the ones still on old terminals by name
-  (`tests::tmux_supervisor`) have tmux itself as their subject. The flag is a harness seam, built like `--boot-id-file`:
-  never read from the environment (tests never change their own process's environment, and a systemd unit or an agent's
-  shell could inherit a variable by accident) and never a user setting, since which kind new terminals are is the
-  release's decision. The harnesses that run a real supervisor process and test old terminals pass
-  `--new-terminals tmux`: the e2e suite's tmux process fixture, the process tests of tmux's own control clients, the
-  browser suite's old-terminal set (`FARHELM_E2E_SUITE_TERMINALS=tmux`, which starts both of every stack's supervisors
-  with it; `e2e/suite-terminals.ts`), and the README and docs media stacks, whose captures were designed against tmux
-  terminals. The browser suite's ordinary run passes `--new-terminals host` to both supervisors of every stack
-  (`e2e/start-stack.sh`), so it tests new terminals, and checks that every terminal it attaches is one. The
-  process-level tests of hosts (`crates/farhelm/tests/e2e/host_processes.rs`) pass `host` explicitly, except the one
-  that checks the bare command's default. The value is fixed for the supervisor's lifetime: it decides only what later
-  creates, tab opens and Restarts start in and never moves a running terminal, and a supervisor restarted with the other
-  value still finds and keeps every terminal it had, of either kind. The flag came with schema 33 (above).
-- **Creating agents in hosts** (`service/core/host_launch.rs`) is behind that switch, on in every shipped launch. A new
-  create, a new tab ("Tabs in hosts" below) and a Restart consult it: with it on, Restart of a tmux session moves the
-  session's agent into a host ("Moving an old session into a host" below), and with it off it stays in tmux exactly as
-  before; Restart of a host agent starts a new host under either setting. A create decides the kind once and commits it
-  with the launching row, before anything starts, so a crash between the start and its confirmation leaves a row that
-  says where to look; a retried create launches in the kind its row records, whatever the switch says by then, since the
-  evidence that allowed the retry was gathered for that kind. A host launch shares everything with a pane's up to the
-  command (the spec, the hooks, the login shell, and the shim's command line with its `systemd-run --user --scope`
-  wrapper exactly where a pane has it), and the host's child runs that command: the agent keeps its launch scope, and
-  the host gets no scope of its own, living in the supervisor's control group as the tmux server does. The child's
-  environment (`host_child_env`, the same for agent and tab hosts) is the supervisor's own environment with the launch
-  environment over it, then the terminal's own variables over both: `TERM=xterm-256color` (the terminal type the
-  emulator implements), `COLORTERM=truecolor`, `TERM_PROGRAM=farhelm` and `TERM_PROGRAM_VERSION` set to the build's
-  version, the one the emulator's XTVERSION answer names. These four are always set, so a supervisor started from some
-  other terminal passes none of its claims on. Then `SHELL` (the user's login shell, also when a test seam replaces the
-  launch shell), `PWD`, and `PATH` as `/usr/bin:/bin` when nothing gave one. `TMUX`, `TMUX_PANE` and systemd's
-  `LISTEN_*` are never passed on: a supervisor started inside the user's own tmux has the first two, and the child is in
-  no tmux. Nothing claims tmux, and no tmux is asked anything for the launch. A login shell's startup file that starts
-  tmux when `TMUX` is unset therefore runs during the agent's launch, as in any terminal outside tmux (SPEC.md, "Session
-  view"); until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a placeholder `TMUX` that
-  held such an autostart back, and a host started then keeps that environment until its agent is restarted. The
-  container environment uses this ordinary path inside its own supervisor. The host's tag binds it to the session and
-  the launch generation, and confirming the launch writes the socket's name to the row's `terminal_address`. **The
-  launch record**: the socket's name is drawn before the host's first stage starts, and before that first stage is given
-  the spec (it starts nothing until it has read it whole), the launch's artifacts record the socket's name and the first
-  stage's process, pinned to its start identity (`<state>/launch/<id>.<generation>.host`). A supervisor that dies after
-  the record leaves a first stage that can still start the host on its own, and the record is how a retry finds it; one
-  that dies before it leaves a first stage whose stdin ends without a spec, which starts nothing. A failed host start is
-  classified from the first stage's exit status: a refusal, or an unfinished start the spawn confirmed ended, leaves
-  nothing, and the create rolls back as for an absent tmux session; a host that may still run (an unfinished start not
-  confirmed ended, or a host that reported ready but cannot be used) is ended through the protocol or by the verified
-  signal, and only when that cannot be confirmed is the launching row kept (with its record). A create that lost to
-  Delete, or whose confirmation failed, sweeps the agent's process tree and then ends its host the same way: through its
-  runtime's `Shutdown` within 15 seconds (a runtime takes it up only between its other work, which a snapshot encode can
-  hold), and otherwise, with the runtime stopped so that it cannot take the host back, by its socket within
-  `stop-terminal-hosts`'s per-host limits. The socket file a host ended by a signal leaves is then removed, judged gone
-  again first. A retried create whose row shows no launch asks, in order: whether the session's published entry holds a
-  host (a create kept as a launching record publishes the host it could not end), which is the launch; whether a launch
-  record exists, without which no host start ever got its spec; whether the recorded first stage still runs, in which
-  case it is waited for up to five seconds and then ended with the verified signal; and finally what is at the recorded
-  socket. A host whose tag names the session's first launch is the launch, and anything else that answers leaves the
-  retry unresolved. Nothing there is absence only once no live process names the socket on its command line: a second
-  stage the first stage forked before it ended still binds the socket and starts the child before its readiness report
-  finds the first stage gone and it ends both, so the socket is looked at again for up to five seconds while such a
-  process remains, and the retry is left unresolved if one stays. The record stays through an agent's launch error (the
-  error settles the agent, not its host, which may still run with the failed launch's final screen and is named nowhere
-  else while the row's `terminal_address` is empty). A retry that finds the host replays the session as created and
-  starts nothing; the interrupted attempt's host itself stays running, and a restarted supervisor's reload adopts it by
-  its tag, as it finds an interrupted tmux launch's pane by its marker. The supervisor-wide `host_scan` lock keeps host
-  spawns (holding it shared from just before the first stage starts until the host's entry is published, or until the
-  create gives the host up) apart from what must not overlap them (holding it exclusively): the removal of an ended
-  host's socket file (by a create or by Delete), whose re-verifying removal requires that nothing binds sockets in the
-  directory meanwhile, and any scan of the socket directory inside a running supervisor (today `serve`'s reload), since
-  a scan would take a host over from the create that is starting it. Delete's settling of its session's launch records
-  takes no part in it: the session's lifecycle claim keeps that session's own creates out. A session kept as a launching
-  record with its host unconfirmed ended has that host ended by its Delete, which finds it by the launch record.
-- **Tabs in hosts** (`service/core/host_tabs.rs`): under the same switch every new tab is a terminal host of its own,
-  whatever its session's agent runs in, so a tmux agent's session holds its old tmux tabs and new host tabs side by side
-  (a mixed session), and a host agent's only host tabs; a tab never changes kind. The tab-open gate asks the agent's
-  terminal by its kind: a tmux agent's tmux session must exist, as before, and a host agent's host must still run (with
-  its program or its final screen); one that has ended is the restart gap, and one that cannot be read refuses. A host
-  agent's session has a tmux session only while it has old tmux tabs, and losing the last of them (tmux ends a session
-  with its last window) touches neither its agent nor its host tabs. The tab host's child is today's tab chain (the
-  forwarder, then `internal tab-shell`, in the tab's own scope when there is a user manager), with the environment a
-  pane's command gets plus the tab's markers and credential, which reach only the child; it starts at the size of the
-  agent's terminal (its tmux window, or its host's emulator; 80x24 when neither can be read). Its tag names the session,
-  the tab, whether it runs in its own scope, and its creation time, which is never at or below the newest of the
-  session's tabs, so a clock stepped backwards cannot reorder them. Like an agent's start, a tab host's writes a launch
-  record before its first stage is given the spec (`<state>/launch/<id>.tab-<tab id>.host`, the same format), under the
-  same `host_scan` fence until the tab is published; the record is removed only once its host is confirmed ended. It is
-  not a registry of tabs (a tab's kind is still known from where it was found): it is how Delete finds a tab host no
-  runtime holds, and how a restarted supervisor knows which socket to ask, cross-checked against the host's tag. The
-  session's tab runtimes live in its session cells, which a Restart shares, so tabs keep running across Restart as tmux
-  tabs do. Stop closes both kinds after stopping the agent. The open waits up to 250 ms for the shell to die, from the
-  runtime's view of the child rather than a poll of tmux, and a shell dead by then refuses the open with the emulator's
-  screen as its last words once the host's exit record has been processed (two seconds at most); the `host_scan` fence
-  is let go as soon as the shell is seen not alive, so that wait holds up no other host's spawn or socket removal. Any
-  failure after the host started ends the host (its `Shutdown`, else the verified signal), sweeps the tab's scope and
-  marker (rooted at the child only when a runtime pinned it, so a failure before the runtime adopted the host sweeps
-  with no root, never one read from an unverified pid) and removes its record, so a failed open leaves nothing; a host
-  that cannot be confirmed ended keeps its record, which its session's Delete finds it by, and whatever could not be
-  confirmed cleaned up is in the refusal. The tab strip and every tab lookup merge the two kinds: tmux tabs first, in
-  window order, then host tabs by their tags' creation times; a host tab whose shell exited, or whose host ended under
-  it, is hidden at once, as a dead window is. Closing a host tab: the session's cell holds only hosts whose tag names
-  one of its tabs (the open wrote it, a reload checked it), and the agent's own runtime is refused; the reap's "only if
-  dead" is the runtime's processed exit record, checked again under the session's lifecycle claim; the scope is the
-  tag's; the sweep roots at the child only while it runs; then the attached viewer is told the tab closed (before the
-  host ends, since a grid stream would otherwise report its terminal ended first), the host is ended as above (for a
-  runtime that judged its host gone from its socket alone, the process it adopted is confirmed gone first, by the
-  verified signal), a marker-only sweep catches what outlived the hangup, and the record goes once the end is confirmed.
-  A close that cannot confirm the end keeps the tab and its record and marks it, and since its stopped runtime announces
-  nothing, the reap closes it again until one does: a second after the failure, then doubling to at most a minute
-  between tries, so an end that keeps failing holds the session's lifecycle claim and a reap slot only that often. A
-  host tab that cannot be read refuses to close; its session's Delete ends it. The automatic reap is driven by the
-  host's exit event: the runtime announces its processed exit record on the supervisor's liveness notifier, which wakes
-  the ticker's reap pass at once, with no poll; the tick runs it too, for a close a busy session put off. A takeover
-  displaces the previous client's attachments to every terminal of the session, tmux and host alike, and a grid attach
-  to a host tab goes through the grid stream as an agent's does.
+  `fh-` and its id. Every create, tab open and Restart makes a host terminal, which a restarted supervisor finds again
+  ("Across supervisor restarts" below); a Restart replaces a host agent's host with a new one ("Restarting a host agent"
+  below), moves a tmux agent into one ("Moving an old session into a host" below), and leaves the session's tab hosts,
+  and its tmux tabs, as they are.
+- **Every new terminal in a host.** A supervisor creates every terminal in a terminal host; nothing selects tmux, and
+  the supervisor never starts a tmux server (it still adopts and serves one an earlier supervisor left, "Terminal
+  substrate: private tmux server"). A supervisor inside a test binary cannot start a host from its own executable; in
+  builds with test seams, one whose launch shim program is not its own executable starts hosts from that program (the
+  built `farhelm` for the e2e suite's in-process supervisors) unless `SupervisorSeams::host_program` names another,
+  while a real `farhelm supervisor run` starts them the shipped way even when built with test seams. The e2e harness's
+  terminal helpers read a grid stream's rows as text and type as grid `text` input. The supervisor crate's own unit
+  tests have no `farhelm`, so their test binary is its own host program: started with a host's command line
+  (`internal terminal-host --socket <path>`), a loader initializer in it runs the host crate's entry point before
+  libtest's `main` starts any thread, and exits (`hosts::test_program`). It is registered on glibc Linux only; elsewhere
+  every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than
+  run on another kind of terminal. Those that need a real terminal run on such hosts (`tests::host_supervisor`); the
+  tests of the tmux driver build their own tmux servers. The browser suite's stacks and the README and docs media stacks
+  run the bare `farhelm supervisor run`, so they test what ships, and the browser suite checks that every terminal it
+  attaches is a host. Known gaps, behaviors new terminals showed differently from what this document says, found when
+  their tests moved to hosts and reported rather than fixed: a create or a tab open in a directory that cannot be
+  entered is refused by the host's own start rather than recorded as a launch error (or a refused open) naming the
+  directory, and a 0x0 attach leaves the terminal at its size.
+- **Creating agents in hosts** (`service/core/host_launch.rs`): every create starts its agent in a host, a new tab opens
+  in one ("Tabs in hosts" below), and a Restart of a tmux session moves the session's agent into one ("Moving an old
+  session into a host" below). A create commits the kind with the launching row, before anything starts, so a crash
+  between the start and its confirmation leaves a row that says where to look. A retried keyed create whose interrupted
+  row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row that turns out
+  to have launched replays as itself; one the takeover claims is refused before anything starts and rolled back like a
+  launch whose spec never landed, the refusal settled against its intent key: the evidence that allowed the retry was
+  gathered for tmux, so starting it in a host instead would be a guess, and no tmux terminal is created any more. A host
+  launch shares everything with a pane's up to the command (the spec, the hooks, the login shell, and the shim's command
+  line with its `systemd-run --user --scope` wrapper exactly where a pane has it), and the host's child runs that
+  command: the agent keeps its launch scope, and the host gets no scope of its own, living in the supervisor's control
+  group as the tmux server does. The child's environment (`host_child_env`, the same for agent and tab hosts) is the
+  supervisor's own environment with the launch environment over it, then the terminal's own variables over both:
+  `TERM=xterm-256color` (the terminal type the emulator implements), `COLORTERM=truecolor`, `TERM_PROGRAM=farhelm` and
+  `TERM_PROGRAM_VERSION` set to the build's version, the one the emulator's XTVERSION answer names. These four are
+  always set, so a supervisor started from some other terminal passes none of its claims on. Then `SHELL` (the user's
+  login shell, also when a test seam replaces the launch shell), `PWD`, and `PATH` as `/usr/bin:/bin` when nothing gave
+  one. `TMUX`, `TMUX_PANE` and systemd's `LISTEN_*` are never passed on: a supervisor started inside the user's own tmux
+  has the first two, and the child is in no tmux. Nothing claims tmux, and no tmux is asked anything for the launch. A
+  login shell's startup file that starts tmux when `TMUX` is unset therefore runs during the agent's launch, as in any
+  terminal outside tmux (SPEC.md, "Session view"); until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's
+  version and a placeholder `TMUX` that held such an autostart back, and a host started then keeps that environment
+  until its agent is restarted. The container environment uses this ordinary path inside its own supervisor. The host's
+  tag binds it to the session and the launch generation, and confirming the launch writes the socket's name to the row's
+  `terminal_address`. **The launch record**: the socket's name is drawn before the host's first stage starts, and before
+  that first stage is given the spec (it starts nothing until it has read it whole), the launch's artifacts record the
+  socket's name and the first stage's process, pinned to its start identity (`<state>/launch/<id>.<generation>.host`). A
+  supervisor that dies after the record leaves a first stage that can still start the host on its own, and the record is
+  how a retry finds it; one that dies before it leaves a first stage whose stdin ends without a spec, which starts
+  nothing. A failed host start is classified from the first stage's exit status: a refusal, or an unfinished start the
+  spawn confirmed ended, leaves nothing, and the create rolls back as for an absent tmux session; a host that may still
+  run (an unfinished start not confirmed ended, or a host that reported ready but cannot be used) is ended through the
+  protocol or by the verified signal, and only when that cannot be confirmed is the launching row kept (with its
+  record). A create that lost to Delete, or whose confirmation failed, sweeps the agent's process tree and then ends its
+  host the same way: through its runtime's `Shutdown` within 15 seconds (a runtime takes it up only between its other
+  work, which a snapshot encode can hold), and otherwise, with the runtime stopped so that it cannot take the host back,
+  by its socket within `stop-terminal-hosts`'s per-host limits. The socket file a host ended by a signal leaves is then
+  removed, judged gone again first. A retried create whose row shows no launch asks, in order: whether the session's
+  published entry holds a host (a create kept as a launching record publishes the host it could not end), which is the
+  launch; whether a launch record exists, without which no host start ever got its spec; whether the recorded first
+  stage still runs, in which case it is waited for up to five seconds and then ended with the verified signal; and
+  finally what is at the recorded socket. A host whose tag names the session's first launch is the launch, and anything
+  else that answers leaves the retry unresolved. Nothing there is absence only once no live process names the socket on
+  its command line: a second stage the first stage forked before it ended still binds the socket and starts the child
+  before its readiness report finds the first stage gone and it ends both, so the socket is looked at again for up to
+  five seconds while such a process remains, and the retry is left unresolved if one stays. The record stays through an
+  agent's launch error (the error settles the agent, not its host, which may still run with the failed launch's final
+  screen and is named nowhere else while the row's `terminal_address` is empty). A retry that finds the host replays the
+  session as created and starts nothing; the interrupted attempt's host itself stays running, and a restarted
+  supervisor's reload adopts it by its tag, as it finds an interrupted tmux launch's pane by its marker. The
+  supervisor-wide `host_scan` lock keeps host spawns (holding it shared from just before the first stage starts until
+  the host's entry is published, or until the create gives the host up) apart from what must not overlap them (holding
+  it exclusively): the removal of an ended host's socket file (by a create or by Delete), whose re-verifying removal
+  requires that nothing binds sockets in the directory meanwhile, and any scan of the socket directory inside a running
+  supervisor (today `serve`'s reload), since a scan would take a host over from the create that is starting it. Delete's
+  settling of its session's launch records takes no part in it: the session's lifecycle claim keeps that session's own
+  creates out. A session kept as a launching record with its host unconfirmed ended has that host ended by its Delete,
+  which finds it by the launch record.
+- **Tabs in hosts** (`service/core/host_tabs.rs`): every new tab is a terminal host of its own, whatever its session's
+  agent runs in, so a tmux agent's session holds its old tmux tabs and new host tabs side by side (a mixed session), and
+  a host agent's only host tabs; a tab never changes kind. The tab-open gate asks the agent's terminal by its kind: a
+  tmux agent's tmux session must exist, as before, and a host agent's host must still run (with its program or its final
+  screen); one that has ended is the restart gap, and one that cannot be read refuses. A host agent's session has a tmux
+  session only while it has old tmux tabs, and losing the last of them (tmux ends a session with its last window)
+  touches neither its agent nor its host tabs. The tab host's child is today's tab chain (the forwarder, then
+  `internal tab-shell`, in the tab's own scope when there is a user manager), with the environment a pane's command gets
+  plus the tab's markers and credential, which reach only the child; it starts at the size of the agent's terminal (its
+  tmux window, or its host's emulator; 80x24 when neither can be read). Its tag names the session, the tab, whether it
+  runs in its own scope, and its creation time, which is never at or below the newest of the session's tabs, so a clock
+  stepped backwards cannot reorder them. Like an agent's start, a tab host's writes a launch record before its first
+  stage is given the spec (`<state>/launch/<id>.tab-<tab id>.host`, the same format), under the same `host_scan` fence
+  until the tab is published; the record is removed only once its host is confirmed ended. It is not a registry of tabs
+  (a tab's kind is still known from where it was found): it is how Delete finds a tab host no runtime holds, and how a
+  restarted supervisor knows which socket to ask, cross-checked against the host's tag. The session's tab runtimes live
+  in its session cells, which a Restart shares, so tabs keep running across Restart as tmux tabs do. Stop closes both
+  kinds after stopping the agent. The open waits up to 250 ms for the shell to die, from the runtime's view of the child
+  rather than a poll of tmux, and a shell dead by then refuses the open with the emulator's screen as its last words
+  once the host's exit record has been processed (two seconds at most); the `host_scan` fence is let go as soon as the
+  shell is seen not alive, so that wait holds up no other host's spawn or socket removal. Any failure after the host
+  started ends the host (its `Shutdown`, else the verified signal), sweeps the tab's scope and marker (rooted at the
+  child only when a runtime pinned it, so a failure before the runtime adopted the host sweeps with no root, never one
+  read from an unverified pid) and removes its record, so a failed open leaves nothing; a host that cannot be confirmed
+  ended keeps its record, which its session's Delete finds it by, and whatever could not be confirmed cleaned up is in
+  the refusal. The tab strip and every tab lookup merge the two kinds: tmux tabs first, in window order, then host tabs
+  by their tags' creation times; a host tab whose shell exited, or whose host ended under it, is hidden at once, as a
+  dead window is. Closing a host tab: the session's cell holds only hosts whose tag names one of its tabs (the open
+  wrote it, a reload checked it), and the agent's own runtime is refused; the reap's "only if dead" is the runtime's
+  processed exit record, checked again under the session's lifecycle claim; the scope is the tag's; the sweep roots at
+  the child only while it runs; then the attached viewer is told the tab closed (before the host ends, since a grid
+  stream would otherwise report its terminal ended first), the host is ended as above (for a runtime that judged its
+  host gone from its socket alone, the process it adopted is confirmed gone first, by the verified signal), a
+  marker-only sweep catches what outlived the hangup, and the record goes once the end is confirmed. A close that cannot
+  confirm the end keeps the tab and its record and marks it, and since its stopped runtime announces nothing, the reap
+  closes it again until one does: a second after the failure, then doubling to at most a minute between tries, so an end
+  that keeps failing holds the session's lifecycle claim and a reap slot only that often. A host tab that cannot be read
+  refuses to close; its session's Delete ends it. The automatic reap is driven by the host's exit event: the runtime
+  announces its processed exit record on the supervisor's liveness notifier, which wakes the ticker's reap pass at once,
+  with no poll; the tick runs it too, for a close a busy session put off. A takeover displaces the previous client's
+  attachments to every terminal of the session, tmux and host alike, and a grid attach to a host tab goes through the
+  grid stream as an agent's does.
 - **Restarting a host agent** (`service/core/host_restart.rs`): a host runs one child for its whole life, so a Restart
   of an agent in a host (or of a host row whose session holds no terminal) never reuses the host. Under the session's
   lifecycle claim, once the consent a working agent needs has been checked (so a refusal touches nothing) and before
@@ -2568,10 +2552,10 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   dead, stays in the session's tmux session (shown nowhere) until the session's Delete ends that tmux session: the
   residual of a crash at one exact moment (SPEC.md, "Lifecycle operations", 2026-10-10). A move that finds its row
   deleted when it confirms ends the new host as for a host agent and leaves the tmux side to Delete's own tmux teardown.
-  Clone and Replace of an old session are creates, and so start their agents in hosts once the switch is on. A move is a
-  Restart in every other respect: while the session is off the map, its host tabs (if it has any; its tmux tabs need
-  nothing) are held beside it for an orderly stop as above, and its new host is known by its row and its launch record,
-  so the startup reclaim never takes it for an orphan.
+  Clone and Replace of an old session are creates, and so start their agents in hosts. A move is a Restart in every
+  other respect: while the session is off the map, its host tabs (if it has any; its tmux tabs need nothing) are held
+  beside it for an orderly stop as above, and its new host is known by its row and its launch record, so the startup
+  reclaim never takes it for an orphan.
 - **Delete ends every terminal host of the session** (`service/session_hosts.rs`), since nothing else would: a host
   outlives its program and carries no session marker. Delete acts only on what the session records, never on a scan of
   the socket directory: the agent's host when its runtime holds one, the session's tab runtimes, and the session's
@@ -2825,20 +2809,20 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   rediscovered from the session's tmux session is `tmux`, every tab in a terminal host `host`), built only through
   `Terminal::tab_info` and its shorthands (`TmuxTerminal::tab_info` and `DiscoveredTab::tab_info` for tmux tabs,
   `HostTab::tab_info` for host tabs), so no site spells a kind out. A replayed keyed create reports the live entry's
-  kind, as the first reply did. `supervisor_creates_host_terminals` is the switch (`SupervisorSeams::new_terminals`),
-  added at the two boundaries every `SessionInfo` leaves through (`listing::list_all` and
+  kind, as the first reply did. `supervisor_creates_host_terminals` is always true, since every terminal a supervisor
+  creates is a host, added at the two boundaries every `SessionInfo` leaves through (`listing::list_all` and
   `Supervisor::with_checkout_metadata`, which every single-session reply passes) rather than stored on entries, since it
-  belongs to the supervisor process, not to the entry. A supervisor kept on old terminals reports false, so the media
-  harnesses' stacks show neither the band nor the kinds. The three fields joined protocol 68 without a bump: each is
-  optional with a decode default, and a peer that ignores or lacks them only shows no migration guidance, which is what
-  a supervisor without hosts would have it show. They decode through `farhelm_proto::lenient_terminal_kind`, so a kind a
-  build does not know reads as unreported instead of failing the session, which matters because the UI decodes these
-  types directly. The UI's decisions (`crates/farhelm-ui/src/migration.rs`) are pure functions of the session and of the
-  tabs the strip shows (`tabs::visible_tab_infos`: the strip's own list, with kinds by tab id and an optimistic open's
-  kind from its open reply), so a tab is named by the label on screen even before the next detail read; that list is a
-  type of its own (`tabs::VisibleTabs`), so neither surface can be handed the server's list. The band's dismissal is the
-  band component's own state, kept per message, and the session view is keyed by session, so the next visit mounts it
-  afresh.
+  describes the supervisor process, not the entry. A supervisor from before terminal hosts sends no such field, which
+  reads as false, so its sessions show neither the band nor the kinds. The three fields joined protocol 68 without a
+  bump: each is optional with a decode default, and a peer that ignores or lacks them only shows no migration guidance,
+  which is what a supervisor without hosts would have it show. They decode through
+  `farhelm_proto::lenient_terminal_kind`, so a kind a build does not know reads as unreported instead of failing the
+  session, which matters because the UI decodes these types directly. The UI's decisions
+  (`crates/farhelm-ui/src/migration.rs`) are pure functions of the session and of the tabs the strip shows
+  (`tabs::visible_tab_infos`: the strip's own list, with kinds by tab id and an optimistic open's kind from its open
+  reply), so a tab is named by the label on screen even before the next detail read; that list is a type of its own
+  (`tabs::VisibleTabs`), so neither surface can be handed the server's list. The band's dismissal is the band
+  component's own state, kept per message, and the session view is keyed by session, so the next visit mounts it afresh.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client
@@ -2969,36 +2953,34 @@ journal cap and `MAX_SNAPSHOT`.
 
 ## Terminal substrate: private tmux server
 
-This section covers the old terminals for as long as both kinds exist. Terminals created with the supervisor's switch on
-run in terminal hosts instead ("Terminal host"), and a session moves its agent there one Restart at a time, its old tabs
-staying in tmux until they are closed. Installation keeps requiring, installing and version-checking tmux exactly as
-below for the whole transition (the installer, the desktop app's preflight, Linux provisioning and
-`farhelm helm setup`). Remote Mac provisioning is the exception: it supports only terminal hosts and has no tmux
-inspection, payload, installation, version check or uninstall action. This does not change the desktop app's local tmux
-preflight. The running supervisor does not: it uses tmux only for old terminals, and only while a private server holding
-them runs. This path changes only for what the switch needs and for bug fixes.
+This section covers the old terminals for as long as both kinds exist. Every terminal a supervisor creates runs in a
+terminal host instead ("Terminal host"), and a session moves its agent there one Restart at a time, its old tabs staying
+in tmux until they are closed. Installation keeps requiring, installing and version-checking tmux exactly as below for
+the whole transition (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`). Remote
+Mac provisioning is the exception: it supports only terminal hosts and has no tmux inspection, payload, installation,
+version check or uninstall action. This does not change the desktop app's local tmux preflight. The running supervisor
+does not: it uses tmux only for old terminals, and only while a private server holding them runs. This path changes only
+for bug fixes.
 
 A supervisor's old terminals live in a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`)
 with a locked-down generated config: status bar off, `history-limit` sized to SPEC.md's replay floor,
 `remain-on-exit on`, `exit-empty on`. The server runs only while it holds old terminals. At startup the supervisor
 connects to the socket once, a plain connect that runs no tmux and needs none installed: nothing answering means no old
 terminals this run, and from then on the supervisor runs no tmux command at all (listings, session details, tab lookups,
-the ticker's passes and its `wait-for` client, Delete, shutdown) until it creates an old terminal itself, which only the
-test-only `--new-terminals tmux` switch does. That create's `new-session` starts the server, which reads the config as
-it starts; nothing runs `start-server` (with `exit-empty on` it would leave no server). A server that answers is
-adopted: the two floor checks below, then its session names become the set of tmux sessions this process asks about, and
-`exit-empty on`, `focus-events on` and the `pane-died` hook are set explicitly, since an adopted server never reads the
-config. A session whose agent runs in a terminal host asks tmux about old tabs only while that set holds its tmux
-session (a host session never gains a tmux tab), so a session created in a host never asks; a session with a tmux agent,
-or with no terminal, asks while any server runs. The set shrinks as whole-server listings stop showing a session and as
-the supervisor kills one; tmux ends the server with its last session (an adopted server with none ends at once), and a
-command that reports no server stops all tmux traffic for the rest of the process unless an old terminal is created
-again. A server that answers but cannot be used (the tmux binary missing or below the floor, or the server below it) is
-left running untouched and treated as unusable: the supervisor starts all the same, never asks that server anything, and
-reports its sessions not alive. Their agents may still run there, so while it lasts (a state of the running supervisor,
-not stored) the supervisor refuses to Delete or Restart a session whose agent may live on that server (Delete would
-leave the agent running with nothing to end it and the server alive for it; Restart would start a second agent beside
-it) and refuses to create old terminals, naming the server and the way out: install a supported tmux and restart the
+the ticker's passes and its `wait-for` client, Delete, shutdown), since it creates no old terminals and so never starts
+a server. A server that answers is adopted: the two floor checks below, then its session names become the set of tmux
+sessions this process asks about, and `exit-empty on`, `focus-events on` and the `pane-died` hook are set explicitly,
+since an adopted server never reads the config. A session whose agent runs in a terminal host asks tmux about old tabs
+only while that set holds its tmux session (a host session never gains a tmux tab), so a session created in a host never
+asks; a session with a tmux agent, or with no terminal, asks while any server runs. The set shrinks as whole-server
+listings stop showing a session and as the supervisor kills one; tmux ends the server with its last session (an adopted
+server with none ends at once), and a command that reports no server stops all tmux traffic for the rest of the process,
+since no old terminal is created again. A server that answers but cannot be used (the tmux binary missing or below the
+floor, or the server below it) is left running untouched and treated as unusable: the supervisor starts all the same,
+never asks that server anything, and reports its sessions not alive. Their agents may still run there, so while it lasts
+(a state of the running supervisor, not stored) the supervisor refuses to Delete or Restart a session whose agent may
+live on that server (Delete would leave the agent running with nothing to end it and the server alive for it; Restart
+would start a second agent beside it), naming the server and the way out: install a supported tmux and restart the
 supervisor, or stop those agents. What is not held back: reload and the ticker record those sessions as exited, as for a
 server that is gone, since nothing can be read from it; once tmux is fixed and the supervisor restarted, the server is
 adopted again and Delete ends such a session's agent with its tmux session. Old tabs of a session whose agent runs in a
@@ -3046,23 +3028,22 @@ state. The final state is written through a private sibling file and rename on c
 event-loop teardown; the rename is atomic for readers but parent-directory durability across a machine crash is best
 effort. Failures warn without preventing startup.
 
-Farhelm requires tmux at or above a version FLOOR that is, by policy, the exact release the output-client teardown
-regression suite (`scripts/test-tmux-pinned-shutdown.sh`) runs against — 3.7c as of this writing, pinned in
-`.github/release/source-pins.env`, with the supervisor's floor constant tested to equal that pin so the two cannot
-drift. This replaced the original "any tmux ≥ 3.3" policy on 2026-08-22 (the decision record lived in TODO.md until the
-floor shipped). The original policy treated versions above 3.3 as interchangeable, and experience said otherwise: the
-supervisor's driver is full of behavior audited per version (3.3a, 3.4, and 3.7b each differ in ways that shaped real
-code), a production distro 3.4 server died in BUGS.md's `fatal()` abort shape on 2026-08-19, and BUGS.md records the
-same abort class reproduced on distro 3.6. The floor is therefore DESIGNED to exclude many current distro packages
-(Ubuntu 24.04 ships 3.4, 26.04 about 3.6, Debian 13 3.5a; some Fedora releases already ship 3.7c): on Linux this is
-close to always-bundled in practice. Always bundling was considered and rejected all the same: it loses distro security
-patching of tmux and libevent (where the 2026-08-16 3.7b segfault lived), concentrates a bad build's blast radius on
-every host at once, needs a static build per platform (the darwin one has never completed), and a from-source install
-has no bundle anyway — so the version check is the policy and the bundle is one way of meeting it. Versions above the
-floor are accepted in tmux's own release spelling (`major.minor` plus at most one patch letter); a version newer than
-the pinned one earns a one-time warning that it is unaudited, never a refusal. Anything the parser cannot read exactly —
-`next-3.8`, release candidates, distro-decorated strings — is refused rather than guessed about: a version Farhelm
-cannot name is one nobody audited it against.
+Farhelm requires tmux at or above a version FLOOR that is, by policy, the exact release the release gate's tmux tests
+run against — 3.7c as of this writing, pinned in `.github/release/source-pins.env`, with the supervisor's floor constant
+tested to equal that pin so the two cannot drift. This replaced the original "any tmux ≥ 3.3" policy on 2026-08-22 (the
+decision record lived in TODO.md until the floor shipped). The original policy treated versions above 3.3 as
+interchangeable, and experience said otherwise: the supervisor's driver is full of behavior audited per version (3.3a,
+3.4, and 3.7b each differ in ways that shaped real code), a production distro 3.4 server died in BUGS.md's `fatal()`
+abort shape on 2026-08-19, and BUGS.md records the same abort class reproduced on distro 3.6. The floor is therefore
+DESIGNED to exclude many current distro packages (Ubuntu 24.04 ships 3.4, 26.04 about 3.6, Debian 13 3.5a; some Fedora
+releases already ship 3.7c): on Linux this is close to always-bundled in practice. Always bundling was considered and
+rejected all the same: it loses distro security patching of tmux and libevent (where the 2026-08-16 3.7b segfault
+lived), concentrates a bad build's blast radius on every host at once, needs a static build per platform (the darwin one
+has never completed), and a from-source install has no bundle anyway — so the version check is the policy and the bundle
+is one way of meeting it. Versions above the floor are accepted in tmux's own release spelling (`major.minor` plus at
+most one patch letter); a version newer than the pinned one earns a one-time warning that it is unaudited, never a
+refusal. Anything the parser cannot read exactly — `next-3.8`, release candidates, distro-decorated strings — is refused
+rather than guessed about: a version Farhelm cannot name is one nobody audited it against.
 
 How the binary is chosen: the supervisor selects its tmux program once at startup — `--tmux <path>` on
 `farhelm supervisor run`, else `FARHELM_TMUX` from its environment, else the bare name `tmux` — and every invocation
@@ -6134,9 +6115,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   and client scale"). Schema 32 alone did not fence every such build: builds at 32 decode the kind but do not act on it
   everywhere, so the change that let a supervisor be started with host terminals on bumped the schema again, to 33, so
   that every one of them refuses a database that may hold host rows.
-- Schema 33 changes no table or row. It came with `farhelm supervisor run --new-terminals`, so that every build at 32
-  (which stores the kind but does not handle a host row everywhere) refuses a database that a supervisor able to create
-  host terminals has opened.
+- Schema 33 changes no table or row. It came with the since-removed `farhelm supervisor run --new-terminals`, so that
+  every build at 32 (which stores the kind but does not handle a host row everywhere) refuses a database that a
+  supervisor able to create host terminals has opened.
 - Schema 34 drops `sessions.tmux_name` and `create_reservations.tmux_name` and renames `sessions.pane` to
   `terminal_address`, so that a row of a terminal that is not a tmux one carries no tmux session name and code reading a
   host row reads no tmux pane field (SPEC.md, "Upgrade compatibility and client scale"). Every stored tmux name was
@@ -6179,36 +6160,35 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   and that pass already holds the tick's tmux pane-state snapshot: it records the kind at the current generation only
   while the in-memory snapshot holds no unresolved row of it in any generation, and resolves every unresolved row of it
   with one update fenced by neither generation nor conversation (`SessionStore::resolve_session_notifications_of_kind`).
-  It runs only on a supervisor with `NewTerminals::Host`, and not on a pass whose pane-state probe failed; the capture
-  pass never touches it. The first two say Restart cannot resume, so they are refused whenever the launch's row holds a
-  captured conversation, checked in the same statement as the insert, which is also what closes the race between a
-  report's commit and the tripwire. The listing carries the last 10 on `SessionInfo::notifications` as sequence number,
-  time, text and an additive `resolved` bool (false omitted and the decode default): the kind and generation stay
-  private to the store and supervisor's in-memory notification snapshot, because an enum on `SessionInfo` that a newer
-  supervisor extended would make the whole record fail to decode in an older helm, which drops a session it cannot
-  decode. The field is additive with a decode default, so an older helm shows no bell and an older supervisor sends
-  none, and needed no protocol bump. Replies are built from immutable entries, so the list lives in a session-scoped
-  cell beside the activity time, seeded from the store when an entry is built from a row and replaced after each
-  recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves the silent-hook and
-  resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a captured conversation
-  exists. This includes reports admitted before startup publishes the entry. An unresolved non-resolving kind or an
-  earlier launch's warning remains history; clearing in the helm does not remove it from the store. The in-memory
-  snapshot retains kind and generation beside the wire fields, so a pass with no unresolved, resolving kind for the
-  current launch skips the store call entirely. An eligible pass uses two indexed updates in one transaction. The
-  resolve SQL compares the exact captured conversation and generation on the session row, so an earlier Resume
-  observation cannot erase a later withdrawal. Notification reloads order snapshots by newest sequence and then resolved
-  count: with the newest sequence fixed, only resolution changes, and it only grows; reopening raises the sequence.
-  Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history; older supervisors refuse the
-  upgraded database on downgrade, as accepted for this change. The helm keeps read and cleared state as two per-session
-  sequence marks ("read through N", "cleared through N") in a `session_notification_marks` table beside `session_seen`,
-  keyed and cleaned up the same way, set by the two endpoints `PUT /api/sessions/{id}/notifications/read` and
-  `PUT /api/sessions/{id}/notifications/cleared`, each taking `{"through": N}`. A mark never moves backwards and is
-  clamped to the newest sequence number the helm's cached row holds, so a mark can never cover an entry that arrives
-  later; the fleet-events revision is bumped only when a mark moved. Building rows for the UI, the helm keeps at most
-  the 10 newest entries whatever a supervisor sent, drops cleared ones, and reports the read mark so the UI can tell
-  unread from read. Clearing deletes nothing in the supervisor; the cap ages records out there. The UI renders each text
-  as peer text, marks resolved entries grey with a "Resolved" word, and excludes them from unread counts and "new"
-  styling without moving the helm's read mark.
+  It does not run on a pass whose pane-state probe failed; the capture pass never touches it. The first two say Restart
+  cannot resume, so they are refused whenever the launch's row holds a captured conversation, checked in the same
+  statement as the insert, which is also what closes the race between a report's commit and the tripwire. The listing
+  carries the last 10 on `SessionInfo::notifications` as sequence number, time, text and an additive `resolved` bool
+  (false omitted and the decode default): the kind and generation stay private to the store and supervisor's in-memory
+  notification snapshot, because an enum on `SessionInfo` that a newer supervisor extended would make the whole record
+  fail to decode in an older helm, which drops a session it cannot decode. The field is additive with a decode default,
+  so an older helm shows no bell and an older supervisor sends none, and needed no protocol bump. Replies are built from
+  immutable entries, so the list lives in a session-scoped cell beside the activity time, seeded from the store when an
+  entry is built from a row and replaced after each recording or resolution, which then sends the `SessionsChanged`
+  hint. Each capture pass resolves the silent-hook and resume-withdrawn kinds only when the generic restart offer is
+  Resume, rather than merely when a captured conversation exists. This includes reports admitted before startup
+  publishes the entry. An unresolved non-resolving kind or an earlier launch's warning remains history; clearing in the
+  helm does not remove it from the store. The in-memory snapshot retains kind and generation beside the wire fields, so
+  a pass with no unresolved, resolving kind for the current launch skips the store call entirely. An eligible pass uses
+  two indexed updates in one transaction. The resolve SQL compares the exact captured conversation and generation on the
+  session row, so an earlier Resume observation cannot erase a later withdrawal. Notification reloads order snapshots by
+  newest sequence and then resolved count: with the newest sequence fixed, only resolution changes, and it only grows;
+  reopening raises the sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history;
+  older supervisors refuse the upgraded database on downgrade, as accepted for this change. The helm keeps read and
+  cleared state as two per-session sequence marks ("read through N", "cleared through N") in a
+  `session_notification_marks` table beside `session_seen`, keyed and cleaned up the same way, set by the two endpoints
+  `PUT /api/sessions/{id}/notifications/read` and `PUT /api/sessions/{id}/notifications/cleared`, each taking
+  `{"through": N}`. A mark never moves backwards and is clamped to the newest sequence number the helm's cached row
+  holds, so a mark can never cover an entry that arrives later; the fleet-events revision is bumped only when a mark
+  moved. Building rows for the UI, the helm keeps at most the 10 newest entries whatever a supervisor sent, drops
+  cleared ones, and reports the read mark so the UI can tell unread from read. Clearing deletes nothing in the
+  supervisor; the cap ages records out there. The UI renders each text as peer text, marks resolved entries grey with a
+  "Resolved" word, and excludes them from unread counts and "new" styling without moving the helm's read mark.
 - Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
   `session_seen` table keyed by `(host_id, session_id)`, not as a `session_cache` column: that cache is replaced
   WHOLESALE by each host's refresh, so a column there would need every refresh to carry forward a viewer fact the
@@ -8626,8 +8606,7 @@ constraint (see the GUI section's motivation), not an afterthought:
 
 - **Playwright (TypeScript) drives the web build in headless Chromium** against a real helm and real supervisor on
   Linux. DOM assertions and screenshots both work because the UI is real DOM. This is the canonical GUI verification
-  path for agents. Its stacks create new terminals, as shipped supervisors do; the tests whose subject exists only for
-  old terminals are a separately named old-terminal set that runs against tmux stacks (`e2e/suite-terminals.ts`).
+  path for agents. Its stacks create new terminals, as shipped supervisors do.
 - **A fake agent** — `farhelm-fixtures fake-agent --script basic|altscreen|binary|mouse-modes|spawn|agent-relay`, from
   the `farhelm-fixtures` package, a test-only binary that is never shipped (the product binary carries no fixtures) —
   stands in for Claude Code/Codex across this suite's integration and e2e tests. Its deterministic scripts cover

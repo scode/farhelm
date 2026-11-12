@@ -6,6 +6,7 @@
  * content. Nothing here is clicked except what only opens or shows something.
  */
 import { expect, test } from "@playwright/test";
+import { terminalScreen, terminalViewport } from "../tests/helpers/term";
 import { open } from "./open";
 import { shot } from "./shot";
 
@@ -50,27 +51,26 @@ test("download hover", async ({ page, request }) => {
   const { director } = await open(page, request, { terminalFiles: true });
   const needle = "e2e/attach.spec.ts";
   // Find the path's cell in the live terminal the way a person's pointer
-  // would land on it: the terminal draws on a canvas, so its text has no
-  // element to hover, only a position.
+  // would land on it: the text has no element of its own to hover, only a
+  // position, found from the terminal's visible rows and its screen's box
+  // (the browser suite's file tests find it the same way).
   let cell: { x: number; y: number } | null = null;
   await expect
     .poll(async () => {
-      cell = await page.evaluate((needle) => {
-        const term = (window as any).__farhelmTerm;
-        if (!term) return null;
-        const box = term.element.querySelector(".xterm-screen").getBoundingClientRect();
-        for (let i = 0; i < term.rows; i++) {
-          const text = term.buffer.active.getLine(term.buffer.active.viewportY + i)?.translateToString(true) || "";
-          const column = text.indexOf(needle);
-          if (column >= 0) {
-            return {
-              x: box.x + (column + needle.length / 2) * box.width / term.cols,
-              y: box.y + (i + 0.5) * box.height / term.rows,
-            };
-          }
+      const view = await terminalViewport(page);
+      const box = await terminalScreen(page).boundingBox();
+      cell = null;
+      if (!view || !box) return false;
+      for (let i = 0; i < view.rows; i++) {
+        const column = (view.lines[i] ?? "").indexOf(needle);
+        if (column >= 0) {
+          cell = {
+            x: box.x + (column + needle.length / 2) * box.width / view.cols,
+            y: box.y + (i + 0.5) * box.height / view.rows,
+          };
+          break;
         }
-        return null;
-      }, needle);
+      }
       return cell !== null;
     }, { message: `the open session's terminal must show ${needle}` })
     .toBe(true);

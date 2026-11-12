@@ -286,9 +286,11 @@ function installOverlay({ fadeMs, theme }: { fadeMs: number; theme: OverlayTheme
       /**
        * An invisible element that sits on the first visible terminal row
        * containing `needle`, re-found every frame, so annotations can point
-       * at a line of agent output. xterm draws text that has no element of
-       * its own; the row's position comes from the terminal's own buffer and
-       * cell size (the `__farhelmTerm` test surface the e2e helpers use).
+       * at a line of agent output. The match itself has no element of its
+       * own: the grid terminal draws each visible row as one
+       * `.grid-terminal-row` element, top to bottom, which gives the row's
+       * position, and the cell width is the screen's width over the grid's
+       * columns (the `__farhelmGrid` test surface the e2e helpers use).
        * Column positions assume one cell per character before the match,
        * which holds for the plain-text lines worth pointing at. Anchors live
        * until the page does. Returns the anchor's id.
@@ -300,18 +302,18 @@ function installOverlay({ fadeMs, theme }: { fadeMs: number; theme: OverlayTheme
         anchor.dataset.anchor = String(id);
         layer.appendChild(anchor);
         trackers.set(id, () => {
-          const term = w.__farhelmTerm;
-          const screen = term?.element?.querySelector(".xterm-screen") as HTMLElement | null;
-          if (!term || !screen) return;
-          const buffer = term.buffer.active;
+          const grid = w.__farhelmGrid;
+          const screen = document.querySelector("#terminal .grid-terminal-screen") as HTMLElement | null;
+          if (!grid || !screen) return;
           const rect = screen.getBoundingClientRect();
-          const cw = rect.width / term.cols, ch = rect.height / term.rows;
-          for (let row = 0; row < term.rows; row++) {
-            const col = buffer.getLine(buffer.viewportY + row)?.translateToString(true).indexOf(needle) ?? -1;
+          const cw = rect.width / grid.model.cols;
+          for (const row of screen.querySelectorAll<HTMLElement>(".grid-terminal-row")) {
+            const col = row.textContent?.indexOf(needle) ?? -1;
             if (col < 0) continue;
+            const box = row.getBoundingClientRect();
             Object.assign(anchor.style, {
-              left: `${rect.left + col * cw}px`, top: `${rect.top + row * ch}px`,
-              width: `${needle.length * cw}px`, height: `${ch}px`,
+              left: `${rect.left + col * cw}px`, top: `${box.top}px`,
+              width: `${needle.length * cw}px`, height: `${box.height}px`,
             });
             return;
           }

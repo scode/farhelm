@@ -1036,8 +1036,7 @@ test("a paste goes to the program as paste messages and brings the view back", a
  * document selection left behind would be what the next copy or the
  * browser's own selection handling acts on. Both paths reach the program
  * through the grid's user-input path; this pins that it clears the
- * selection on each, which the old-terminal set's "input dismisses both the
- * xterm and native selections" pins for xterm.js.
+ * selection on each.
  * Spec: with mouse reporting off, a plain drag across the screen's first row
  * selects it (premise: `hasSelection()` is true); a key typed into the
  * focused grid clears it, and the document selection is empty. A second

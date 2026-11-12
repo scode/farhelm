@@ -20,7 +20,7 @@
 //!    moment: [`CONVERSATION_PLACEHOLDER`] when the resume argv is built
 //!    ([`IntegrationSnapshot::filled_resume_argv`]), and [`CWD_PLACEHOLDER`]
 //!    and [`FARHELM_ARGS_PLACEHOLDER`] at spawn time in
-//!    `Supervisor::spawn_agent`, the only place the launch's working
+//!    `Supervisor::prepare_launch`, the only place the launch's working
 //!    directory and this launch's hook policy are known on every path.
 //! 2. **Conversation identity from reports.** Each integrated agent names its
 //!    own conversation through a hook, plugin, or extension. Exact-file checks
@@ -59,7 +59,7 @@
 //!   `offers_effort`, `offers_permission`, `offers_workspace_trust`,
 //!   `offers_only_yolo`, `supports_initial_prompt`). Literal prompt arguments
 //!   come from `LaunchHarness::initial_prompt_arguments` in proto and are
-//!   appended by `Supervisor::spawn_agent` only after placeholder and hook
+//!   appended by `Supervisor::prepare_launch` only after placeholder and hook
 //!   expansion. The helm's release catalog and argv compiler stay
 //!   in
 //!   `farhelm-helm/src/launches.rs`: exhaustive matches for the program
@@ -266,7 +266,7 @@ pub(crate) use records::{
 /// its own argv slot and never quoted or word-split, and none may stand as
 /// `argv[0]` (see [`ensure_no_cwd_program`]). `{conversation}` is filled when
 /// the resume argv is built ([`IntegrationSnapshot::filled_resume_argv`]),
-/// `{cwd}` and `{farhelm_args}` at spawn in `Supervisor::spawn_agent`, the
+/// `{cwd}` and `{farhelm_args}` at spawn in `Supervisor::prepare_launch`, the
 /// only place the launch's working directory is known on every path.
 pub use farhelm_proto::session_launch::{
     CODEX_TRUSTED_CWD_PLACEHOLDER, CODEX_UNTRUSTED_CWD_PLACEHOLDER, CONVERSATION_PLACEHOLDER,
@@ -1776,7 +1776,7 @@ fn correlators_from(
 ///
 /// An id equal to any of [`RESERVED_PLACEHOLDERS`] is refused even though
 /// it is graphic ASCII. Substitution runs in two passes — identity first,
-/// the working directory later in `spawn_agent` — and an id spelled `{cwd}`
+/// the working directory later in `prepare_launch` — and an id spelled `{cwd}`
 /// (or one of the Codex trust markers, which that later pass turns into a
 /// Codex project-trust setting) would be written into the template by the
 /// first pass and then rewritten by the second, so a record file (which any
@@ -2242,7 +2242,7 @@ fn fill_slots(argv: &mut [String], placeholder: &str, value: &str) {
 /// Substitute the launch's working directory into each supported whole-element
 /// marker. Codex project-trust markers use the target's canonical directory
 /// when available; the ordinary `{cwd}` marker keeps the path tmux receives.
-/// Meant for exactly one caller, `Supervisor::spawn_agent` — the
+/// Meant for exactly one caller, `Supervisor::prepare_launch` — the
 /// single seam where an argv becomes a process for create, retry, and
 /// every restart alike — as the first of the two transformations that
 /// seam applies, ahead of hook-flag injection, so the injected tail is
@@ -2298,7 +2298,7 @@ pub fn fill_cwd(mut argv: Vec<String>, cwd: &str) -> Vec<String> {
 
 /// Whether `argv` carries a working-directory marker as a whole element.
 /// The one place that comparison is spelled out, so the log line in
-/// `spawn_agent` and this module's own tests cannot drift from either the
+/// `prepare_launch` and this module's own tests cannot drift from either the
 /// ordinary `{cwd}` or Codex project-trust substitution rule.
 pub fn has_cwd_placeholder(argv: &[String]) -> bool {
     argv.iter().any(|element| {
@@ -3062,12 +3062,12 @@ mod tests {
     /// Pins the ORDER contract: identity is substituted when the restart
     /// snapshot is built (`filled_resume_argv`, a per-restart call), `{cwd}`
     /// is substituted at SPAWN time (`fill_cwd`, called only from
-    /// `Supervisor::spawn_agent`). A template that uses both
+    /// `Supervisor::prepare_launch`). A template that uses both
     /// placeholders must let `filled_resume_argv` touch only
     /// `{conversation}` and leave `{cwd}` for the later, separate call, and
     /// the second call must then find exactly that element left to fill.
     /// The test exercises the two pure substitution passes in that order;
-    /// it does not drive `spawn_agent` itself.
+    /// it does not drive `prepare_launch` itself.
     #[farhelm_testtrace::test]
     fn conversation_and_cwd_placeholders_coexist_in_one_template() {
         let snapshot = test_snapshot(

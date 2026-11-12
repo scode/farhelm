@@ -2,16 +2,12 @@
 //! booting a `Supervisor`, and polling for the terminal/session-list state a
 //! test wants to assert on.
 //!
-//! Every harness creates new terminals (each in a terminal host of its own,
-//! started from the built `farhelm`), as every shipped supervisor does,
-//! unless the test asks for old ones by name: [`harness_tmux`] and its
-//! siblings, or seams built from `SupervisorSeams::tmux_terminals()`. Only a
-//! harness of old terminals owns a private tmux server and its guard. The
-//! terminal helpers read either kind: an attachment takes whichever stream
-//! its terminal sends, a grid's screen and history arrive in a transcript as
-//! text lines ([`grid_text`]), and [`SupervisorClientAttachExt::send_keys`]
-//! types into either. A test whose subject is a byte stream (escape
-//! sequences, tmux's flow control or replay) runs on old terminals.
+//! Every harness creates its terminals in terminal hosts (each started from
+//! the built `farhelm`), as every supervisor does. The terminal helpers
+//! still read a byte stream as well as a grid: an attachment takes whichever
+//! stream its terminal sends, a grid's screen and history arrive in a
+//! transcript as text lines ([`grid_text`]), and
+//! [`SupervisorClientAttachExt::send_keys`] types into either.
 //!
 //! This is the
 //! broadly shared layer — everything the pre-split file's shared preamble
@@ -145,8 +141,8 @@ impl TermSource for TermStream {
 ///
 /// This is what lets one waiter, and one needle, serve both kinds of
 /// terminal: a test looking for what a program printed finds it in either
-/// transcript. Escape sequences exist only in a byte stream, so a test whose
-/// subject is one runs on old terminals. A grid transcript's order is the
+/// transcript. Escape sequences exist only in a byte stream, which only an
+/// old terminal sends. A grid transcript's order is the
 /// order rows were sent, not printed (see [`grid_text`]).
 pub(crate) fn append_transcript(grid: bool, seen: &mut Vec<u8>, bytes: &[u8]) {
     if grid {
@@ -655,29 +651,6 @@ pub(crate) async fn pane_id_of(sock: &std::path::Path, tmux_name: &str) -> Strin
         .to_string()
 }
 
-/// Whether the harness's tmux knows a given format variable, probed
-/// against its live server (which always has a session by the time any
-/// caller asks).
-///
-/// The success assert distinguishes "tmux genuinely lacks this format"
-/// (expands empty) from "the probe itself broke" (command fails): a
-/// silent probe failure would look like an unsupported format and
-/// quietly skip the assertion it guards, which is exactly the assertion
-/// worth having.
-pub(crate) async fn tmux_has_format(h: &Harness, name: &str) -> bool {
-    let out = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &["display-message", "-p", &format!("#{{{name}}}")],
-    )
-    .await;
-    assert!(
-        out.status.success(),
-        "tmux format probe failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    !String::from_utf8_lossy(&out.stdout).trim().is_empty()
-}
-
 /// Wait until a supervisor on `state_dir` can be DIALLED, for tests that
 /// drive `serve()` directly (or run a supervisor as a real child process)
 /// rather than using an in-process duplex pipe.
@@ -779,15 +752,12 @@ pub(crate) const REAL_STACK_SETTLE: Duration = Duration::from_secs(90);
 
 /// One running supervisor process plus everything that must die with it.
 ///
-/// Field order is drop order and is load-bearing, the same rule
-/// [`TmuxServerGuard`]'s own docs set out: the process first, then its tmux
-/// server (only a supervisor of old terminals has one, so only its fixture
-/// holds a guard), then the directory holding both their sockets. The
-/// directory is
-/// also the terminal hosts' guard: a host outlives the supervisor that
-/// started it, and the `TestDir`'s drop ends every host with a socket in it
-/// before removing it, keeping it for the sweep when it cannot confirm they
-/// ended (`terminal_host_cleanup` pins this).
+/// Field order is drop order and is load-bearing: the process first, then
+/// the directory holding its sockets. The directory is also the terminal
+/// hosts' guard: a host outlives the supervisor that started it, and the
+/// `TestDir`'s drop ends every host with a socket in it before removing it,
+/// keeping it for the sweep when it cannot confirm they ended
+/// (`terminal_host_cleanup` pins this).
 ///
 /// The child needs no guard of its own — every process here is spawned with
 /// `kill_on_drop(true)`, so dropping the `Child` is what kills it, and a
@@ -797,29 +767,14 @@ pub(crate) const REAL_STACK_SETTLE: Duration = Duration::from_secs(90);
 /// debris that makes the NEXT run fail for an unrelated reason.
 pub(crate) struct SupervisorProcess {
     _child: tokio::process::Child,
-    _tmux: Option<TmuxServerGuard>,
     pub(crate) state: farhelm_teststate::TestDir,
-}
-
-/// Which kind of terminal a real-process fixture's supervisor creates: its
-/// `--new-terminals`, or none for the bare command's default (terminal hosts,
-/// what every shipped launch runs).
-#[derive(Clone, Copy)]
-enum FixtureTerminals {
-    /// The bare `farhelm supervisor run`: terminal hosts.
-    Default,
-    /// `--new-terminals tmux`: old terminals, for the tests written against
-    /// them.
-    Tmux,
 }
 
 /// Start a real `farhelm supervisor run` on a fresh state directory and
 /// wait for its socket path to appear.
 ///
 /// The bare command, as every shipped launch runs it, so its sessions run in
-/// terminal hosts. A test whose subject is a tmux terminal (a byte-stream
-/// attach, which a host terminal refuses, or a read of the private tmux
-/// server) uses [`supervisor_process_tmux`] instead.
+/// terminal hosts.
 ///
 /// This establishes that startup has published the path, not that a peer
 /// can connect or that later initialization is finished. Call
@@ -830,13 +785,23 @@ pub(crate) async fn supervisor_process() -> SupervisorProcess {
     supervisor_process_on_state(state, std::iter::empty()).await
 }
 
-/// [`supervisor_process`] with `env` applied to the child's environment
-/// (see [`supervisor_process_tmux_with_env`] for why that exists).
+/// [`supervisor_process`] with `env` applied to the CHILD's environment
+/// before spawn.
+///
+/// Every other real-stack fixture builds a [`SupervisorStartup`] directly
+/// in Rust, which is the right shape for almost everything — but it never
+/// exercises `main.rs`'s own `std::env::var` reads for
+/// `FARHELM_AGENT_HOOKS`/`FARHELM_AGENT_INSTRUCTIONS` at all, since those
+/// reads live in the CLI arm and a struct built by hand skips over them
+/// entirely. Tests that need exactly that arm exercised, env var and
+/// non-UTF-8 fallback included, set an environment variable on a spawned
+/// `farhelm` process rather than mutating this test process's own — the two
+/// are never confused, because `Command::env` only ever reaches the CHILD.
 pub(crate) async fn supervisor_process_with_env(
     env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
 ) -> SupervisorProcess {
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
-    spawn_supervisor_process(state, env, std::iter::empty(), FixtureTerminals::Default).await
+    spawn_supervisor_process(state, env, std::iter::empty()).await
 }
 
 /// [`supervisor_process_with_env`], after removing named inherited
@@ -846,36 +811,7 @@ pub(crate) async fn supervisor_process_with_env_removed(
     removed: impl IntoIterator<Item = std::ffi::OsString>,
 ) -> SupervisorProcess {
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
-    spawn_supervisor_process(state, env, removed, FixtureTerminals::Default).await
-}
-
-/// [`supervisor_process`] with `--new-terminals tmux`: its sessions run in
-/// tmux terminals, for the tests written against them (old terminals keep
-/// their tests for as long as they exist).
-pub(crate) async fn supervisor_process_tmux() -> SupervisorProcess {
-    supervisor_process_tmux_with_env(std::iter::empty()).await
-}
-
-/// [`supervisor_process_tmux`], with `env` applied to the CHILD's environment
-/// before spawn.
-///
-/// Every other real-stack fixture builds a [`SupervisorStartup`] directly
-/// in Rust, which is the right shape for almost everything — but it never
-/// exercises `main.rs`'s own `std::env::var` reads for
-/// `FARHELM_AGENT_HOOKS`/`FARHELM_AGENT_INSTRUCTIONS` at all, since those
-/// reads live in the CLI arm and a struct built by hand skips over them
-/// entirely. `hook_identity`'s `FARHELM_AGENT_INSTRUCTIONS` tests need
-/// exactly that arm exercised, env var and non-UTF-8 fallback included, so
-/// this is the one place in the suite that sets an environment variable on
-/// a spawned `farhelm` process rather than mutating this test process's
-/// own — the two are never confused, because `Command::env` only ever
-/// reaches the CHILD. Its callers read their sessions through tmux, hence the
-/// pin.
-pub(crate) async fn supervisor_process_tmux_with_env(
-    env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
-) -> SupervisorProcess {
-    let state = farhelm_teststate::tempdir().expect("supervisor state dir");
-    spawn_supervisor_process(state, env, std::iter::empty(), FixtureTerminals::Tmux).await
+    spawn_supervisor_process(state, env, removed).await
 }
 
 /// [`supervisor_process`], on a caller-prepared state directory.
@@ -891,42 +827,27 @@ pub(crate) async fn supervisor_process_on_state(
     state: farhelm_teststate::TestDir,
     env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
 ) -> SupervisorProcess {
-    spawn_supervisor_process(state, env, std::iter::empty(), FixtureTerminals::Default).await
+    spawn_supervisor_process(state, env, std::iter::empty()).await
 }
 
-/// Shared spawn path for every real-process supervisor fixture: the kind of
-/// terminal it creates, then removals before explicit fixture values, so
-/// test-owned configuration wins without changing the test process's
-/// environment or runtime substrate.
+/// Shared spawn path for every real-process supervisor fixture: removals
+/// before explicit fixture values, so test-owned configuration wins without
+/// changing the test process's environment or runtime substrate.
 async fn spawn_supervisor_process(
     state: farhelm_teststate::TestDir,
     env: impl IntoIterator<Item = (&'static str, std::ffi::OsString)>,
     removed: impl IntoIterator<Item = std::ffi::OsString>,
-    terminals: FixtureTerminals,
 ) -> SupervisorProcess {
     let mut command = tokio::process::Command::new(farhelm_bin());
     command
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path());
-    match terminals {
-        FixtureTerminals::Default => {}
-        FixtureTerminals::Tmux => {
-            command.args(["--new-terminals", "tmux"]);
-        }
-    }
     for key in removed {
         command.env_remove(key);
     }
     for (key, value) in env {
         command.env(key, value);
     }
-    let tmux = match terminals {
-        FixtureTerminals::Default => None,
-        FixtureTerminals::Tmux => Some(tmux_guard_for_supervisor_child(
-            state.path().join("tmux.sock"),
-            command.as_std(),
-        )),
-    };
     let child = command
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -939,7 +860,6 @@ async fn spawn_supervisor_process(
     wait_for_file(&socket, REAL_STACK_SETTLE.as_secs()).await;
     SupervisorProcess {
         _child: child,
-        _tmux: tmux,
         state,
     }
 }
@@ -1142,13 +1062,7 @@ pub(crate) struct Harness {
     /// supervisor (`second_client`) — cross-connection enforcement is
     /// exactly what some SPEC.md rules are about.
     pub(crate) sup: Arc<Supervisor>,
-    /// The private tmux server's guard, for a harness of old terminals
-    /// only: a harness of new terminals has no tmux server (its supervisor
-    /// never starts one) and runs no tmux command at teardown.
-    pub(crate) _tmux: Option<TmuxServerGuard>,
-    // Read in tests (socket paths); ALSO held so the tempdir outlives
-    // the tmux server — it must be declared after `_tmux` so the server
-    // dies before its socket directory is deleted.
+    // Read in tests (socket paths).
     //
     // A `TestDir` rather than a plain `TempDir`: drop-time removal is the
     // same (normal exit and panic unwinding alike), but the dir lives
@@ -1208,8 +1122,8 @@ impl Harness {
     /// required: a terminal host serves one connection and every new one
     /// takes it over, so a second supervisor built beside a live first one
     /// would fight it for every host (and start read-only, without the
-    /// state directory's claim). The private tmux server, the slot and the
-    /// state directory carry over.
+    /// state directory's claim). The slot and the state directory carry
+    /// over.
     pub(crate) async fn restart_supervisor<F, Fut>(self, build: F) -> Harness
     where
         F: FnOnce(std::path::PathBuf) -> Fut,
@@ -1218,7 +1132,6 @@ impl Harness {
         let Harness {
             client,
             sup,
-            _tmux,
             state,
             _slot,
         } = self;
@@ -1232,7 +1145,6 @@ impl Harness {
         Harness {
             client,
             sup,
-            _tmux,
             state,
             _slot,
         }
@@ -2283,32 +2195,14 @@ pub(crate) async fn wait_for_exit_code(
 
 /// Boot a supervisor on a throwaway state dir and connect a client to it.
 ///
-/// Its sessions and tabs are new terminals, in terminal hosts, as every
-/// shipped supervisor's are; [`harness_tmux`] is the one for old terminals.
+/// Its sessions and tabs run in terminal hosts, as every supervisor's do.
 pub(crate) async fn harness() -> Harness {
     harness_with_timeouts(SupervisorTimeouts::default()).await
 }
 
-/// [`harness`] for old terminals: its sessions and tabs are panes in a
-/// private tmux server this harness owns and stops at teardown.
-///
-/// For tests whose subject exists only for old terminals: a byte-stream
-/// attachment and its escape sequences, tmux's flow control and replay, tmux
-/// windows as tabs, reading or killing tmux panes. Everything else runs on
-/// [`harness`].
-pub(crate) async fn harness_tmux() -> Harness {
-    harness_tmux_with_timeouts(SupervisorTimeouts::default()).await
-}
-
-/// [`harness_with_timeouts`] for old terminals (see [`harness_tmux`]).
-pub(crate) async fn harness_tmux_with_timeouts(timeouts: SupervisorTimeouts) -> Harness {
-    harness_with_seams(timeouts, SupervisorSeams::tmux_terminals()).await
-}
-
 /// A supervisor on `state_dir`, with default timeouts and seams and the
 /// built `farhelm` as its launch shim, outside any [`Harness`]: for a test
-/// that starts a supervisor again on a harness's state directory. New
-/// terminals, as [`harness`]'s.
+/// that starts a supervisor again on a harness's state directory.
 pub(crate) async fn supervisor_on(state_dir: &std::path::Path) -> anyhow::Result<Arc<Supervisor>> {
     Supervisor::new_with_seams(
         state_dir,
@@ -2319,29 +2213,7 @@ pub(crate) async fn supervisor_on(state_dir: &std::path::Path) -> anyhow::Result
     .await
 }
 
-/// [`supervisor_on`] for old terminals, as [`harness_tmux`]'s.
-pub(crate) async fn tmux_supervisor_on(
-    state_dir: &std::path::Path,
-) -> anyhow::Result<Arc<Supervisor>> {
-    tmux_supervisor_with_timeouts(state_dir, SupervisorTimeouts::default()).await
-}
-
-/// [`tmux_supervisor_on`] with `timeouts`.
-pub(crate) async fn tmux_supervisor_with_timeouts(
-    state_dir: &std::path::Path,
-    timeouts: SupervisorTimeouts,
-) -> anyhow::Result<Arc<Supervisor>> {
-    Supervisor::new_with_seams(
-        state_dir,
-        farhelm_bin().into(),
-        timeouts,
-        SupervisorSeams::tmux_terminals(),
-    )
-    .await
-}
-
-/// [`tmux_supervisor_with_timeouts`] for new terminals, as [`supervisor_on`]
-/// is with default timeouts.
+/// [`supervisor_on`] with `timeouts`.
 pub(crate) async fn suite_supervisor_with_timeouts(
     state_dir: &std::path::Path,
     timeouts: SupervisorTimeouts,
@@ -2652,10 +2524,6 @@ pub(crate) async fn harness_with_seams(
     let timeouts = floor_suite_timeouts(timeouts);
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let guard =
-        (seams.new_terminals == farhelm_supervisor::service::NewTerminals::Tmux).then(|| {
-            TmuxServerGuard::with_program(state.path().join("tmux.sock"), &seams.tmux_program)
-        });
     let sup = Supervisor::new_with_seams(state.path(), farhelm_bin().into(), timeouts, seams)
         .await
         .expect("supervisor");
@@ -2663,7 +2531,6 @@ pub(crate) async fn harness_with_seams(
     Harness {
         client,
         sup,
-        _tmux: guard,
         state,
         _slot: slot,
     }
@@ -2725,8 +2592,8 @@ pub(crate) async fn wait_until<S: TermSource>(
             // The replay-complete marker (PLAN_M5.md item 4) is
             // presentation metadata — it carries no bytes and this helper
             // is a plain text scan, so there is nothing for it to add to
-            // `seen`. Its own ordering contract is pinned at the protocol
-            // level in replay_marker.rs and, helm-side, in
+            // `seen`. Its own ordering contract is pinned by the
+            // supervisor's `service::grid_stream` tests and, helm-side, in
             // farhelm-helm's client.rs/lib.rs; these supervisor-facing
             // tests deliberately do not re-assert it here.
             Ok(Some(TermEvent::ReplayComplete)) => {}
@@ -2776,7 +2643,7 @@ async fn wait_for_inner<S: TermSource>(rx: &mut S, seen: &mut Vec<u8>, needle: &
 /// Its job is the fixture-readiness barrier: `("FAKE-AGENT READY", "> ")`
 /// waits for the fake agent's PROMPT rather than its ready marker, which
 /// is what a test must do before it types if it later asserts on the
-/// startup rows (see `reattach_replays_history_and_modes`). Anchoring
+/// startup rows. Anchoring
 /// matters because `"> "` is not unique to startup, so only its position
 /// after the marker identifies it. (It once also anchored assertions on a
 /// dead pane's appended stop-time snapshot; that mechanism is gone.)
@@ -2961,38 +2828,6 @@ async fn wait_for_normalized_inner<S: TermSource>(
         normalize_pane_text(seen).contains(needle)
     })
     .await;
-}
-
-/// Extract complete records from the counter fixture without decoding
-/// unrelated terminal bytes as UTF-8.
-///
-/// A record split exactly at replay cutover may have cursor-restoration
-/// escapes inserted between its halves, in which case it is deliberately
-/// absent here. The fixture flushes each short record as one PTY write so
-/// that shape would itself be evidence that tmux split one write across
-/// pane reads, not a parser artifact.
-pub(crate) fn counter_records(transcript: &[u8]) -> Vec<u64> {
-    const PREFIX: &[u8] = b"CUTOVER-";
-    const DIGITS: usize = 8;
-
-    let mut records = Vec::new();
-    let mut offset = 0;
-    while offset + PREFIX.len() + DIGITS <= transcript.len() {
-        if transcript[offset..].starts_with(PREFIX) {
-            let digits = &transcript[offset + PREFIX.len()..offset + PREFIX.len() + DIGITS];
-            if digits.iter().all(u8::is_ascii_digit) {
-                let number = std::str::from_utf8(digits)
-                    .expect("ASCII digits")
-                    .parse()
-                    .expect("eight digits fit in u64");
-                records.push(number);
-                offset += PREFIX.len() + DIGITS;
-                continue;
-            }
-        }
-        offset += 1;
-    }
-    records
 }
 
 /// Wait for an attachment's `Detached` notice and return it (reason and code).

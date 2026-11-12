@@ -16,7 +16,7 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { attachSession, cleanupSession, waitForTermText } from "../tests/helpers/term";
+import { attachSession, cleanupSession, terminalFit, waitForTermText } from "../tests/helpers/term";
 import { patchPreferences, SESSION_LISTING } from "../tests/helpers/fleet";
 import type { Scenario, ScenarioSession } from "./scenario";
 
@@ -209,13 +209,11 @@ async function measureTerminal(page: Page, request: APIRequestContext, info: Sta
   const id = ((await created.json()) as { id: string }).id;
   await page.goto("/");
   await attachSession(page, id);
-  const read = () => page.evaluate(() => {
-    const term = (window as any).__farhelmTerm;
-    return { cols: (term?.cols as number) ?? 0, rows: (term?.rows as number) ?? 0 };
-  });
-  // xterm mounts at its 80x24 default and is fitted to the pane afterwards;
-  // the viewport is far larger than that, so "bigger than the default" is
-  // the fitted size.
+  // The size the page fits the terminal to, the one it asks the program
+  // for (the grid's own fit, read the way the browser suite reads it). The
+  // viewport is far larger than the API's 80x24 default, so "bigger than
+  // the default" is the fitted size rather than one read before the fit.
+  const read = async () => (await terminalFit(page)) ?? { cols: 0, rows: 0 };
   await expect.poll(async () => {
     const size = await read();
     return size.cols > 80 && size.rows > 24;

@@ -49,12 +49,6 @@ enum Cmd {
         /// own tree. Ignored by every other script.
         #[arg(long)]
         record_home: Option<PathBuf>,
-        /// Bracket each chunk of [`fake_agent::Script::FloodRegion`]'s
-        /// scrolled records in DEC private mode 2026's synchronized-output
-        /// sequences. Ignored by every other script, the same tolerance
-        /// `record_home` gets.
-        #[arg(long)]
-        sync_output: bool,
         /// The transcript [`fake_agent::Script::Replay`] prints before it
         /// settles (see `docs/readme-hero/SPEC.md`). Ignored by every other
         /// script.
@@ -149,7 +143,6 @@ fn main() -> anyhow::Result<()> {
         Cmd::FakeAgent {
             script,
             record_home,
-            sync_output,
             transcript,
             then,
             exit_code,
@@ -168,7 +161,6 @@ fn main() -> anyhow::Result<()> {
             fake_agent::run(
                 script,
                 record_home,
-                sync_output,
                 fake_agent::ReplayOptions {
                     transcript,
                     then,
@@ -372,61 +364,5 @@ mod tests {
         };
         assert_eq!(report_conversation.as_deref(), Some("conv-1"));
         assert_eq!(extra, vec!["--settings", "{}"]);
-    }
-
-    /// Pins the `--sync-output` flag (`fake_agent::Script::FloodRegion`):
-    /// that it parses to `true` when given, defaults to `false` when
-    /// omitted, and — like `--record-home` — is accepted regardless of
-    /// which script it accompanies, since every other script is
-    /// documented to ignore it rather than reject it.
-    #[farhelm_testtrace::test]
-    fn fake_agent_sync_output_flag_parses_and_defaults_false() {
-        let with_flag = Cli::try_parse_from([
-            "farhelm-fixtures",
-            "fake-agent",
-            "--script",
-            "flood-region",
-            "--sync-output",
-        ])
-        .unwrap();
-        let Cmd::FakeAgent {
-            script,
-            sync_output,
-            ..
-        } = with_flag.command
-        else {
-            panic!("expected Cmd::FakeAgent");
-        };
-        assert!(matches!(script, fake_agent::Script::FloodRegion));
-        assert!(sync_output);
-
-        let without_flag =
-            Cli::try_parse_from(["farhelm-fixtures", "fake-agent", "--script", "flood-region"])
-                .unwrap();
-        let Cmd::FakeAgent { sync_output, .. } = without_flag.command else {
-            panic!("expected Cmd::FakeAgent");
-        };
-        assert!(!sync_output);
-
-        // The "accepted regardless of script" half of the contract: a
-        // script that ignores the flag must still parse with it present.
-        let other_script = Cli::try_parse_from([
-            "farhelm-fixtures",
-            "fake-agent",
-            "--script",
-            "counter",
-            "--sync-output",
-        ])
-        .unwrap();
-        let Cmd::FakeAgent {
-            script,
-            sync_output,
-            ..
-        } = other_script.command
-        else {
-            panic!("expected Cmd::FakeAgent");
-        };
-        assert!(matches!(script, fake_agent::Script::Counter));
-        assert!(sync_output);
     }
 }

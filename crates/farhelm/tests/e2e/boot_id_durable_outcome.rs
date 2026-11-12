@@ -1,10 +1,9 @@
 //! Boot-id classification, the durable last-known outcome, and the
 //! durable stop annotation across simulated reboots.
 //!
-//! These run on new terminals: a reboot is simulated by ending every
-//! terminal host of the state directory (`end_all_terminals`), and an exit
-//! while no supervisor watches is read from the host runtime's own record of
-//! its child. Each restart drains the previous supervisor first
+//! A reboot is simulated by ending every terminal host of the state
+//! directory (`end_all_terminals`), and an exit while no supervisor watches
+//! is read from the host runtime's own record of its child. Each restart drains the previous supervisor first
 //! (`Harness::restart_supervisor`), since a host serves one supervisor at a
 //! time.
 
@@ -83,22 +82,8 @@ pub(crate) async fn supervisor_believing_boot(
 /// id, so a later supervisor can be told a different one without the test
 /// depending on whether this host publishes a real boot id at all.
 pub(crate) async fn harness_believing_boot(boot: &str) -> Harness {
-    harness_believing_boot_with(boot, SupervisorSeams::default()).await
-}
-
-/// [`harness_believing_boot`] for old terminals (see `harness_tmux`), with
-/// the private tmux server's guard.
-pub(crate) async fn harness_believing_boot_tmux(boot: &str) -> Harness {
-    harness_believing_boot_with(boot, SupervisorSeams::tmux_terminals()).await
-}
-
-/// [`harness_believing_boot`] built on `base`, whose boot id source the
-/// harness replaces.
-async fn harness_believing_boot_with(boot: &str, base: SupervisorSeams) -> Harness {
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
-    let tmux = (base.new_terminals == farhelm_supervisor::service::NewTerminals::Tmux)
-        .then(|| TmuxServerGuard::new(state.path().join("tmux.sock")));
     let boot = boot.to_string();
     let sup = Supervisor::new_with_seams(
         state.path(),
@@ -106,7 +91,7 @@ async fn harness_believing_boot_with(boot: &str, base: SupervisorSeams) -> Harne
         SupervisorTimeouts::default(),
         SupervisorSeams {
             boot_id: Arc::new(move || Ok(Some(boot.clone()))),
-            ..base
+            ..SupervisorSeams::default()
         },
     )
     .await
@@ -115,7 +100,6 @@ async fn harness_believing_boot_with(boot: &str, base: SupervisorSeams) -> Harne
     Harness {
         client,
         sup,
-        _tmux: tmux,
         state,
         _slot: slot,
     }
@@ -543,8 +527,7 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
         .await
         .expect_err("the injected crash must fail the create");
 
-    // Nothing external happened: no terminal host was ever started (and no
-    // tmux session created, for a supervisor of old terminals).
+    // Nothing external happened: no terminal host was ever started.
     let hosts = std::fs::read_dir(farhelm_supervisor::hosts::hosts_dir(state.path()))
         .map(|entries| entries.count())
         .unwrap_or(0);

@@ -312,7 +312,9 @@ async function showSession(page: Page, session: ScenarioSession) {
 }
 
 /** Hover actual visible terminal cells after this session's replay is revealed.
- * Canvas text has no DOM target. The bounded observation keeps attachment and
+ * The matched text has no element of its own: the grid terminal's row element
+ * gives its row, and the screen's width over the grid's columns its cell
+ * width. The bounded observation keeps attachment and
  * visibility facts in a timeout instead of treating an absent path as readiness.
  * Nothing is printed, clicked or opened to manufacture the target.
  */
@@ -330,17 +332,17 @@ async function hoverTerminalReviewText(page: Page, id: string, needle: string) {
   await expect.poll(async () => {
     const observed = await page.evaluate(({ id, needle }) => {
       const island = (window as any).__farhelmIslands?.terminal;
-      const term = island?.term;
-      const screen = term?.element.querySelector(".xterm-screen");
+      const grid = island?.grid;
+      const screen = document.querySelector("#terminal .grid-terminal-screen");
       const box = screen?.getBoundingClientRect();
       let cell = null;
-      if (box && box.width > 0 && box.height > 0) {
-        for (let row = 0; row < term.rows; row++) {
-          const line = term.buffer.active.getLine(term.buffer.active.viewportY + row)?.translateToString(true) || "";
-          const column = line.indexOf(needle);
+      if (grid && screen && box && box.width > 0 && box.height > 0) {
+        for (const row of screen.querySelectorAll(".grid-terminal-row")) {
+          const column = (row.textContent || "").indexOf(needle);
           if (column < 0) continue;
-          const x = box.x + (column + needle.length / 2) * box.width / term.cols;
-          const y = box.y + (row + 0.5) * box.height / term.rows;
+          const rowBox = row.getBoundingClientRect();
+          const x = box.x + (column + needle.length / 2) * box.width / grid.model.cols;
+          const y = rowBox.y + rowBox.height / 2;
           if (x >= 0 && x < innerWidth && y >= 0 && y < innerHeight) cell = { x, y };
           break;
         }
@@ -582,7 +584,7 @@ async function unboundShortcutShots(page: Page, request: APIRequestContext, name
     }).toMatchObject({ quick_launch_template: null, template_shortcuts: {} });
     const begin = page.locator('.launch-sequence-trigger[data-sequence-action="begin"]');
     await expect(begin).toBeEnabled();
-    const terminalInput = page.locator("#terminal .xterm-helper-textarea");
+    const terminalInput = page.locator("#terminal .grid-terminal-input");
     await terminalInput.focus();
     await expect(terminalInput).toBeFocused();
     const indicator = page.locator(".launch-sequence-indicator");

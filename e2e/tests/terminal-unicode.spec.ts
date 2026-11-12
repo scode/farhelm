@@ -1,19 +1,16 @@
 // Emoji widths must agree with the two-cell cursor coordinates agents use.
-// Direct writes exercise the mounted terminal's parser and DOM renderer; the
-// reconnect case separately exercises tmux's capture and cursor restoration.
+// A real program prints every case; the reconnect case separately exercises
+// the supervisor's replay of its own copy of the screen and the cursor.
 // Geometry checks the cell layout, so these tests need no colour-emoji font.
 
 import { type APIRequestContext, type Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { attachSession, cleanupSession, sendTerminalInput, terminalKind, terminalSize, waitForTermText } from "./helpers/term";
-import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import { installTerminalSuiteHooks, reconnectTimingsFromNextLoad } from "./helpers/terminal-suite";
 import { waitForReplayReveal, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 installTerminalSuiteHooks();
 
-const EMOJI = ["✅", "❌", "🔄", "⚠️", "✔️", "⏭️"];
-const CLEAR = "\x1b[3J\x1b[2J\x1b[H";
 const REPLAY_ROW = "⚠️R✅S✔️T⏭️U";
 const CURSOR_PREFIX = "REPLAY-CURSOR:";
 
@@ -68,18 +65,6 @@ async function sendCommand(page: Page, id: string, command: string): Promise<voi
 }
 
 /**
- * Wait for xterm to parse a direct write before reading its public buffer API.
- * Rendering is asynchronous beyond this callback, so DOM assertions still poll
- * their own rows. These bytes deliberately bypass tmux, just as live output
- * reaches xterm without first being rendered by tmux.
- */
-async function writeTerminal(page: Page, bytes: string): Promise<void> {
-  await page.evaluate((bytes) => new Promise<void>((resolve) => {
-    (window as any).__farhelmIslands.terminal.term.write(bytes, resolve);
-  }), bytes);
-}
-
-/**
  * Compare the same visible screen rows in the buffer and DOM. Returning only
  * the requested rows keeps polling and timeout diagnostics bounded; trimming
  * trailing blanks preserves interior spaces where cursor misalignment appears.
@@ -115,104 +100,6 @@ async function expectRows(page: Page, expected: string[]): Promise<void> {
     atTail: true,
   });
 }
-
-/**
- * A wide cell owns its continuation column; inspecting both it and the next
- * printable cell catches tables that draw the glyph but still advance by one.
- */
-test("emoji and VS16 sequences occupy two cells before the following character", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
-  // Writes straight into xterm.js's parser and reads its buffer and DOM
-  // renderer. A grid terminal has no parser in the page: the supervisor's
-  // emulator owns cell widths (its own tests pin them),
-  // and the grid's wide boxes and columns are pinned against recorded
-  // streams in e2e/grid-client/grid-terminal.spec.ts.
-  const id = await openUnicodeTerminal(page, request);
-  try {
-    await writeTerminal(page, CLEAR + EMOJI.map((emoji) => `${emoji}X`).join("\r\n"));
-    const cells = await page.evaluate((count) => {
-      const buffer = (window as any).__farhelmIslands.terminal.term.buffer.active;
-      return Array.from({ length: count }, (_, row) => {
-        const line = buffer.getLine(buffer.baseY + row);
-        return [0, 1, 2].map((column) => ({
-          chars: line.getCell(column).getChars() as string,
-          width: line.getCell(column).getWidth() as number,
-        }));
-      });
-    }, EMOJI.length);
-    expect(cells).toEqual(EMOJI.map((emoji) => [
-      { chars: emoji, width: 2 },
-      { chars: "", width: 0 },
-      { chars: "X", width: 1 },
-    ]));
-    await expectRows(page, EMOJI.map((emoji) => `${emoji}X`));
-  } finally {
-    await cleanupSession(request, id);
-  }
-});
-
-/**
- * Agents update counts with cell coordinates rather than reprinting the whole
- * line. More output must preserve those edits in both parsed and painted rows;
- * a full repaint that happens to repair an earlier overlap is insufficient.
- */
-test("cursor-addressed status redraws stay aligned as more output arrives", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
-  // As above: direct writes into xterm.js.
-  const id = await openUnicodeTerminal(page, request);
-  try {
-    await writeTerminal(page, CLEAR + EMOJI.map((emoji) => `${emoji} 0`).join(" "));
-    await expectRows(page, [EMOJI.map((emoji) => `${emoji} 0`).join(" ")]);
-    for (let index = 0; index < EMOJI.length; index++) {
-      // Each segment occupies five columns: a two-cell emoji, space, count,
-      // and separator. Addressing the count models the agent's width contract.
-      await writeTerminal(page, `\x1b[1;${index * 5 + 4}H${index + 1}`);
-    }
-    await writeTerminal(page, "\x1b[2;1Hstream-one\r\nstream-two");
-    await expectRows(page, [EMOJI.map((emoji, index) => `${emoji} ${index + 1}`).join(" "), "stream-one", "stream-two"]);
-  } finally {
-    await cleanupSession(request, id);
-  }
-});
-
-/**
- * A neighbouring background can cover the right half of a one-cell emoji
- * box. Box widths and adjacency test that mechanism without depending on which
- * fallback font supplies the glyph, or comparing rendered pixels.
- */
-test("a coloured neighbouring cell starts after the emoji's full two-cell box", { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
-  // As above: direct writes into xterm.js and its DOM renderer.
-  const id = await openUnicodeTerminal(page, request);
-  try {
-    await writeTerminal(page, CLEAR + EMOJI.map((emoji) => `${emoji}\x1b[41mX\x1b[0m`).join("\r\n"));
-    await expectRows(page, EMOJI.map((emoji) => `${emoji}X`));
-    const boxes = await page.evaluate((emoji) => {
-      const rows = document.querySelector("#terminal .xterm-rows")!;
-      return emoji.map((text, index) => {
-        const spans = Array.from(rows.children[index].children) as HTMLElement[];
-        const wide = spans.find((span) => span.textContent === text);
-        const next = spans.find((span) => span.textContent === "X");
-        if (!wide || !next) return null;
-        const wideBox = wide.getBoundingClientRect();
-        const nextBox = next.getBoundingClientRect();
-        return {
-          emojiWidth: wideBox.width,
-          cellWidth: nextBox.width,
-          gap: nextBox.left - wideBox.right,
-          background: getComputedStyle(next).backgroundColor,
-        };
-      });
-    }, EMOJI);
-    for (let index = 0; index < boxes.length; index++) {
-      const box = boxes[index];
-      expect(box, `DOM spans for ${EMOJI[index]} and its coloured neighbour`).not.toBeNull();
-      expect(box!.cellWidth).toBeGreaterThan(0);
-      expect(Math.abs(box!.emojiWidth - 2 * box!.cellWidth), `${EMOJI[index]} needs a two-cell box`).toBeLessThan(1);
-      expect(Math.abs(box!.gap), "the coloured cell must begin at the emoji box's right edge").toBeLessThan(1);
-      expect(box!.background, "the neighbour must actually paint a background").not.toMatch(/^(transparent|rgba\(0, 0, 0, 0\))$/);
-    }
-  } finally {
-    await cleanupSession(request, id);
-  }
-});
 
 /**
  * A text selector can narrow a normally wide glyph. The supervisor supplies

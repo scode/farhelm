@@ -1469,22 +1469,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   tests can overwrite their startup marker with early test input and then report a healthy supervisor restart as having
   lost terminal contents.
 
-- [`migration-switch-test-accepts-dead-old-agent.md`](migration-switch-test-accepts-dead-old-agent.md) — The update
-  regression can pass if the old running agent dies during supervisor stop/start, so it fails to test its stated
-  keep-working guarantee.
-
-- [`retry-capture-test-cannot-distinguish-smaller-read.md`](retry-capture-test-cannot-distinguish-smaller-read.md) — The
-  migration regression can pass if a timed-out history capture is retried at its original size, leaving the promised
-  smaller retry untested.
-
-- [`oversized-pane-fixture-pulls-history-onto-screen.md`](oversized-pane-fixture-pulls-history-onto-screen.md) — The
-  oversized-terminal regression claims to preserve existing scrollback but moves its entire short scrollback onto the
-  visible screen before Restart, so it misses the positive-scrollback case it says it exercises.
-
-- [`reaping-test-mistakes-missing-sink-for-complete-cleanup.md`](reaping-test-mistakes-missing-sink-for-complete-cleanup.md)
-  — The migration regression cannot detect incomplete old-output-client reaping through the predicate it calls its reap
-  check.
-
 - [`replacement-history-absence-asserted-before-delivery.md`](replacement-history-absence-asserted-before-delivery.md) —
   The replacement regression checks that old history is absent before proving history delivery has finished. The
   boundary gap is confirmed, but a concrete false-pass counterpart for this small fixture remains unverified after
@@ -2030,11 +2014,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`transition-accessor-comment.md`](transition-accessor-comment.md) — A maintainer following the test's explanation
   encounters an accessor name that no longer exists. No product behavior or lifecycle guarantee is shown to be wrong.
 
-- [`tmux-test-probe-deadlines.md`](tmux-test-probe-deadlines.md) — The new server-exit test does not enforce its stated
-  one-minute wait while a tmux probe is in flight. Its companion test's one-shot server-alive assertion also has no
-  probe deadline. These are source-established local timeout gaps in maintainer validation; no dependency hang or
-  product failure was observed.
-
 - [`successor-exit-processing-witness.md`](successor-exit-processing-witness.md) — The retained-exit-code regression
   test relies on recovery replay finishing in the background before it checks the code. A slow replay can make a correct
   restart fail this test; the failing schedule is unverified after investigation.
@@ -2052,11 +2031,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can be credited with an earlier callback's terminal result. Report-write counts prove that reports ran and were
   accepted, but do not prove the second callback exited successfully and stayed silent. The exact false-pass scheduling
   remains unverified after investigation.
-
-- [`mixed-stack-missing-tmux-cleanup.md`](mixed-stack-missing-tmux-cleanup.md) — An old-terminal migration test that
-  fails can leave its private server and agent running after its state directory is removed. The shared test fixture
-  lost the guard that owned those processes. This is a conditional tooling cleanup defect; no actual leftover was
-  observed.
 
 - [`reboot-concurrency-early-release.md`](reboot-concurrency-early-release.md) — The reboot tests do not keep their
   integration permit through successor retirement and terminal cleanup. Under the explicit in-process/libtest use of
@@ -2092,10 +2066,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`host-flood-stall-window-claim.md`](host-flood-stall-window-claim.md) — A migrated test now claims to cross the new
   terminal's stall timeout, but observes only eight of its configured sixty seconds. Its inherited flood witness also
   does not establish output pressure. This is a new coverage-description error, with no observed product stall.
-
-- [`sink-churn-without-sinks.md`](sink-churn-without-sinks.md) — The test intended to catch memory growth from retired
-  old-terminal clients now passes without creating any of those clients. A regression that stops pruning the registry
-  would escape this assertion. No actual memory leak in shipped code is claimed.
 
 - [`fixture-private-ipv6-url-guard.md`](fixture-private-ipv6-url-guard.md) — The fixture checks can approve a screen
   containing a private IPv6 proxy URL. This is a guard omission for valid URL/configuration text, not evidence that a
@@ -2154,10 +2124,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`settings-close-test-forwards-cancelled-save.md`](settings-close-test-forwards-cancelled-save.md) — The regression
   meant to prove that a settings save survives closing its dialog can pass even if the original browser request is
   cancelled: the test itself sends an independent write. No current product save-loss bug is established.
-
-- [`shallow-pause-observer-exceeds-boundary.md`](shallow-pause-observer-exceeds-boundary.md) — Unverified after
-  investigation: a legitimate later recovery may fail the shallow-pause regression because its observer continues beyond
-  the declared output boundary. The required tmux and runtime scheduling has not been demonstrated.
 
 - [`capture-scrubber-misses-multiple-at-signs.md`](capture-scrubber-misses-multiple-at-signs.md) — The capture scrubber
   and its immediate check both miss a local proxy URL with another raw at sign in its password. The separate Rust check

@@ -44,7 +44,6 @@ import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";
 import { attachSession, waitForTermText, terminalInput, terminalLinkPointer, terminalScreen, terminalSize, terminalViewport } from "./helpers/term";
-import { OLD_TERMINAL_TAG } from "../suite-terminals";
 import fs from "node:fs";
 import path from "node:path";
 import { stackScratchDir } from "./helpers/scratch";
@@ -1072,86 +1071,6 @@ test("an OSC 8 link whose text matches its target, or is not a URL, hovers quiet
     await cleanupSession(request, session.id);
   }
 });
-
-/** Pin the private cell tag against the shipped xterm, not a synthetic buffer.
- * Claude closes/reopens an id at the edge; Codex keeps an id-less link open
- * over a cursor move. Neither marks the continuation as terminal-wrapped.
- * Repeated complete links, a native wrap, split-host forgery and ambiguity pin the
- * complete comparison and the fragment-to-warning mapping.
- */
-for (const layout of ["claude", "codex", "terminal", "wide-wrap", "split-host", "ambiguous", "repeated"] as const) {
-  test(`OSC 8 tagged rows compare the complete ${layout} link`, { tag: OLD_TERMINAL_TAG }, async ({ page, request }) => {
-    // Writes straight into xterm.js and reads its cells' link tags. A grid
-    // terminal's links come from the supervisor, and judging a link's text
-    // across its rows is pinned against recorded streams in
-    // e2e/grid-client/grid-attach.spec.ts ("an OSC 8 link whose text is
-    // another address warns, judging the text across the link's rows").
-    let owned: string | undefined;
-    try {
-      const session = await createSession(request, {
-        title: `wrapped-osc-${layout}-${Date.now()}`, cwd: "/tmp",
-        invocation: gatedShellInvocation("printf ready"),
-      });
-      owned = session.id;
-      await page.goto("/");
-      await attachSession(page, session.id);
-      await assertLinkWiring(page);
-      const fixture = await page.evaluate(async (shape) => {
-        const term = (window as any).__farhelmTerm;
-        const prefix = "https://wrap.example/";
-        const first = shape === "repeated" ? prefix : shape === "split-host" ? "https://git" : shape === "codex" || shape === "ambiguous" ? `${prefix}short-` :
-          prefix + "a".repeat(term.cols - 4 - prefix.length - (shape === "wide-wrap" ? 1 : 0));
-        const last = shape === "repeated" ? first : shape === "split-host" ? "hub.com/login" : shape === "ambiguous" ? "https://piece.example/" :
-          shape === "wide-wrap" ? "日continuation-tail" : "continuation-tail";
-        const target = shape === "split-host" ? "https://hub.com/login" : shape === "ambiguous" || shape === "repeated" ? first : first + last;
-        const open = `\x1b]8;${shape === "claude" || shape === "split-host" || shape === "ambiguous" || shape === "repeated" ? "id=joined" : ""};${target}\x07`;
-        const close = "\x1b]8;;\x07";
-        const middle = shape === "claude" || shape === "split-host" || shape === "ambiguous" || shape === "repeated" ? `${close}\r\n     ${open}` :
-          shape === "codex" ? "\x1b[3;6H" : "";
-        // The first ambiguous piece equals its target. Only the incomplete
-        // extent, rather than ordinary mismatch parsing, can make it warn.
-        const extra = shape === "ambiguous" ? ` ${open}again${close}` : "";
-        await new Promise<void>(resolve => term.write(`\x1b[2J\x1b[H$ prompt\r\nsee ${open}${first}${middle}${last}${close}${extra}`, resolve));
-        const buffer = term.buffer.active;
-        const top = buffer.getLine(buffer.baseY + 1);
-        const bottom = buffer.getLine(buffer.baseY + 2);
-        const indent = shape === "terminal" || shape === "wide-wrap" ? 0 : 5;
-        return {
-          first, last, target: new URL(target).href, indent,
-          topTag: top.getCell(4).extended?.urlId,
-          bottomTag: bottom.getCell(indent).extended?.urlId,
-          prefixTag: top.getCell(0).extended?.urlId,
-          indentTag: indent ? bottom.getCell(0).extended?.urlId : 0,
-          pad: top.getCell(term.cols - 1).getChars(),
-          nextWidth: bottom.getCell(0).getWidth(),
-          wrapped: bottom.isWrapped,
-          bottomText: bottom.translateToString(true),
-        };
-      }, layout);
-      expect(fixture.topTag, "vendored getCell must expose a positive extended.urlId").toBeGreaterThan(0);
-      expect(fixture.bottomTag, "both emitted pieces must belong to the same OSC link").toBe(fixture.topTag);
-      expect(fixture.prefixTag, "plain prefix must be untagged in a fresh cell snapshot").toBe(0);
-      expect(fixture.indentTag, "indentation must be untagged in a fresh cell snapshot").toBe(0);
-      expect(fixture.wrapped, "only native terminal wraps set isWrapped").toBe(layout === "terminal" || layout === "wide-wrap");
-      if (layout === "wide-wrap") {
-        expect(fixture.pad, "a wide character that cannot fit leaves an empty tagged pad").toBe("");
-        expect(fixture.nextWidth).toBe(2);
-      }
-      expect(fixture.bottomText).toBe(" ".repeat(fixture.indent) + fixture.last + (layout === "ambiguous" ? " again" : ""));
-      const display = page.locator("#terminal .terminal-link-target:not(.terminal-file-target)");
-      for (const [index, piece] of [fixture.first, fixture.last].entries()) {
-        await hoverLink(page, layout === "repeated" ? `${index === 0 ? "see " : "     "}${piece}` : piece, piece.slice(0, 12));
-        await expect(display.locator(".terminal-link-target-url")).toHaveText(fixture.target);
-        if (layout === "split-host" || layout === "ambiguous") await expect(display).toHaveClass(/\bterminal-link-target-mismatch\b/);
-        else await expect(display).not.toHaveClass(/\bterminal-link-target-mismatch\b/);
-        await page.mouse.move(1, 1);
-        await expect(display).toBeHidden();
-      }
-    } finally {
-      if (owned) await cleanupSession(request, owned);
-    }
-  });
-}
 
 test("an OSC 8 span wins over its https display text, beside a working bare URL", async ({
   page,

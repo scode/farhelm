@@ -258,7 +258,8 @@ async function waitForSession(
 }
 
 /**
- * On the browser suite's new-terminal run, a revealed or ready attachment
+ * In a test under the evidence fixtures' host-terminal premise
+ * (host-premise.ts), a revealed or ready attachment
  * that did not come back as a grid is a failure unless its session was
  * declared fabricated (host-premise.ts's `oldTerminalProblem`): an early,
  * located failure for the premise that the automatic per-test check in evidence.ts
@@ -274,7 +275,7 @@ async function expectHostTerminalKind(page: Page, terminal: SessionTerminal): Pr
   const grid = await page.evaluate((el) => !!(window as any).__farhelmIslands?.[el]?.grid, elementId);
   if (grid) return;
   const problem = await oldTerminalProblem(page.request, terminal, watch.options);
-  expect(problem, "the new-terminal run's premise").toBeNull();
+  expect(problem, "the host-terminal premise").toBeNull();
 }
 
 /** Compare the fixed readiness snapshot without serializing browser-derived data for diagnostics. */

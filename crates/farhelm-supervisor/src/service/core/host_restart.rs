@@ -1,20 +1,18 @@
 //! Restarting an agent into a new terminal host (the plan's PR 21, the
 //! goal's "A restart is a new host, and keeps the history", and its "Old to
-//! new": a tmux session's Restart under the internal switch).
+//! new": a tmux session's Restart).
 //!
 //! A terminal host runs one child for its whole life and has no message to
 //! start another, so a Restart of an agent whose terminal is a host never
 //! reuses that host: it starts a new one for the new launch generation,
 //! through the same start a create uses (`host_launch`: the launch record,
 //! the `host_scan` fence, adoption), and ends the old host once the new
-//! launch is confirmed. With the internal switch on
-//! (`SupervisorSeams::new_terminals`), a Restart of an agent in tmux goes
-//! here too, and that is how an old session moves to a new terminal (below,
-//! "From a tmux pane"). Restart's own frame is unchanged
-//! ([`Supervisor::relaunch`]: the stop first, the generation claim, the
-//! session off the map, the viewer detached, the republication or the
-//! restore); this module is the host arm of `relaunch_into_terminal`, the
-//! counterpart of the tmux targets there.
+//! launch is confirmed. A Restart of an agent in tmux goes here too, and
+//! that is how an old session moves to a new terminal (below, "From a tmux
+//! pane"). Restart's own frame is unchanged ([`Supervisor::relaunch`]: the
+//! stop first, the generation claim, the session off the map, the viewer
+//! detached, the republication or the restore); this module is where
+//! `relaunch_into_terminal` starts every new launch.
 //!
 //! ## Before anything is stopped
 //!
@@ -88,9 +86,9 @@
 //!
 //! ## From a tmux pane
 //!
-//! With the switch on, a Restart of a session whose agent is in tmux (or of a
-//! tmux row whose session holds no terminal) starts the new launch in a host
-//! like any other, so every Restart under the switch ends in a host. The
+//! A Restart of a session whose agent is in tmux (or of a tmux row whose
+//! session holds no terminal) starts the new launch in a host like any
+//! other, so every Restart ends in a host. The
 //! session's agent is stopped in tmux as for any Restart (its pane stays,
 //! dead, under `remain-on-exit`), and its pane's history is read for the seed
 //! ([`Supervisor::tmux_restart_seed`]): `capture-pane` of the newest rows
@@ -544,7 +542,6 @@ impl Supervisor {
                     generation,
                     Relaunched {
                         terminal,
-                        launch_excerpt: None,
                         scope,
                         outcome: LastOutcome::Launching,
                         hooked,
@@ -575,7 +572,6 @@ impl Supervisor {
                 generation,
                 Relaunched {
                     terminal,
-                    launch_excerpt: None,
                     scope,
                     outcome,
                     hooked,
@@ -1158,9 +1154,8 @@ impl Supervisor {
     }
 
     /// Unwind a host relaunch whose start failed, once it is established
-    /// that nothing of it runs: the host counterpart of
-    /// `unwind_failed_relaunch`, deciding from what the start itself could
-    /// tell ([`HostLeft`]) rather than from probing tmux.
+    /// that nothing of it runs, deciding from what the start itself could
+    /// tell ([`HostLeft`]).
     ///
     /// A start that left nothing, or a host it may have left that is then
     /// confirmed ended ([`Supervisor::end_launch_host`], by the protocol

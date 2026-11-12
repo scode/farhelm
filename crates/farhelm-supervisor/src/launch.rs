@@ -2622,26 +2622,6 @@ mod tests {
         finish_exec_failure_child(&spec_path, &error);
     }
 
-    /// Run the production tab helper for supervisor fixtures without linking the CLI.
-    /// Only an explicitly selected ignored child may change cwd or exec. A failed
-    /// exec must exit immediately, just like exec_failure_child, without returning
-    /// its potentially inconsistent process environment to libtest cleanup.
-    #[farhelm_testtrace::test]
-    #[ignore = "the child half of the supervisor tab-helper fixtures"]
-    fn tab_shell_child() {
-        let directory = std::env::var_os("FARHELM_TAB_SHELL_CHILD_DIRECTORY")
-            .map(PathBuf::from)
-            .expect("the parent must provide the tab directory");
-        let shell = std::env::var_os("FARHELM_TAB_SHELL_CHILD_SHELL")
-            .map(PathBuf::from)
-            .expect("the parent must provide the tab shell");
-        let error = exec_tab_shell(&directory, &shell);
-        eprintln!("{error:#}");
-        // SAFETY: this is an isolated helper child; no libtest or Rust cleanup
-        // may read the environment after the production helper's failed exec.
-        unsafe { libc::_exit(1) }
-    }
-
     /// Replace only a disposable child with the real wrapper helper. Child-only
     /// environment wiring leaves the test runner untouched, including after exec fails.
     fn wrapped_launch_child_command(

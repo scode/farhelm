@@ -10,7 +10,7 @@ import path from "node:path";
 import { requireHelmBuild } from "./helm-build";
 import { createResumableSession } from "./fleet";
 import { stackScratchDir } from "./scratch";
-import { attachSession, suiteTerminals, terminalKind, terminalText, waitForTermText, waitForTerminalText } from "./term";
+import { attachSession, terminalKind, terminalText, waitForTermText, waitForTerminalText } from "./term";
 import { waitForSessionRevealed } from "./terminal-readiness";
 
 export {
@@ -233,19 +233,6 @@ export function installTerminalSuiteHooks(options: { tabSweep?: boolean } = {}) 
 export const FAKE_AGENT_INVOCATION = `"${path.resolve(__dirname, "../../../target/debug/farhelm-fixtures")}" fake-agent --script basic`;
 
 /**
- * The fake agent's flood producer as a COMMAND to type into a shell,
- * ungated, for the per-terminal isolation tests.
- *
- * A tab is a plain shell, so the suite's own flood fixture runs inside one
- * as an ordinary command — no fixture support on either side, and a
- * genuinely per-terminal producer rather than a second session. Ungated
- * because the gate exists to let a test control when a producer starts
- * relative to an ATTACH, and here the attach is long since done: the
- * command starts the flood at the moment it is typed.
- */
-export const FLOOD_AGENT_COMMAND = `"${path.resolve(__dirname, "../../../target/debug/farhelm-fixtures")}" fake-agent --script flood`;
-
-/**
  * Locator for a session row by its exact title, matched against the
  * `.session-title` element specifically rather than `hasText` on the
  * whole row: `hasText` matches a row's full text content (title, cwd, AND
@@ -328,14 +315,10 @@ export async function openTerminal(page: Page) {
   // The fake agent prints this banner once its raw-mode setup is ready; its
   // prompt is deliberately later output.
   await waitForTermText(page, "FAKE-AGENT READY");
-  // The run's premise: on the ordinary run the shared session really is a
-  // terminal in a terminal host, drawn as a grid (a stack that kept tmux would
-  // pass every product-level assertion vacuously), and on the old-terminal
-  // set's run it is an old one, drawn by xterm.js, which its tests read.
-  expect(
-    await terminalKind(page),
-    `the shared session must draw as ${suiteTerminals() === "host" ? "a grid" : "xterm.js"} on this run`,
-  ).toBe(suiteTerminals() === "host" ? "grid" : "xterm");
+  // The suite's premise: the shared session really is a terminal in a
+  // terminal host, drawn as a grid (a page that drew it with xterm.js would
+  // pass every product-level assertion there, never exercising the grid).
+  expect(await terminalKind(page), "the shared session must draw as a grid").toBe("grid");
 }
 
 /**

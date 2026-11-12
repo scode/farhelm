@@ -90,10 +90,8 @@ is refused is an event like any other tooling problem.
 ## Scope
 
 The sweep is the AGENTS.md finishing-work inventory minus what cannot flake: formatters, clippy, compile-only checks,
-generated-file and asset-parity checks, and shellcheck are not run. `scripts/test-tmux-pinned-shutdown.sh` is not run
-separately because the workspace nextest phase executes the same tests on the same pinned tmux. Slow deterministic
-batteries (CentOS provisioning, desktop smoke) ARE run; the run is meant to take hours in the background and their cost
-in inference is zero when green.
+generated-file and asset-parity checks, and shellcheck are not run. Slow deterministic batteries (CentOS provisioning,
+desktop smoke) ARE run; the run is meant to take hours in the background and their cost in inference is zero when green.
 
 The browser suite runs both engines, as the merge gate does.
 

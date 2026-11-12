@@ -1,12 +1,11 @@
-//! Creating a session's agent in a terminal host, with the supervisor's
-//! internal switch turned on (`SupervisorSeams::new_terminals`): what the
+//! Creating a session's agent in a terminal host: what the
 //! host and its child are given, how the create's launch identity holds
 //! when the create is interrupted, races Delete or its host fails to start,
 //! and that Stop's sweep spares the host. Restart of a created host agent is
 //! in `host_relaunches.rs`.
 //!
-//! Every supervisor here is the e2e suite's in-process one with the switch
-//! on and `host_program` pointing at the built `farhelm`: the supervisor
+//! Every supervisor here is the e2e suite's in-process one with
+//! `host_program` pointing at the built `farhelm`: the supervisor
 //! runs inside this test binary, which has no `internal terminal-host`.
 //! The host's own fork happens in that `farhelm` process, never in this
 //! test process. Hosts live in the harness's state directory, whose drop
@@ -26,7 +25,6 @@ use crate::host_terminals::{
     WAIT_SECS, host_process, listed_info, wait_for_liveness, wait_for_screen,
 };
 use farhelm_supervisor::hosts::{HostTerminal, Liveness, StopLimits};
-use farhelm_supervisor::service::NewTerminals;
 use farhelm_supervisor::store::TerminalKind;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -34,11 +32,10 @@ use std::path::{Path, PathBuf};
 
 // ---- Fixtures -------------------------------------------------------------------
 
-/// Seams that turn the switch on for an in-process supervisor: new agents
-/// start in hosts, started from the built `farhelm`, with no user manager.
+/// Seams for an in-process supervisor whose hosts start from the built
+/// `farhelm`, with no user manager.
 pub(crate) fn host_seams() -> SupervisorSeams {
     SupervisorSeams {
-        new_terminals: NewTerminals::Host,
         host_program: Some(farhelm_bin().into()),
         scopes: Arc::new(farhelm_supervisor::scope::ScopeManager::disabled()),
         ..SupervisorSeams::default()
@@ -1663,28 +1660,30 @@ async fn deleting_a_session_fences_its_unbound_recorded_start() {
     assert!(!runs.exists(), "the agent never started");
 }
 
-/// A create of `session`'s kind interrupted after its launching row, then
-/// retried by a supervisor with the switch the other way: the retry's
-/// session, and the supervisor that ran it (with its harness pieces).
-async fn retry_across_a_switch_change(
-    first: NewTerminals,
-    then: NewTerminals,
-) -> (
-    SessionInfo,
-    Arc<Supervisor>,
-    farhelm_teststate::TestDir,
-    TmuxServerGuard,
-    farhelm_teststate::TestDir,
-) {
+/// A keyed create that an earlier supervisor started in tmux and that was
+/// interrupted after its launching row is refused when retried: nothing is
+/// started, its row is rolled back, and the refusal is what every later
+/// retry of the intent gets.
+///
+/// Why: this supervisor creates no tmux terminals, and a retry cannot move
+/// the launch into a host instead: the evidence that lets a retry take an
+/// interrupted launch over was gathered for the row's kind, so a host
+/// launch would be a guess. Such a row comes only from an older supervisor;
+/// here it is made by interrupting a create after its launching row and
+/// writing the row's kind as tmux, as an older supervisor would have left
+/// it. Spec: the retry fails with a conflict that says the create was in an
+/// old terminal and was not retried; the row is gone; no host was started
+/// in the state directory; and a second retry gets the same refusal, which
+/// the intent's settlement replays.
+#[farhelm_testtrace::test]
+async fn a_retry_of_a_create_interrupted_in_tmux_is_refused() {
     let state = farhelm_teststate::tempdir().expect("state");
-    let tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
     let work = farhelm_teststate::tempdir().expect("workdir");
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
         suite_timeouts(),
         SupervisorSeams {
-            new_terminals: first,
             faults: FaultHooks {
                 create_crash: Some(crate::boot_id_durable_outcome::crash_at(
                     CreateStage::AfterRecord,
@@ -1707,7 +1706,7 @@ async fn retry_across_a_switch_change(
                     None,
                     80,
                     24,
-                    Some("switched".to_string()),
+                    Some("interrupted-in-tmux".to_string()),
                 )
                 .await
         }
@@ -1715,85 +1714,65 @@ async fn retry_across_a_switch_change(
     create(Arc::clone(&client))
         .await
         .expect_err("the first attempt crashes after its row");
+    let store = SessionStore::open(&state.path().join("supervisor.db"), false)
+        .await
+        .expect("open the store");
+    let rows = store.load_all().await.expect("read the rows");
+    let [row] = rows.as_slice() else {
+        panic!("premise: the interrupted create left one row: {rows:?}");
+    };
+    assert_eq!(row.outcome, LastOutcome::Launching, "premise: {row:?}");
+    assert!(row.terminal_address.is_empty(), "premise: {row:?}");
+    let id = row.id.clone();
+    store
+        .set_terminal_for_test(&id, TerminalKind::Tmux, "")
+        .await
+        .expect("write the row as an older supervisor's tmux launch");
+    drop(store);
     let sup = crate::create_idempotency::handoff_to_new_supervisor_with_seams(
         state.path(),
         sup,
         client,
-        SupervisorSeams {
-            new_terminals: then,
-            ..host_seams()
-        },
+        host_seams(),
     )
     .await;
     let client = connect_client(&sup).await;
-    let session = create(client).await.expect("the retry launches");
-    (session, sup, state, tmux, work)
-}
-
-/// A retry launches in the kind of terminal its row records, not the one
-/// the switch now selects: a tmux row stays in tmux with the switch on.
-///
-/// Why: the opus review's finding 2. The evidence that let the retry take
-/// the launch over was gathered for the row's kind; a retry in the other
-/// kind would be refused by the takeover and replay a create that never
-/// launched, a session with nothing behind it. Spec: a create interrupted
-/// after its launching row under the switch off, retried after a restart
-/// with the switch on, returns the same session running in tmux: its row
-/// is a tmux row with a pane, its tmux session exists, and it has no host.
-#[farhelm_testtrace::test]
-async fn a_retry_keeps_a_tmux_rows_kind_with_the_switch_on() {
-    let (session, sup, state, _tmux, _work) =
-        retry_across_a_switch_change(NewTerminals::Tmux, NewTerminals::Host).await;
-    let row = SessionStore::open(&state.path().join("supervisor.db"), false)
+    let row_kind = SessionStore::open(&state.path().join("supervisor.db"), false)
         .await
-        .unwrap()
-        .session(&session.id)
+        .expect("open the store")
+        .session(&id)
         .await
-        .unwrap()
-        .expect("the row");
-    assert_eq!(row.terminal_kind, TerminalKind::Tmux);
-    assert!(!row.terminal_address.is_empty(), "the launch was confirmed");
-    assert!(sup.agent_host_for_test(&session.id).await.is_none());
-    wait_for_tmux_agent_ready(&state.path().join("tmux.sock"), &session.id).await;
-}
-
-/// The reverse: a host row stays in a host with the switch off.
-///
-/// Why: as above, and the direction a downgrade of the switch takes. Spec:
-/// a create interrupted after its launching row under the switch on,
-/// retried after a restart with the switch off, returns the same session
-/// running in a host: its row is a host row whose `pane` names the host's
-/// socket, the host shows the agent's ready marker, and the private tmux
-/// server has no session for it.
-#[farhelm_testtrace::test]
-async fn a_retry_keeps_a_host_rows_kind_with_the_switch_off() {
-    let (session, sup, state, _tmux, _work) =
-        retry_across_a_switch_change(NewTerminals::Host, NewTerminals::Tmux).await;
-    let row = SessionStore::open(&state.path().join("supervisor.db"), false)
-        .await
-        .unwrap()
-        .session(&session.id)
-        .await
-        .unwrap()
-        .expect("the row");
-    assert_eq!(row.terminal_kind, TerminalKind::Host);
-    let host = sup
-        .agent_host_for_test(&session.id)
-        .await
-        .expect("the retry runs in a host");
+        .expect("read the row")
+        .map(|row| row.terminal_kind);
     assert_eq!(
-        OsString::from(&row.terminal_address),
-        host.socket().file_name().unwrap()
+        row_kind,
+        Some(TerminalKind::Tmux),
+        "premise: the reload kept the tmux row"
     );
-    wait_for_screen(&host, AGENT_READY_MARKER).await;
-    let tmux = tmux_query(
-        &state.path().join("tmux.sock"),
-        &["has-session", "-t", &format!("=fh-{}", session.id)],
-    )
-    .await;
-    assert!(!tmux.status.success(), "no tmux session for a host agent");
-    let pid = host_process(host.socket()).expect("the host's process serves its socket");
-    end_runtime(&host, pid).await;
+
+    for attempt in ["the retry", "a second retry"] {
+        let refused = create(Arc::clone(&client))
+            .await
+            .expect_err("a create interrupted in tmux is not retried");
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("old terminal (tmux)") && message.contains("was not retried"),
+            "{attempt} names the old terminal and the outcome: {message}"
+        );
+        let row = SessionStore::open(&state.path().join("supervisor.db"), false)
+            .await
+            .expect("open the store")
+            .session(&id)
+            .await
+            .expect("read the row");
+        assert!(row.is_none(), "{attempt}: the row was rolled back: {row:?}");
+        assert!(
+            host_processes_in(state.path()).is_empty(),
+            "{attempt} started no host"
+        );
+    }
+    drop(client);
+    drop(sup);
 }
 
 /// An agent launch that the shim cannot execute: a missing program, below

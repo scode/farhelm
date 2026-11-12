@@ -671,10 +671,9 @@ impl std::fmt::Display for TmuxVersion {
 /// interchangeable there. Crashes have been observed on older ones (a
 /// distro 3.4 server hosting live sessions aborted on 2026-08-19, and
 /// BUGS.md records the same abort class reproduced on distro 3.6), while
-/// the pinned build carries a crash-regression suite of its own
-/// (`scripts/test-tmux-pinned-shutdown.sh`). So the floor tracks the pinned
-/// build in `.github/release/source-pins.env` rather than tracking what
-/// distributions ship.
+/// the pinned build is the one the release gate's tests run against. So
+/// the floor tracks the pinned build in `.github/release/source-pins.env`
+/// rather than tracking what distributions ship.
 ///
 /// It is DESIGNED to exclude current distro packages (Ubuntu 24.04 ships
 /// 3.4, 26.04 about 3.6, Debian 13 and Fedora 42 3.5a). The documented
@@ -2601,8 +2600,8 @@ impl TmuxDriver {
 
     /// Learn from a failed command that the server is gone: tmux said no
     /// server runs, or its socket file is missing. Every later command is
-    /// then refused without asking ([`Self::refuse_if_absent`]) until this
-    /// process creates an old terminal again.
+    /// then refused without asking ([`Self::refuse_if_absent`]); only the
+    /// driver's own tests create sessions after that.
     ///
     /// `started` is where the command began ([`presence::ServerPresence::listing_started`]):
     /// a session whose create finished after that may have started the
@@ -3042,9 +3041,8 @@ impl TmuxDriver {
     /// while a private server holding them runs, so the server's existence
     /// is the whole question (the `presence` module): nothing answering on
     /// the socket means no old terminals this run, and the driver then
-    /// issues no tmux command at all until this process creates an old
-    /// terminal itself (only the test-only `--new-terminals tmux` switch
-    /// does). The probe is a plain connect to the socket, not a tmux
+    /// issues no tmux command at all (the supervisor creates no old
+    /// terminals; only the driver's own tests do). The probe is a plain connect to the socket, not a tmux
     /// command, so it needs no tmux binary and starts nothing.
     ///
     /// A server that answers is adopted: the binary and the server are
@@ -3672,6 +3670,14 @@ impl TmuxDriver {
     /// tmux group. Respawn clears the visible grid but preserves history, so the
     /// old history count is the first possible new row. A malformed sample costs
     /// the optional excerpt, not the successfully respawned agent.
+    ///
+    /// Test-only: nothing in the supervisor installs an excerpt fence any
+    /// more (a fence is process-local, set by the process that creates or
+    /// respawns a pane, and the supervisor creates no tmux panes), so the
+    /// tmux excerpt read in `append_launch_excerpt` is unreachable in
+    /// production. Kept, with the driver's tests that use it, only until the
+    /// driver is deleted.
+    #[cfg(test)]
     pub(crate) async fn relaunch_in_pane_with_excerpt_fence(
         &self,
         session: &str,
@@ -3767,6 +3773,10 @@ impl TmuxDriver {
     /// A newly created pane has no prior generation to exclude. Stamping after
     /// creation is safe even if startup already died; callers publish its run
     /// entry only after this best-effort setup has finished.
+    ///
+    /// Test-only, as [`Self::relaunch_in_pane_with_excerpt_fence`] is and
+    /// for the same reason: no production path installs a fence.
+    #[cfg(test)]
     pub(crate) async fn establish_launch_excerpt_fence(
         &self,
         session: &str,
@@ -6996,9 +7006,8 @@ mod tests {
     /// probes) reads this one classification, so a misclassified diagnostic
     /// either launders a real failure into success or turns a harmless
     /// absence into an error. Provoking each shape against a real server
-    /// would mean killing one mid-test; the e2e
-    /// `list_sessions_survives_when_the_tmux_server_is_gone` test covers the
-    /// end-to-end path.
+    /// would mean killing one mid-test, and no end-to-end test does since
+    /// the supervisor stopped creating tmux terminals.
     ///
     /// Specification: each verified tmux diagnostic maps to its variant,
     /// target-bearing ones by prefix and server-level ones only as the whole
@@ -9564,76 +9573,6 @@ mod tests {
             assert!(
                 tokio::time::Instant::now() < deadline,
                 "the empty server must end"
-            );
-            // sleep-ok: polls a server's exit, which tmux reports to no one.
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-
-    /// The first old terminal a driver creates starts the server from the
-    /// generated config, and the server ends with it.
-    ///
-    /// Why: under the test-only `--new-terminals tmux` switch a supervisor
-    /// that found no server must still create old terminals, through the
-    /// config it writes (nothing runs `start-server`), and the server must
-    /// not outlive them. Spec: after adopting nothing, `create_session`
-    /// starts a server whose `exit-empty` and `focus-events` are on and
-    /// whose `pane-died` hook is set, the session is listed and may be
-    /// held, and killing it ends the server.
-    #[cfg(unix)]
-    #[farhelm_testtrace::test]
-    async fn the_first_old_terminal_starts_the_server_and_its_end_ends_it() {
-        let dir = farhelm_teststate::tempdir().expect("tempdir");
-        let real = PathBuf::from(DEFAULT_TMUX_PROGRAM);
-        let driver = TmuxDriver::new(dir.path());
-        let _server = farhelm_teststate::tmux::guard::TmuxServerGuard::with_program(
-            driver.socket.clone(),
-            &real,
-        );
-        driver
-            .adopt_running_server(true)
-            .await
-            .expect("adopt nothing");
-        assert!(!driver.server_may_run());
-
-        let pane = driver
-            .create_session("fh-new", "/", 80, 24, &[], &["sleep".into(), "600".into()])
-            .await
-            .expect("the create starts a server");
-        assert!(driver.may_hold_session("fh-new"));
-        let states = driver.pane_states().await.expect("listing");
-        assert_eq!(states[&pane].session_name, "fh-new");
-        assert_eq!(
-            driver
-                .run(&["show-options", "-s", "exit-empty"])
-                .await
-                .expect("exit-empty")
-                .trim(),
-            "exit-empty on"
-        );
-        assert_eq!(
-            driver
-                .run(&["show-options", "-s", "focus-events"])
-                .await
-                .expect("focus-events")
-                .trim(),
-            "focus-events on"
-        );
-        assert!(
-            driver
-                .run(&["show-hooks", "-g", "pane-died"])
-                .await
-                .expect("hooks")
-                .contains(PANE_DIED_CHANNEL)
-        );
-
-        driver.kill_session("fh-new").await.expect("kill");
-        assert!(!driver.server_may_run());
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-        while raw_server_runs(&real, &driver.socket).await {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the server must end with its last session"
             );
             // sleep-ok: polls a server's exit, which tmux reports to no one.
             tokio::time::sleep(Duration::from_millis(50)).await;

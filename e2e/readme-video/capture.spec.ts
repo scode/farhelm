@@ -22,7 +22,7 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { waitForTermText } from "../tests/helpers/term";
+import { terminalInput, waitForTermText } from "../tests/helpers/term";
 import { waitForSessionReady } from "../tests/helpers/terminal-readiness";
 import { loadScenario } from "../readme-hero/scenario";
 import { openStagedFleet, readStackInfo, sessions, stageFleet } from "../readme-hero/stage";
@@ -42,15 +42,14 @@ async function waitForStatus(request: APIRequestContext, id: string, state: stri
 }
 
 /**
- * Fail unless xterm's own input element has focus. Keys typed anywhere else
- * go nowhere useful, and the failure would otherwise surface much later as
- * a transcript line that never appeared, hiding the cause.
+ * Fail unless the terminal's own input element (the grid's input field,
+ * found the way the browser suite finds it) has focus. Keys typed anywhere
+ * else go nowhere useful, and the failure would otherwise surface much later
+ * as a transcript line that never appeared, hiding the cause.
  */
 async function expectTerminalFocused(page: Page) {
-  await expect.poll(
-    () => page.evaluate(() => document.activeElement === (window as any).__farhelmTerm?.textarea),
-    { timeout: 5_000, message: "the terminal must have keyboard focus before typing into it" },
-  ).toBe(true);
+  await expect(terminalInput(page), "the terminal must have keyboard focus before typing into it")
+    .toBeFocused({ timeout: 5_000 });
 }
 
 // The running recording, so teardown can discard it when a beat fails before
@@ -124,7 +123,7 @@ test("record the README demo video", async ({ page, request }) => {
   await note.dismiss();
 
   // Beat 5: answer. The pointer clicks the option it is choosing, which
-  // also (re)focuses xterm, and the key press is what actually answers.
+  // also (re)focuses the terminal, and the key press is what actually answers.
   await director.click(await director.terminalText("1. Yes"));
   await expectTerminalFocused(page);
   await director.hold(400);

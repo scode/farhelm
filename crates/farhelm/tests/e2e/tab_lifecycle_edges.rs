@@ -1,50 +1,11 @@
 //! Tab lifecycle edge cases: restart-gap conflicts and other boundary
 //! conditions a tab's open/close path must resolve consistently.
 //!
-//! Most tests here run on new terminals. The two that read a tab's tmux
-//! window (its marking step, its exited pane) stay on old terminals and say
-//! so in their docs, with the `host_tabs.rs` tests that cover the same on
-//! host tabs.
 
 use crate::harness::*;
 
 use crate::terminal_backpressure::drain_for;
-use crate::terminal_tabs::{
-    listed_tabs, run_in_shell, tab_pane, wait_for_shell, window_rows, write_daemon_script,
-};
-
-/// Observe shell exit through the pane before asking a listing to reconcile the tab.
-///
-/// A list request would exercise the behavior the caller is about to assert,
-/// so it cannot supply this premise. Query the named pane directly under one
-/// deadline, and kill an unresponsive query when its future is dropped.
-async fn wait_for_exited_tab_pane(sock: &std::path::Path, pane: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
-    let mut last = String::new();
-    let result = tokio::time::timeout_at(deadline, async {
-        loop {
-            let out = tokio::process::Command::new("tmux")
-                .arg("-S")
-                .arg(sock)
-                .args(["display-message", "-p", "-t", pane, "#{pane_dead}"])
-                .kill_on_drop(true)
-                .output()
-                .await
-                .expect("query the tab pane");
-            last = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-            if last == "1" {
-                return;
-            }
-            // sleep-ok: shell exit is asynchronous; observe pane death without triggering the listing reconciliation under test.
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await;
-    assert!(
-        result.is_ok(),
-        "the tab's shell never exited; pane {pane}, last pane_dead={last:?}"
-    );
-}
+use crate::terminal_tabs::{listed_tabs, run_in_shell, wait_for_shell, write_daemon_script};
 
 /// Observe that a delete racing a tab operation left no process with the owned session marker.
 ///
@@ -152,125 +113,6 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
     drop(slot);
 }
 
-/// A tab whose shell EXITED disappears from listings at once and still
-/// closes cleanly — SPEC.md's automatic-reap contract as the listing
-/// paths see it (the ticker's reap, the half that actually kills the
-/// window, is pinned in `ticker`'s own tests; this harness runs no
-/// ticker).
-///
-/// This test REPLACED the pre-reap contract, deliberately: a dead tab
-/// used to stay listed and attachable with its scrollback, per PLAN_M4's
-/// "established tabs have no error-vs-exited story to tell". The user
-/// decided otherwise (BUGS_BURNDOWN.md issue 3, 2026-08-13): an exited
-/// tab is DONE — removed silently, scrollback discarded — while the
-/// agent terminal keeps its exited-with-scrollback behavior. The close
-/// half matters because the manual close and the ticker's reap are the
-/// same flow, and both must tolerate a pane that is already dead.
-///
-/// Old terminals: it reads the exited tab pane from tmux; host tabs are covered
-/// by host_tabs' exited tab hidden and reaped.
-#[farhelm_testtrace::test]
-async fn a_tab_whose_shell_exited_vanishes_from_listings_and_still_closes() {
-    let h = harness_tmux().await;
-    let (session, _work) = basic_session(&h).await;
-    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
-
-    let tab = h.client.open_tab(&session.id).await.expect("open a tab");
-    let (chan, initial_replay, mut rx) = h
-        .client
-        .attach_terminal_live(
-            &session.id,
-            80,
-            24,
-            TerminalSelector::Tab { id: tab.id.clone() },
-            "tab-lease",
-        )
-        .await
-        .expect("attach the tab");
-    let mut seen = initial_replay;
-    wait_for_shell(&h.client, chan, &mut rx, &mut seen, "READY").await;
-    assert_eq!(
-        listed_tabs(&h.client, &session.id).await,
-        vec![tab.id.clone()],
-        "a live tab lists normally"
-    );
-    h.client.send_keys(chan, b"exit\r".to_vec()).await;
-
-    // The pane goes dead — and the tab is gone from listings the moment
-    // any list looks, without waiting on the ticker's kill.
-    let pane = tab_pane(&h, &session.id, &tab.id).await;
-    wait_for_exited_tab_pane(&h.state.path().join("tmux.sock"), &pane).await;
-    assert!(
-        listed_tabs(&h.client, &session.id).await.is_empty(),
-        "a tab whose shell exited must not be listed"
-    );
-
-    // Gone from listings means gone from ATTACH too: a client that kept
-    // the id must not be able to reach into the corpse and read scrollback
-    // the product has declared discarded (the reap normally follows within
-    // a tick; this window must not behave differently from after it).
-    let err = h
-        .client
-        // The refusal itself is the observation, so consuming a replay
-        // boundary would add an unrelated wait before this assertion.
-        .attach_terminal_at_boundary(
-            &session.id,
-            80,
-            24,
-            TerminalSelector::Tab { id: tab.id.clone() },
-            "corpse-lease",
-        )
-        .await
-        .expect_err("attaching a dead-but-unreaped tab must be refused");
-    assert_eq!(
-        err.downcast_ref::<SupervisorError>()
-            .expect("a refused attach must carry a SupervisorError")
-            .kind(),
-        ErrorKind::NotFound,
-        "a dead tab answers exactly like a reaped one"
-    );
-
-    // The window itself is still there until a reap — asserted at the
-    // tmux level, because the LISTING was already empty before this close
-    // (the dead-tab filter above) and a listing check alone would pass a
-    // no-op close.
-    let before = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &["display-message", "-p", "-t", &pane, "#{pane_dead}"],
-    )
-    .await;
-    assert!(
-        before.status.success(),
-        "the dead pane must still exist before the close"
-    );
-    // The manual close — the same flow the ticker's reap runs — must
-    // finish the job for a pane that is already dead.
-    h.client
-        .close_tab(&session.id, &tab.id)
-        .await
-        .expect("a tab whose shell already exited must still close");
-    assert!(listed_tabs(&h.client, &session.id).await.is_empty());
-    // Enumerated rather than probed: `display-message -t %N` for a
-    // vanished pane silently falls back to a current pane instead of
-    // failing, so only the full pane list can prove absence.
-    let after = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &["list-panes", "-a", "-F", "#{pane_id}"],
-    )
-    .await;
-    assert!(
-        after.status.success(),
-        "the pane enumeration itself must succeed, or its emptiness proves nothing: {}",
-        String::from_utf8_lossy(&after.stderr)
-    );
-    assert!(
-        !String::from_utf8_lossy(&after.stdout)
-            .lines()
-            .any(|line| line.trim() == pane),
-        "the close must actually destroy the window, not merely agree with the empty listing"
-    );
-}
-
 /// Closing a tab id that is well-formed but unknown is `NotFound`, and
 /// costs the session's real terminals nothing.
 ///
@@ -350,63 +192,6 @@ async fn a_closed_tabs_channel_receives_its_detached_notice() {
     assert!(
         reason.code == farhelm_proto::DetachCode::TabClosed,
         "the notice must say the tab closed, got: {reason:?}"
-    );
-}
-
-/// A tab open whose MARKING fails leaves nothing behind: no window, no
-/// shell, no tab in the list — and the error says so rather than
-/// claiming a clean removal it did not perform.
-///
-/// The marking is the one step whose failure strands something no
-/// rediscovery can ever see again (an unmarked window is, by
-/// construction, not a tab), so the unwind is worth proving rather than
-/// reasoning about. The seam is the only way to reach that state: the
-/// tmux call before it either works or leaves nothing.
-///
-/// Old terminals: the tmux window's marking step; host tabs are covered by
-/// host_tabs' opens failed before publishing.
-#[farhelm_testtrace::test]
-async fn a_tab_open_that_cannot_mark_its_window_leaves_nothing_behind() {
-    let h = harness_with_seams(
-        SupervisorTimeouts::default(),
-        SupervisorSeams {
-            faults: FaultHooks {
-                tab_open_fault: Some(Arc::new(|stage| {
-                    assert_eq!(
-                        stage,
-                        farhelm_supervisor::service::TabOpenStage::BeforeMarking
-                    );
-                    Err(anyhow::anyhow!("injected marking failure"))
-                })),
-                ..FaultHooks::default()
-            },
-            ..SupervisorSeams::tmux_terminals()
-        },
-    )
-    .await;
-    let (session, _work) = basic_session(&h).await;
-    let _cleanup = MarkerCleanupGuard::new(session.id.clone());
-
-    let before = window_rows(&h).await.len();
-    let err = h
-        .client
-        .open_tab(&session.id)
-        .await
-        .expect_err("an unmarkable window must fail the open");
-    assert!(
-        format!("{err:#}").contains("injected marking failure"),
-        "the refusal must carry the cause, got: {err:#}"
-    );
-    assert!(
-        listed_tabs(&h.client, &session.id).await.is_empty(),
-        "a failed open must leave no tab"
-    );
-    let after = window_rows(&h).await;
-    assert_eq!(
-        after.len(),
-        before,
-        "a failed open must leave no window either; rows:\n{}",
-        after.join("\n")
     );
 }
 
@@ -880,16 +665,15 @@ async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
 ///
 /// The session's lifecycle claim is what makes that true: without it a
 /// delete could finish its process-tree sweep and an open could then start
-/// a shell in the tmux session the delete is about to tear down, leaving
+/// a shell beside the session the delete is about to tear down, leaving
 /// that shell's daemonized children alive with no row left to reap them
 /// from. Serialized, both orders are correct — an open that wins is swept
 /// by the delete behind it, and an open that loses finds no session at
 /// all — so the assertion is on the OUTCOMES rather than on which one won.
 ///
-/// Staggered offsets rather than one fixed timing, the same technique
-/// `a_stall_teardown_racing_a_takeover_never_detaches_the_winner` uses:
-/// the interesting interleavings are near the boundary and no single
-/// delay reliably lands on them.
+/// Staggered offsets rather than one fixed timing: the interesting
+/// interleavings are near the boundary and no single delay reliably lands
+/// on them.
 #[farhelm_testtrace::test]
 async fn an_open_tab_racing_a_delete_leaves_one_coherent_winner() {
     for offset_ms in [0, 5, 20, 60] {

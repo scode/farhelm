@@ -59,7 +59,7 @@
 //! ability to resume; a corrected selection explains which conversation
 //! an earlier Restart would have resumed instead.
 
-use super::core::{NewTerminals, SessionEntry, Supervisor, session_tmux_name};
+use super::core::{SessionEntry, Supervisor, session_tmux_name};
 use super::terminals::{Terminal, tabs_from_pane_states, tmux_tab_home};
 use crate::store::StoredSessionNotification;
 use crate::tmux::PaneState;
@@ -467,15 +467,6 @@ impl Supervisor {
     /// could not be asked" is not "nothing old runs". An empty map from a
     /// pass that had no session to ask about is definite, and resolves.
     ///
-    /// Only on a supervisor that creates new terminals. That is every
-    /// production supervisor (`NewTerminals::Host` is the default); the gate
-    /// is the same switch the migration band reads
-    /// (`supervisor_creates_host_terminals`), since a supervisor that still
-    /// creates old terminals has nothing to move a session to. It is also
-    /// what keeps the tests built on `SupervisorSeams::tmux_terminals()` free
-    /// of a notification they never asked about. Not a special case for
-    /// `--new-terminals tmux`, which is a test harness switch.
-    ///
     /// The session's notification cell is the precheck, so the store is
     /// touched only on a transition: a session with something old running
     /// and no unresolved warning of this kind in any launch gets one at its
@@ -490,7 +481,7 @@ impl Supervisor {
         entries: &[std::sync::Arc<SessionEntry>],
         states: &HashMap<String, PaneState>,
     ) {
-        if self.new_terminals() != NewTerminals::Host || !self.may_record() {
+        if !self.may_record() {
             return;
         }
         let kind = NotificationKind::OldTerminal;

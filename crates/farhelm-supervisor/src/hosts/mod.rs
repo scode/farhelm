@@ -37,12 +37,9 @@
 //!   program, so that its unit tests run their sessions in real hosts.
 //!
 //! The service's terminal switch points handle a session whose terminal is
-//! a [`terminal::HostTerminal`] (`service::terminals::Terminal::Host`). A
-//! create starts its agent in a host, and a new tab opens in one, only under
-//! the supervisor's switch (`service::SupervisorSeams::new_terminals`), on
-//! in every supervisor `farhelm supervisor run` starts unless its hidden
-//! `--new-terminals tmux` asks for the old kind, and in the in-process test
-//! harnesses unless a test asks for old terminals. A restarted supervisor finds
+//! a [`terminal::HostTerminal`] (`service::terminals::Terminal::Host`). Every
+//! create starts its agent in a host, and every new tab opens in one. A
+//! restarted supervisor finds
 //! the hosts of its host rows again with [`registry`] and adopts them
 //! ([`terminal::HostTerminal::adopt_found`]), in
 //! `service::core::host_handover`, and its sessions' tab hosts in

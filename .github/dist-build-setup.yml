@@ -168,7 +168,7 @@
   # Built from the checksummed source pins, not restored from a cache: the
   # tests must run on the tmux the product actually supports. The version
   # floor is SPEC_impl.md's tmux policy — the floor IS the release the
-  # teardown regression suite runs against — and the exact release is pinned
+  # suite's tmux tests run against — and the exact release is pinned
   # in `.github/release/source-pins.env`, which the build script asserts
   # against what it produced.
   if: runner.os == 'Linux' && runner.arch == 'X64'
@@ -257,7 +257,7 @@
   # coverage after the release-only dependencies are installed.
   #
   # ONE BUILD FOR EVERY RUST STEP. Every later Rust test in
-  # this job (the doctests here, the teardown regressions, the CentOS leg)
+  # this job (the doctests here, the CentOS leg)
   # uses this same `--workspace --exclude farhelm-desktop` selection and picks
   # its tests with a filter too. Cargo resolves features once per command from
   # the packages that command selects, so a narrower `-p` or `--exclude` turns
@@ -280,14 +280,6 @@
       --kind release --selection 'workspace doctests except farhelm-desktop' \
       --concurrency '4 doctest threads' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \
       -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4
-
-- name: Regress safe output-client teardown on the pinned tmux
-  # Its own step after the full suite: each scenario gets a fresh test
-  # process, so a surviving client or server cannot contaminate the next.
-  if: runner.os == 'Linux' && runner.arch == 'X64'
-  run: |
-    PATH="$PWD/.ci-tmux:$PATH" scripts/test-tmux-pinned-shutdown.sh \
-      --kind release --output-root "$RUNNER_TEMP/test-run-evidence"
 
 - name: Run the JS unit harness
   if: runner.os == 'Linux' && runner.arch == 'X64'

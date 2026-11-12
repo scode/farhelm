@@ -61,7 +61,7 @@ for (const dismissal of ["got it", "close", "Escape"] as const) {
     await expect(page.locator(".new-session-button")).toBeVisible();
     await expect(dialog).toHaveCount(0);
     const other = await browser.newContext({ storageState: currentStackSlot().authStatePath });
-    // Under the new-terminal run's premise watch like every other context.
+    // Under the host-terminal premise's watch like every other context.
     watchHostPremise(other);
     try {
       const seed = await other.storageState();
