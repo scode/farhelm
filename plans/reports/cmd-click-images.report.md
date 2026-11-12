@@ -90,3 +90,51 @@ A fresh Opus 5.5 reviewer at high effort found nothing blocking. It raised two r
 Its point about whether the SPEC amendment's date should be the UTC or the local date was left as is: it uses the UTC
 date, as this plan's recorded decisions do. The change was not reviewed again after the fixes; the checks above ran on
 the fixed code.
+
+### Landing
+
+#### What landed with it
+
+It landed in one round with session-action-leftovers (two fixes to how a session remembers a finished Restart and
+Replace with's progress) and version-dblclick-flake (a browser test waits for the terminal's focus); neither touches the
+Cmd-click list. While the round ran, a docs refresh (#3349) landed on main and edited the same docs page, the session
+list's, in other paragraphs; the two edits do not overlap and the page reads correctly with both. A change to a
+docs-screenshot test (#3347) also landed and touches nothing here.
+
+The landing's review checked that the new default list (`md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif`) and the
+types that show no warning are the same everywhere they are stated: the shared protocol code, the helm, Settings, the
+three places in SPEC.md (the confirmed decision is amended with a dated note rather than rewritten), the docs page and
+the changelog entry. No fixes were made while landing.
+
+#### Possible follow-ups
+
+- One helm test still checks only that the message the helm gives for a file type not on the list contains
+  `md, txt, json`. It passes because the new default starts with those; making it check the whole list would close that.
+
+#### Checks
+
+The round's three plans were checked together, stacked in queue order on main (session-action-leftovers, then
+version-dblclick-flake, then cmd-click-images; their TODO.md conflicts were resolved by keeping each plan's removal of
+its own entry). Browser runs were on Tensorlake sandboxes at the maintainer's request; the sandboxes run Node 24.16
+where the development machine runs 24.20, which these tests do not depend on, and each shard is recorded in the
+recorder's mode for arbitrary commands.
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, the docs website build (`bun install --frozen-lockfile` and
+  `bun run build`), `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop` passed.
+- `cargo nextest run -p farhelm-helm -p farhelm-proto -p farhelm-ui --lib`: 2,978 passed (run
+  `64f04ec9-18bc-4bb4-bdd1-fb2503b7cbb9`).
+- The whole browser suite, `npx playwright test` split by project over ten sandboxes, because three plans' interactions
+  were checked in one run and session-action-leftovers changes how every session view keeps a finished Restart: 3,296
+  passed, 14 skipped, none failed (runs `4f802ef7-91db-4b47-9622-41cf69ad4216`, `ff5047d5-a356-4d6d-bd9e-e6d79ddb5e00`,
+  `97413f07-ea76-496b-8a26-64ff1045e28b`, `ee9ea862-1e4c-437f-bedd-f90e8c07713f`,
+  `8e430cf6-69d0-4c89-9e08-09f390b77eea`, `5dd8460f-f24d-4845-94ea-23b92f1697dd`,
+  `87bed0c7-b106-4e86-9a62-9122c45e4de0`, `7f818c77-32af-40f4-afeb-2dc08cc60aaf`, `8bb6cc96-5151-42f9-a4c4-9385246c5f1d`
+  and `517ea6a3-9db7-4f5b-ac17-f5139f5ffae6`). The 14 skips are as many as in earlier whole-suite runs.
+
+Main differs from the tested tree only by the docs refresh (#3349) and the docs-screenshot test change (#3347), which
+landed while the round ran; the docs refresh and cmd-click-images both edit the session list's docs page, in separate
+paragraphs, and the website was not rebuilt with both edits together. Skipped: the workspace Rust tests beyond the three
+changed crates' library tests (nothing else reads what changed), the old-terminal browser set (nothing here touches old
+terminals), and the desktop app itself (the Cmd-click list is shared code the library tests cover).
