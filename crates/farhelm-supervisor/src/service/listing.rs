@@ -10,16 +10,14 @@
 //! row that made it ([`list_all`]).
 //!
 //! [`list_all`] is the seam `handle_list_sessions` sits behind. It does the
-//! whole of what a list request DOES — snapshot, order, cut, probe tmux,
-//! and describe cached state — and none of how it answers:
+//! whole of what a list request DOES — snapshot, order, cut, and describe
+//! live and cached state — and none of how it answers:
 //! no reply channel, no transport, no `req_id`. That is what lets the
 //! listing be reasoned about, and tested, without a socket in sight.
 
 use super::core::{SessionEntry, Supervisor};
-use super::status::{KnownTmuxNames, entry_info, report_new_terminals};
-use super::terminals::Terminal;
+use super::status::{entry_info, report_new_terminals};
 use farhelm_proto::{LIST_SESSIONS_CAP, SessionInfo};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// The order a `SessionList` reply is in, and the order that decides
@@ -87,14 +85,12 @@ pub(crate) struct ListReply {
     pub(crate) truncated: bool,
 }
 
-/// Answer from the last reconciliation, with one fresh pane query for exits and tabs.
+/// Answer from the last reconciliation, with each host's current exit and tab state.
 ///
 /// Lists never sample screens, apply reports, read launch artifacts or commit
 /// outcomes. Resume readiness, launch-error classification and notification
 /// resolution may therefore lag by one nominal two-second tick. A launch
 /// artifact read failure leaves lists available; the ticker logs and retries it.
-/// Unclassified tmux failures still fail the whole request because liveness
-/// and tabs cannot be described honestly without that snapshot.
 pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // The lock's own critical section is just the snapshot — clone every
     // `Arc<SessionEntry>` — nothing more: sorting and cutting the clone
@@ -112,8 +108,8 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
     // Sessions mid-restart are off the map but still listed, from the rows
     // the restart path holds for them (`Supervisor::restarting_rows`, read
     // under the same lock that keeps it in step with the map). A held row
-    // goes into the reply as it is: no tmux, sentinel or exit observation
-    // runs on it, because its pane is mid-respawn and anything read from it
+    // goes into the reply as it is: no sentinel or exit observation runs on
+    // it, because its terminal is being replaced and anything read from it
     // now would describe the run being replaced as having just ended.
     let (snapshot, held): (Vec<Arc<SessionEntry>>, Vec<SessionInfo>) = {
         let sessions = sup.sessions.lock().await;
@@ -127,76 +123,16 @@ pub(crate) async fn list_all(sup: &Supervisor) -> anyhow::Result<ListReply> {
             .collect();
         (sessions.values().cloned().collect(), held)
     };
-    // From the whole snapshot, not the cut: whether a renamed pane now
-    // belongs to another farhelm session depends on every session this
-    // supervisor holds, including the ones past the reply's cap.
-    //
-    // A host terminal holds no tmux name; its session's minted name is
-    // counted all the same (`KnownTmuxNames::from_sessions`), which is the
-    // tmux session its tmux tabs, if any, live in.
-    let known = KnownTmuxNames::from_sessions(snapshot.iter().map(|entry| {
-        (
-            entry.info.id.as_str(),
-            match &entry.terminal {
-                Some(Terminal::Tmux(tmux)) => Some(tmux.tmux_name.as_str()),
-                Some(Terminal::Host(_)) | None => None,
-            },
-        )
-    }));
     let listed: Vec<Listed> = snapshot
         .into_iter()
         .map(Listed::Live)
         .chain(held.into_iter().map(|row| Listed::Held(Box::new(row))))
         .collect();
     let (listed, truncated) = order_and_cut(listed, Listed::info);
-    let entries: Vec<Arc<SessionEntry>> = listed
-        .iter()
-        .filter_map(|row| match row {
-            Listed::Live(entry) => Some(Arc::clone(entry)),
-            Listed::Held(_) => None,
-        })
-        .collect();
-    // ONE query for every session's liveness, not one per
-    // session (`TmuxDriver::pane_states`'s own docs on why
-    // that multiplies subprocess spawns under a polling UI) —
-    // and skipped only when there are no entries to describe. Old tmux
-    // tabs can survive losing the agent terminal, so a terminal-less entry
-    // still needs the query even though its agent status does not.
-    //
-    // A host agent's status needs no tmux (its runtime answers), but its
-    // session's tmux tabs, if any, are listed from the same map
-    // (`tmux_tab_home`), so it asks too, and a failed query fails the
-    // listing for it as for a tmux terminal: "we could not ask" is never
-    // "there are none", and a client takes a successful reply's tab list as
-    // the truth (a session migrated into a host can still have live tmux
-    // tabs). A private server that is simply not running reads as an empty
-    // map, not an error, so a fleet of host terminals without tmux lists.
-    // Asked only when some listed session may have old terminals to find
-    // (`terminals::may_have_tmux_terminals`): a host whose sessions are all
-    // new terminals lists without a tmux command.
-    let needs_tmux = entries.iter().any(|entry| {
-        super::terminals::may_have_tmux_terminals(
-            &sup.tmux,
-            &entry.info.id,
-            entry.terminal.as_ref(),
-        )
-    });
-    let pane_states = if needs_tmux {
-        // An error here is reached only for a genuinely
-        // UNCLASSIFIED tmux failure: `TmuxDriver::pane_states`
-        // itself now tolerates a vanished private tmux server
-        // (the whole reason a dead-tmux-server `ListSessions`
-        // no longer lands here at all — see that method's
-        // own docs for why an empty pane-states map is
-        // honest, not fabricated, in that case).
-        sup.tmux.pane_states().await?
-    } else {
-        HashMap::new()
-    };
     let sessions: Vec<SessionInfo> = listed
         .iter()
         .map(|row| match row {
-            Listed::Live(entry) => entry_info(entry, &pane_states, &known),
+            Listed::Live(entry) => entry_info(entry),
             Listed::Held(held) => held.as_ref().clone(),
         })
         .collect();

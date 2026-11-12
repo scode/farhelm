@@ -9,8 +9,8 @@
 //! terminal host with the environment a supervisor gives an agent (the
 //! emulator's `screen_text`); versions captured before November 2026 are a
 //! tmux pane's `capture-pane -p`, the old terminals' form, and stay because
-//! old terminals, and agents started before their new terminal's
-//! environment changed, still draw those screens. The expected state in the
+//! agents started before their new terminal's environment changed still
+//! draw those screens. The expected state in the
 //! name is the tool's ground truth, never a reader's verdict, which is what
 //! lets these screens act as an oracle for the per-harness screen readers:
 //! after a vendor upgrade, re-running the tool and then these tests shows which

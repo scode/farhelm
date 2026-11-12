@@ -17,8 +17,8 @@
 
 use super::channels::ConnectionChannels;
 use super::connection::{
-    AttachOutput, ConnectionCtx, Forwarder, TmuxOutput, admit_or_refuse, notify_detached,
-    reply_frame, send_reply, set_attachment_paused, spawn_admitted,
+    ConnectionCtx, admit_or_refuse, notify_detached, reply_frame, send_reply,
+    set_attachment_paused, spawn_admitted,
 };
 use super::core::{
     CreateInputs, RequestError, SessionEntry, Supervisor, create_fingerprint,
@@ -30,13 +30,13 @@ use super::launch_artifacts::{
     stopped_before_start, wrapper_failure_detail,
 };
 use super::listing::list_all;
-use super::status::{KnownTmuxNames, dead_pane_exit_code, entry_info};
+use super::status::entry_info;
 use super::sweep::{ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree, stop_live_agent};
 use super::teardown::TeardownError;
 use super::terminals::{
-    ActiveAttach, AttachBackend, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER,
-    InputRoute, MAX_LEASE_BYTES, SUPERVISOR_STOPPING, Terminal, TerminalId, TmuxAttach,
-    displaced_by_attach, resolve_terminal,
+    ActiveAttach, AttachmentKey, DETACH_REASON_REPLACED, DETACH_REASON_TAKEOVER, InputRoute,
+    MAX_LEASE_BYTES, SUPERVISOR_STOPPING, TerminalId, displaced_by_attach, join_forwarder,
+    resolve_terminal,
 };
 use super::uploads::{
     MAX_UPLOADS_PER_CONNECTION, UPLOAD_CHUNK_QUEUE, UPLOAD_SIGNAL_QUEUE, UploadCommand,
@@ -80,7 +80,7 @@ use tracing::{debug, warn};
 /// title, or resume template. Capping the inputs this far below the frame
 /// limit makes an oversized `SessionCreated` reply structurally
 /// impossible and bounds the stored fingerprint copy, before
-/// `create_session` has touched storage, tmux, or the filesystem.
+/// `create_session` has touched storage, a terminal, or the filesystem.
 pub(crate) const CREATE_FIELD_CAP: usize = 64 * 1024;
 
 /// Reply to `req_id` with a refusal of `kind`.
@@ -520,40 +520,20 @@ async fn forward_owned_request_panic(
 /// Describe a renamed session with the same freshness contract as a list.
 ///
 /// The timer supplies launch errors, Resume readiness and notifications;
-/// this reply only probes pane liveness and tabs, including old tmux tabs
-/// that survive losing the agent terminal.
+/// this reply reads the terminal's liveness and the session's tabs as they
+/// are now.
 async fn session_info_now(
     sup: &Arc<Supervisor>,
     entry: &Arc<SessionEntry>,
 ) -> anyhow::Result<SessionInfo> {
-    // Every session may retain old tmux tabs, including after its agent
-    // terminal is lost. As in `listing::list_all`, a failed query cannot
-    // produce an authoritative empty tab list. Only a tmux agent needs the
-    // registry snapshot to classify its pane's ownership. A session with no
-    // old terminals to find asks nothing (`terminals::may_have_tmux_terminals`):
-    // not asking gives the same empty answer tmux would.
-    let asks_tmux = super::terminals::may_have_tmux_terminals(
-        &sup.tmux,
-        &entry.info.id,
-        entry.terminal.as_ref(),
-    );
-    let (pane_states, known) = match &entry.terminal {
-        _ if !asks_tmux => (Default::default(), KnownTmuxNames::default()),
-        Some(Terminal::Tmux(_)) => (sup.tmux.pane_states().await?, sup.known_tmux_names().await),
-        Some(Terminal::Host(_)) | None => {
-            (sup.tmux.pane_states().await?, KnownTmuxNames::default())
-        }
-    };
-    sup.with_checkout_metadata(entry_info(entry, &pane_states, &known))
-        .await
+    sup.with_checkout_metadata(entry_info(entry)).await
 }
 
 /// Spawned onto its own task rather than awaited inline: this
 /// handler is reached from `handle_connection`'s single serial read
-/// loop, and `TmuxDriver::pane_states` is a real subprocess
-/// round trip that can block for as long as tmux takes to
-/// answer (a wedged or merely slow tmux, under load). Awaiting
-/// it inline would stall every OTHER request on this
+/// loop, and a listing waits for a list permit and reads the
+/// checkout registry, either of which can take a while under
+/// load. Awaiting it inline would stall every OTHER request on this
 /// connection — attach, input, another session's list/stop/
 /// delete — behind this one `ListSessions`. Spawning is safe:
 /// this handler only reads `sup.sessions` under its own lock hold
@@ -638,7 +618,8 @@ async fn handle_list_sessions(
 /// The reply to `ListSessions`: the listing, or the error that ended it,
 /// except that a sealed supervisor always reports its seal (see the arm).
 /// Apart from the handler so the rule can be tested without a listing that
-/// really fails, which takes a tmux failure.
+/// really fails, which takes an unreadable launch sentinel or checkout
+/// registry.
 fn list_reply(
     req_id: u64,
     listed: anyhow::Result<super::listing::ListReply>,
@@ -670,7 +651,7 @@ fn list_reply(
             }
         }
         // Every failure the listing can hit — an unreadable launch
-        // sentinel, an unclassified tmux failure — is an `Internal`
+        // sentinel, an unreadable checkout registry — is an `Internal`
         // carrying the original error verbatim: see `list_all`'s own
         // docs for why each of them fails the whole request rather
         // than degrading one entry.
@@ -865,26 +846,14 @@ async fn handle_stop_session(
         // A no-tabs click authorizes stopping the agent only. Check before
         // recording intent or signalling anything, under the same claim
         // that every tab open takes; no new tab can slip past this boundary.
-        if refuse_if_tabs_open {
-            let refusal = match sup.has_open_tabs_for_stop(&entry).await {
-                Ok(false) => None,
-                Ok(true) => Some(
-                    "this session has terminal tabs open; Stop was requested from a display \
-                     with no tabs, so nothing was stopped. Check the session or reload this \
-                     window and try again"
-                        .to_string(),
-                ),
-                Err(error) => Some(format!(
-                    "could not confirm that this session has no terminal tabs, so nothing \
-                     was stopped: {error:#}"
-                )),
-            };
-            if let Some(message) = refusal {
-                reply_error(&tx, req_id, ErrorKind::Conflict, message).await;
-                return;
-            }
+        if refuse_if_tabs_open && sup.has_open_tabs_for_stop(&entry) {
+            let message = "this session has terminal tabs open; Stop was requested from a \
+                display with no tabs, so nothing was stopped. Check the session or reload this \
+                window and try again";
+            reply_error(&tx, req_id, ErrorKind::Conflict, message.to_string()).await;
+            return;
         }
-        // A dead or absent pane, or a terminal-less (restart-gap)
+        // A dead or absent terminal, or a terminal-less (restart-gap)
         // entry, all mean there is no live pid worth walking
         // ancestry from (`root_identity: None`). SPEC.md assigns
         // reaping any leftover descendants of a PAST run to the
@@ -893,62 +862,23 @@ async fn handle_stop_session(
         // environment-marker sweep is the only mechanism that can
         // still find such a survivor. `service::sweep`'s
         // `reap_process_tree` docs say when the sweep is kept.
-        let pane_state = match entry.terminal.as_ref() {
-            Some(terminal) => match terminal.probe_process(&sup).await {
-                Ok(TerminalProbe::Owned(pane)) => Some(pane),
-                Ok(TerminalProbe::Gone) => None,
-                // A RECOGNIZED owner folds into the dead-or-absent path,
-                // which is what makes the record below honest rather than
-                // merely convenient: another farhelm session holding this
-                // pane id proves the recording predates the current tmux
-                // server, so this session's agent DID exit on its own —
-                // with the server that owned its pane. A plain exit is
-                // exactly what happened, which is why this is not recorded
-                // as an annotated stop. The marker sweep that path runs is
-                // the SPEC.md-assigned mechanism for a past run's
-                // survivors and needs no pane; the stranger's pid is never
-                // touched. Erroring instead — what this used to do — left
-                // stop permanently unavailable after the 2026-08-16 tmux
-                // server death.
-                //
-                // An UNRECOGNIZED owner still errors. The recorded pane
-                // may be this session's own live agent under a renamed
-                // tmux session, and recording a plain exit for a process
-                // that never exited is a lie the user would act on.
-                Ok(TerminalProbe::ForeignOwner { owner }) => {
-                    if !sup.known_session_tmux_name(&owner).await {
-                        reply_error(
-                            &tx,
-                            req_id,
-                            ErrorKind::Internal,
-                            terminal.unknown_owner_refusal(&owner),
-                        )
-                        .await;
-                        return;
-                    }
-                    warn!(
-                        session = %session_id, foreign_owner = %owner,
-                        "this session's recorded pane now belongs to another tmux session; the \
-                         stop records it as no longer running and sweeps by marker alone"
-                    );
-                    None
-                }
+        let probe = match entry.terminal.as_ref() {
+            Some(terminal) => match terminal.probe() {
+                Ok(probe) => probe,
                 Err(e) => {
                     reply_failure(&tx, req_id, &e).await;
                     return;
                 }
             },
-            None => None,
+            None => TerminalProbe::Gone,
         };
         // The one "alive" check that decides which lifecycle this
-        // stop runs (kill a live tree, or classify a dead pane). The
-        // stale pid a dead pane still reports is deliberately never
-        // read; it may already be recycled.
-        let alive_pane = pane_state.filter(|pane| !pane.dead);
-        // The authoritative probe above already refuses unreadable or
-        // unrecognized terminals. Reuse that same liveness boundary for
+        // stop runs (kill a live tree, or classify a dead terminal).
+        let alive_pid = probe.live_pid();
+        // The authoritative probe above already refuses unreadable
+        // terminals. Reuse that same liveness boundary for
         // ended-agent consent before intent, classification, or signals.
-        if refuse_if_agent_running && alive_pane.is_some() {
+        if refuse_if_agent_running && alive_pid.is_some() {
             let message = "this session's agent is running again; Stop was requested from \
                     a display with an ended agent, so nothing was stopped. Check the session \
                     and try again";
@@ -959,14 +889,14 @@ async fn handle_stop_session(
         // decision. The stop intent and sweep may wait on durable I/O; a
         // bare pid carried through that work could name a replacement.
         //
-        // The root comes from the terminal (`Terminal::live_root`): a tmux
-        // pane's pid read now, or a host child's pid with the start
-        // identity pinned when its host was adopted. Either way the sweep
-        // below starts from the child; a host itself carries no session
-        // marker and sits outside the launch's scope, so the stop leaves it
-        // running, showing the final screen (the plan's D-17).
-        let alive_identity = match (alive_pane, entry.terminal.as_ref()) {
-            (Some(pane), Some(terminal)) => match terminal.live_root(&pane) {
+        // The root comes from the terminal (`HostTerminal::sweep_root`): the
+        // host child's pid with the start identity pinned when its host was
+        // adopted. The sweep below starts from the child; a host itself
+        // carries no session marker and sits outside the launch's scope, so
+        // the stop leaves it running, showing the final screen (the plan's
+        // D-17).
+        let alive_identity = match (alive_pid, entry.terminal.as_ref()) {
+            (Some(pid), Some(terminal)) => match terminal.sweep_root(pid) {
                 Ok(identity) => identity,
                 // Unreadable is unconfirmed, never gone: refuse the stop
                 // rather than sweep without its root (see
@@ -981,14 +911,14 @@ async fn handle_stop_session(
 
         // What this stop records, and why the two branches differ.
         //
-        // Only a pane observed ALIVE starts the stop lifecycle and
+        // Only a terminal observed ALIVE starts the stop lifecycle and
         // its annotation: an agent that had already exited on its
         // own is not something the user
         // stopped, and claiming otherwise would credit them with
         // an ending they had nothing to do with. That case records
         // the plain exit instead — unless an earlier Stop's intent is
         // still pending, in which case this completes that Stop. Keep whatever code the dead
-        // pane still retains — because a stop is also the moment
+        // terminal still retains — because a stop is also the moment
         // this supervisor witnesses an exit nobody had listed yet.
         //
         // The sentinel is checked FIRST, though (item 3a of the
@@ -1010,14 +940,11 @@ async fn handle_stop_session(
         // (`stop_live_agent`). The dead-or-absent path is this
         // handler's alone: it records a CLASSIFICATION rather than a new
         // intent. The store adds an annotation only for an existing intent.
-        let stop_error = if alive_pane.is_some() {
-            // Nothing is read off the pane before the kill. A stop
-            // used to capture an alternate-screen app's last frame
-            // here and replay it on the dead pane afterwards; SPEC.md
-            // (Terminal experience) now says a full-screen program's
-            // last frame is not retained after it exits and no
-            // snapshot of it is taken or stored. What the dead pane
-            // shows is whatever tmux itself still holds.
+        let stop_error = if alive_pid.is_some() {
+            // Nothing is read off the terminal before the kill: SPEC.md
+            // (Terminal experience) says a full-screen program's last
+            // frame is not retained after it exits and no snapshot of it
+            // is taken or stored.
             stop_live_agent(&sup, &session_id, &entry, alive_identity)
                 .await
                 .err()
@@ -1055,8 +982,7 @@ async fn handle_stop_session(
                     // A prior Stop may have recorded intent and then failed its
                     // sweep. Its dead terminal is evidence of that Stop, not a
                     // shell or wrapper that failed on its own.
-                    let exit_code =
-                        dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id).await;
+                    let exit_code = entry.terminal.as_ref().and_then(|host| host.exit_code());
                     Transition::ObservedExit {
                         exit_code,
                         stopped_before_start: stopped_before_start(
@@ -1072,19 +998,20 @@ async fn handle_stop_session(
                     // terminal (its exit code, and the excerpt quoted from
                     // its screen), is durable, and is never revised, so it
                     // is made only from a terminal that holds the process's
-                    // final state. A host terminal's probe can say dead
-                    // before the host's exit record (and the output before
-                    // it) has arrived; that is waited for, briefly. If it
+                    // final state. The probe can say dead before the host's
+                    // exit record (and the output before it) has arrived;
+                    // that is waited for, briefly. If it
                     // does not come, the stop records a plain exit, which
                     // the observer may still turn into the launch's error
                     // once the record is in (a launch failure outranks an
                     // unannotated exit), rather than an error with a partial
                     // screen and no exit code.
-                    let final_state = match (&pane_state, entry.terminal.as_ref()) {
-                        (Some(pane), Some(terminal)) if pane.dead => {
+                    let dead = probe == TerminalProbe::Dead;
+                    let final_state = match entry.terminal.as_ref() {
+                        Some(terminal) if dead => {
                             terminal.holds_final_state(HOST_EXIT_RECORD_WAIT).await
                         }
-                        (Some(_), Some(_)) | (None, _) | (_, None) => true,
+                        Some(_) | None => true,
                     };
                     if !final_state {
                         warn!(
@@ -1094,24 +1021,22 @@ async fn handle_stop_session(
                              to the observer"
                         );
                     }
-                    // pane_process supplies only liveness. Reuse the richer
-                    // exit-code probe for either classification rather than
-                    // querying again after a negative launch-evidence read.
-                    let exit_code =
-                        dead_pane_exit_code(&sup, entry.terminal.as_ref(), &session_id).await;
+                    // The probe supplies only liveness; the exit code is the
+                    // runtime's processed exit record.
+                    let exit_code = entry.terminal.as_ref().and_then(|host| host.exit_code());
                     match wrapper_failure_detail(
                         &sup.state_dir,
                         &session_id,
                         entry.generation,
                         entry.scope.is_some(),
-                        final_state && pane_state.is_some_and(|state| state.dead),
+                        final_state && dead,
                         exit_code,
                     )
                     .await
                     {
                         Ok(Some(detail)) => Transition::SentinelError {
                             inferred: true,
-                            detail: append_launch_excerpt(&sup, &entry, detail, &mut true).await,
+                            detail: append_launch_excerpt(&entry, detail),
                             address: entry
                                 .terminal
                                 .as_ref()
@@ -1134,7 +1059,7 @@ async fn handle_stop_session(
                     // whole stop rather than durably committing a
                     // plain exit this sentinel might contradict.
                     // Nothing was alive to signal anyway
-                    // (`alive_pane` is already `None` in this
+                    // (`alive_pid` is already `None` in this
                     // branch), so nothing beyond the classification
                     // write itself is lost — the caller can retry
                     // once the sentinel is readable again.
@@ -1217,8 +1142,9 @@ async fn handle_stop_session(
         };
 
         // Deliberately untouched: the DB row, the sessions map, and
-        // the agent's live attachment. The pane survives (remain-on-exit),
-        // so an attached client's stream simply goes quiet after the
+        // the agent's live attachment. The terminal host keeps its final
+        // screen after the child exits, so an attached client's stream
+        // simply goes quiet after the
         // agent's death output — there is nothing here for it to be
         // notified of, unlike delete below.
         match stop_error {
@@ -1393,10 +1319,6 @@ async fn handle_delete_session(
 /// same failure differently.
 fn teardown_failure_message(error: TeardownError) -> String {
     match error {
-        TeardownError::TerminalProbe(error) => format!("querying pane process: {error:#}"),
-        TeardownError::TabRediscovery(error) => format!(
-            "could not determine this session's terminal tabs, so nothing was deleted: {error:#}"
-        ),
         TeardownError::TabScopeEnumeration(error) => format!(
             "this host has a systemd user manager but its terminal-tab scopes could not be \
              enumerated, so nothing was deleted: {error:#}"
@@ -1612,7 +1534,7 @@ async fn handle_delete_session_or_seal(
 
 /// How long a Stop that found a host terminal's child dead waits for the
 /// host's exit record before it records a plain exit instead of classifying
-/// a launch that never started (`Terminal::holds_final_state`). The host
+/// a launch that never started (`HostTerminal::holds_final_state`). The host
 /// sends the record as soon as it has drained the child's output, normally
 /// within milliseconds of reaping it; two seconds is ample on a loaded
 /// machine and short beside the stop's own sweeps, which run under the same
@@ -1664,17 +1586,6 @@ fn host_attach_refusal(host: &crate::hosts::HostTerminal) -> Option<String> {
         | crate::hosts::Liveness::Exited { .. }
         | crate::hosts::Liveness::Gone => None,
     }
-}
-
-/// What an attach streams, decided once from the terminal it resolved:
-/// a tmux pane, attached through the session's sink, a replay stream and
-/// an input client of its own; or a terminal in a terminal host, for a
-/// client that can show grids, attached through a grid sender and an input
-/// side (`super::grid_stream`). The handler's takeover is the same for
-/// both; only the setup before and after it differs.
-enum AttachTarget<'a> {
-    Tmux(&'a super::terminals::TmuxTerminal),
-    Host(crate::hosts::HostTerminal),
 }
 
 /// Every request-shape check the attach can make lives here,
@@ -1767,16 +1678,13 @@ async fn handle_attach(
         reply_error(tx, req_id, error.kind, error.message).await;
         return;
     }
-    // Which terminal this attach is FOR, resolved once here and
-    // used for everything below: the tmux handles to drive, and
-    // the second half of the attachment key.
+    // Which terminal this attach is FOR, resolved once here and used for
+    // everything below.
     //
-    // Resolved BEFORE the takeover below, deliberately: an attach
-    // that cannot be honored must take nothing over, so naming a
-    // terminal that does not exist can never cost this session's
-    // current client its attachments. Also resolved before the
-    // `attachments` lock is taken, because resolving a tab is a
-    // tmux subprocess and that mutex is supervisor-wide.
+    // Resolved BEFORE the takeover below, deliberately: an attach that
+    // cannot be honored must take nothing over, so naming a terminal that
+    // does not exist can never cost this session's current client its
+    // attachments.
     let terminal = match resolve_terminal(sup, &entry, &terminal_id).await {
         Ok(terminal) => terminal,
         Err(e) => {
@@ -1785,52 +1693,33 @@ async fn handle_attach(
         }
     };
     let key = AttachmentKey::new(&session_id, terminal_id);
-    // The kind is decided here, once, for the whole setup below
-    // (`AttachTarget`): a tmux terminal is attached through the session's
-    // sink, a replay stream and an input client of its own, and a
-    // pane-death latch, all addressed by the tmux handles. Those become
-    // the attachment's `AttachBackend::Tmux` and its forwarder's
-    // `AttachOutput::Tmux` (which also carries the stream's attach
-    // replay), and everything after this handler (input, death
-    // observation, output, replay rendering, teardown) dispatches on those
-    // per kind. Resize and the revalidation below keep the `Terminal`
-    // itself.
-    //
-    // A host terminal has no byte stream a client could render: its screen
-    // lives in the supervisor's emulator, and reaches a viewer only as a
-    // grid (`farhelm_proto::grid`), from a grid sender of its own
-    // (`super::grid_stream::GridSender`, which takes the forwarder's place)
-    // and an input side (`AttachBackend::Host`, which takes the input
-    // client's). A client that cannot show grids is refused, permanently
-    // (`ATTACH_NEEDS_GRID_CLIENT`), before the attach takes anything over
-    // or opens anything, so the session's current client keeps its
-    // attachments. So is an attach to a host that cannot be read
-    // (`host_attach_refusal`), for now.
-    let target = match &terminal {
-        Terminal::Tmux(tmux) => AttachTarget::Tmux(tmux),
-        Terminal::Host(host) if grid => {
-            if let Some(refusal) = host_attach_refusal(host) {
-                reply_error(tx, req_id, ErrorKind::Unavailable, refusal).await;
-                return;
-            }
-            AttachTarget::Host(host.clone())
-        }
-        Terminal::Host(_) => {
-            reply_error(
-                tx,
-                req_id,
-                ErrorKind::InvalidRequest,
-                ATTACH_NEEDS_GRID_CLIENT.to_string(),
-            )
-            .await;
-            return;
-        }
-    };
+    // A terminal's screen lives in the supervisor's emulator, and reaches a
+    // viewer only as a grid (`farhelm_proto::grid`), from a grid sender of
+    // its own (`super::grid_stream::GridSender`) and an input side
+    // (`super::grid_stream::HostAttach`). A client that cannot show grids
+    // is refused, permanently (`ATTACH_NEEDS_GRID_CLIENT`), before the
+    // attach takes anything over or opens anything, so the session's
+    // current client keeps its attachments. So is an attach to a host that
+    // cannot be read (`host_attach_refusal`), for now.
+    if !grid {
+        reply_error(
+            tx,
+            req_id,
+            ErrorKind::InvalidRequest,
+            ATTACH_NEEDS_GRID_CLIENT.to_string(),
+        )
+        .await;
+        return;
+    }
+    if let Some(refusal) = host_attach_refusal(&terminal) {
+        reply_error(tx, req_id, ErrorKind::Unavailable, refusal).await;
+        return;
+    }
 
     // Reserve one writer slot BEFORE taking any lock, so this
     // handler's eventual reply — success or failure — can be enqueued
     // without awaiting. Everything below either holds
-    // `attachments` or must not race the forwarder it is about to
+    // `attachments` or must not race the output task it is about to
     // spawn, and awaiting a bounded queue in either position is
     // what this reservation exists to make impossible. Waiting
     // here instead is exactly right: it backpressures the
@@ -1841,100 +1730,41 @@ async fn handle_attach(
         return;
     };
 
-    // The session's sink client, acquired BEFORE the attachments
-    // lock and held across everything below. Three orderings ride
-    // on this one line.
-    //
-    // It must precede the per-terminal clients opened further
-    // down, because those turn the session's other panes off for
-    // themselves and tmux answers by not reading a pane no client
-    // wants (see `tmux::SessionSink`).
-    //
-    // It must precede the takeover sweep, so that a reattach —
-    // where the incumbent holds the session's only other reference
-    // — hands this attachment the SAME live sink instead of
-    // letting the last reference drop and immediately spawning a
-    // replacement.
-    //
-    // And it deliberately happens OUTSIDE the lock, unlike the
-    // other tmux work here. Bringing a sink up costs a process
-    // spawn and two control-mode round trips, and this mutex
-    // serializes attach and input for EVERY session in this
-    // supervisor (see the `Supervisor` struct's own note on that
-    // coarseness) — so paying for it under the lock would make one
-    // session's first attach measurably slow every other session's
-    // traffic. Nothing about the sink needs the lock: the registry
-    // has its own, and it is this `Arc` rather than any map entry
-    // that keeps the sink alive.
-    //
-    // A host terminal has no tmux session, so no sink: its host reads the
-    // program's output whoever watches.
-    let sink = match &target {
-        AttachTarget::Tmux(tmux) => match sup.ensure_session_sink(&tmux.tmux_name).await {
-            Ok(sink) => Some(sink),
-            Err(e) => {
-                permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
-                return;
-            }
-        },
-        AttachTarget::Host(_) => None,
-    };
-
-    // The whole takeover — kick every attachment this attach
-    // displaces, set up tmux, install the new one — runs under
-    // ONE lock hold. Without it, two concurrent attaches can both
-    // pass the kick step and both install forwarders, leaving one
-    // terminal with two live attachments (and, worse, a session
-    // whose terminals are split between two clients, which SPEC.md
-    // forbids). It also makes the winner the *last* attach rather
-    // than whichever client's tmux calls happened to finish last.
-    let mut attachments = loop {
-        let attachments = sup.attachments.lock().await;
-        // Checked on every pass, under `attachments`, before any output
-        // client exists: a stop that began while this attach was bringing
-        // up its sink must not gain a new streaming client it would then
-        // have to close abruptly. Returning drops `sink`, and that lease's
-        // own destructor hands the sink to its orderly shutdown, which the
-        // stopping supervisor waits for.
-        if sup.is_stopping() {
-            drop(attachments);
-            permit.send(error_frame(
-                req_id,
-                ErrorKind::Conflict,
-                SUPERVISOR_STOPPING.to_string(),
-            ));
-            return;
-        }
-        if !sup.has_output_reap_for_key(&key) {
-            break attachments;
-        }
+    // The whole takeover — kick every attachment this attach displaces,
+    // install the new one — runs under ONE lock hold. Without it, two
+    // concurrent attaches can both pass the kick step and both install
+    // output tasks, leaving one terminal with two live attachments (and,
+    // worse, a session whose terminals are split between two clients,
+    // which SPEC.md forbids). It also makes the winner the *last* attach.
+    let mut attachments = sup.attachments.lock().await;
+    // Checked under `attachments`, before any output task exists: a stop
+    // that began while this attach was being set up must not gain a new
+    // streaming attachment it would then have to close abruptly.
+    if sup.is_stopping() {
         drop(attachments);
-        if let Err(error) = sup.wait_for_output_reap(&key).await {
-            permit.send(error_frame(
-                req_id,
-                ErrorKind::Internal,
-                format!("terminal output cleanup is unconfirmed: {error}"),
-            ));
-            return;
-        }
-    };
+        permit.send(error_frame(
+            req_id,
+            ErrorKind::Conflict,
+            SUPERVISOR_STOPPING.to_string(),
+        ));
+        return;
+    }
 
     // Revalidate the entry this attach resolved BEFORE installing
     // anything on it (fix-batch item 6). The lookup above released
     // the `sessions` lock, and a restart landing in that window
-    // replaces the entry (and respawns, or replaces, its pane) —
-    // so an attachment installed from the stale entry would be
+    // replaces the entry (and its terminal) — so an attachment
+    // installed from the stale entry would be
     // wired to the NEW run's terminal while nothing in this handler
     // ever checked that the user may drive it.
     //
     // A changed POINTER is not by itself a changed run, though, and
     // treating it as one made a rename racing an attach fail with a
     // spurious `Conflict` (PLAN_M5.md item 3 publishes a rebuilt
-    // entry for a title change — same run, same pane, same
+    // entry for a title change — same run, same terminal, same
     // generation). A replacement is accepted when it still
     // describes what this attach resolved: same generation, same
-    // terminal identity (`Terminal`'s equality: same kind, same
-    // handles). Everything else is refused exactly as before — a
+    // terminal (`HostTerminal`'s equality: the same runtime). Everything else is refused exactly as before — a
     // changed generation is a restart, a vanished entry is a delete
     // (or an id something else took), and a changed terminal is a
     // substrate this attach never validated.
@@ -2028,11 +1858,12 @@ async fn handle_attach(
         .remove(&key)
         .map(|attachment| (key.clone(), attachment));
 
-    // Stop every doomed forwarder BEFORE awaiting any of them. The joins run
-    // concurrently, so signalling in the same loop would let a quick cleanup
-    // finish and emit effects while later forwarders were still live.
-    for (old_key, old) in displaced.iter().chain(incumbent.iter()) {
-        sup.begin_forwarder_shutdown(old_key.clone(), old);
+    // Stop every doomed output task BEFORE awaiting any of them, so that a
+    // quick one cannot finish and emit effects while later ones are still
+    // live. Output tasks never take this lock, so awaiting them under it
+    // cannot deadlock.
+    for (_, old) in displaced.iter().chain(incumbent.iter()) {
+        old.request_forwarder_shutdown();
     }
     let mut notices = Vec::with_capacity(displaced.len() + usize::from(incumbent.is_some()));
     let doomed = displaced
@@ -2043,72 +1874,18 @@ async fn handle_attach(
                 .into_iter()
                 .map(|(key, old)| (key, old, (DETACH_REASON_REPLACED, DetachCode::Replaced))),
         );
-    let mut forwarders = tokio::task::JoinSet::new();
     for (old_key, old, reason) in doomed {
-        // `..` drops this attachment's pause sender. Its backend (for tmux,
-        // the input client, whose control-mode process `kill_on_drop` ends,
-        // and the sink share) goes with the forwarder's join below, which
-        // is what every teardown path does.
         let ActiveAttach {
             channel,
             notify,
             forwarder,
-            backend,
             ..
         } = old;
-        // Await until the old forwarder either reaps its control client or
-        // transfers that client to the published per-terminal reaper. The
-        // request refuses the replacement below while that barrier remains.
-        // The forwarder never takes this lock, so awaiting it here cannot
-        // deadlock.
-        forwarders.spawn(async move {
-            let joined = forwarder.await;
-            drop(backend);
-            (old_key, joined, channel, notify, reason)
-        });
-    }
-    let mut cleanup_error = None;
-    while let Some(joined) = forwarders.join_next().await {
-        match joined {
-            Ok((old_key, result, channel, notify, reason)) => {
-                if let Err(error) = sup.record_forwarder_join(old_key, result) {
-                    cleanup_error.get_or_insert(error);
-                }
-                notices.push((channel, notify, reason));
-            }
-            Err(join) => {
-                cleanup_error.get_or_insert_with(|| {
-                    Arc::<str>::from(format!("terminal cleanup wrapper failed: {join}"))
-                });
-            }
-        }
-    }
-    if let Some(error) = cleanup_error {
-        drop(attachments);
-        for (channel, notify, reason) in notices {
-            notify_detached(&notify, channel, reason.0.to_string(), reason.1);
-        }
-        permit.send(error_frame(
-            req_id,
-            ErrorKind::Internal,
-            format!("the old terminal attachment could not be cleaned up: {error}"),
-        ));
-        return;
-    }
-    if sup.has_output_reap_for_key(&key) {
-        drop(attachments);
-        for (channel, notify, reason) in notices {
-            notify_detached(&notify, channel, reason.0.to_string(), reason.1);
-        }
-        permit.send(error_frame(
-            req_id,
-            ErrorKind::Conflict,
-            "the old terminal attachment is still being cleaned up; attach again".to_string(),
-        ));
-        return;
+        join_forwarder(&old_key, forwarder).await;
+        notices.push((channel, notify, reason));
     }
     // Every notice is enqueued back to back, after the last
-    // forwarder is gone, so a client that lost several terminals
+    // output task is gone, so a client that lost several terminals
     // at once sees them as one event and can coalesce the
     // identical reasons into a single banner (which is why the
     // protocol needs no session-scoped takeover message).
@@ -2130,161 +1907,52 @@ async fn handle_attach(
     // mutation the incumbent would have seen, and a later prep
     // failure would have left its terminal reflowed to a size
     // nobody is using.
-    if let Err(e) = terminal.resize(sup, cols, rows).await {
+    if let Err(e) = terminal.resize(terminal_host::protocol::Size { cols, rows }) {
         warn!(session = %session_id, error = %e, "resize during attach failed");
     }
 
-    // Everything that streams the terminal to the client (a tmux
-    // terminal's replay prefill and live pump, a host terminal's grid
-    // attach sequence and live updates) happens inside the output task
-    // spawned below rather than here, and that placement is load-bearing.
-    // A full replay is megabytes of 32 KiB frames (a grid's history is as
-    // large), and this handler runs under the supervisor-wide
-    // `attachments` mutex; sending them here would mean AWAITING a bounded
+    // Everything that streams the terminal to the client (the grid's attach
+    // sequence and live updates) happens inside the output task spawned
+    // below rather than here, and that placement is load-bearing. A grid's
+    // history is megabytes, and this handler runs under the supervisor-wide
+    // `attachments` mutex; sending it here would mean AWAITING a bounded
     // queue (see CONNECTION_WRITER_QUEUE) with that lock held, letting one
-    // slow client stall every other session's attach and input. Ordering
-    // is unaffected: the output task is this channel's only writer, so its
-    // prefill necessarily precedes its own live output.
+    // slow client stall every other session's attach and input. Ordering is
+    // unaffected: the output task is this channel's only writer.
+    //
+    // A host terminal has no setup that can fail: its runtime is already
+    // connected. The reply goes first, through the permit reserved before
+    // any lock: it must precede the catch-up so the client's `attach()` can
+    // return and its consumer can start draining, and it must not AWAIT
+    // here, because `attachments` is held.
+    permit.send(reply_frame(&ControlMsg::Attached {
+        req_id,
+        channel,
+        stream: farhelm_proto::StreamKind::Grid,
+    }));
     let (pause_tx, pause_rx) = watch::channel(None);
     let (forwarder_shutdown, shutdown_rx) = watch::channel(false);
-    let (forwarder_cleanup, cleanup_rx) = watch::channel(None);
-    let (task, backend) = match target {
-        AttachTarget::Tmux(tmux) => {
-            let sink = sink.expect("a tmux attach brought up its session's sink above");
-            // The incumbent must be fully gone before the replacement
-            // control client starts. Overlap reproducibly froze the new
-            // stream after replay, even though two steady-state control
-            // clients both receive output in isolation. The replacement
-            // attaches with output disabled, captures replay, and enables
-            // live output through that SAME client; its final command
-            // block is the exact replay/live boundary.
-            //
-            // This setup happens after takeover on purpose. There is no
-            // safe way to preserve the incumbent while also avoiding
-            // control-client overlap, so failure here leaves the session
-            // detached and reports only this attach request as failed.
-            //
-            // One replay stream and one input client PER ATTACHED
-            // TERMINAL, which is what makes flow control per terminal:
-            // `pause-after`/`%pause` are properties of a control client,
-            // so a client shared across terminals would let one stalled
-            // viewer pause another terminal's stream (PLAN_M4.md item 3).
-            // The overlap hazard above is per TERMINAL too — it is about
-            // two clients streaming one pane, not about a session having
-            // several. The stream is opened against the tmux SESSION,
-            // because that is the only thing a control client can attach
-            // to; it therefore hears every window's panes and filters down
-            // to this one by pane id (see `tmux::OutputStream`), which is
-            // what keeps a tab's output out of the agent's terminal.
-            let stream_candidate = match sup
-                .open_replay_stream_candidate(key.clone(), &tmux.tmux_name, &tmux.pane)
-                .await
-            {
-                Ok(candidate) => candidate,
-                Err(e) => {
-                    drop(attachments);
-                    permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
-                    return;
-                }
-            };
-            // A second, dedicated control-mode client for this
-            // attachment's input (see `InputClient`) — opened here rather
-            // than derived from `stream`, since the two are now
-            // independent control connections rather than one shared
-            // stdin. A failure here must tear down the replay stream just
-            // opened above: leaving it live would attach this session to
-            // a client nothing will ever read from or write to again.
-            let input = match sup
-                .tmux
-                .open_input_client(&tmux.tmux_name, &tmux.pane)
-                .await
-            {
-                Ok(input) => input,
-                Err(e) => {
-                    drop(stream_candidate);
-                    drop(attachments);
-                    permit.send(error_frame(req_id, error_kind(&e), format!("{e:#}")));
-                    return;
-                }
-            };
-            let (modes, prefill, stream) = stream_candidate.install();
-
-            // The `Attached` reply is enqueued HERE, before the forwarder
-            // exists, using the capacity reserved before this handler took
-            // any lock. Both halves matter. It must precede the replay so
-            // the client's `attach()` can return and its consumer can
-            // start draining — otherwise a large replay floods the helm's
-            // bounded per-terminal queue while nobody is allowed to read
-            // it yet, and a perfectly healthy attach trips the
-            // stalled-terminal detach. And it must not AWAIT here, because
-            // `attachments` is held: `permit` makes the enqueue
-            // infallible and instant.
-            permit.send(reply_frame(&ControlMsg::Attached {
-                req_id,
-                channel,
-                stream: farhelm_proto::StreamKind::Bytes,
-            }));
-
-            let (pane_death, death_rx) =
-                super::terminals::PaneDeath::new(stream.session(), stream.pane());
-            let forwarder = Forwarder {
-                sup: Arc::clone(sup),
-                session_id: session_id.clone(),
-                terminal: key.terminal.clone(),
-                channel,
-                tx: tx.clone(),
-                stream: AttachOutput::Tmux(TmuxOutput::new(modes, prefill, stream)),
-                pause_rx,
-                death_rx,
-                stall_timeout: sup.timeouts.stall_detach,
-                cleanup: forwarder_cleanup,
-            };
-            (
-                tokio::spawn(forwarder.run(shutdown_rx)),
-                AttachBackend::Tmux(TmuxAttach {
-                    pane_death,
-                    input,
-                    sink,
-                }),
-            )
-        }
-        AttachTarget::Host(host) => {
-            // A host terminal has no setup that can fail: its runtime is
-            // already connected. The reply goes first, through the permit
-            // reserved before any lock, for the tmux arm's reasons.
-            permit.send(reply_frame(&ControlMsg::Attached {
-                req_id,
-                channel,
-                stream: farhelm_proto::StreamKind::Grid,
-            }));
-            let (input, input_failure) = super::grid_stream::HostAttach::new(host.clone());
-            let stream = super::grid_stream::GridStream::new(super::grid_stream::GridStreamParts {
-                channel,
-                tx: tx.clone(),
-                notices: Some(host.subscribe_notices()),
-                host,
-                pause_rx,
-                stall_timeout: sup.timeouts.stall_detach,
-                attach_size: Some(terminal_host::protocol::Size { cols, rows }),
-                input_failure: Some(input_failure),
-                seams: super::grid_stream::StreamSeams::default(),
-            });
-            let sender = super::grid_stream::GridSender {
-                sup: Arc::clone(sup),
-                key: key.clone(),
-                channel,
-                tx: tx.clone(),
-                stream,
-                stall_timeout: sup.timeouts.stall_detach,
-                cleanup: forwarder_cleanup,
-            };
-            (
-                tokio::spawn(sender.run(shutdown_rx)),
-                AttachBackend::Host(input),
-            )
-        }
+    let (input, input_failure) = super::grid_stream::HostAttach::new(terminal.clone());
+    let stream = super::grid_stream::GridStream::new(super::grid_stream::GridStreamParts {
+        channel,
+        tx: tx.clone(),
+        notices: Some(terminal.subscribe_notices()),
+        host: terminal,
+        pause_rx,
+        stall_timeout: sup.timeouts.stall_detach,
+        attach_size: Some(terminal_host::protocol::Size { cols, rows }),
+        input_failure: Some(input_failure),
+        seams: super::grid_stream::StreamSeams::default(),
+    });
+    let sender = super::grid_stream::GridSender {
+        sup: Arc::clone(sup),
+        key: key.clone(),
+        channel,
+        tx: tx.clone(),
+        stream,
+        stall_timeout: sup.timeouts.stall_detach,
     };
-
+    let task = tokio::spawn(sender.run(shutdown_rx));
     attachments.insert(
         key.clone(),
         ActiveAttach {
@@ -2293,9 +1961,8 @@ async fn handle_attach(
             notify: tx.clone(),
             forwarder: task,
             forwarder_shutdown,
-            forwarder_cleanup: cleanup_rx,
             pause: pause_tx,
-            backend,
+            input,
         },
     );
     drop(attachments);
@@ -2331,33 +1998,11 @@ async fn handle_detach(
         .get(&route.key)
         .is_some_and(|a| a.channel == channel && a.notify.same_channel(tx));
     if mine && let Some(a) = attachments.remove(&route.key) {
-        // Request shutdown AND await, mirroring the takeover path: detach
-        // followed by an immediate reattach (a browser reload is
-        // exactly this) finds no incumbent to kick, so the only
-        // thing keeping the old control-mode client from
-        // overlapping the new one — the documented frozen-replay
-        // hazard — is waiting for it here, before the lock is
-        // released. Awaiting cannot deadlock: forwarders never
-        // take this lock.
-        sup.begin_forwarder_shutdown(route.key.clone(), &a);
-        let ActiveAttach {
-            forwarder, backend, ..
-        } = a;
-        if let Err(cleanup) = sup.record_forwarder_join(route.key.clone(), forwarder.await) {
-            warn!(
-                session = %route.key.session,
-                terminal = ?route.key.terminal,
-                error = %cleanup,
-                "detached terminal output cleanup remains unconfirmed"
-            );
-        }
-
-        // Dropping the backend releases its sink lease, and dropping the
-        // final lease publishes this session's reaping barrier
-        // synchronously. The runtime-owned reaper may finish afterward, but
-        // the next attach already has a state it must wait on; a shared sink
-        // simply retains its other lease and never enters that state.
-        drop(backend);
+        // Request shutdown AND await, mirroring the takeover path, so that
+        // nothing of this attachment streams once the detach is done.
+        // Awaiting cannot deadlock: output tasks never take this lock.
+        a.request_forwarder_shutdown();
+        join_forwarder(&route.key, a.forwarder).await;
     }
 }
 
@@ -2395,30 +2040,23 @@ async fn handle_resize(
     // lost a takeover reflow the winner's terminal.
     //
     // The check and the resize run UNDER one hold of the
-    // attachments lock, like the Attach handler's tmux calls.
-    // Checking ownership and then resizing after releasing the
-    // lock is a TOCTOU: a takeover can interleave in that gap,
-    // and the kicked client's already-authorized resize would
-    // land after the winner's attach-time resize, reflowing the
-    // winner's terminal with nothing to correct it.
-    // Resolved BEFORE the lock, never under it. Resolving a TAB is
-    // a tmux subprocess, and `attachments` is a supervisor-wide
-    // mutex that every session's attach, input and resize queues
-    // behind — running a subprocess inside it would serialize the
-    // whole supervisor on one client's drag. The ownership check
-    // that follows is what makes resolving early safe: a
-    // resolution that went stale by the time the lock is held
-    // simply does not act.
+    // attachments lock. Checking ownership and then resizing after
+    // releasing the lock is a TOCTOU: a takeover can interleave in
+    // that gap, and the kicked client's already-authorized resize
+    // would land after the winner's attach-time resize, reflowing
+    // the winner's terminal with nothing to correct it.
+    // Resolved BEFORE the lock: the ownership check that follows is
+    // what makes resolving early safe, since a resolution that went
+    // stale by the time the lock is held simply does not act.
     //
-    // Re-resolved rather than remembered, and no longer
-    // infallible: a TAB is a tmux window that another client can
-    // close while this one still holds an attachment to it, so
-    // "the terminal this channel names" can genuinely stop
-    // existing between attach and resize. Reflowing nothing is
-    // the right answer then — the forwarder is already on its way
-    // to detaching this channel — and it is the same
-    // fire-and-forget silence a resize gets for any other reason
-    // it cannot land.
+    // Re-resolved rather than remembered, and fallible: a TAB is a
+    // terminal another client can close while this one still holds
+    // an attachment to it, so "the terminal this channel names" can
+    // genuinely stop existing between attach and resize. Reflowing
+    // nothing is the right answer then — the output task is already
+    // on its way to detaching this channel — and it is the same
+    // fire-and-forget silence a resize gets for any other reason it
+    // cannot land.
     let terminal = match resolve_terminal(sup, &route.entry, &route.key.terminal).await {
         Ok(terminal) => terminal,
         Err(e) => {
@@ -2435,19 +2073,12 @@ async fn handle_resize(
         .get(&route.key)
         .is_some_and(|a| a.channel == channel && a.notify.same_channel(tx));
     if owns {
-        // Fire-and-forget: a resize has no req_id to answer,
-        // and a tmux failure here must not take the
-        // connection (and every other session on it) down.
-        //
-        // Targeted at the terminal's own WINDOW (through its
-        // pane), never at the session: with tabs, a bare session
-        // target names whichever window tmux last made current,
-        // so a client resizing its agent view could reflow
-        // somebody's tab (PLAN_M4.md item 3: resize goes per
-        // window). The pane is paired with its session in the
-        // target, so even a resolution that went stale in an
-        // unexpected way cannot reach another session's window.
-        if let Err(e) = terminal.resize(sup, cols, rows).await {
+        // Fire-and-forget: a resize has no req_id to answer, and a
+        // failure here must not take the connection (and every other
+        // session on it) down. Each terminal has a host of its own, so
+        // a resize reaches only the terminal this channel names
+        // (PLAN_M4.md item 3: resize goes per terminal).
+        if let Err(e) = terminal.resize(terminal_host::protocol::Size { cols, rows }) {
             warn!(session = %session_id, error = %e, "resize failed");
         }
     }
@@ -2652,8 +2283,8 @@ async fn handle_restart_session(
 ///
 /// Spawned like the other slow handlers: the commit takes the
 /// session's lifecycle claim, so it can legitimately wait out a
-/// multi-second stop or delete, and the reply makes a tmux round
-/// trip of its own for the live status. Awaiting either inline
+/// multi-second stop or delete, and the reply reads the checkout
+/// registry for its session. Awaiting either inline
 /// would stall every other request on this connection. It touches
 /// neither channel routes (connection-local) nor `attachments`.
 ///
@@ -2730,7 +2361,7 @@ async fn handle_rename_session(
     tasks.spawn(async move {
         let sup = sup2;
         // The slot comes back with the outcome whatever it is, and is held
-        // for the rest of this task — through the reply's tmux round trip
+        // for the rest of this task — through the reply's construction
         // on the success path, and through the error reply's wait on the
         // bounded writer queue on the other. Dropping it at either reply's
         // send is what keeps a peer that never reads from reclaiming
@@ -2771,7 +2402,7 @@ async fn handle_rename_session(
 }
 
 /// Spawned for the same reason the other slow handlers are: an
-/// open is a handful of tmux round trips plus a liveness probe,
+/// open starts a terminal host and waits for it to settle,
 /// and awaiting it inline would stall every other request on
 /// this connection. It touches neither channel routes (which are
 /// connection-local) nor `attachments`.
@@ -3044,7 +2675,7 @@ fn handle_abort_upload(route: Option<&mut UploadRoute>, channel: u32) {
 
 /// Dispatch one control message from a connected client.
 ///
-/// Failures belonging to one request—bad cwd, a tmux hiccup, an unknown
+/// Failures belonging to one request—bad cwd, a host that would not start, an unknown
 /// session—become `ControlMsg::Error` replies here. They must not escape
 /// into the connection loop: one connection carries every session the
 /// helm is driving, so request-local failure cannot be allowed to detach
@@ -3395,8 +3026,8 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             terminal: selector,
             lease,
             if_unowned,
-            // A tmux terminal streams bytes whatever the client can render;
-            // a host terminal only to a grid-capable client (`handle_attach`).
+            // A host terminal streams only to a grid-capable client
+            // (`handle_attach`); a bytes-only attach is refused.
             grid,
         } => {
             handle_attach(
@@ -4366,7 +3997,6 @@ mod tests {
     use super::super::core::{HANDLER_ADMISSION_PERMITS, LIST_ADMISSION_PERMITS};
     use super::super::core::{RunCells, SessionCells};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
-    use super::super::terminals::Terminal;
     use super::*;
     use crate::agent_kind::IntegrationSnapshot;
     use farhelm_proto::LaunchHarness;
@@ -4939,7 +4569,7 @@ mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not touch the launch shim");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
@@ -7794,34 +7424,28 @@ mod tests {
                 .contains(&INTENT_KEY_CAP.to_string())
         );
     }
-    /// Spec: an attach that already holds its session sink when a stop
-    /// begins is refused once it reaches `attachments`, before it opens any
-    /// output client, and the stop then completes with that sink closed in
-    /// order.
+    /// Spec: an attach that reaches `attachments` after a stop drained them
+    /// is refused before it starts any output task, and the stop completes.
     ///
-    /// Why: attach brings its sink up outside the `attachments` lock, so a
-    /// stop can start in between. Letting that attach install would leave a
-    /// fresh streaming client the stopping supervisor never closes in
-    /// order, which is exactly the abrupt close the stop exists to prevent.
-    /// The test holds `attachments` itself to park the attach at that point
-    /// deterministically, the way a stop's drain would.
+    /// Why: attach resolves its terminal outside the `attachments` lock, so
+    /// a stop can start in between. Letting that attach install would leave
+    /// a fresh streaming attachment the stopping supervisor never closes,
+    /// which is exactly the abrupt end the stop exists to prevent. The test
+    /// holds `attachments` itself, waits until the attach has done its
+    /// pre-lock work and is parked on that lock (it reserves its reply's
+    /// writer slot just before taking it, so the queue's capacity drops by
+    /// one), and only then sets the stop boundary under the lock, the way a
+    /// stop's drain does. A check moved ahead of the lock would then see no
+    /// stop and fail this test.
     #[farhelm_testtrace::test]
-    async fn an_attach_holding_its_sink_is_refused_once_the_supervisor_stops() {
+    async fn an_attach_racing_a_stop_is_refused() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let id = uuid::Uuid::new_v4().to_string();
-        let tmux_name = format!("fh-{id}");
-        let pane = sup
-            .tmux
-            .create_session(&tmux_name, "/", 80, 24, &[], &["sleep".into(), "60".into()])
-            .await
-            .expect("fixture premise: a tmux session to attach to");
-        let mut entry = entry_with(
-            Some(Terminal::tmux(tmux_name.clone(), pane)),
-            LastOutcome::Running,
-        );
+        let (host, _test_host) = crate::hosts::terminal::test_host::adopt_test_host(None).await;
+        let mut entry = entry_with(Some(host), LastOutcome::Running);
         entry.info.id = id.clone();
         sup.sessions
             .lock()
@@ -7830,6 +7454,7 @@ mod tests {
 
         let held = sup.attachments.lock().await;
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
+        let queue = tx.clone();
         let attach = tokio::spawn({
             let sup = Arc::clone(&sup);
             let id = id.clone();
@@ -7847,7 +7472,7 @@ mod tests {
                         terminal: TerminalSelector::default(),
                         lease: "stop-test".to_string(),
                         if_unowned: false,
-                        grid: false,
+                        grid: true,
                     },
                     ConnectionCtx {
                         panics: &mpsc::channel(1).0,
@@ -7860,32 +7485,22 @@ mod tests {
                 .await;
             }
         });
-        // The attach has its sink once the registry holds a live lease for
-        // the session; it is then parked on `attachments`, which this test
-        // holds.
-        tokio::time::timeout(Duration::from_secs(20), async {
-            loop {
-                let live = sup
-                    .sinks
-                    .lock()
-                    .expect("sink registry")
-                    .get(&tmux_name)
-                    .is_some_and(|entry| {
-                        matches!(entry, crate::service::terminals::SinkRegistryEntry::Live(handle)
-                            if handle.strong_count() > 0)
-                    });
-                if live {
-                    return;
-                }
-                // sleep-ok: polling interval while the attach brings up its real sink client
-                tokio::time::sleep(Duration::from_millis(20)).await;
+        // Premise: the attach has resolved its terminal and reserved its
+        // reply's slot, the last step before it waits for `attachments`.
+        let parked = tokio::time::timeout(Duration::from_secs(10), async {
+            while queue.capacity() != CONNECTION_WRITER_QUEUE - 1 {
+                tokio::task::yield_now().await;
             }
         })
-        .await
-        .expect("the attach must acquire its sink before reaching attachments");
+        .await;
+        assert!(
+            parked.is_ok() && !attach.is_finished(),
+            "premise: the attach must be parked on `attachments` before the stop begins"
+        );
         // Establish the stop boundary the way `shutdown_output_clients`
         // does: under `attachments`.
-        sup.sinks.lock().expect("sink registry").stopping = true;
+        sup.attachments_closed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         drop(held);
 
         attach.await.expect("attach task must not panic");
@@ -7900,7 +7515,7 @@ mod tests {
         assert!(sup.attachments.lock().await.is_empty());
         assert!(
             sup.shutdown_output_clients(Duration::from_secs(10)).await,
-            "the refused attach's sink must close in order and let the stop complete"
+            "with nothing attached the stop must complete"
         );
     }
 
@@ -9713,7 +9328,7 @@ mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not touch the launch shim");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
@@ -10069,7 +9684,7 @@ mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not touch the launch shim");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
@@ -10386,10 +10001,10 @@ mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not touch the launch shim");
 
         // Populate the session map directly with fake data, sidestepping
-        // tmux/launch entirely: only the size-driven reply behavior at
+        // hosts and launches entirely: only the size-driven reply behavior at
         // the ListSessions call site is under test here.
         sup.sessions.lock().await.insert(
             "s1".to_string(),
@@ -10420,9 +10035,8 @@ mod tests {
                     agent_terminal: None,
                     supervisor_creates_host_terminals: false,
                 },
-                terminal: Some(Terminal::tmux("fh-fake".to_string(), "%0".to_string())),
+                terminal: Some(super::super::core::tests::a_terminal()),
                 run: RunCells {
-                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     launch_boot_ended: false,
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -10471,7 +10085,7 @@ mod tests {
         // own comment on why), so `handle_control`'s `.await` above only
         // proves the request was ACCEPTED, not that the reply has been
         // sent yet — an immediate `try_recv` would be a race against the
-        // spawned task's own tmux round trip. `recv().await`, bounded by
+        // spawned task's own listing. `recv().await`, bounded by
         // a timeout so a genuine regression fails fast instead of hanging
         // the test suite, is what actually waits for it.
         let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
@@ -10504,8 +10118,7 @@ mod tests {
         // substitution was scoped to its one request. Clearing only
         // AFTER the first reply was actually received (not merely after
         // the request was accepted) keeps this ordering deliberate rather
-        // than racing the first spawned task's still-in-flight tmux
-        // query.
+        // than racing the first spawned task's still-in-flight listing.
         sup.sessions.lock().await.clear();
         handle_control(
             &sup,
@@ -10544,13 +10157,13 @@ mod tests {
     /// (`listing::list_order_key`) keeps the newest and drops the oldest —
     /// missing precisely the session created first. `fake_entry` gives
     /// every entry a synthetic, terminal-less (`terminal: None`) fixture:
-    /// real tmux sessions would add launch work without testing the cap.
+    /// real terminal hosts would add launch work without testing the cap.
     #[farhelm_testtrace::test]
     async fn list_sessions_honors_the_session_cap_at_the_handler_level() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not touch the launch shim");
 
         {
             let mut sessions = sup.sessions.lock().await;
@@ -10579,11 +10192,11 @@ mod tests {
     }
 
     /// A terminal-less, synthetic session entry for the ordering tests
-    /// below — real tmux/launch machinery is irrelevant to REPLY ORDER, so
+    /// below — real host/launch machinery is irrelevant to REPLY ORDER, so
     /// every fixture here skips it the same way
     /// `list_sessions_honors_the_session_cap_at_the_handler_level`'s
     /// fixtures do (`terminal: None`, decided by `session_status` without
-    /// any tmux round trip).
+    /// any terminal).
     fn fake_entry(id: &str, created_at: i64) -> Arc<SessionEntry> {
         Arc::new(SessionEntry {
             info: SessionInfo {
@@ -10614,7 +10227,6 @@ mod tests {
             },
             terminal: None,
             run: RunCells {
-                launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                 launch_boot_ended: false,
                 launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -10700,7 +10312,7 @@ mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not touch the launch shim");
 
         // Three sessions per `created_at` bucket, four buckets: descending
         // creation order puts the HIGHEST-numbered bucket (and, within it,
@@ -10733,7 +10345,7 @@ mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not touch the launch shim");
         {
             let mut sessions = sup.sessions.lock().await;
             for id in ["sC", "sA", "sB"] {
@@ -10757,149 +10369,6 @@ mod tests {
     // shot, so there is no walk to interleave a mutation into and no
     // budget to force a mid-page cut. Deleted rather than adapted.
 
-    /// Only an empty listing can skip tmux: a terminal-less session may
-    /// still have old tabs, so a failed query cannot prove its tab list empty.
-    /// A stopped server is a tolerated empty answer, and so is one this
-    /// supervisor knows does not run; a socket path that is a symlink loop
-    /// supplies a verified propagating error, on a supervisor that has
-    /// created an old terminal and so believes a server may run, that both
-    /// list and rename must preserve rather than hide tabs behind a
-    /// successful empty result.
-    #[farhelm_testtrace::test]
-    async fn only_an_empty_listing_skips_failed_pane_queries() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
-
-        // An old terminal starts the server, so the supervisor believes one
-        // may run from here on and asks tmux for a terminal-less session.
-        sup.tmux
-            .create_session(
-                "fh-premise",
-                "/",
-                80,
-                24,
-                &[],
-                &["sleep".into(), "60".into()],
-            )
-            .await
-            .expect("an old terminal starts the private server");
-        let sock = state.path().join("tmux.sock");
-        let killed = std::process::Command::new("tmux")
-            .arg("-S")
-            .arg(&sock)
-            .arg("kill-server")
-            .output()
-            .expect("run tmux kill-server");
-        assert!(
-            killed.status.success(),
-            "test setup: tmux kill-server must succeed, got: {}",
-            String::from_utf8_lossy(&killed.stderr)
-        );
-        match std::fs::remove_file(&sock) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => panic!("remove the stopped server's socket: {error}"),
-        }
-        // A symlink loop: tmux reports it as a connection error that says
-        // nothing about whether a server runs (a directory would read as a
-        // refused stale socket, "no server running", a tolerated answer).
-        std::os::unix::fs::symlink(&sock, &sock).expect("obstruct the socket path");
-        assert!(
-            sup.tmux.pane_states().await.is_err(),
-            "fixture premise: querying the obstructed socket must propagate an error"
-        );
-        assert!(list_sessions(&sup, 0).await.0.is_empty());
-
-        sup.sessions.lock().await.insert(
-            "s1".to_string(),
-            Arc::new(SessionEntry {
-                info: SessionInfo {
-                    screen_yolo: false,
-                    claude_trust_prompt: false,
-                    workspace_trust_prompt: false,
-                    agent_kind: farhelm_proto::AgentKind::Generic,
-                    parent: None,
-                    id: "s1".to_string(),
-                    title: "t".to_string(),
-                    created_at: 1_700_000_000,
-                    last_activity_at: 1_700_000_000,
-                    last_work_started_at: 0,
-                    creation_seq: None,
-                    cwd: "/tmp".to_string(),
-                    canonical_cwd: None,
-                    invocation: "agent".to_string(),
-                    launch: farhelm_proto::SessionLaunch::plain_command("agent"),
-                    status: SessionStatus::default(),
-                    annotation: None,
-                    restart_offer: RestartOffer::default(),
-                    tabs: Vec::new(),
-                    github_repo: None,
-                    working_copy: None,
-                    notifications: Vec::new(),
-                    agent_terminal: None,
-                    supervisor_creates_host_terminals: false,
-                },
-                terminal: None,
-                run: RunCells {
-                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
-                    launch_boot_ended: false,
-                    launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    launch_error: Arc::new(std::sync::Mutex::new(None)),
-                    outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
-                    first_input: Arc::new(std::sync::Mutex::new(None)),
-                    capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
-                    hooked: crate::service::core::hook_flag(false),
-                    hook_warned: crate::service::core::hook_flag(false),
-                    activity: crate::service::ticker::ActivitySample::unsampled(),
-                },
-                session: SessionCells {
-                    last_activity_at: crate::service::core::activity_stamp(1_700_000_000),
-                    last_work_started_at: crate::service::core::activity_stamp(1_700_000_000_000),
-                    notifications: crate::service::core::notification_cell(),
-                    host_tabs: crate::service::core::host_tab_cell(Vec::new()),
-                },
-                snapshot: IntegrationSnapshot {
-                    kind: AgentKind::Generic,
-                    wrapper_prefix_words: 0,
-                    resume_template: None,
-                },
-                canonical_cwd: None,
-                generation: 0,
-                scope: None,
-            }),
-        );
-
-        let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
-        let mut channels = ConnectionChannels::default();
-        let mut tasks = tokio::task::JoinSet::new();
-        handle_control(
-            &sup,
-            ControlMsg::ListSessions { req_id: 1 },
-            ConnectionCtx {
-                panics: &mpsc::channel(1).0,
-                tx: &tx,
-                priority: &tx,
-                channels: &mut channels,
-                tasks: &mut tasks,
-            },
-        )
-        .await;
-        let reply = tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .expect("spawned ListSessions handler never replied")
-            .expect("reply channel closed before a reply arrived");
-        let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
-        let ControlMsg::Error { kind, .. } = decoded else {
-            panic!("terminal-less tabs could not be read: {decoded:?}");
-        };
-        assert_eq!(kind, ErrorKind::Internal);
-        let entry = sup.sessions.lock().await["s1"].clone();
-        assert!(session_info_now(&sup, &entry).await.is_err());
-    }
-
     // ---------------------------------------------------------------------
     // A busy host: every management slot held, seen through one connection
     // ---------------------------------------------------------------------
@@ -10911,7 +10380,8 @@ mod tests {
     /// Bound a frozen reader or cleanup without relying on elapsed time for readiness.
     const BUSY_HOST_WAIT: Duration = Duration::from_secs(20);
 
-    /// One real multiplexed connection with a post-replay echo oracle and all
+    /// One real multiplexed connection with a post-replay typing oracle (the
+    /// agent's stand-in host records the input it is written) and all
     /// management slots held by Stops parked on their own lifecycle claim.
     ///
     /// The connection task and state remain owned outside assertion tasks. A
@@ -10924,22 +10394,26 @@ mod tests {
         server: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
         stop_claim: Option<super::super::core::KeyedGuard>,
         replies: Vec<ControlMsg>,
-        echoed: Vec<u8>,
+        /// The agent's stand-in host: what it has been written is the typing
+        /// oracle. Kept until the fixture is dropped, which ends it.
+        agent_host: crate::hosts::terminal::test_host::TestHost,
+        /// Bytes of output frames channel 1 received, bounded.
+        output_bytes: usize,
         replay_complete: bool,
-        // Channel 2 belongs to the candidate, never the independent echo oracle.
+        // Channel 2 belongs to the candidate, never the independent typing oracle.
         secondary_replayed: bool,
         secondary_bytes: u64,
         /// Optional contention keys included in failures while their guards live.
         contention: Option<(String, String)>,
-        // This guard kills only this fixture's tmux server. It remains live until
-        // the owned connection and its output clients have been settled.
+        // Removed once the owned connection and its attachments have settled.
         _state: StateDir,
     }
 
-    /// These tests emit a handful of short echoes and control replies. A runaway
-    /// peer should fail with bounded retained state rather than grow this fixture
-    /// indefinitely while an otherwise healthy stream defeats a timeout.
-    const BUSY_HOST_ECHO_LIMIT: usize = 64 * 1024;
+    /// These tests receive one small grid catch-up and a handful of control
+    /// replies. A runaway peer should fail with bounded retained state rather
+    /// than grow this fixture indefinitely while an otherwise healthy stream
+    /// defeats a timeout.
+    const BUSY_HOST_OUTPUT_LIMIT: usize = 64 * 1024;
     const BUSY_HOST_REPLY_LIMIT: usize = 128;
 
     impl BusyHost {
@@ -10969,21 +10443,17 @@ mod tests {
         }
 
         /// Construct resource ownership before protocol assertions can fail.
-        /// Before the connection is spawned, StateDir alone owns the real tmux
-        /// server; after spawn, there is no await before storing its JoinHandle.
+        /// Before the connection is spawned, the stand-in host and StateDir are
+        /// the only resources; after spawn, there is no await before storing
+        /// its JoinHandle.
         async fn uninitialized() -> Self {
             let state = StateDir::new();
             let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
                 .await
                 .expect("supervisor");
             let id = uuid::Uuid::new_v4().to_string();
-            let tmux_name = format!("fh-{id}");
-            let pane = sup
-                .tmux
-                .create_session(&tmux_name, "/", 80, 24, &[], &["cat".into()])
-                .await
-                .expect("fixture premise: a tmux pane running cat");
-            let mut entry = entry_with(Some(Terminal::tmux(tmux_name, pane)), LastOutcome::Running);
+            let (host, agent_host) = crate::hosts::terminal::test_host::adopt_test_host(None).await;
+            let mut entry = entry_with(Some(host), LastOutcome::Running);
             entry.info.id = id;
             sup.sessions
                 .lock()
@@ -11002,7 +10472,8 @@ mod tests {
                 server: Some(server),
                 stop_claim: None,
                 replies: Vec::new(),
-                echoed: Vec::new(),
+                agent_host,
+                output_bytes: 0,
                 replay_complete: false,
                 secondary_replayed: false,
                 secondary_bytes: 0,
@@ -11011,9 +10482,9 @@ mod tests {
             }
         }
 
-        /// Use this fixture's own post-replay attachment as the live typing oracle.
-        /// The echoed marker cannot be stale snapshot content because it is sent
-        /// only after this attachment's ReplayComplete boundary has arrived.
+        /// Use this fixture's own post-replay attachment as the live typing
+        /// path: input is typed only after this attachment's ReplayComplete
+        /// boundary has arrived.
         async fn initialize(&mut self) {
             tokio::time::timeout(
                 BUSY_HOST_WAIT,
@@ -11040,13 +10511,13 @@ mod tests {
                 terminal: TerminalSelector::default(),
                 lease: "busy-host".into(),
                 if_unowned: false,
-                grid: false,
+                grid: true,
             })
             .await;
             let attached = self.reply(1).await;
             assert!(
                 matches!(attached, ControlMsg::Attached { channel: 1, .. }),
-                "fixture premise: the cat pane attaches, got {attached:?}",
+                "fixture premise: the agent's host attaches, got {attached:?}",
             );
             let replayed = tokio::time::timeout(BUSY_HOST_WAIT, async {
                 while !self.replay_complete {
@@ -11060,7 +10531,7 @@ mod tests {
                 "initial replay did not settle: {}",
                 self.premises()
             );
-            self.type_and_see_echo("before-saturation").await;
+            self.type_and_see_received("before-saturation").await;
             self.stop_claim = Some(self.sup.lifecycle_locks.claim(BUSY_STOP_TARGET).await);
             for req_id in 1001..1001 + HANDLER_ADMISSION_PERMITS as u64 {
                 self.send(ControlMsg::StopSession {
@@ -11142,8 +10613,8 @@ mod tests {
                 });
             match frame.kind {
                 FrameKind::Data if frame.channel == 1 => {
-                    assert!(self.echoed.len() + frame.body.len() <= BUSY_HOST_ECHO_LIMIT);
-                    self.echoed.extend_from_slice(&frame.body);
+                    self.output_bytes += frame.body.len();
+                    assert!(self.output_bytes <= BUSY_HOST_OUTPUT_LIMIT);
                 }
                 FrameKind::Data if frame.channel == 2 => {
                     self.secondary_bytes = self
@@ -11190,30 +10661,40 @@ mod tests {
             result.unwrap_or_else(|_| panic!("no reply to {req_id}: {}", self.premises()))
         }
 
-        /// Prove a following Data frame reached this fixture's post-replay pane.
-        /// Markers must be unique within this fixture so earlier echo cannot pass
-        /// a later observation. The progress channel is always channel 1.
-        async fn type_and_see_echo(&mut self, marker: &str) {
+        /// Prove a following Data frame reached this fixture's post-replay
+        /// terminal: the agent's host records the typed marker as written
+        /// (`TestHost::received_contains`). Markers must be unique within
+        /// this fixture so earlier input cannot pass a later observation. The
+        /// progress channel is always channel 1.
+        async fn type_and_see_received(&mut self, marker: &str) {
             assert!(
                 self.replay_complete,
                 "typing must follow this attachment's replay"
             );
             self.assert_peer_alive();
-            assert!(!String::from_utf8_lossy(&self.echoed).contains(marker));
-            let result = tokio::time::timeout(BUSY_HOST_WAIT, async {
+            assert!(
+                !String::from_utf8_lossy(&self.agent_host.received()).contains(marker),
+                "premise: {marker:?} is unique within this fixture"
+            );
+            let message = serde_json::json!({"t": "text", "data": format!("{marker}\r")});
+            tokio::time::timeout(
+                BUSY_HOST_WAIT,
                 self.writer
-                    .write_frame(&Frame::data(1, format!("{marker}\r").into_bytes()))
-                    .await
-                    .expect("write terminal input");
-                while !String::from_utf8_lossy(&self.echoed).contains(marker) {
-                    self.read_one(&format!("the echo of {marker:?}")).await;
-                }
-            })
-            .await;
-            assert!(result.is_ok(), "no echo of {marker:?}: {}", self.premises());
+                    .write_frame(&Frame::data(1, message.to_string().into_bytes())),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("writing {marker:?} stalled: {}", self.premises()))
+            .expect("write terminal input");
+            assert!(
+                self.agent_host
+                    .received_contains(marker.as_bytes(), BUSY_HOST_WAIT)
+                    .await,
+                "the host was not written {marker:?}: {}",
+                self.premises()
+            );
         }
 
-        /// Release only management saturation, keeping the connection and echo
+        /// Release only management saturation, keeping the connection and input
         /// oracle available for a later admitted-contention observation. Repeated
         /// calls are harmless once these Stops have already been collected.
         async fn release_slots(&mut self) {
@@ -11305,7 +10786,7 @@ mod tests {
     impl Drop for BusyHost {
         /// Last-resort cleanup for cancellation outside the awaited test path.
         /// Normal setup failures and body failures call finish and join first;
-        /// StateDir still kills only this fixture's tmux server after this guard.
+        /// The stand-in host and StateDir are dropped after this guard.
         fn drop(&mut self) {
             if let Some(server) = &self.server {
                 server.abort();
@@ -11409,23 +10890,14 @@ mod tests {
                         authenticated_parent_with(&sup, &cwd, &target, launch.clone()).await;
                     let terminal_control =
                         matches!(name, "Detach" | "Resize" | "PauseOutput" | "ResumeOutput");
-                    let terminal = if terminal_control {
-                        let tmux_name = format!("fh-{target}");
-                        let pane = sup
-                            .tmux
-                            .create_session(
-                                &tmux_name,
-                                cwd.to_str().unwrap(),
-                                80,
-                                24,
-                                &[],
-                                &["cat".into()],
-                            )
-                            .await
-                            .expect("target terminal control needs its own live cat pane");
-                        Some(Terminal::tmux(tmux_name, pane))
+                    // Terminal control needs a live terminal of the target's
+                    // own: a stand-in host, ended when this case's scope does.
+                    let (terminal, _target_host) = if terminal_control {
+                        let (host, test_host) =
+                            crate::hosts::terminal::test_host::adopt_test_host(None).await;
+                        (Some(host), Some(test_host))
                     } else {
-                        None
+                        (None, None)
                     };
                     let outcome = if terminal_control {
                         LastOutcome::Running
@@ -11481,7 +10953,7 @@ mod tests {
                             terminal: TerminalSelector::Agent,
                             lease: "conformance-target".into(),
                             if_unowned: false,
-                            grid: false,
+                            grid: true,
                         })
                         .await;
                         let attached = host.reply(10).await;
@@ -11503,7 +10975,8 @@ mod tests {
                         if matches!(&message, ControlMsg::ResumeOutput { .. }) {
                             host.send(ControlMsg::PauseOutput { channel: 2 }).await;
                             // The independent echo proves the preceding pause was dispatched.
-                            host.type_and_see_echo("target-paused-before-resume").await;
+                            host.type_and_see_received("target-paused-before-resume")
+                                .await;
                         }
                     }
                     (message, listener)
@@ -11681,7 +11154,7 @@ mod tests {
                     }
                     assert_conformance_gates(&sup, &target, &intent);
                     host.send(message).await;
-                    host.type_and_see_echo(&format!("following-{name}")).await;
+                    host.type_and_see_received(&format!("following-{name}")).await;
                     // Confirm the representatives whose target branch could
                     // otherwise be bypassed by a missing row or a malformed route.
                     if name == "Attach" {
@@ -11784,7 +11257,7 @@ mod tests {
         let mut host = BusyHost::new().await;
 
         host.send(ControlMsg::ListSessions { req_id: 2 }).await;
-        host.type_and_see_echo("typed-after-the-list").await;
+        host.type_and_see_received("typed-after-the-list").await;
         let listed = host.reply(2).await;
         assert!(
             matches!(listed, ControlMsg::SessionList { .. }),
@@ -11803,7 +11276,7 @@ mod tests {
     /// in its own task, never in the connection's read loop, and is answered
     /// once a list permit frees.
     ///
-    /// Why: the list's limit exists to bound the tmux cost of building
+    /// Why: the list's limit exists to bound the cost of building
     /// lists, and the easy way to take it, before spawning the task the way
     /// the management requests used to, would put every keystroke on the
     /// connection back behind a burst of lists. The test holds both list
@@ -11824,7 +11297,8 @@ mod tests {
         );
 
         host.send(ControlMsg::ListSessions { req_id: 3 }).await;
-        host.type_and_see_echo("typed-while-the-list-waits").await;
+        host.type_and_see_received("typed-while-the-list-waits")
+            .await;
         assert!(
             host.replies
                 .iter()
@@ -11878,7 +11352,7 @@ mod tests {
             refuse_if_agent_running: false,
         })
         .await;
-        host.type_and_see_echo("typed-after-the-stop").await;
+        host.type_and_see_received("typed-after-the-stop").await;
         let reply = host.reply(2).await;
         assert_refused_as_busy(&reply, 2);
         assert_eq!(
@@ -11906,7 +11380,7 @@ mod tests {
             session_id: "another-session".to_string(),
         })
         .await;
-        host.type_and_see_echo("typed-after-the-tab-open").await;
+        host.type_and_see_received("typed-after-the-tab-open").await;
         let reply = host.reply(2).await;
         assert_refused_as_busy(&reply, 2);
 
@@ -11935,7 +11409,7 @@ mod tests {
             expected_launch: None,
         })
         .await;
-        host.type_and_see_echo("typed-after-the-restart").await;
+        host.type_and_see_received("typed-after-the-restart").await;
         let reply = host.reply(2).await;
         assert_refused_as_busy(&reply, 2);
         assert_eq!(
@@ -11967,7 +11441,7 @@ mod tests {
             expected_title: None,
         })
         .await;
-        host.type_and_see_echo("typed-after-the-rename").await;
+        host.type_and_see_received("typed-after-the-rename").await;
         let reply = host.reply(2).await;
         assert_refused_as_busy(&reply, 2);
         assert_eq!(
@@ -12938,7 +12412,7 @@ mod tests {
         /// inferred, and sealed; an unsealed one answers the error.
         #[farhelm_testtrace::test]
         fn a_sealed_supervisor_reports_the_seal_even_when_its_listing_fails() {
-            let failed = || Err(anyhow::anyhow!("tmux stopped answering"));
+            let failed = || Err(anyhow::anyhow!("the checkout registry could not be read"));
             assert!(matches!(
                 list_reply(1, failed(), false),
                 ControlMsg::Error {

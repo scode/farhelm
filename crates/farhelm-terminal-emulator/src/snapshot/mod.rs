@@ -148,8 +148,7 @@ use std::time::Instant;
 use alacritty_terminal::grid::Dimensions;
 use unicode_width::UnicodeWidthChar;
 
-use crate::effects::{Collected, FeedMode};
-use crate::emulator::{Emulator, Size};
+use crate::emulator::Emulator;
 
 /// The snapshot format version [`Emulator::snapshot`] writes.
 pub const FORMAT_VERSION: u16 = v1::VERSION;
@@ -639,175 +638,6 @@ fn title_costs(emulator: &Emulator) -> Vec<usize> {
         .collect()
 }
 
-/// A Restart seed built from plain history lines, as `tmux capture-pane -p -e`
-/// prints them: one row of text each, with SGR sequences for its styles,
-/// oldest first. For restarting an old (tmux) terminal into a terminal host:
-/// the new host starts with the tmux pane's history.
-///
-/// The lines are printed into a scratch emulator of `size` (wrapping any
-/// longer than it, as a resize would) and the seed is taken from its history
-/// ([`Emulator::history_seed`]). Each line ends with its styles and any
-/// hyperlink reset, so that one line's colors never bleed into the next.
-/// When the lines, wrapped, are more than `scrollback_lines` hold, the oldest
-/// are dropped and the seed's history is marked trimmed.
-pub fn history_seed_from_lines<'a>(
-    size: Size,
-    scrollback_lines: usize,
-    lines: impl IntoIterator<Item = &'a [u8]>,
-    max_bytes: usize,
-) -> Snapshot {
-    match history_seed_from_lines_until(
-        size,
-        scrollback_lines,
-        lines,
-        max_bytes,
-        LineStyles::PerLine,
-        false,
-        &Cancel::never(),
-    ) {
-        Ok(seed) => seed.snapshot,
-        Err(SnapshotStopped::Cancelled | SnapshotStopped::NotClean) => {
-            unreachable!("a cancel that never fires, and a seed needs no clean boundary")
-        }
-    }
-}
-
-/// A seed from [`history_seed_from_lines_until`], and how many lines of
-/// history it holds.
-#[derive(Debug, Clone)]
-pub struct LinesSeed {
-    /// The seed.
-    pub snapshot: Snapshot,
-    /// The history lines the seed holds, after any the size limit left out:
-    /// 0 when nothing of the lines given is in it (none were given, say), so
-    /// a caller can tell a seed that keeps a history from one that only
-    /// exists.
-    pub history_lines: usize,
-}
-
-/// How the lines given to [`history_seed_from_lines_until`] set their
-/// styles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LineStyles {
-    /// Each line sets the styles it uses: nothing carries from one line into
-    /// the next.
-    PerLine,
-    /// The lines of a `tmux capture-pane -e` (the tmux capture mode). A
-    /// style set in one line holds into the next lines until changed, since
-    /// tmux writes an SGR sequence only where the style changes, line ends
-    /// included. Each line still ends with a reset (so that the line feed's
-    /// new row is never filled with a background color the next line does
-    /// not reach), and the style it ended with is set again before the next
-    /// one. Line drawing is written as tmux writes it, shifted out (SO) to G1
-    /// and back (SI) around the plain ASCII codes, with the shift held across
-    /// line ends and no designation of its own, so G1 is designated DEC
-    /// Special Graphics (`ESC ) 0`) before the first line, as tmux assumes.
-    /// A hyperlink does not carry: tmux closes one at each row's end and
-    /// does not open it again on the next row, so only the first row of a
-    /// link that spans rows is a link.
-    Carried,
-}
-
-/// How many lines of history a Restart seed of a terminal of `size` can
-/// hold, at most `scrollback_lines`: what a restore of the seed keeps within
-/// [`MAX_RESTORE_CELLS`] (`restorable_history`). `None` when no seed can be
-/// made at that size: a side is zero or over [`MAX_SIDE`], or the two
-/// screens alone need more cells than a restore allocates.
-///
-/// For a caller that reads the history to seed from somewhere it costs to
-/// read (a tmux pane): reading more lines than this is wasted, since the
-/// seed would leave them out, and printing them into the scratch emulator
-/// of [`history_seed_from_lines_until`] would cost a full row of cells each,
-/// however short the line. A 10,000-column pane's 12,000 short lines are
-/// a small capture, and 120 million cells.
-pub fn seed_history_capacity(size: Size, scrollback_lines: usize) -> Option<usize> {
-    let sides = 1..=MAX_SIDE;
-    if !sides.contains(&size.columns) || !sides.contains(&size.lines) {
-        return None;
-    }
-    if 2 * u64::from(size.columns) * u64::from(size.lines) > MAX_RESTORE_CELLS {
-        return None;
-    }
-    Some(restorable_history(size.columns, size.lines).min(scrollback_lines))
-}
-
-/// [`history_seed_from_lines`] for lines whose styles are as `styles` says,
-/// giving up once `cancel` fires ([`SnapshotStopped::Cancelled`], with
-/// nothing kept), and marking the seed's history trimmed when `cut_before`
-/// says the caller already left out lines older than these.
-///
-/// For a supervisor that builds the seed from a tmux pane's capture
-/// ([`LineStyles::Carried`]) on its blocking pool, which nothing interrupts
-/// from outside, as [`Emulator::history_seed_until`] is: the cancel is looked
-/// at between lines while they are printed, and then by the encoder between
-/// rows. `cut_before` is for a caller that bounds what it read of a long
-/// history (keeping the newest lines), so that the restarted terminal says
-/// its history is incomplete rather than look whole. With
-/// [`LineStyles::PerLine`], not cancelled and `cut_before` false, it yields
-/// exactly what [`history_seed_from_lines`] does.
-///
-/// The scratch emulator keeps at most [`seed_history_capacity`] lines of
-/// history (older ones scroll out, and the seed says its history was
-/// trimmed), so its grid stays within [`MAX_RESTORE_CELLS`] whatever is fed.
-/// `size` must be one [`seed_history_capacity`] accepts: the screens are
-/// allocated before anything is printed, so a size it refuses panics here
-/// rather than allocate them.
-pub fn history_seed_from_lines_until<'a>(
-    size: Size,
-    scrollback_lines: usize,
-    lines: impl IntoIterator<Item = &'a [u8]>,
-    max_bytes: usize,
-    styles: LineStyles,
-    cut_before: bool,
-    cancel: &Cancel,
-) -> Result<LinesSeed, SnapshotStopped> {
-    let scrollback_lines = seed_history_capacity(size, scrollback_lines)
-        .unwrap_or_else(|| panic!("a seed of a {size:?} terminal would not restore"));
-    let mut scratch = Emulator::new(size, scrollback_lines);
-    let now = Instant::now();
-    let mut ignored = Collected::default();
-    let mut carried = String::new();
-    if styles == LineStyles::Carried {
-        scratch.feed(b"\x1b)0", now, FeedMode::ReplaySeen, &mut ignored);
-    }
-    for line in lines {
-        if cancel.is_cancelled() {
-            return Err(SnapshotStopped::Cancelled);
-        }
-        scratch.feed(carried.as_bytes(), now, FeedMode::ReplaySeen, &mut ignored);
-        scratch.feed(line, now, FeedMode::ReplaySeen, &mut ignored);
-        if styles == LineStyles::Carried {
-            carried = v1::sgr_setting(&scratch.term.grid().cursor.template);
-        }
-        scratch.feed(
-            b"\x1b[m\x1b]8;;\x1b\\\r\n",
-            now,
-            FeedMode::ReplaySeen,
-            &mut ignored,
-        );
-    }
-    // Scroll every row above the cursor into history: the cursor sits on the
-    // blank row after the last line.
-    let cursor_line = scratch.term.grid().cursor.point.line.0;
-    if cursor_line > 0 {
-        let scroll = format!("\x1b[{cursor_line}S");
-        scratch.feed(scroll.as_bytes(), now, FeedMode::ReplaySeen, &mut ignored);
-    }
-    let scrolled = scratch.primary_grid().lines_scrolled_into_history();
-    if cut_before || scrolled > scrollback_lines as u64 {
-        scratch.mark_trimmed(scrollback_lines.max(1) as u64);
-    }
-    let snapshot = scratch.history_seed_until(max_bytes, cancel)?;
-    let history_lines = scratch
-        .primary_grid()
-        .history_size()
-        .saturating_sub(snapshot.dropped_history_lines);
-    Ok(LinesSeed {
-        snapshot,
-        history_lines,
-    })
-}
-
 /// The title cut either fits, or leaves a reusable measurement with every
 /// title removed. The next history step starts from exactly that state, so
 /// throwing this measurement away would paint the whole terminal twice.
@@ -919,7 +749,8 @@ fn fit_history(
 #[cfg(test)]
 mod cancel_tests {
     use super::*;
-    use crate::effects::Collected;
+    use crate::effects::{Collected, FeedMode};
+    use crate::emulator::Size;
     use std::sync::atomic::AtomicUsize;
 
     /// Feed `lines` colorful lines into a 40x5 terminal; all but the visible

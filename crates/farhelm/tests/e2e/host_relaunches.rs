@@ -800,8 +800,7 @@ async fn interrupted_restart(stage: HostRestartStage) -> Interrupted {
         }
         HostRestartStage::GenerationClaimed
         | HostRestartStage::Confirmation
-        | HostRestartStage::ReplacementUnwound
-        | HostRestartStage::OldWindowRemoval => {
+        | HostRestartStage::ReplacementUnwound => {
             unreachable!("only crashes after the new host started are run here")
         }
     }

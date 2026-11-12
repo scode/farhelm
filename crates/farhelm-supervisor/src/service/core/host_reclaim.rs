@@ -163,7 +163,6 @@ use crate::hosts::{
     ScanOptions, SocketRemoval,
 };
 use crate::launch::LaunchFileOf;
-use crate::service::terminals::Terminal;
 
 /// How long the startup reclaim takes at most, from its start, before what
 /// is still running is dropped and left for the next start.
@@ -553,13 +552,12 @@ impl Supervisor {
             }
         }
         for (id, entry) in sessions.iter() {
-            match &entry.terminal {
-                Some(Terminal::Host(host)) => {
-                    if let Some(name) = host.socket().file_name() {
-                        held.sockets.insert(name.to_os_string());
-                    }
-                }
-                Some(Terminal::Tmux(_)) | None => {}
+            if let Some(name) = entry
+                .terminal
+                .as_ref()
+                .and_then(|host| host.socket().file_name())
+            {
+                held.sockets.insert(name.to_os_string());
             }
             let tabs = held.tabs.entry(id.clone()).or_default();
             for tab in host_tabs_of(&entry.session.host_tabs) {

@@ -4138,8 +4138,8 @@
           // the stray-input shape the DECRQM swallow above exists to prevent.
           // This family cannot be stripped supervisor-side: the query
           // carries a variable-length payload terminated by ST, so no
-          // literal table can hold it, and `query_strip.rs` is deliberately
-          // not a VT parser. The browser is the one place that can decline
+          // literal table can hold it, and the supervisor's old query strip
+          // was deliberately not a VT parser. The browser is the one place that can decline
           // to answer it. Returning true stops xterm's responder.
           term.parser.registerDcsHandler(
             { intermediates: "$", final: "q" },

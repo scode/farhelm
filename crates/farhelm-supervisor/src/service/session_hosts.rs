@@ -5,7 +5,7 @@
 //!
 //! A host outlives its program (it keeps the final screen until it is shut
 //! down, the plan's D-17) and carries no session marker, so neither the
-//! marker sweep nor the end of the session's tmux session ends it. Delete is
+//! marker sweep nor the end of the session's processes ends it. Delete is
 //! the one verb that ends a session for good, so it ends the hosts on
 //! purpose (the inventory's top risk 7).
 //!
@@ -15,8 +15,7 @@
 //! the socket directory (a host found there could be anyone's, and telling
 //! whose takes machinery a record makes unnecessary):
 //!
-//! - **The agent's runtime**, when the session's agent terminal is a host
-//!   (`Terminal::Host`). The caller roots the sweep at its child as pinned
+//! - **The agent's runtime** (`SessionEntry::terminal`). The caller roots the sweep at its child as pinned
 //!   at adoption (`hosts::HostStatus::pinned_child_root`) and hands the
 //!   runtime to [`SessionHosts::end`].
 //! - **The tab runtimes**: the session's tabs in terminal hosts
@@ -126,7 +125,6 @@ use anyhow::Context as _;
 use tracing::debug;
 
 use super::core::{AtRecordedSocket, HostTab, Supervisor, read_launch_record};
-use super::terminals::Terminal;
 use crate::hosts::stop::{HostOutcome, StopLimits, shut_down, signal};
 use crate::hosts::terminal::{Child, pin_child};
 use crate::hosts::{
@@ -227,7 +225,7 @@ impl Supervisor {
     pub(crate) async fn session_hosts(
         &self,
         session_id: &str,
-        agent: Option<&Terminal>,
+        agent: Option<&HostTerminal>,
         tabs: Vec<HostTab>,
         budget: Duration,
     ) -> anyhow::Result<SessionHosts> {
@@ -238,9 +236,9 @@ impl Supervisor {
         // fenced and only a host the record names is ended. One that no
         // record names is settled by its host's tag alone, below.
         let (held, placeholder) = match agent {
-            Some(Terminal::Host(host)) if host.is_placeholder() => (None, Some(host)),
-            Some(Terminal::Host(host)) => (host.socket().file_name().map(ToOwned::to_owned), None),
-            Some(Terminal::Tmux(_)) | None => (None, None),
+            Some(host) if host.is_placeholder() => (None, Some(host)),
+            Some(host) => (host.socket().file_name().map(ToOwned::to_owned), None),
+            None => (None, None),
         };
         // A tab's runtime holds its host as the agent's does; a tab's
         // placeholder, like the agent's, is settled from its record.
@@ -554,16 +552,10 @@ impl SessionHosts {
     /// would let the agent's scope hide unscoped tabs from the fallback.
     /// Existing derived-name manager policy is preserved independently.
     pub(crate) fn add_tab_scopes(&self, session_id: &str, units: &mut super::sweep::ScopeUnits) {
-        use crate::terminal_process::TabScope;
         for tab in self.tabs.iter().chain(&self.placeholder_tabs) {
-            let selection = if tab.scoped {
-                TabScope::Scoped
-            } else {
-                TabScope::Unscoped
-            };
             units.extend_tab(
                 crate::scope::tab_unit_name(session_id, &tab.tab_id),
-                selection,
+                tab.scoped,
             );
         }
         for host in &self.hosts {
@@ -576,12 +568,7 @@ impl SessionHosts {
                         },
                     ..
                 } => {
-                    let selection = if *scoped {
-                        TabScope::Scoped
-                    } else {
-                        TabScope::Unscoped
-                    };
-                    units.extend_tab(crate::scope::tab_unit_name(session_id, tab_id), selection);
+                    units.extend_tab(crate::scope::tab_unit_name(session_id, tab_id), *scoped);
                 }
                 // Without a tag this host may have held an unscoped tab.
                 // Its absence says nothing about detached marked jobs.

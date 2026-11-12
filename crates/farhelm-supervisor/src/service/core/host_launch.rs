@@ -34,9 +34,9 @@
 //!   ([`Supervisor::end_launch_host`]).
 //!
 //! The host's child stays in the supervisor's own control group, as a tmux
-//! pane does under the tmux server: a host gets no systemd scope of its
-//! own. Its lifetime is the unit's (`KillMode=process` keeps it across
-//! supervisor restarts, as it keeps tmux), and the agent inside keeps its
+//! pane under the old private tmux server did: a host gets no systemd scope
+//! of its own. Its lifetime is the unit's (`KillMode=process` keeps it
+//! across supervisor restarts), and the agent inside keeps its
 //! per-launch scope from the wrapper in its command.
 
 use std::collections::BTreeMap;
@@ -44,7 +44,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use terminal_host::protocol::Size;
+use terminal_host::protocol::{Info, Size};
 use tracing::warn;
 
 use super::{
@@ -58,8 +58,6 @@ use crate::hosts::{
     terminate_verified,
 };
 use crate::launch::LaunchArtifacts;
-use crate::service::terminals::Terminal;
-use terminal_host::protocol::Info;
 
 // ---- The child's environment -------------------------------------------------------
 
@@ -410,7 +408,9 @@ impl Supervisor {
     ///
     /// The host's child runs the launch's composed command
     /// ([`Self::prepare_launch`]), in `cwd`, at `cols` x `rows` (clamped
-    /// as tmux clamps them), with the environment of [`host_child_env`]
+    /// into the host protocol's accepted range, 1 to `MAX_DIMENSION` each
+    /// way, so a client's out-of-range size starts a terminal rather than
+    /// having the host refuse its spec), with the environment of [`host_child_env`]
     /// and the default journal cap. `initial_snapshot` seeds its terminal:
     /// a create has none, and a Restart gives the old terminal's history
     /// (`host_restart`). The host is started from this supervisor's own program
@@ -510,8 +510,8 @@ impl Supervisor {
             cwd: PathBuf::from(&cwd),
             env,
             size: Size {
-                cols: cols.clamp(1, 10_000),
-                rows: rows.clamp(1, 10_000),
+                cols: cols.clamp(1, terminal_host::protocol::MAX_DIMENSION),
+                rows: rows.clamp(1, terminal_host::protocol::MAX_DIMENSION),
             },
             journal_cap: DEFAULT_JOURNAL_CAP,
             initial_snapshot,
@@ -636,7 +636,7 @@ impl Supervisor {
             )
             .await;
         }
-        self.track_pending_hold(artifacts.spec(), Terminal::Host(host.clone()));
+        self.track_pending_hold(artifacts.spec(), host.clone());
         Ok(SpawnedInHost {
             host,
             artifacts,
@@ -817,7 +817,7 @@ impl Supervisor {
     /// Whether session `session_id`'s first launch (generation 0) started a
     /// terminal host, for a retried create whose row does not show it
     /// launched: the last source of `reserved_launch_evidence` for a host
-    /// row, and the host counterpart of asking tmux for the reserved session.
+    /// row.
     ///
     /// The bias is the evidence's: relaunching needs positive evidence of
     /// absence, so anything that cannot be settled is unresolved. In order:
@@ -855,11 +855,8 @@ impl Supervisor {
     /// when this returns, which leaves the host as it was.
     pub(super) async fn host_launch_evidence(&self, session_id: &str) -> LaunchEvidence {
         let published = self.sessions.lock().await.get(session_id).cloned();
-        if let Some(entry) = published {
-            match &entry.terminal {
-                Some(Terminal::Host(_)) => return LaunchEvidence::Present,
-                Some(Terminal::Tmux(_)) | None => {}
-            }
+        if published.is_some_and(|entry| entry.terminal.is_some()) {
+            return LaunchEvidence::Present;
         }
         let artifacts = LaunchArtifacts::for_launch(&self.state_dir, session_id, 0);
         let record = match read_launch_record(artifacts.host()).await {

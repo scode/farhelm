@@ -743,21 +743,6 @@ fn pen_changes(from: &Pen, to: &Pen, params: &mut String) {
     }
 }
 
-/// The SGR sequence that takes a plain template to `template`'s style, or
-/// nothing when it is plain. For printing lines whose styles carry from one
-/// line into the next (`super::super::LineStyles::Carried`): the style a line
-/// ended with is set again after the reset that ends the line. The same
-/// parameter writer serves this owned string and the snapshot's reusable scratch.
-pub(crate) fn sgr_setting(template: &Cell) -> String {
-    let mut sequence = String::new();
-    pen_changes(&Pen::plain(), &Pen::of(template), &mut sequence);
-    if !sequence.is_empty() {
-        sequence.insert_str(0, "\x1b[");
-        sequence.push('m');
-    }
-    sequence
-}
-
 /// SGR parameters that reset the template and set all of `pen` (without an
 /// underline color: see [`Writer::set_pen`]). Replaces the previous spelling
 /// in `params` without dropping its allocation, for comparison with changes.

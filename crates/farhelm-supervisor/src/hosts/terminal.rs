@@ -3,8 +3,8 @@
 //! terminal's emulator.
 //!
 //! A terminal host (`crates/terminal-host/`) keeps the pty, the program and a
-//! journal of raw output, and interprets nothing. Everything a tmux pane
-//! does for a terminal beyond that happens here: the program's output is fed
+//! journal of raw output, and interprets nothing. Everything else a terminal
+//! needs happens here: the program's output is fed
 //! to the supervisor's emulator (`farhelm_terminal_emulator`), its terminal
 //! queries are answered through the host's `Input`, its synchronized updates
 //! are flushed on their deadline, and the child's life is followed from the
@@ -187,15 +187,15 @@
 //!   unavailable is also sent to a [`LivenessNotifier`], if one was given,
 //!   so that one task can wait for the exits of every host terminal at
 //!   once.
-//! - **Adapters** map a host terminal's state onto the types the supervisor
-//!   decides with for a terminal of either kind (`crate::terminal_process`):
+//! - **Adapters** map a host terminal's state onto the types the supervisor's
+//!   lifecycle verbs decide with (`crate::terminal_process`):
 //!   [`HostStatus::probe`] gives a [`TerminalProbe`],
 //!   [`HostStatus::live_root`] the kill root beside it, and
 //!   [`HostStatus::exit_code`] and `HostStatus::anchor` the exit code and
-//!   hook anchor a pane would give. [`HostStatus::evidence`] gives the
-//!   three classes of status evidence ([`HostEvidence`]) with the owned
-//!   facts status reads (dead, exit code) and no tmux fields, which
-//!   `service::status::TerminalEvidence` maps one to one.
+//!   hook anchor. [`HostStatus::evidence`] gives the three classes of
+//!   status evidence ([`HostEvidence`]) with the owned facts status reads
+//!   (dead, exit code), which `service::status::TerminalEvidence` maps one
+//!   to one.
 //! - **Checkpoints** (`checkpoint`): once enough output has passed since
 //!   the previous attempt (the plan's D-8, revised), the runtime snapshots
 //!   its emulator at the next clean boundary and hands the host the
@@ -319,7 +319,7 @@ use super::process::HostProcess;
 use super::tag::HostTag;
 use crate::grid_input::PASTE_END;
 use crate::procs::{self, ProcessIdentity, ProcessState, TerminalAnchor};
-use crate::terminal_process::{TerminalProbe, TerminalProcess};
+use crate::terminal_process::TerminalProbe;
 
 // ---- Limits --------------------------------------------------------------------
 
@@ -329,10 +329,10 @@ use crate::terminal_process::{TerminalProbe, TerminalProcess};
 /// least the screen plus 10,000 lines of scrollback; this keeps a margin
 /// above that floor. The emulator's memory budget is measured at this size
 /// (the `farhelm-terminal-emulator` crate docs, "Memory budget"), so raising
-/// it raises every terminal's worst case. Old terminals keep the same amount
-/// (tmux's `HISTORY_LIMIT`), so a session restarted from one into a host
-/// loses nothing to a smaller limit; a compile-time assertion beside
-/// `HISTORY_LIMIT` keeps this at least as large, and nothing else ties them.
+/// it raises every terminal's worst case. A Restart carries a terminal's
+/// history into its new host (`core::host_restart`), which keeps the same
+/// number of lines, so a restarted session loses none of it beyond what the
+/// seed's size bound leaves out (its oldest history, marked trimmed).
 pub const DEFAULT_SCROLLBACK_LINES: usize = 12_000;
 
 /// How many `send_input` calls may wait in the task's queue. Each holds at
@@ -697,8 +697,7 @@ pub struct HostStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostEvidence {
     /// The host answers for its child: whether it has exited and its exit
-    /// code, as `PaneState::dead` and `PaneState::exit_code` give them for a
-    /// pane.
+    /// code.
     Owned { dead: bool, exit_code: Option<i32> },
     /// The host has ended, and with it the terminal.
     Absent,
@@ -801,42 +800,31 @@ impl HostStatus {
     }
 
     /// This state's answer to the process question the verbs decide on
-    /// (Stop, Restart, Delete, prompt delivery, the tab reap), the one
-    /// `TmuxDriver::pane_process` gives for a pane.
+    /// (Stop, Restart, Delete, prompt delivery, the tab reap).
     ///
-    /// A child that [`Self::child_root`] gives is an owned, live process. A
-    /// child without a root (reaped, or the exit recorded) is an owned, dead
-    /// one with no pid, so nothing signals a reaped pid. This can say dead
+    /// A child that [`Self::child_root`] gives is running. A child without a
+    /// root (reaped, or the exit recorded) is dead, with no pid, so nothing
+    /// signals a reaped pid. This can say dead
     /// a little before [`Self::evidence`] does, which waits for the exit
     /// record so that the exit is recorded with the final screen. A host
     /// that has ended is gone. An unavailable host, or a process table that
     /// cannot be read, is an error: the verbs treat an error as "could not
-    /// tell" and refuse. It has no `ForeignOwner` answer: a host terminal's
-    /// owner is its tag, not a name that could be recycled.
+    /// tell" and refuse.
     ///
-    /// `TerminalProcess` carries a pid only. A caller that kills or sweeps
-    /// from it must take the root with its start identity from
+    /// [`TerminalProbe::Running`] carries a pid only. A caller that kills or
+    /// sweeps from it must take the root with its start identity from
     /// [`Self::child_root`] rather than read an identity from the bare pid
     /// again, which could be a process that took the pid since.
     pub fn probe(&self) -> anyhow::Result<TerminalProbe> {
         match &self.liveness {
             Liveness::Running { .. } => match self.pinned_child() {
-                Some(Ok(root)) => Ok(TerminalProbe::Owned(TerminalProcess {
-                    pid: Some(root.pid),
-                    dead: false,
-                })),
+                Some(Ok(root)) => Ok(TerminalProbe::Running(root.pid)),
                 Some(Err(why)) => Err(anyhow::anyhow!(
                     "the terminal host's child could not be checked: {why}"
                 )),
-                None => Ok(TerminalProbe::Owned(TerminalProcess {
-                    pid: None,
-                    dead: true,
-                })),
+                None => Ok(TerminalProbe::Dead),
             },
-            Liveness::Exited { .. } => Ok(TerminalProbe::Owned(TerminalProcess {
-                pid: None,
-                dead: true,
-            })),
+            Liveness::Exited { .. } => Ok(TerminalProbe::Dead),
             Liveness::Gone => Ok(TerminalProbe::Gone),
             Liveness::Unavailable { reason, .. } => Err(anyhow::anyhow!(
                 "the terminal host is unavailable: {reason}"
@@ -879,9 +867,8 @@ impl HostStatus {
     /// still be waiting to be applied; with the start identity read while
     /// the child lived, so a pid reused since cannot match. A child that
     /// had already exited when the runtime adopted its host was never
-    /// pinned, and is anchored by its pid alone, as tmux anchors a dead
-    /// pane. `None` without a child pid, and for a host that cannot be
-    /// read.
+    /// pinned, and is anchored by its pid alone. `None` without a child
+    /// pid, and for a host that cannot be read.
     pub(crate) fn anchor(&self) -> Option<TerminalAnchor> {
         match &self.liveness {
             Liveness::Unavailable { .. } => None,
@@ -1222,6 +1209,19 @@ impl From<ConnectError> for AdoptError {
 ///
 /// Two handles are equal when they share one runtime: a new runtime for the
 /// same host is a new terminal handle, even though it names the same socket.
+///
+/// A handle is what backs one of a session's terminals (its agent, or one
+/// of its tabs). Every create makes one, every Restart makes a new one, and
+/// a restarted supervisor's reload makes one for every host row whose host
+/// it finds again (`service::core::host_handover`): adopted, or, for a host
+/// it cannot read, a handle that answers as unavailable
+/// ([`Self::unavailable`]). A host that cannot be read
+/// ([`Liveness::Unavailable`]) answers every question about its process as "could not
+/// tell": an error from the probes, no evidence for status, and nothing done
+/// to it, except by an unconditional Delete, which ends the session for good
+/// and the host with it (`service::session_hosts`). Attach's revalidation
+/// uses `PartialEq` (one runtime) to ask whether a session still has the
+/// terminal it resolved before taking its lock.
 #[derive(Clone)]
 pub struct HostTerminal {
     inner: Arc<Inner>,
@@ -1983,6 +1983,22 @@ impl HostTerminal {
         Self::ended(socket, Liveness::Gone, adopted, None)
     }
 
+    /// A handle whose state is fixed at `liveness`, with no host and no
+    /// runtime behind it: for unit tests of code that only reads a
+    /// terminal's state (status, the listing, the observers), which would
+    /// otherwise need a host to put a terminal in each state. It is a
+    /// placeholder that has not caught up, so the sampler never reads it.
+    /// Like [`Self::gone`], it must be made within a tokio runtime.
+    #[cfg(test)]
+    pub(crate) fn fixed_for_test(liveness: Liveness) -> HostTerminal {
+        Self::ended(
+            Path::new("/nonexistent/fixed-test-host"),
+            liveness,
+            None,
+            None,
+        )
+    }
+
     /// A retry failed without disproving the host process pinned by this
     /// handle. Keep that identity through every failed retry: a later
     /// missing socket still cannot prove the original process ended.
@@ -2532,6 +2548,108 @@ impl HostTerminal {
     /// See `HostStatus::anchor`.
     pub(crate) fn anchor(&self) -> Option<TerminalAnchor> {
         self.inner.status.borrow().anchor()
+    }
+}
+
+/// The supervisor's readings of a terminal that the lifecycle verbs, the
+/// session row and the wire share, beside the runtime's own answers.
+impl HostTerminal {
+    /// The `(pid, start time)` root a kill or process-tree sweep starts
+    /// from, for the running child `pid` [`Self::probe`] just reported
+    /// ([`TerminalProbe::Running`]): `None` once that child is dead or gone,
+    /// an error when the process table cannot be read (an unexamined root is unconfirmed,
+    /// never gone, so the callers refuse rather than sweep without it).
+    ///
+    /// Stop, Restart and Delete each read it right after their probe, at
+    /// the same liveness boundary, so that the durable writes and sweeps
+    /// that follow act on the process the probe authorized and never on one
+    /// that took its pid since. The child was pinned to its start identity
+    /// when the runtime adopted the host, so the root is that pinned
+    /// identity, checked against the process table again
+    /// ([`HostStatus::live_root`]) rather than read afresh
+    /// from a bare pid.
+    pub(crate) fn sweep_root(&self, pid: u32) -> anyhow::Result<Option<(u32, u64)>> {
+        // The probe and the root both come from the pinned child, so a
+        // different pid means the terminal's state is not what the probe
+        // saw; that is unexamined, never "no root".
+        match self.live_root()? {
+            Some(root) if root.pid == pid => Ok(Some((root.pid, root.start))),
+            Some(root) => Err(anyhow::anyhow!(
+                "the terminal host's child is {} where its probe saw {pid}; refusing to sweep \
+                 without a root",
+                root.pid
+            )),
+            None => Ok(None),
+        }
+    }
+
+    /// For a terminal whose process its probe reported dead, wait up to
+    /// `bound` for the terminal to hold everything the process left (its
+    /// final output and its exit status), and say whether it does.
+    ///
+    /// The probe says dead as soon as the child is reaped, which can be
+    /// before the host's exit record, sent after the child's drained
+    /// output, has been processed; only the record makes the screen final
+    /// and gives the exit code ([`HostStatus::evidence`]). A
+    /// caller that makes a durable classification from the dead terminal (a
+    /// launch that never started, quoted from the screen) needs this to be
+    /// true first: a durable error is never revised, so one made from a
+    /// partial screen and a missing code would stay wrong. `false` for a
+    /// host whose record does not come in time, or that cannot be read.
+    pub(crate) async fn holds_final_state(&self, bound: Duration) -> bool {
+        let settled =
+            |host: &HostTerminal| matches!(host.evidence(), HostEvidence::Owned { dead: true, .. });
+        let mut status = self.subscribe();
+        tokio::time::timeout(bound, async {
+            while !settled(self) {
+                if status.changed().await.is_err() {
+                    return settled(self);
+                }
+            }
+            true
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// The value this terminal contributes to the session row's terminal
+    /// address ([`crate::store::StoredSession::terminal_address`]), which
+    /// outcome transitions carry so a launch's provenance survives the
+    /// physical terminal's disappearance: the host's socket name (the file
+    /// name inside the state directory's socket directory, never a path).
+    ///
+    /// The string is only meaningful beside the row's
+    /// [`crate::store::StoredSession::terminal_kind`]: a row of the old kind
+    /// holds a tmux pane id there, which is never looked up again
+    /// (`service::core::old_terminals`).
+    ///
+    /// Socket names are short base32 names this supervisor mints
+    /// (`crate::hosts::names`), always valid UTF-8 and never empty, so the
+    /// empty fallback below is unreachable; an empty address would read as a
+    /// launch never confirmed, which is the conservative misreading.
+    pub(crate) fn recorded_address(&self) -> &str {
+        self.socket()
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or_default()
+    }
+
+    /// This terminal's kind as replies report it to clients
+    /// (`SessionInfo::agent_terminal`, `TabInfo::kind`): always a host. The
+    /// wire still carries the kind for clients that tell the two kinds of
+    /// terminal apart, which an older page and helm do.
+    pub(crate) fn wire_kind(&self) -> farhelm_proto::TerminalKind {
+        farhelm_proto::TerminalKind::Host
+    }
+
+    /// The reply's description of a tab backed by this terminal: its id and
+    /// its kind ([`Self::wire_kind`]). Every `TabInfo` a reply carries is
+    /// built here.
+    pub(crate) fn tab_info(&self, id: String) -> farhelm_proto::TabInfo {
+        farhelm_proto::TabInfo {
+            id,
+            kind: Some(self.wire_kind()),
+        }
     }
 }
 

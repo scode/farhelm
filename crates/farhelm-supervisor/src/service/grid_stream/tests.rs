@@ -1525,7 +1525,8 @@ async fn drain_until(
 /// messages there (`<kind>.messages`, each a 4-byte little-endian length
 /// followed by the message, since binary rows cannot be split on newlines),
 /// and the output that made them (`<kind>.raw`), for measuring the grid
-/// client's memory and today's tmux replay of the same output.
+/// client's memory and a byte-stream replay of the same output (what the
+/// old tmux terminals sent).
 async fn measure_attach(kind: &str) {
     let out_dir = std::env::var_os("FARHELM_GRID_MEASURE_OUT").map(std::path::PathBuf::from);
     let (host, _test_host, output) = host_at_the_cap(kind).await;

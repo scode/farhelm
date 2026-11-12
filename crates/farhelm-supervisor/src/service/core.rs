@@ -3,7 +3,7 @@
 //!
 //! This is the module every other `service` submodule ultimately answers
 //! to — sweep, uploads, terminals, and the rest each own one slice of
-//! *how* a session's state changes on disk or in tmux, but the map of
+//! *how* a session's state changes on disk or in its terminals, but the map of
 //! what sessions exist, their durable outcome, and their conversation-
 //! capture identity lives here. See the crate-root `service` module doc
 //! (`mod.rs`) for the state model and the shape of the split.
@@ -11,11 +11,11 @@
 //! Reading that state back out does NOT live here. `status` derives a
 //! session's liveness, its restart offer, and the `SessionInfo` a reply
 //! carries; its classification core takes what it needs as plain arguments
-//! (an entry, a pane-state map), which is what keeps it out of this
+//! (an entry and its terminal), which is what keeps it out of this
 //! module's private fields and testable with no supervisor at all.
 //! `listing` owns the whole-list reply, and that one is NOT supervisor-free:
 //! `list_all` takes a `&Supervisor` because listing means locking the
-//! session map and probing tmux. What it does not do is reach into
+//! session map and reading the checkout registry. What it does not do is reach into
 //! private fields — it goes through the same API any other submodule
 //! would.
 
@@ -43,7 +43,7 @@ pub(crate) use host_tabs::{
 /// Restarting a host agent into a new terminal host that keeps the old
 /// one's history (see its own docs).
 mod host_restart;
-pub use host_restart::{HostRestartFault, HostRestartStage, TmuxSeedFault};
+pub use host_restart::{HostRestartFault, HostRestartStage};
 
 /// The startup reclaim of orphaned terminal hosts: ending the hosts whose
 /// tags name sessions and tabs nothing in the state directory knows, and
@@ -80,9 +80,7 @@ use super::sweep::{
     reap_process_tree, stop_live_agent,
 };
 use super::terminals::{
-    ActiveAttach, AttachmentKey, DiscoveredTab, OutputReapRegistry, SINK_READY_TIMEOUT,
-    SinkRegistry, Terminal, TerminalId, TmuxTerminal, agent_pane_from_states,
-    resolve_terminal_for_close, tabs_from_pane_states, tmux_tab_home,
+    ActiveAttach, AttachmentKey, TerminalId, join_forwarder, resolve_terminal_for_close,
 };
 use super::ticker::{
     ACTIVITY_STAMP_QUANTUM, ActivitySample, REAP_BUDGET_PER_TICK, SAMPLING_ADMISSION_PERMITS,
@@ -90,14 +88,14 @@ use super::ticker::{
 };
 use super::uploads::UploadHandle;
 use crate::agent_kind::IntegrationSnapshot;
+use crate::hosts::HostTerminal;
 use crate::launch::{LaunchArtifacts, LaunchSpec, resolve_shell, window_command};
 use crate::store::DedupScope;
 use crate::store::{
     Claimed, IntentClaim, LastOutcome, Reservation, ReservationOutcome, RetryClaim, SessionStore,
     Settlement, StoredSession, TerminalKind, Transition, now_unix,
 };
-use crate::terminal_process::{TabScope, TerminalProbe};
-use crate::tmux::{LaunchExcerptFence, PaneState, TmuxDriver};
+use crate::terminal_process::TerminalProbe;
 use anyhow::Context;
 use farhelm_proto::{
     AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, RestartOffer, SessionInfo, SessionLaunch,
@@ -383,41 +381,8 @@ pub struct SupervisorTimeouts {
     pub upload_progress: Duration,
     /// See [`UPLOAD_DISK_STAGE_TIMEOUT`].
     pub upload_disk_stage: Duration,
-    /// The budget for one tmux control-mode exchange — see
-    /// [`crate::tmux::CONTROL_EXCHANGE_TIMEOUT`], whose docs cover why
-    /// PRODUCTION keeps this tight (it bounds how long a wedged tmux can
-    /// hold the supervisor-wide attachments mutex).
-    ///
-    /// Grouped with the other "gone, not slow" timeouts above for the same
-    /// reason they are: a test scenario that drives real tmux traffic on a
-    /// loaded CI runner needs this loosened too, or a merely-busy tmux
-    /// reads as wedged and the test fails for a reason that has nothing to
-    /// do with what it is testing. Threaded into the [`TmuxDriver`] this
-    /// supervisor constructs — see `new_with_seams` — because that driver,
-    /// not the supervisor itself, is what actually reads it.
-    pub tmux_exchange: Duration,
-    /// The budget for the attach-time pane-listing step — see
-    /// [`crate::tmux::PANE_LIST_TIMEOUT`]. Threaded the same way and for
-    /// the same CI-load reason as `tmux_exchange`.
-    pub tmux_pane_list: Duration,
-    /// See [`SINK_READY_TIMEOUT`]: how long [`Supervisor::ensure_session_
-    /// sink`] waits for a sink that is between incarnations before failing
-    /// the attach it was called for.
-    ///
-    /// Grouped here for the same CI-load reason as `tmux_exchange` and
-    /// `tmux_pane_list`, and coupled to them in practice: a sink's respawn
-    /// attempt opens a fresh control-mode client through `tmux_exchange`'s
-    /// own budget, so a test suite that widens `tmux_exchange` without
-    /// also widening this one can end up with a sink-ready wait shorter
-    /// than the respawn attempt it is meant to cover.
-    pub sink_ready: Duration,
-    /// See [`super::terminals::DELETE_SINK_REAP_WAIT`]: how long Delete waits
-    /// for a session sink's orderly shutdown before it kills the session's
-    /// tmux session anyway. Here so tests can reach that fallback without
-    /// waiting out the production budget.
-    pub delete_sink_reap: Duration,
     /// See [`AGENT_UPCALL_TIMEOUT`]. The one entry here that bounds a wait
-    /// on the PEER rather than on tmux or a socket write — the supervisor
+    /// on the PEER rather than on a socket write — the supervisor
     /// is the client for the duration of an agent request. Counts only the
     /// wait AFTER the request reached the connection; getting it there is
     /// [`Self::agent_deliver`]'s budget.
@@ -490,10 +455,6 @@ impl Default for SupervisorTimeouts {
             writer_stall: WRITER_STALL_TIMEOUT,
             upload_progress: UPLOAD_PROGRESS_TIMEOUT,
             upload_disk_stage: UPLOAD_DISK_STAGE_TIMEOUT,
-            tmux_exchange: crate::tmux::CONTROL_EXCHANGE_TIMEOUT,
-            tmux_pane_list: crate::tmux::PANE_LIST_TIMEOUT,
-            sink_ready: SINK_READY_TIMEOUT,
-            delete_sink_reap: super::terminals::DELETE_SINK_REAP_WAIT,
             agent_upcall: AGENT_UPCALL_TIMEOUT,
             agent_approval_wait: farhelm_proto::approvals::APPROVAL_WAIT,
             agent_environment_launch: farhelm_proto::approvals::ENVIRONMENT_LAUNCH_WAIT,
@@ -545,15 +506,15 @@ pub enum CreateStage {
     /// After the durable launching row is committed — together with a
     /// first-time intent's reservation, or by the takeover that reclaimed
     /// a pending one — and before ANY external side effect: no launch spec
-    /// on disk, no tmux session. What survives is a row describing an
+    /// on disk, no terminal host. What survives is a row describing an
     /// attempt that provably never got anywhere, which is the state item
     /// 2's ordering rule exists to guarantee and the only one a retry may
     /// relaunch over.
     AfterRecord,
-    /// After tmux has the session and its pane, and before that launch is
-    /// confirmed durably. What survives is a `Launching` row with no pane
-    /// recorded while the tmux session genuinely exists — reload's pane
-    /// rediscovery is what reconciles it. (Whether the AGENT is running is
+    /// After the terminal host and its child exist, and before that launch
+    /// is confirmed durably. What survives is a `Launching` row with no
+    /// terminal address recorded while the host genuinely exists — reload's
+    /// host discovery (by its tag) is what reconciles it. (Whether the AGENT is running is
     /// a separate question at this instant: the shim may not have reached
     /// its `exec` yet, and may yet fail it.)
     DuringLaunch,
@@ -647,36 +608,6 @@ pub type CreateIntentWaiting = Arc<dyn Fn(&str) + Send + Sync>;
 /// `File::sync_all` and installs no callback.
 pub type PreparationParentSync = Arc<dyn Fn(&std::fs::File) -> std::io::Result<()> + Send + Sync>;
 
-/// Which of a sampling pass's two tmux reads a [`SampleFault`] is being
-/// asked about (PLAN_M6_75.md items 1 and 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SampleRead<'a> {
-    /// The single batched liveness probe the whole pass is built on.
-    /// Failing it means the pass learns nothing about ANY session.
-    PaneStates,
-    /// One selected session's own screen capture.
-    Tail { session: &'a str },
-}
-
-/// A failure injected in place of one of a sampling pass's tmux reads,
-/// returning the message the read should fail with.
-///
-/// A seam rather than a fault-injecting tmux wrapper, and it exists for a
-/// property that is otherwise untestable: what a pass does to the retained
-/// screens when it cannot read them. Both failure paths INVALIDATE
-/// screen-derived readings without recording an observation
-/// (`ticker::ActivitySample::forget_tail`), and neither can be reached from
-/// a test by arranging real conditions — a pane must be alive in the very
-/// probe that selected it for its capture to be attempted at all, so
-/// "selected, then unreadable" is a race with no handle on it, and a failed
-/// server-wide probe means breaking tmux underneath a running supervisor.
-///
-/// Testing the invalidation by calling `forget_tail` directly was the
-/// alternative and is not equivalent: it stays green if production stops
-/// calling it, which is precisely the regression. Production installs none,
-/// so the cost is one `Option` check per read.
-pub type SampleFault = Arc<dyn Fn(SampleRead<'_>) -> Option<String> + Send + Sync>;
-
 /// Millisecond wall clock used to date a sampler-observed work burst.
 ///
 /// Production reads `SystemTime`; tests inject a private sequence so same-
@@ -694,25 +625,11 @@ fn work_start_now() -> i64 {
     i64::try_from(millis).unwrap_or(i64::MAX)
 }
 
-/// A hook awaited after a missing sink is reserved but before opening starts.
-///
-/// The reservation race test needs to hold this exact boundary: another
-/// ensure must already see the candidate barrier even though no tmux process
-/// has begun opening. Production installs none.
-pub type SinkReservationGate =
+/// A hook awaited at one boundary a test holds still: the step after it
+/// waits until the returned future completes. The named aliases below say
+/// which boundary each one holds. Production installs none.
+pub type BoundaryGate =
     Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
-
-/// A hook awaited immediately before the locked sink-registry decision.
-///
-/// Tests release two callers from this boundary together to prove the locked
-/// lookup admits only one missing-sink reservation. Production installs none.
-pub type SinkLookupGate = SinkReservationGate;
-
-/// A hook awaited before a natural forwarder verdict claims its attachment.
-///
-/// The arbitration race test holds this boundary while an explicit takeover
-/// removes the attachment. Production installs none.
-pub type NaturalDetachGate = SinkReservationGate;
 
 /// A hook awaited inside an `AgentRequest`'s window between claiming the
 /// delete fence and checking the asking session's credential.
@@ -724,16 +641,7 @@ pub type NaturalDetachGate = SinkReservationGate;
 /// boundary is what lets a test try the delete DURING it — the only way to
 /// tell "the fence was claimed first" from "the fence was claimed at some
 /// point". Production installs none.
-pub type AgentAuthGate = SinkReservationGate;
-
-/// A hook awaited after a forwarder's output client is safely gone but before
-/// that result is published to teardown waiters.
-///
-/// Restart and tab-close must still notify their viewer and recover their
-/// session state when cleanup has moved behind a runtime-owned barrier. Tests
-/// hold this boundary to make that normally tiny interval deterministic.
-/// Production installs none.
-pub type ForwarderCleanupGate = SinkReservationGate;
+pub type AgentAuthGate = BoundaryGate;
 
 /// A hook awaited in Delete after the supervisor-wide `attachments` guard is
 /// released and before the deleted session's files are removed.
@@ -741,7 +649,7 @@ pub type ForwarderCleanupGate = SinkReservationGate;
 /// The slow, unbounded file cleanup must run outside that guard; a test
 /// holds this boundary to observe the guard free while cleanup is pending.
 /// Production installs none.
-pub type DeletedSessionCleanupGate = SinkReservationGate;
+pub type DeletedSessionCleanupGate = BoundaryGate;
 
 /// A hook awaited after a tab's host is adopted, but before the
 /// dead-at-open-reply settle looks at its shell.
@@ -753,20 +661,20 @@ pub type DeletedSessionCleanupGate = SinkReservationGate;
 /// starts, and the settle begins whenever the open reaches it, bounded only
 /// by [`TAB_LAUNCH_SETTLE`]. Under enough load the fixture shell's death has
 /// been observed landing after the settle (2026-08-18, three concurrent e2e
-/// binaries on a four-core box, with the tmux tabs of the time), turning the
+/// binaries on a four-core box, with the tabs of the time), turning the
 /// refusal test into a successful open of a live tab. Holding this boundary
 /// lets a test wait for the shell's death before the settle runs, so
 /// "already dead by reply time" is a fact rather than a bet.
 ///
 /// Production installs none, so the cost is one `Option` check per open, and
 /// the settle's own timing is untouched.
-pub type TabSettleGate = SinkReservationGate;
+pub type TabSettleGate = BoundaryGate;
 
 /// A hook awaited at the start of the startup reclaim's discovery
 /// (`host_reclaim`), inside its budget: a test holds it past the budget to
 /// show that a discovery that never finishes ends and removes nothing.
 /// Production installs none.
-pub type ReclaimDiscoveryGate = SinkReservationGate;
+pub type ReclaimDiscoveryGate = BoundaryGate;
 
 /// A hook the startup reclaim's listing of the launch directory consults
 /// (`host_reclaim`): with `None` before it opens the directory, then with
@@ -783,7 +691,7 @@ pub type ReclaimListingFault = Arc<dyn Fn(Option<&str>) -> bool + Send + Sync>;
 /// [`Supervisor::restarting_rows`]). The window lasts as long as detaching the
 /// old terminal and relaunching, which a test cannot time a listing into, so a
 /// test holds it open here. Production installs none.
-pub type RestartWindowGate = SinkReservationGate;
+pub type RestartWindowGate = BoundaryGate;
 
 /// An interruption of a create's host start at the moment a supervisor
 /// crash there is most dangerous: the host's first stage has been recorded
@@ -846,7 +754,7 @@ fault_hooks! {
     report_watch_creation: Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>,
     /// Hold a report drain after its directory snapshot. Tests write a new
     /// directory here to prove an event during the drain owes another pass.
-    report_drain_listed: SinkReservationGate,
+    report_drain_listed: BoundaryGate,
     /// Suppress backend event delivery only for the imposed-event latch proof,
     /// so a late kernel event cannot rescue a lost Notify permit.
     suppress_report_watch_events: Arc<std::sync::atomic::AtomicBool>,
@@ -885,29 +793,8 @@ fault_hooks! {
     /// Fail Claude's pin liveness read without relying on host permissions or
     /// changing process-wide state. Unavailable evidence must retain authority.
     claude_pin_process_fault: Arc<dyn Fn(u32) -> Option<String> + Send + Sync>,
-    /// See [`SinkReservationGate`]. `None` in production.
-    sink_reservation_gate: SinkReservationGate,
-    /// See [`SinkLookupGate`]. `None` in production.
-    sink_lookup_gate: SinkLookupGate,
-    /// Test signal emitted after locked lookup observes a candidate barrier.
-    sink_candidate_wait_gate: SinkLookupGate,
-    /// See [`NaturalDetachGate`]. `None` in production.
-    natural_detach_gate: NaturalDetachGate,
-    /// Drop live payloads after decoding while leaving replay untouched. Tests
-    /// arm this only after observing live readiness to model tmux's silent EOF
-    /// loss deterministically. The immediate-exit producer remains unchanged.
-    suppress_live_output: Arc<std::sync::atomic::AtomicBool>,
-    /// Observe a byte-stream recovery before its reset is sent. The channel
-    /// belongs to this connection; true means the pump requested a death
-    /// recovery, false means tmux flow control. Tests retain bounded evidence
-    /// here because a flood can evict the corresponding tracing event.
-    tmux_recovery_observer: Arc<dyn Fn(u32, bool) + Send + Sync>,
-    /// See [`ForwarderCleanupGate`]. `None` in production.
-    forwarder_cleanup_gate: ForwarderCleanupGate,
     /// See [`AgentAuthGate`]. `None` in production.
     agent_auth_gate: AgentAuthGate,
-    /// See [`SampleFault`]. `None` in production.
-    sample_fault: SampleFault,
     /// See [`TabOpenFault`]. `None` in production.
     tab_open_fault: TabOpenFault,
     /// See [`TabSettleGate`]. `None` in production.
@@ -915,7 +802,7 @@ fault_hooks! {
     /// Hold a resolved tab close immediately before process teardown. Tests
     /// prove sampling continues while the close owns its lifecycle claim;
     /// a sleep would race the production kill grace instead of establishing it.
-    tab_close_gate: SinkReservationGate,
+    tab_close_gate: BoundaryGate,
     /// See [`DeletedSessionCleanupGate`]. `None` in production.
     deleted_session_cleanup_gate: DeletedSessionCleanupGate,
     /// See [`RestartWindowGate`]. `None` in production.
@@ -944,10 +831,10 @@ fault_hooks! {
     /// hosts (`service::session_hosts`), so a test can hold one host's end
     /// past Delete's deadline for ending them and show what the deadline
     /// does. `None` in production.
-    delete_host_end_gate: SinkReservationGate,
+    delete_host_end_gate: BoundaryGate,
     /// Hold Delete between its uncertainty check and live-tab count, so a
-    /// test can make a running tab unreadable during the tmux round trip.
-    delete_tab_count_gate: SinkReservationGate,
+    /// test can make a running tab unreadable in between.
+    delete_tab_count_gate: BoundaryGate,
     /// Called before a tab's close ends its host (`host_tabs`); an error
     /// stands for an end that could not be confirmed (a host that survives
     /// its signals, a process table that cannot be read), so a test can show
@@ -959,18 +846,6 @@ fault_hooks! {
     reclaim_discovery_gate: ReclaimDiscoveryGate,
     /// See [`ReclaimListingFault`]. `None` in production.
     reclaim_listing_fault: ReclaimListingFault,
-    /// Awaited by a Restart that moves a tmux session into a terminal host,
-    /// before it reads the tmux pane's history for the new host's seed
-    /// (`host_restart`, "From a tmux pane"), so a test can begin an orderly
-    /// stop while the seed is being made and show that the stop refuses the
-    /// Restart rather than wait for it. `None` in production.
-    tmux_seed_gate: SinkReservationGate,
-    /// Called by a Restart that moves a tmux session into a terminal host
-    /// in place of each attempt to read the tmux pane's history; an error is
-    /// handled as that failure of the read would be (`host_restart`,
-    /// "tmux_restart_seed"), and `Ok` lets the real read run. `None` in
-    /// production.
-    tmux_seed_fault: Arc<dyn Fn() -> Result<(), host_restart::TmuxSeedFault> + Send + Sync>,
 }
 
 /// A Delete's mark in [`Supervisor::deletes_in_progress`], for as long as
@@ -1041,31 +916,19 @@ impl Supervisor {
 pub struct SupervisorSeams {
     /// See [`BootIdSource`]. Defaults to reading this host's real boot id.
     pub boot_id: BootIdSource,
-    /// The tmux binary this supervisor drives — the resolved value of
-    /// `--tmux` / `FARHELM_TMUX` (see
-    /// [`crate::tmux::resolve_tmux_program`]), defaulting to plain `tmux`
-    /// off `PATH`.
-    ///
-    /// A production knob rather than a test fault seam, and it lives here
-    /// anyway for the reason this struct exists: the alternative was a
-    /// fifth positional parameter on `new_with_seams` that every one of
-    /// the crate's several dozen test constructions would have to spell
-    /// out as "no opinion". Resolution deliberately happens ONCE, at
-    /// `farhelm supervisor run`'s startup, so nothing below this line ever
-    /// consults the environment again and no two launch paths can disagree
-    /// about which tmux this supervisor is driving.
-    pub tmux_program: PathBuf,
     /// Which agent kinds get the per-launch conversation hook appended to
     /// their argv — the `FARHELM_AGENT_HOOKS` opt-out (plan D5). See
     /// [`crate::agent_kind::AgentHooks`], and
     /// [`Supervisor::with_farhelm_args`] for the one place it is consulted.
     ///
-    /// A production knob for the same reason `tmux_program` above is one,
-    /// and it obeys the same rule this struct's `Default` states: nothing
-    /// below this line ever consults the environment. The single
+    /// A production knob rather than a test fault seam, and it lives here
+    /// anyway for the reason this struct exists: the alternative was another
+    /// positional parameter on `new_with_seams` that every one of the
+    /// crate's several dozen test constructions would have to spell out as
+    /// "no opinion". It obeys the rule this struct's `Default` states:
+    /// nothing below this line ever consults the environment. The single
     /// `std::env::var("FARHELM_AGENT_HOOKS")` read happens in `farhelm
-    /// supervisor run`'s CLI arm, beside the `--tmux` resolution, and the
-    /// PARSED value arrives here — so a test sets the policy by setting
+    /// supervisor run`'s CLI arm, and the PARSED value arrives here — so a test sets the policy by setting
     /// this field and never by mutating its own process's environment,
     /// which this repo forbids.
     ///
@@ -1139,8 +1002,9 @@ pub struct SupervisorSeams {
     /// repeated or backward reading still produces a nondecreasing key.
     pub work_start_clock: WorkStartClock,
     /// Extra environment entries every launch of every session in this
-    /// supervisor starts with, injected into tmux (`-e`) so they reach the
-    /// login shell before it sources anything.
+    /// supervisor starts with, put into the terminal host child's
+    /// environment (`host_launch::host_child_env`) so they reach the login
+    /// shell before it sources anything.
     ///
     /// Empty in production, and deliberately not a user-facing feature:
     /// SPEC.md's environment contract says a session behaves as if the user
@@ -1286,7 +1150,6 @@ impl Default for SupervisorSeams {
     fn default() -> Self {
         SupervisorSeams {
             boot_id: Arc::new(read_host_boot_id),
-            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             faults: FaultHooks::default(),
@@ -1470,16 +1333,6 @@ impl StateDirOwnership {
     /// looks like) — it simply may not migrate the schema or write any
     /// reconciliation, and its `serve` will refuse.
     ///
-    /// The `bool` alongside the claim is true only when THIS call took
-    /// the OS lock — as opposed to reusing a claim some other
-    /// `Supervisor` in this process already holds. The distinction
-    /// matters to exactly one caller: the startup reap of stale tmux
-    /// control clients, whose "everything attached is a dead
-    /// predecessor's" premise is true when the lock was just acquired
-    /// (nothing in this process OR any other owned the directory a
-    /// moment ago) and FALSE for a reused claim (the incumbent holding
-    /// it has live, healthy clients this constructor must not touch).
-    ///
     /// One benign race is left deliberately: a claim being DROPPED
     /// concurrently with this call can leave the registry entry already
     /// dead while its lock file has not finished closing, so the
@@ -1487,14 +1340,14 @@ impl StateDirOwnership {
     /// another process held the directory. It resolves itself on the next
     /// construction, and it fails in the safe direction (no migration, no
     /// reconciliation) — the only direction worth being sure of.
-    fn claim(state_dir: &Path) -> anyhow::Result<Option<(Arc<StateDirOwnership>, bool)>> {
+    fn claim(state_dir: &Path) -> anyhow::Result<Option<Arc<StateDirOwnership>>> {
         // Canonicalized so two spellings of the same directory cannot
         // yield two claims; the directory exists by now (`ensure_private_dir`).
         let path = std::fs::canonicalize(state_dir)
             .with_context(|| format!("resolving state dir {}", state_dir.display()))?;
         let mut claims = STATE_DIR_CLAIMS.lock().expect("claims mutex poisoned");
         if let Some(existing) = claims.get(&path).and_then(std::sync::Weak::upgrade) {
-            return Ok(Some((existing, false)));
+            return Ok(Some(existing));
         }
         let lock_path = path.join("supervisor.lock");
         let lock = std::fs::OpenOptions::new()
@@ -1518,7 +1371,7 @@ impl StateDirOwnership {
             serving: std::sync::atomic::AtomicBool::new(false),
         });
         claims.insert(path, Arc::downgrade(&owned));
-        Ok(Some((owned, true)))
+        Ok(Some(owned))
     }
 
     /// [`Self::claim`], but a lock held by a supervisor that is not serving
@@ -1527,9 +1380,9 @@ impl StateDirOwnership {
     /// This is what lets Farhelm be reopened right after it was quit. A
     /// stopping supervisor stops answering on its socket immediately and
     /// then keeps `supervisor.lock` for up to [`SHUTDOWN_OUTPUT_BUDGET`]
-    /// (plus a two-second quiet-down if that budget expires) while it
-    /// closes its terminal-output clients in order, and after that until any
-    /// blocking work it started has finished (see [`on_owned_runtime`]); a
+    /// while it closes its terminal-output clients in order, and after that
+    /// until any blocking work it started has finished (see
+    /// [`on_owned_runtime`]); a
     /// long startup sweep can outlast the wait, which then gives up. A successor
     /// started in that window used to find the lock held, start read-only,
     /// and have `serve` refuse it, so the desktop app refused to open. The
@@ -1559,7 +1412,7 @@ impl StateDirOwnership {
     async fn claim_waiting(
         state_dir: &Path,
         wait: Duration,
-    ) -> anyhow::Result<Option<(Arc<StateDirOwnership>, bool)>> {
+    ) -> anyhow::Result<Option<Arc<StateDirOwnership>>> {
         Self::claim_waiting_observed(state_dir, wait, || {}).await
     }
 
@@ -1570,7 +1423,7 @@ impl StateDirOwnership {
         state_dir: &Path,
         wait: Duration,
         on_busy: impl Fn(),
-    ) -> anyhow::Result<Option<(Arc<StateDirOwnership>, bool)>> {
+    ) -> anyhow::Result<Option<Arc<StateDirOwnership>>> {
         let deadline = tokio::time::Instant::now() + wait;
         loop {
             if let Some(claim) = Self::claim(state_dir)? {
@@ -1670,7 +1523,7 @@ impl StateDirOwnership {
 /// session list has its own limit, [`LIST_ADMISSION_PERMITS`].
 ///
 /// Per process, not per connection: the resource actually being bounded —
-/// tmux subprocesses, `/proc` sweeps — is process-global, and a
+/// process sweeps and kills, terminal host starts — is process-global, and a
 /// per-connection cap would let every additional helm connection multiply
 /// the real concurrency by another 8, defeating the point of having a
 /// bound at all. 8 is generous headroom for ordinary use while still being
@@ -1715,7 +1568,7 @@ pub(crate) const HANDLER_ADMISSION_PERMITS: usize = 8;
 /// management stayed busy. Listing needs no management slot for
 /// correctness (it holds the session map only briefly and takes no
 /// lifecycle, intent or directory lock), so this limit only bounds what a
-/// list build costs: its pane query and cached row construction. The status
+/// list build costs: its checkout-registry snapshot and row construction. The status
 /// sampler's `sampling_admission` is the precedent for giving periodic or
 /// read-only work its own limiter rather than a share of the request pool.
 ///
@@ -1737,7 +1590,7 @@ const DIRECTORY_BROWSE_WORKER_PERMITS: usize = 2;
 /// reply's `kind`.
 ///
 /// This is deliberately the only place `ErrorKind` gets decided: everything
-/// else that can fail (a tmux hiccup, an I/O error reading directory
+/// else that can fail (a host that would not answer, an I/O error reading directory
 /// metadata) has no opinion on classification and is left to default to
 /// `ErrorKind::Internal` via `error_kind`'s fallback — every fallible call
 /// site does not have to pick a kind for errors it cannot actually
@@ -1785,7 +1638,7 @@ pub(crate) const SEALED_REFUSAL: &str =
 /// this indifferent to whether `RequestError` sits at the root of the
 /// `anyhow::Error` or several `.context(...)` layers down — see that
 /// struct's docs. Anything with no `RequestError` anywhere in its chain — a
-/// tmux failure, a filesystem error with no classification opinion —
+/// host failure, a filesystem error with no classification opinion —
 /// reports `ErrorKind::Internal`, the honest default for a failure no call
 /// site claimed a more specific reason for.
 pub(crate) fn error_kind(e: &anyhow::Error) -> ErrorKind {
@@ -2299,9 +2152,8 @@ impl Drop for KeyedGuard {
 /// reservation) rather than discovered from it, because every later
 /// reconciliation is a question about this id — "did anything happen under
 /// it?" — which cannot be asked about an id that was never written down.
-/// Whatever names a launch's terminal follows from the id: a tmux launch's
-/// session name ([`session_tmux_name`]), or a host's tag. No tmux name is
-/// minted for a launch that does not run in tmux.
+/// Whatever names a launch's terminal follows from the id: a host's tag
+/// carries it (with the launch's generation).
 #[derive(Debug, Clone)]
 struct SessionIdentity {
     session_id: String,
@@ -2328,9 +2180,8 @@ const HOST_PROMPT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
 /// program's queries queue before or after it), and closes if a lost
 /// connection cuts it short. The submit is sent only once the whole paste
 /// was written to the pty: a paste that did not arrive whole must not be
-/// submitted, which is the guarantee the tmux path gets from its confirmed
-/// input client. Anything short of that is an error saying delivery may be
-/// partial, as the tmux path says it; nothing is sent again, since some of
+/// submitted. Anything short of that is an error saying delivery may be
+/// partial; nothing is sent again, since some of
 /// it may have reached the program.
 ///
 /// Between the paste and the submit, other input can be written: an
@@ -2386,33 +2237,14 @@ async fn deliver_prompt_to_host(
 /// The FULL uuid, not a truncated prefix: an 8-hex-char prefix collides
 /// often enough in practice for two sessions — one live, one a dead row
 /// surviving in SQLite across a restart — to plausibly share an id, and with
-/// it the tmux session name derived from it, which would cross-wire attach
-/// between an unrelated pair of sessions after a reload. The id is the
-/// `sessions` table's primary key, which backstops this at the DB layer; a
-/// full UUID is what makes that constraint never fire in the first place.
-/// Dashes are legal in tmux session names (verified empirically against a
-/// scratch server).
+/// it the host tag derived from it, which would cross-wire attach between an
+/// unrelated pair of sessions after a reload. The id is the `sessions`
+/// table's primary key, which backstops this at the DB layer; a full UUID is
+/// what makes that constraint never fire in the first place.
 fn new_session_identity() -> SessionIdentity {
     SessionIdentity {
         session_id: uuid::Uuid::new_v4().to_string(),
     }
-}
-
-/// The name of a session's tmux session: `fh-` and its id.
-///
-/// The only name any tmux terminal of a session lives under, and nowhere
-/// stored: the rows store none since schema 34, which dropped the
-/// `tmux_name` columns after checking that every value in them was exactly
-/// this (it has been since sessions were first persisted; the truncated
-/// names before that never reached a database). So code that knows a
-/// session can name its tmux session without a store read, and only tmux
-/// code ever needs to: a tmux row's agent pane is found under it,
-/// [`super::status::KnownTmuxNames`] counts it as farhelm's, and tab
-/// rediscovery for a session whose agent runs in a terminal host looks for
-/// old tmux tabs there ([`super::terminals::tmux_tab_home`]). The scheme
-/// cannot change while tmux sessions named by it may still run.
-pub(crate) fn session_tmux_name(session_id: &str) -> String {
-    format!("fh-{session_id}")
 }
 
 /// What an existing reservation means for the request that found it.
@@ -2437,7 +2269,7 @@ enum Resolution {
     Fresh,
 }
 
-/// What is known about whether a reserved launch reached tmux; see
+/// What is known about whether a reserved launch reached a terminal; see
 /// `Supervisor::reserved_launch_evidence` for the sources and for why
 /// absence must be POSITIVE rather than merely unobserved.
 enum LaunchEvidence {
@@ -2445,7 +2277,7 @@ enum LaunchEvidence {
     Absent,
     /// A source that should have answered could not be read. Carries the
     /// cause, which reaches the client: this is a state a human can
-    /// usually clear (a wedged tmux, an unreadable state directory), and
+    /// usually clear (an unresponsive host, an unreadable state directory), and
     /// the retry that follows is expected to resolve properly.
     Unresolved(anyhow::Error),
 }
@@ -2503,7 +2335,7 @@ struct LaunchRequest {
     /// retry rebuilds it from the stored row rather than borrowing the
     /// request's literal string.
     cwd: String,
-    /// The directory this launch actually hands to tmux, which is NOT the
+    /// The directory this launch actually hands to its terminal host, which is NOT the
     /// same question as what it records.
     ///
     /// For a create the two are identical: there is no prior identity to
@@ -2516,7 +2348,7 @@ struct LaunchRequest {
     /// For a RETRY it is the canonical path [`ensure_cwd_identity`] just
     /// verified, and that is the whole point of the field. Checking that
     /// `cwd` still resolves to the session's stored identity and then
-    /// handing tmux the ORIGINAL symlink is a time-of-check/time-of-use
+    /// handing the host the ORIGINAL symlink is a time-of-check/time-of-use
     /// gap: the link can be repointed between the two, and the launch lands
     /// in a directory nobody validated — often with a permissively
     /// configured agent. Launching into the resolved path closes it, since
@@ -2845,7 +2677,7 @@ enum Reserved {
     /// identities nothing was ever launched — a crash between the claim and
     /// the launch. This attempt redoes the launch under those SAME
     /// identities, so however many attempts an intent takes, it can only
-    /// ever leave one session id and one tmux name behind.
+    /// ever leave one session id and one host tag behind.
     Retry(Box<Reservation>),
 }
 
@@ -3229,7 +3061,7 @@ fn with_hook_argv_using(
 /// Split out for testability, and the split is worth its keep: the
 /// interesting behaviour here is a list of kind-specific REFUSALS, and
 /// reaching them through a real supervisor would
-/// mean constructing one per case, tmux and SQLite included, to exercise a
+/// mean constructing one per case, state directory and SQLite included, to exercise a
 /// function that touches neither. Its only effect beyond its return value
 /// is tracing.
 ///
@@ -3417,7 +3249,7 @@ fn same_launch_entry(
 /// unasked. No terminal puts the entry under the terminal-less guard
 /// (`terminal_less_launch_may_be_live`); the hosts of both generations stay
 /// reachable by their launch records.
-fn republished_terminal(definitive: bool, prior: Option<Terminal>) -> Option<Terminal> {
+fn republished_terminal(definitive: bool, prior: Option<HostTerminal>) -> Option<HostTerminal> {
     if definitive { prior } else { None }
 }
 
@@ -3456,7 +3288,7 @@ fn republished_terminal(definitive: bool, prior: Option<Terminal>) -> Option<Ter
 fn relaunched_entry(
     entry: &SessionEntry,
     info: SessionInfo,
-    terminal: Option<Terminal>,
+    terminal: Option<HostTerminal>,
     generation: i64,
     scope: Option<String>,
     outcome: LastOutcome,
@@ -3476,7 +3308,6 @@ fn relaunched_entry(
             launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             launch_error: Arc::new(std::sync::Mutex::new(None)),
-            launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
             outcome: Arc::new(std::sync::Mutex::new(outcome)),
             first_input: Arc::new(std::sync::Mutex::new(None)),
             capture: Arc::new(std::sync::Mutex::new(capture)),
@@ -3568,7 +3399,7 @@ fn relaunched_entry(
 /// to check.
 ///
 /// And a successful comparison is not the end of the guard's job. The
-/// caller was passing the ORIGINAL, still-symlinked `cwd` to tmux
+/// caller was passing the ORIGINAL, still-symlinked `cwd` to the terminal
 /// afterwards, so a link repointed between the comparison and the launch
 /// put the agent in a directory nothing validated — the classic
 /// time-of-check/time-of-use window, and a wide one, since a launch is
@@ -3613,9 +3444,9 @@ async fn ensure_cwd_identity(cwd: &str, canonical: Option<&str>) -> anyhow::Resu
 /// UTF-8"). The canonical spelling is the directory's recorded identity, and
 /// a restart or the retry of an unfinished create launches into it, so a
 /// lossy conversion was worse than useless there: it named a different,
-/// usually nonexistent, directory, tmux fell back to the home directory for
-/// one it could not enter, and the relaunch reported success with the agent
-/// somewhere else. A first create launched into the caller's own spelling
+/// usually nonexistent, directory, the tmux that ran terminals then fell
+/// back to the home directory for one it could not enter, and the relaunch
+/// reported success with the agent somewhere else. A first create launched into the caller's own spelling
 /// and worked; it refuses too because it is what records the identity those
 /// relaunches would check and launch into. `cwd` is the spelling the caller
 /// gave, which is valid UTF-8 even when a symlink in it leads somewhere that
@@ -3883,7 +3714,7 @@ struct PreparedLaunch {
 /// confirms and publishes.
 struct StartedLaunch {
     /// The terminal the agent runs in, which the published entry holds.
-    terminal: Terminal,
+    terminal: HostTerminal,
     /// The files this launch owns (see [`SpawnedInHost`]).
     artifacts: LaunchArtifacts,
     /// See [`SpawnedInHost::hooked`].
@@ -3911,11 +3742,8 @@ enum FailedStart {
 }
 
 /// How a terminal reads in an error about ending it.
-fn terminal_description(terminal: &Terminal) -> String {
-    match terminal {
-        Terminal::Tmux(tmux) => format!("tmux session {}", tmux.tmux_name),
-        Terminal::Host(host) => format!("the terminal host at {}", host.socket().display()),
-    }
+fn terminal_description(terminal: &HostTerminal) -> String {
+    format!("the terminal host at {}", terminal.socket().display())
 }
 
 /// Expand a `~`-prefixed working directory against the SUPERVISOR's home
@@ -4018,7 +3846,7 @@ pub(super) fn expand_tilde_cwd<'a>(
 /// permission, a symlink loop, or a failing filesystem.
 ///
 /// `cwd` must be absolute. A relative path, if accepted, would be stored
-/// durably and handed to tmux, which resolves it against the SUPERVISOR
+/// durably and handed to the terminal host, which resolves it against the SUPERVISOR
 /// DAEMON's own working directory, not the client's — so its meaning would
 /// shift with wherever the daemon happens to have been started, and
 /// re-shift on every daemon restart. That has already produced a real
@@ -4138,7 +3966,7 @@ pub(crate) fn truncate_for_error(id: &str) -> std::borrow::Cow<'_, str> {
 /// (`outcome`, `tabs`) are easy to transpose at a call site while still
 /// type-checking.
 struct Relaunched {
-    terminal: Terminal,
+    terminal: HostTerminal,
     /// The cgroup scope the NEW generation launched into.
     scope: Option<String>,
     /// The outcome that actually committed, which is not always the one
@@ -4157,10 +3985,8 @@ struct Relaunched {
     /// Raising it on the published entry is the only placement that
     /// survives.
     hooked: bool,
-    /// The session's tabs to report with the restart. Pane reuse carries the
-    /// preflight list; a replacement in a surviving tmux session re-discovers
-    /// the list after the old agent window is removed so the reply names only
-    /// tabs that actually remain.
+    /// The session's tabs to report with the restart: the preflight list,
+    /// since a restart keeps every tab open.
     tabs: Vec<TabInfo>,
 }
 
@@ -4183,16 +4009,10 @@ struct RelaunchPlan {
     clear_capture: bool,
     argv: Vec<String>,
     launch_cwd: String,
-    /// Whether the old agent's tmux pane is still this session's: a
-    /// session moving out of tmux then removes its old agent window once the
-    /// new host starts with its history (`relaunch_into_terminal`). Always
-    /// false for a host agent, whose host runs one child and is never
-    /// reused.
-    terminal_survives: bool,
     restart_with: Option<RestartWithBundle>,
-    /// The new host's history seed, read from the old host or the old tmux
-    /// pane before the generation was claimed; `None` for a restart with no
-    /// old terminal to read.
+    /// The new host's history seed, read from the old host before the
+    /// generation was claimed; `None` for a restart with no old terminal to
+    /// read.
     seed: Option<host_restart::RestartSeed>,
 }
 
@@ -4235,33 +4055,28 @@ async fn sweep_legacy_snapshots_dir(state_dir: &Path) {
     }
 }
 
-/// Sweep abandoned `overwrite_private_file` staging files (`.tmux.conf.tmp-*`)
-/// directly out of `<state_dir>` (the tmux config's own location — the
-/// one write-atomicity-tier file that lives at the state-dir ROOT rather
-/// than under `launch/`, so the launch-dir sweep would never see its
-/// debris). Same placement and reasoning as [`sweep_launch_dir`]: after
-/// the exclusivity bind, best-effort and log-only.
+/// Sweep the Running record's abandoned `overwrite_private_file` staging
+/// files (`.running-version.tmp-*`) directly out of `<state_dir>`: the
+/// record lives at the state-dir ROOT rather than under `launch/`, so the
+/// launch-dir sweep would never see its debris. Same placement and
+/// reasoning as [`sweep_launch_dir`]: after the exclusivity bind,
+/// best-effort and log-only.
 ///
-/// Also sweeps the Running record's staging files, which share the
-/// convention.
-///
-/// Scoped specifically to names starting with `.tmux.conf` and
-/// `.running-version` (not a bare
+/// Scoped to names starting with `.running-version.tmp-` (not a bare
 /// [`crate::files::is_staged_temp_name`] check against the whole state
 /// dir) because the state-dir root also holds `supervisor.db`,
 /// `supervisor.sock`, and `supervisor.lock` — none of which stage temp
 /// files this way — and `launch/` as a subdirectory; a prefix match keeps
 /// this sweep from ever needing to reason about entries that are not its
-/// concern at all.
-async fn sweep_tmux_config_temp_files(state_dir: &Path) {
-    // The Running record goes through the same staged write as the tmux
-    // config (`crate::files::overwrite_private_file_sync`), so a crash
-    // mid-write leaves the same kind of orphan beside it.
-    const TEMP_PREFIXES: [&str; 2] = [".tmux.conf.tmp-", ".running-version.tmp-"];
+/// concern at all. The old private tmux server's staged config writes
+/// beside it are the startup's ending of the old terminals to remove
+/// (`old_terminals`); earlier releases swept them here.
+async fn sweep_running_version_temp_files(state_dir: &Path) {
+    const TEMP_PREFIX: &str = ".running-version.tmp-";
     let mut entries = match tokio::fs::read_dir(state_dir).await {
         Ok(entries) => entries,
         Err(e) => {
-            warn!(error = %e, "could not sweep tmux-config temp files; orphaned staging files may remain");
+            warn!(error = %e, "could not sweep Running-record temp files; orphaned staging files may remain");
             return;
         }
     };
@@ -4269,17 +4084,18 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
         match entries.next_entry().await {
             Ok(None) => break,
             Ok(Some(entry)) => {
-                let is_temp_file = entry.file_name().to_str().is_some_and(|name| {
-                    TEMP_PREFIXES.iter().any(|prefix| name.starts_with(prefix))
-                });
+                let is_temp_file = entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(TEMP_PREFIX));
                 if is_temp_file && let Err(e) = tokio::fs::remove_file(entry.path()).await {
                     warn!(path = %entry.path().display(), error = %e,
-                        "could not remove orphaned tmux-config temp file");
+                        "could not remove orphaned Running-record temp file");
                 }
             }
             Err(e) => {
                 warn!(error = %e,
-                    "tmux-config temp-file sweep aborted early; orphaned staging files may remain");
+                    "Running-record temp-file sweep aborted early; orphaned staging files may remain");
                 break;
             }
         }
@@ -4289,17 +4105,17 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 /// A session as the supervisor tracks it: the wire-visible metadata plus
 /// its terminal handle, if it still has one.
 ///
-/// `terminal` is `None` for exactly one reason: this entry was
-/// reconstructed from a SQLite row whose tmux session `has_session` no
-/// longer finds (`Supervisor::reload_sessions`) — the restart-gap case
-/// PLAN_M2.md specifies. A session created
+/// `terminal` is `None` when this entry has no terminal this supervisor
+/// holds: reconstructed from a SQLite row whose host is gone or was never
+/// started (`Supervisor::reload_sessions`) — the restart-gap case
+/// PLAN_M2.md specifies — or whose old tmux terminal this start ended. A session created
 /// in this same process always gets `Some` immediately; nothing in a
 /// live process ever demotes an entry from `Some` to `None` after the
 /// fact — that would require noticing an already-open terminal died,
 /// which is M3's interrupted-classification job, not this PR's. Entries
 /// are otherwise immutable once created — shared as `Arc` and never
 /// mutated in place — so nothing has to hold the session map while
-/// talking to tmux. Changing one therefore means PUBLISHING A REPLACEMENT
+/// talking to a terminal. Changing one therefore means PUBLISHING A REPLACEMENT
 /// into the map: [`relaunched_entry`] for a new launch generation,
 /// [`renamed_entry`] for the title (the only field a user can change after
 /// creation).
@@ -4327,7 +4143,7 @@ async fn sweep_tmux_config_temp_files(state_dir: &Path) {
 /// strand input diagnostics and report updates in an entry no reply reads.
 pub(crate) struct SessionEntry {
     pub(crate) info: SessionInfo,
-    pub(crate) terminal: Option<Terminal>,
+    pub(crate) terminal: Option<HostTerminal>,
     /// This run's mutable cells: shared by a rename, replaced by a relaunch
     /// ([`RunCells`]).
     pub(crate) run: RunCells,
@@ -4419,12 +4235,6 @@ pub(crate) struct RunCells {
     /// Provenance stays with the detail so a pending Stop rejects an old
     /// inference even if that cache was published after Stop committed.
     pub(crate) launch_error: Arc<std::sync::Mutex<Option<LaunchError>>>,
-    /// Process-local proof fencing an optional startup-error excerpt to this
-    /// launch. A rename shares the cell, but a new generation starts empty
-    /// until its own spawn supplies a fence. Reload cannot recover the proof
-    /// from retained tmux history, so it omits the excerpt rather than risk
-    /// quoting an earlier run. Never held across an await.
-    pub(crate) launch_excerpt: Arc<std::sync::Mutex<Option<LaunchExcerptFence>>>,
     /// In-memory mirror of this session's durable last-known outcome
     /// (`crate::store::LastOutcome`, PLAN_M3.md item 2), so the common
     /// case — a `ListSessions` reply for a session whose outcome has not
@@ -4466,7 +4276,7 @@ pub(crate) struct RunCells {
     ///
     /// Diagnostics only: nothing about capture, restart, or the wire reply
     /// consults it. The spawn records it in `StoredSession::launch_hooked`
-    /// before tmux starts, so reload restores the same launch's policy.
+    /// before the host starts, so reload restores the same launch's policy.
     /// Older stored launches default clear because their injection is unknown.
     /// The first-input anchor remains process-local: after a supervisor
     /// restart, the next qualifying Enter starts the clock again.
@@ -4508,7 +4318,7 @@ pub(crate) struct RunCells {
     /// the new launch was injected. Reload and retained-row publication
     /// restore the durable value for that same generation.
     ///
-    /// One accepted hole follows from that: a restart whose tmux command
+    /// One accepted hole follows from that: a restart whose host start
     /// failed AMBIGUOUSLY may in fact be running a hooked agent, and the
     /// generic recovery republishes it through `relaunched_entry` with this
     /// flag clear, because the failure path never learns what the spawn
@@ -4636,10 +4446,8 @@ pub(crate) struct SessionCells {
     /// SESSION-scoped like the cells above: a tab is the session's, not one
     /// launch's, and SPEC.md keeps tabs open across Restart, so
     /// a relaunch must share this cell rather than start an empty one (which
-    /// would lose every tab host's runtime while its host runs on). A tmux
-    /// tab needs no cell, since it is rediscovered from its window marker on
-    /// every read; a host tab has no window, and this is where its runtime
-    /// lives between the open that started it (or the reload that adopted
+    /// would lose every tab host's runtime while its host runs on). This is
+    /// where a tab's runtime lives between the open that started it (or the reload that adopted
     /// it) and the close or Delete that ends it. Re-adoption replaces an
     /// unavailable handle in this same cell, keeping the tab's identity
     /// across a healthy recovery and across the agent's generations.
@@ -4662,28 +4470,28 @@ pub(crate) fn notification_cell()
 /// Sessions are keyed by session id; attachments by (session, terminal)
 /// — separate maps because their lifetimes differ: a session outlives any
 /// number of attach/detach cycles, and it may have several terminals
-/// attached at once — each with its own channel and its own PAIR of
-/// control-mode clients, one streaming output and one dedicated to input
-/// (PLAN_M4.md item 3) — while SPEC.md caps the attached CLIENTS at one.
+/// attached at once — each with its own channel, its own output task and
+/// its own input side (`ActiveAttach::forwarder`, `ActiveAttach::input`;
+/// PLAN_M4.md item 3) — while SPEC.md caps the attached CLIENTS at one.
 /// That cap lives in the `Attach` handler's lease check, not in the shape
 /// of this map: see [`AttachmentKey`] and `terminals::same_lease_client`.
 ///
 /// Lock discipline: the two mutexes are never held at once, with one
-/// deliberate exception (`DeleteSession`), and no tmux call happens while
+/// deliberate exception (`DeleteSession`), and no terminal call happens while
 /// `sessions` is held on its own. ("The two" means `sessions` and `attachments` throughout
-/// this discussion; `sinks` and `uploads` arrived later and neither is
-/// ever held alongside either of the two — see their own docs — so they
-/// add no case to the rules below.) `attachments` is deliberately the exception for holding it
-/// across tmux calls — the whole attach takeover runs under it, because
+/// this discussion; `uploads` arrived later and is never held alongside
+/// either of the two — see its own docs — so it adds no case to the rules
+/// below.) `attachments` is deliberately the exception for holding it
+/// across terminal calls — the whole attach takeover runs under it, because
 /// that is the only way "at most one client, last attach wins" survives
 /// two concurrent attaches — and the only way the lease sweep and the new
 /// attachment's installation are one atomic step, which is what
 /// `ControlMsg::Attach` promises (see the `Attach` handler) — and the
-/// input and `Resize` arms hold it across their tmux calls for the same
+/// input and `Resize` arms hold it across their terminal calls for the same
 /// reason: an ownership check that releases the lock before acting goes
 /// stale the moment a takeover interleaves. `DeleteSession` is the second
 /// holder of this same exception, for the same underlying reason: it
-/// holds `attachments` across its own forwarder shutdown and tmux calls so a
+/// holds `attachments` across its own forwarder shutdown and terminal calls so a
 /// concurrent `Attach` cannot install a fresh attachment on a session
 /// that is disappearing out from under it — but deliberately NOT across
 /// its process-tree sweep, which can take seconds and would otherwise
@@ -4724,15 +4532,10 @@ pub(crate) fn notification_cell()
 /// differs by path: a create holds it until the launch settles, a delete
 /// for its whole teardown (sweep included, so the last-reference decision
 /// and the final membership removal see the same world), and a restart
-/// only through its admission checks, releasing it before any tmux work.
+/// only through its admission checks, releasing it before any terminal work.
 ///
 /// Branches off the chains, each ordered only against what it names:
 ///
-/// - `attachments` before `sinks`: dropping a sink lease under
-///   `attachments` (detach, a failed input) locks the sink registry. No
-///   process operation runs under `sinks`.
-/// - `attachments` before `output_reaps`: an attach checks for an
-///   unfinished reap of the terminal it is about to open.
 /// - A lifecycle claim before `capture.lock`, the capture pass's own mutex
 ///   (restart asks for an immediate capture). A pass then takes `sessions`
 ///   and per-session `capture_locks`. Lifecycle work may also take a
@@ -4744,12 +4547,12 @@ pub(crate) fn notification_cell()
 ///   only through checks and rename; its single remover takes neither lock.
 /// - `uploads`: may be taken under the whole mutation chain down to the
 ///   lifecycle claim (delete's teardown aborts the session's uploads), and
-///   is never held alongside `attachments`, `sessions`, or `sinks`.
+///   is never held alongside `attachments` or `sessions`.
 /// - `helm_links`: taken with nothing else held, and released before any
 ///   other lock is taken.
 /// - `list_admission`: taken at the top of a list build with nothing else
-///   held, and kept while the build takes `sessions` and runs its tmux and
-///   capture work, then released before the reply is sent. Never held
+///   held, and kept while the build takes `sessions` and reads the
+///   checkout registry, then released before the reply is sent. Never held
 ///   alongside `admission`.
 /// - `sampling_admission`: taken at the top of a ticker pass with nothing
 ///   else held, and kept across the pass, which takes `sessions`, lifecycle
@@ -4777,7 +4580,7 @@ pub(crate) fn notification_cell()
 ///   `sessions` and before the reclaim ends any host.
 ///   Re-adoption does not take it: it contacts only the one socket a launch
 ///   recorded, which no spawn can be starting. Never held while a lifecycle
-///   claim, `attachments`, or a tmux call is acquired.
+///   claim, `attachments`, or a terminal call is acquired.
 /// - `host_adoption`, after a lifecycle claim and before `host_scan` and
 ///   `sessions`: a re-adoption takes it, holding the session's claim (taken
 ///   without waiting), only around swapping its outcome into `sessions`;
@@ -4793,12 +4596,11 @@ pub(crate) fn notification_cell()
 ///
 /// Known coarseness, acceptable in M1 and revisit at M2: the map-wide
 /// mutex serializes input for EVERY session behind any in-flight attach
-/// (which holds the lock across takeover, resize, and the bounded
-/// control-mode cutover). With many sessions per supervisor, this wants
-/// per-session attachment slots so sessions stall independently.
+/// (which holds the lock across takeover and the attach's catch-up setup).
+/// With many sessions per supervisor, this wants per-session attachment
+/// slots so sessions stall independently.
 pub struct Supervisor {
     pub(crate) state_dir: PathBuf,
-    pub(crate) tmux: TmuxDriver,
     /// Session metadata's durable half — see `crate::store` and the
     /// `service` module docs (`mod.rs`) for the split of truth this
     /// implements.
@@ -4837,9 +4639,9 @@ pub struct Supervisor {
     /// had it open deselect it, and nothing selected it again when it came
     /// back. Each row is the session as the last `ListSessions` reply
     /// described it before the restart began ([`Self::last_listed`]), not a
-    /// fresh pane read: the pane is mid-respawn, and reading it would report
-    /// the session exited, or record an exit, for a run that is about to
-    /// start.
+    /// fresh terminal read: the old host is being replaced, and reading it
+    /// would report the session exited, or record an exit, for a run that is
+    /// about to start.
     ///
     /// Only ever read or written while [`Self::sessions`] is locked, so a
     /// listing sees each restarting session exactly once: in this map or in
@@ -4883,8 +4685,7 @@ pub struct Supervisor {
     ///
     /// What keeps a viewer from being told by its stream's natural end
     /// (`session terminal ended`, or a failed stream or input) what a
-    /// Delete caused: the Delete ends a host terminal (and kills a tmux
-    /// agent) before it takes `attachments` to detach the session's
+    /// Delete caused: the Delete ends a host terminal before it takes `attachments` to detach the session's
     /// viewers, and a terminal host's stream ends with its host. Every
     /// natural verdict for a session in here waits until the Delete is over
     /// (`connection::detach_naturally`), with one of three outcomes: the
@@ -4927,41 +4728,12 @@ pub struct Supervisor {
     /// see [`super::hints`]. Marking it takes no lock, so it sits outside
     /// the lock-ordering rules entirely.
     pub(crate) change_hints: Arc<super::hints::ChangeHints>,
-    /// Per-terminal barriers for provisional opens and unfinished shutdowns.
-    ///
-    /// Teardown publishes a `Reaping` entry while it still holds
-    /// `attachments`, before allowing any attach to observe the old map entry
-    /// as absent. The retained receiver is therefore the per-terminal handoff
-    /// boundary: a replacement waits outside the global async mutex, while a
-    /// lost reaper leaves `Failed` behind until supervisor restart.
-    pub(crate) output_reaps: OutputReapRegistry,
-    /// Each tmux session's sink lifecycle and handoff state, keyed by tmux
-    /// session name (PLAN_M4.md order-of-work step 5, and
-    /// [`super::terminals::SessionSinkHandle`] for what a live sink is).
-    ///
-    /// A live entry is `Weak`, deliberately: attachments own the sink. A
-    /// final release replaces that weak entry with a per-session `Reaping`
-    /// state before starting process teardown. A failed reap leaves `Failed`
-    /// behind even after every attachment is gone; it is proof that opening
-    /// another same-session client would be unsafe, not stale map data.
-    /// Candidate-operation barriers sit alongside that registered state: they
-    /// are published atomically when a missing sink is reserved for opening
-    /// and remain until the open completes without an installable handle or
-    /// the resulting installed/competing client is resolved. A runtime task
-    /// owns the in-flight open. On success, the request receives a guard and
-    /// completes the barrier by installing it; abandoning that guard transfers
-    /// both cleanup and completion to its runtime-owned drop reaper. Request
-    /// cancellation therefore cannot erase either barrier.
-    ///
-    /// Keyed by TMUX session name rather than farhelm session id because
-    /// the name is what a client attaches to, and because it makes the
-    /// restart path fall out correctly: a restart that rebuilds the tmux
-    /// session under the same name kills the sink attached to the old one,
-    /// and the supervising task reattaches to the new one by name.
-    ///
-    /// No process operation runs under this lock. Teardown only installs a
-    /// reaping state; the detached reaper does the slow work afterward.
-    pub(super) sinks: SinkRegistry,
+    /// Set once the orderly stop has drained the attachments
+    /// ([`Self::shutdown_output_clients`], under `attachments`): from then on
+    /// an attach is refused ([`Self::is_stopping`]). Its own flag rather than
+    /// [`Self::stopping`], which the host checkpoints set under `sessions`
+    /// at a moment of their own, beside this drain.
+    pub(crate) attachments_closed: std::sync::atomic::AtomicBool,
     /// Every attachment upload currently in flight in this supervisor,
     /// keyed by the transfer id minted at `BeginUpload` (PLAN_M4.md item
     /// 4).
@@ -4981,9 +4753,9 @@ pub struct Supervisor {
     /// operator reading begin/publish/abort events can follow one transfer
     /// through them.
     ///
-    /// LOCK ORDER: never held alongside `sessions`, `attachments`, or
-    /// `sinks`. A lifecycle claim may be held while taking it (delete does
-    /// exactly that), never the reverse.
+    /// LOCK ORDER: never held alongside `sessions` or `attachments`. A
+    /// lifecycle claim may be held while taking it (delete does exactly
+    /// that), never the reverse.
     pub(crate) uploads: Mutex<HashMap<u64, UploadHandle>>,
     /// Source of the transfer ids above: monotonic within this process,
     /// which is all an id needs to be — uploads are in-flight state, never
@@ -5010,8 +4782,7 @@ pub struct Supervisor {
     /// so that one task learns of every host's exit without polling each.
     /// The ticker takes the receiving end ([`Self::host_liveness_receiver`])
     /// and runs its reap pass on each change, which is what records a host
-    /// agent's exit and reaps an exited tab between ticks, as tmux's
-    /// `pane-died` hook does for panes. A passing unavailability change
+    /// agent's exit and reaps an exited tab between ticks. A passing unavailability change
     /// also wakes re-adoption: its task remains the only retry owner.
     pub(crate) host_liveness: crate::hosts::LivenessNotifier,
     /// The receiving end of [`Self::host_liveness`], until the ticker takes
@@ -5077,21 +4848,13 @@ pub struct Supervisor {
     /// and the re-adoption task returns. So every runtime in the map when
     /// the stop gathers is one the stop closes, and none is added after.
     pub(crate) stopping: std::sync::atomic::AtomicBool,
-    /// Woken (`notify_waiters`) right after [`Self::stopping`] is set, for
-    /// work that must give up as an orderly stop begins rather than poll the
-    /// flag: a Restart's seed from a tmux pane, which runs on the blocking
-    /// pool with no runtime of its own for the stop to cancel
-    /// (`host_restart`, "From a tmux pane"). A waiter enables its
-    /// `notified()` before it reads the flag, so a stop between the two is
-    /// never missed.
-    pub(crate) stop_began: tokio::sync::Notify,
-    /// Launches in the versioned layout between starting their tmux window
+    /// Launches in the versioned layout between starting their terminal
     /// and being added to [`Self::pending_holds`] (or failing). The shutdown
-    /// wait keeps going while any are in flight, so a window created just as
+    /// wait keeps going while any are in flight, so a terminal created just as
     /// a stop begins is still waited for. See [`StartingLaunch`].
     starting_launches: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     /// Set when the shutdown wait ends: from then on no launch may start a
-    /// tmux window ([`Self::starting_launch`] refuses), because nothing would
+    /// terminal ([`Self::starting_launch`] refuses), because nothing would
     /// wait for it any more. Read and written only while holding
     /// [`Self::pending_holds`]'s lock, which is what makes "the wait saw no
     /// launch in flight" and "no launch can start after it" one decision.
@@ -5102,8 +4865,8 @@ pub struct Supervisor {
     ///
     /// The bundle's forwarder when this supervisor runs from the versioned
     /// layout, [`Self::farhelm_exe`] otherwise. Also the terminal-tab
-    /// helper's program: tmux can start a tab's window after this supervisor
-    /// has stopped holding its version, and the forwarder claims the version
+    /// helper's program: a tab's login shell can reach the helper after this
+    /// supervisor has stopped holding its version, and the forwarder claims the version
     /// it starts (this supervisor's own while it is there, found through the
     /// socket variable in the tab's environment), where a bare path to the
     /// version would run unheld until the helper's own lock. Not the launch
@@ -5138,7 +4901,7 @@ pub struct Supervisor {
     /// `HANDLER_ADMISSION_PERMITS`'s own docs, including why a full cap
     /// refuses instead of waiting). Deliberately
     /// SUPERVISOR-wide, not per-connection: the resource being bounded is
-    /// tmux subprocesses and `/proc` sweeps, which are global to this
+    /// process sweeps and terminal host starts, which are global to this
     /// process regardless of how many helm connections are open at once.
     /// A per-connection semaphore would let N connections each run 8
     /// concurrent kill sweeps — `8*N`, not 8 — defeating the bound the
@@ -5152,8 +4915,7 @@ pub struct Supervisor {
     /// The session list's own limit, disjoint from `admission` so management
     /// work can never hold up a listing; see [`LIST_ADMISSION_PERMITS`].
     /// Supervisor-wide for the same reason `admission` is: the cost it
-    /// bounds is this process's tmux subprocesses, whichever connection
-    /// asked.
+    /// bounds is this process's, whichever connection asked.
     pub(crate) list_admission: Arc<tokio::sync::Semaphore>,
     /// Shared by directory browsing and trash listing.
     /// Bounds filesystem workers independently from request replies. A
@@ -5165,9 +4927,9 @@ pub struct Supervisor {
     /// `admission` (PLAN_M6_75.md item 1's review found the shared version
     /// to be a SPEC violation).
     ///
-    /// Sharing the request semaphore looked right — the ticker consumes
-    /// the same tmux subprocesses the handlers do — and was wrong for a
-    /// reason that has nothing to do with tmux: a permit taken by periodic
+    /// Sharing the request semaphore looked right — the ticker does the
+    /// same kind of terminal work the handlers do — and was wrong for a
+    /// reason that has nothing to do with that work: a permit taken by periodic
     /// work is a permit a REQUEST cannot have. With seven slow handlers in
     /// flight the ticker would take the eighth, the next control request
     /// would park inside `handle_control`, and `handle_connection`'s read
@@ -5182,7 +4944,7 @@ pub struct Supervisor {
     /// sequential: what this actually bounds is a future second caller,
     /// and what it BUYS today is a limiter a test can exhaust in order to
     /// prove that request admission is unaffected by a wedged sampler.
-    /// Total tmux concurrency from the handlers and the sampler therefore
+    /// Total concurrency from the handlers and the sampler therefore
     /// becomes one more than `HANDLER_ADMISSION_PERMITS` rather than exactly
     /// it, which is a rounding error next to the failure mode it removes.
     /// Automatic tab reaps run on their own tasks and add at most
@@ -5192,8 +4954,8 @@ pub struct Supervisor {
     ///
     /// Each sample pass may start [`REAP_BUDGET_PER_TICK`] closes and does
     /// not wait for them, so without this cap a mass exit across many
-    /// sessions would stack a fresh batch of tmux and process-scan work on
-    /// every tick and every pane-death wake. A start that finds no permit
+    /// sessions would stack a fresh batch of host and process-scan work on
+    /// every tick and every host-exit wake. A start that finds no permit
     /// is skipped, never awaited: the dead tab stays hidden and the next
     /// pass retries it, exactly as for a session whose claim is busy.
     pub(crate) tab_reap_inflight: Arc<tokio::sync::Semaphore>,
@@ -5254,7 +5016,7 @@ pub struct Supervisor {
     /// takeover where a rename can interleave (before it the session is not
     /// on the map yet, after it no longer is, and rename answers `NotFound`
     /// like stop and delete do); it is released well before the launch's
-    /// tmux work (see `Supervisor::launch_reserved`). When the retry's
+    /// terminal work (see `Supervisor::launch_reserved`). When the retry's
     /// validation instead retains a refusal, it covers that refusal's
     /// durable settlement and publication, which a rename of the existing
     /// entry could otherwise race. Separately, a
@@ -5265,7 +5027,7 @@ pub struct Supervisor {
     ///
     /// The map-wide `sessions` mutex cannot do this job — it is released
     /// the moment an entry is cloned out of it, and every one of these
-    /// operations then spends seconds in tmux and `/proc` with nothing
+    /// operations then spends seconds in terminal hosts and `/proc` with nothing
     /// holding the session still. What that permits is not merely untidy:
     /// two concurrent restarts each recheck liveness before either has
     /// stopped anything, both conclude "nothing is running", and the
@@ -5426,40 +5188,18 @@ pub struct Supervisor {
     pub(super) report_watch_lifetime: tokio::sync::watch::Sender<()>,
     /// Sessions whose waiting report has already been warned about as being
     /// retried. A retry repeats every pass for as long as its cause lasts (a
-    /// store or tmux that cannot be read), so it warns once per session and
+    /// store or terminal that cannot be read), so it warns once per session and
     /// logs at debug after that; the session leaves this set when one of its
     /// reports settles.
     pub(super) report_retry_warned: std::sync::Mutex<std::collections::HashSet<String>>,
-}
-
-/// The refusal every lifecycle verb returns for an UNRECOGNIZED foreign
-/// pane owner — delete, stop, restart, and close-tab all say this
-/// same sentence, which is why it is written once.
-///
-/// It has to carry both halves an operator needs to act: which tmux session
-/// actually holds the pane, and why an unrecognized name is what stops the
-/// verb rather than merely being logged. The wording keeps the substance of
-/// the `bail!` this classification replaced
-/// ([`crate::terminal_process::TerminalProbe`]), because that text is what
-/// the 2026-08-16 incident's journal entries and any search for it will
-/// match — the change is that it now appears only for the case that still
-/// deserves it. [`Supervisor::known_session_tmux_name`] holds the reasoning
-/// for the split.
-pub(crate) fn unknown_pane_owner_refusal(pane: &str, owner: &str, expected: &str) -> String {
-    format!(
-        "pane {pane} belongs to session {owner:?}, not {expected:?}, and {owner:?} is not a \
-         session this supervisor knows; refusing to treat it as this session's terminal — the \
-         recorded pane may be this session's own live terminal, renamed or moved out from under \
-         us, and acting on that guess would touch an agent that is still running"
-    )
 }
 
 /// Whether an entry with no recorded terminal may still have a live agent,
 /// which an unconfirmed delete must not kill.
 ///
 /// Only an unconfirmed launch qualifies. A `Launching` row without a terminal
-/// is chiefly an ambiguous create: tmux reported an error, but the session (and
-/// the agent in it) may exist anyway, and nothing recorded a pane to probe.
+/// is chiefly an ambiguous create: the host's start reported an error, but
+/// the agent may run anyway, and nothing recorded a terminal to probe.
 /// Deleting that row unasked could kill the agent and its unsaved work, so
 /// delete treats it as alive, as does a Stop whose display said the agent
 /// had ended. Restart used to demand consent for it too; it
@@ -5467,7 +5207,7 @@ pub(crate) fn unknown_pane_owner_refusal(pane: &str, owner: &str, expected: &str
 /// restarts without asking (SPEC.md, Lifecycle operations).
 ///
 /// Every other terminal-less row has no known live agent. The common way to
-/// lose a terminal is a reboot or a tmux server that died under a restarted
+/// lose a terminal is a reboot or a host that died under a restarted
 /// supervisor: reload publishes those rows as `Interrupted` or `Exited` with no
 /// terminal. Surviving tabs are independent; Delete must still discover them.
 pub(crate) fn terminal_less_launch_may_be_live(entry: &SessionEntry) -> bool {
@@ -5492,13 +5232,9 @@ pub(crate) fn terminal_less_launch_may_be_live(entry: &SessionEntry) -> bool {
 /// The values themselves land in [`SupervisorSeams`], which is where every
 /// launch path reads them from; this type exists only to carry them across
 /// the one boundary between the CLI arm and the constructor. See that
-/// struct's `tmux_program` and `agent_hooks` fields for what each means and
-/// for the environment-hygiene rule they both obey.
+/// struct's `agent_hooks` and `agent_instructions` fields for what each
+/// means and for the environment-hygiene rule they obey.
 pub struct SupervisorStartup {
-    /// The resolved `--tmux` / `FARHELM_TMUX` override (see
-    /// [`crate::tmux::resolve_tmux_program_from_env`]). Callers with no
-    /// opinion pass [`crate::tmux::DEFAULT_TMUX_PROGRAM`].
-    pub tmux_program: PathBuf,
     /// The parsed `FARHELM_AGENT_HOOKS` opt-out (see
     /// [`crate::agent_kind::parse_agent_hooks`]). Callers with no opinion
     /// pass [`crate::agent_kind::AgentHooks::default()`], which hooks every
@@ -6142,7 +5878,6 @@ impl Supervisor {
         Self::new_for_startup(
             state_dir,
             SupervisorStartup {
-                tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
                 boot_id_file: None,
@@ -6173,7 +5908,6 @@ impl Supervisor {
         claim: Option<&ClaimSlot>,
     ) -> anyhow::Result<Arc<Supervisor>> {
         let SupervisorStartup {
-            tmux_program,
             agent_hooks,
             agent_instructions,
             boot_id_file,
@@ -6194,7 +5928,6 @@ impl Supervisor {
             exe,
             SupervisorTimeouts::default(),
             SupervisorSeams {
-                tmux_program,
                 agent_hooks,
                 agent_instructions,
                 boot_id,
@@ -6348,9 +6081,8 @@ impl Supervisor {
         // and for why an unclaimed supervisor is still constructible
         // rather than fatal here. `farhelm supervisor run` waits here for
         // a predecessor that is still shutting down (`claim_waiting`).
-        let ownership = StateDirOwnership::claim_waiting(&state_dir, seams.state_dir_claim_wait)
-            .await?
-            .map(|(ownership, _)| ownership);
+        let ownership =
+            StateDirOwnership::claim_waiting(&state_dir, seams.state_dir_claim_wait).await?;
         if let (Some(claim), Some(ownership)) = (claim, &ownership) {
             claim
                 .set(Arc::clone(ownership))
@@ -6407,35 +6139,16 @@ impl Supervisor {
         // Loaded once: only `seal_unless_other_sessions` sets the column,
         // through this same process's in-memory flag, and nothing clears it.
         let sealed = store.is_sealed().await?;
-        // Threaded from `timeouts` rather than `TmuxDriver::new`'s
-        // production default so an integration test's loosened budgets
-        // (see `SupervisorTimeouts::tmux_exchange`) actually reach the
-        // driver every attach and send-keys call goes through. The tmux
-        // binary rides along for the same reason at the other end of the
-        // scale: this is the only production driver a supervisor ever
-        // builds, so it is the one place the `--tmux` / `FARHELM_TMUX`
-        // override has to land for every launch path to honor it.
-        let tmux = TmuxDriver::new_with_program(
-            &state_dir,
-            crate::tmux::TmuxBudgets {
-                exchange: timeouts.tmux_exchange,
-                pane_list: timeouts.tmux_pane_list,
-            },
-            seams.tmux_program.clone(),
-        );
         // The old terminals end here, before any session is reloaded: the
         // private tmux server an earlier release ran sessions in is ended,
         // and the reload below converts and sweeps the sessions that ran
         // in it (`old_terminals`). Only the state directory's owner may
-        // end anything; one without the claim leaves it to the owner. The
-        // driver is then told no server runs, whatever happened, so that
-        // nothing in this process runs tmux.
+        // end anything; one without the claim leaves it to the owner.
         let old_terminals = if ownership.is_some() {
             OldTerminals::end_private_server(&state_dir).await
         } else {
             OldTerminals::none()
         };
-        tmux.no_server_after_startup();
 
         // A missing home matters only when a `~` create arrives; that
         // request receives its own refusal without disabling identity reports.
@@ -6478,7 +6191,6 @@ impl Supervisor {
             .unwrap_or(0);
         let supervisor = Arc::new(Supervisor {
             state_dir,
-            tmux,
             store,
             host_identity,
             sessions: Mutex::new(sessions),
@@ -6492,8 +6204,7 @@ impl Supervisor {
                 farhelm_proto::MAX_TCP_TUNNEL_CONNECTIONS,
             )),
             change_hints: Arc::new(super::hints::ChangeHints::default()),
-            output_reaps: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            sinks: Arc::new(std::sync::Mutex::new(Default::default())),
+            attachments_closed: std::sync::atomic::AtomicBool::new(false),
             uploads: Mutex::new(HashMap::new()),
             next_transfer: AtomicU64::new(1),
             farhelm_exe,
@@ -6506,7 +6217,6 @@ impl Supervisor {
             gone_hosts,
             readoption_wake: Arc::new(tokio::sync::Notify::new()),
             stopping: std::sync::atomic::AtomicBool::new(false),
-            stop_began: tokio::sync::Notify::new(),
             starting_launches: Default::default(),
             launches_closed: Default::default(),
             session_farhelm_exe,
@@ -6559,7 +6269,7 @@ impl Supervisor {
         id: &str,
         lock_wait: Duration,
     ) -> anyhow::Result<()> {
-        let (ownership, _) = StateDirOwnership::claim(state_dir)?
+        let ownership = StateDirOwnership::claim(state_dir)?
             .context("Claude trust recovery requires state-directory ownership")?;
         let state_dir = state_dir.to_owned();
         let id = id.to_owned();
@@ -6597,7 +6307,7 @@ impl Supervisor {
     /// Before a single row is probed, the host's current boot id is
     /// compared against the one the last supervisor stored:
     ///
-    /// - **Different** — the host rebooted, so tmux took every terminal
+    /// - **Different** — the host rebooted, so every terminal host went
     ///   with it and no probe can say anything about what happened. Every
     ///   still-live session becomes **interrupted**, in the same
     ///   transaction that stores the new id (`SessionStore::record_boot`
@@ -6924,8 +6634,8 @@ impl Supervisor {
         let (mut row_hosts, earlier_hosts) =
             host_handover::attribute_host_rows(state_dir, hosts, &rows).await;
         // And every session's tabs in terminal hosts, whatever its agent's
-        // kind: a tmux session can have them too (`host_tabs`, "After a
-        // restart"). Each goes into its session's cell below. Tab hosts are
+        // kind: a session whose old tmux agent this start ended can have
+        // them too. Each goes into its session's cell below. Tab hosts are
         // never superseded: the rule looks at agent hosts only.
         let mut tab_hosts = host_tabs::adopt_tab_hosts(
             state_dir,
@@ -7048,9 +6758,8 @@ impl Supervisor {
             // A launch sentinel discovered now outranks every pane-based
             // inference (PLAN_M3.md item 3) — including "no pane was even
             // found" and an unattributed pane, the first of which is exactly
-            // the case a vanished tmux window
-            // (no remain-on-exit, or a crash before the window was ever
-            // created) produces — and, per item 3's addition 18, including
+            // the case a vanished host (a crash before the host was ever
+            // started, or one that ended) produces — and, per item 3's addition 18, including
             // a row ALREADY recorded as an inferred `Interrupted` or
             // unannotated `Exited`: both are themselves only inferences
             // from a dead-or-vanished pane, the exact evidence class a
@@ -7084,10 +6793,9 @@ impl Supervisor {
                         // though this row takes the sentinel branch (item
                         // 5/19 of the review-swarm fix batch): a
                         // `SessionEntry` built with no `terminal` at all
-                        // breaks `Attach` and leaks the tmux session out
-                        // from under `DeleteSession`'s kill sweep — the
-                        // pane genuinely exists in tmux right now
-                        // regardless of which durable outcome this pass
+                        // breaks `Attach` and leaks the host out from
+                        // under `DeleteSession`'s teardown — the terminal
+                        // genuinely exists right now regardless of which durable outcome this pass
                         // assigns the row.
                         if let Some(found) = found {
                             found_panes.insert(row.id.clone(), found);
@@ -7295,8 +7003,8 @@ impl Supervisor {
                     // whose kill sweep evidently never landed — the last
                     // being the reconciliation that keeps a crashed stop
                     // from annotating a session that is still running. A
-                    // LIVE pane found by name after a crashed relaunch is
-                    // this generation's after all (the respawn landed
+                    // LIVE host found by its tag after a crashed relaunch is
+                    // this generation's after all (the new host started
                     // before the crash), which is why the staleness rule
                     // above covers only the dead case.
                     transitions.push((
@@ -7393,7 +7101,7 @@ impl Supervisor {
         }
 
         let mut sessions = HashMap::new();
-        // Sessions this pass can say REACHED tmux at some point; the
+        // Sessions this pass can say REACHED a terminal at some point; the
         // provenance the reservation settlement below requires, and
         // deliberately narrower than "has a terminal outcome". See that
         // settlement's own comment for what each source proves.
@@ -7470,7 +7178,7 @@ impl Supervisor {
                         agent_kind: snapshot.kind,
                         launch: row.launch,
                         // Placeholder only: `ListSessions` recomputes
-                        // `status` fresh from tmux plus the recorded
+                        // `status` fresh from the terminal plus the recorded
                         // outcome on every reply (see `session_status`),
                         // so nothing ever reads this particular value —
                         // `Unknown` is simply the honest "not yet
@@ -7487,10 +7195,9 @@ impl Supervisor {
                         // `Resume` at any moment, and a value frozen at
                         // reload would go stale the first time it did.
                         restart_offer,
-                        // Vocabulary only for now (PLAN_M4.md step 4 gives
-                        // tabs real rediscovery from tmux); until then this
-                        // is the honest "none known" value every reload
-                        // reports.
+                        // Filled from the session's tab cell when a reply
+                        // is built; empty is the honest "none known" value
+                        // for the entry itself.
                         tabs: Vec::new(),
 
                         // Reply-time registry projection supplies these;
@@ -7512,7 +7219,6 @@ impl Supervisor {
                             launch_cleanup_done,
                         )),
                         launch_error: Arc::new(std::sync::Mutex::new(launch_error)),
-                        launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                         outcome: Arc::new(std::sync::Mutex::new(outcome)),
                         // Loaded FROM the database, so by definition
                         // already there.
@@ -7568,8 +7274,8 @@ impl Supervisor {
         // (`reserved_launch_evidence`, which carries the full rationale for
         // the provenance rule). This pass reads a SUBSET of that function's
         // sources: pane, sentinel, scope, but not the conversation report,
-        // and its tmux reading is the pane scan taken at the start of this
-        // pass rather than `has_session` asked as each reservation is
+        // and its terminal reading is the host scan taken at the start of
+        // this pass rather than the hosts asked as each reservation is
         // decided. That errs the safe way: a reservation this pass cannot
         // settle stays pending for the retry. Settling here is what
         // makes the crash windows survivable across a RESTART with no retry
@@ -7577,11 +7283,12 @@ impl Supervisor {
         // recorded.
         //
         // Settlement requires PROVENANCE, not merely a non-launching
-        // status. A pane (recorded, or found by this pass) means something
-        // saw this session in tmux; an actual sentinel means its launch ran.
+        // status. A terminal address (recorded, or found by this pass)
+        // means something saw this session's terminal; an actual sentinel
+        // means its launch ran.
         // `Interrupted` proves nothing on its own — the reboot conversion
         // blankets `Launching` rows too, so a create that crashed before
-        // ever reaching tmux comes back from a reboot looking terminal, and
+        // ever reaching a terminal comes back from a reboot looking terminal, and
         // settling THAT as created would replay a session that never
         // existed and can never run. Those, like every other reservation
         // whose launch left no trace, stay pending: only a retry can create
@@ -7591,9 +7298,9 @@ impl Supervisor {
         // in the row loop above because it costs a D-Bus round trip per
         // question and only pending reservations have a question worth
         // asking: a live scope with the reserved launch's name can only have
-        // been created inside that launch's own tmux window, and it is the
-        // only evidence that survives the pane, the sentinel, and the tmux
-        // session all being gone while a daemon the launch spawned runs on.
+        // been created inside that launch's own terminal, and it is the
+        // only evidence that survives the terminal, the sentinel, and the
+        // host all being gone while a daemon the launch spawned runs on.
         // Failing to ask (an unreachable manager) leaves the reservation
         // pending, which is the same answer every other unresolved source
         // produces.
@@ -7613,7 +7320,7 @@ impl Supervisor {
                         // Error-outcome shortcut this loop used to take):
                         // the shim writes it when a launch fails,
                         // so it is evidence even when the pane was never
-                        // recorded and the tmux session is gone. A retained
+                        // recorded and the terminal is gone. A retained
                         // create-refusal row — an Error the REFUSAL wrote,
                         // with the shim never having run — has no sentinel,
                         // no scope, and no pane, and stays pending (its
@@ -7914,12 +7621,12 @@ impl Supervisor {
         state_dir.join("supervisor.sock")
     }
 
-    /// The tmux window command that runs this supervisor's launch shim on
+    /// The terminal command that runs this supervisor's launch shim on
     /// `spec_path`.
     ///
     /// Always [`Self::farhelm_exe`], never the session program: the shim
     /// reads a launch description only this supervisor's own version
-    /// writes, and the tmux window carries no `FARHELM_SUPERVISOR_SOCK` for
+    /// writes, and the terminal's environment carries no `FARHELM_SUPERVISOR_SOCK` for
     /// the forwarder to find the Running record by, so through the forwarder
     /// a mid-update launch would run the newly installed shim against this
     /// version's description.
@@ -7992,9 +7699,8 @@ impl Supervisor {
     /// [`Self::wait_for_pending_holds`], dropping entries that have since
     /// shown "held" so the list only ever holds launches still starting.
     ///
-    /// `terminal` is where the launch's program runs: its window's pane for
-    /// tmux, its host for a terminal host.
-    fn track_pending_hold(&self, spec_path: &Path, terminal: Terminal) {
+    /// `terminal` is the host the launch's program runs in.
+    fn track_pending_hold(&self, spec_path: &Path, terminal: HostTerminal) {
         if self.versioned_program.is_none() {
             return;
         }
@@ -8020,7 +7726,7 @@ impl Supervisor {
     /// belt and braces. Launches still creating their window when the wait
     /// begins (connections keep being served during a stop) are picked up
     /// as they register, and the wait does not end while any are in
-    /// flight. Every tmux query is bounded by what is left of `budget`, so
+    /// flight. Every terminal read is bounded by what is left of `budget`, so
     /// the whole wait never outlasts it by more than one poll interval.
     /// Returns whether every launch settled.
     pub(crate) async fn wait_for_pending_holds(&self, budget: Duration) -> bool {
@@ -8036,7 +7742,7 @@ impl Supervisor {
             let mut still = Vec::new();
             for hold in waiting {
                 let left = deadline.saturating_duration_since(tokio::time::Instant::now());
-                if left.is_zero() || !self.hold_settled(&hold, left).await {
+                if left.is_zero() || !Self::hold_settled(&hold) {
                     still.push(hold);
                 }
             }
@@ -8082,27 +7788,17 @@ impl Supervisor {
     }
 
     /// Whether one tracked launch needs no more waiting for; see
-    /// [`Self::wait_for_pending_holds`]. A tmux query that fails or does not
-    /// answer within `left` is not settled, so the wait runs on until its
-    /// budget.
+    /// [`Self::wait_for_pending_holds`].
     ///
-    /// A host terminal answers from its runtime ([`Terminal::probe_process`]),
-    /// whose live answer is the host's child: the same process a pane's pid
-    /// names, since both start the launch's command chain, so the mark is
-    /// compared with it the same way. A host that cannot be read is not
-    /// settled either.
-    async fn hold_settled(&self, hold: &PendingHold, left: Duration) -> bool {
-        let probe = match &hold.terminal {
-            Terminal::Tmux(tmux) => {
-                self.tmux
-                    .pane_process_within(&tmux.tmux_name, &tmux.pane, Some(left))
-                    .await
-            }
-            Terminal::Host(_) => hold.terminal.probe_process(self).await,
-        };
-        match probe {
-            Ok(TerminalProbe::Owned(pane)) if !pane.dead => {
-                crate::session_hold::read_mark(&hold.held) == pane.live_pid()
+    /// The terminal answers from its runtime
+    /// ([`crate::hosts::HostTerminal::probe`]), whose live answer is the
+    /// host's child, which starts the launch's command chain, so the mark is
+    /// compared with it. A host that cannot be read is not settled, so the
+    /// wait runs on until its budget.
+    fn hold_settled(hold: &PendingHold) -> bool {
+        match hold.terminal.probe() {
+            Ok(TerminalProbe::Running(pid)) => {
+                crate::session_hold::read_mark(&hold.held) == Some(pid)
             }
             Ok(_) => true,
             Err(error) => {
@@ -8121,76 +7817,32 @@ impl Supervisor {
     }
 
     /// Protect startup's surviving clone claims before any blocking sweep.
-    /// The exact generation and owned pane matter: pane ids can be recycled,
-    /// and an unreadable preparation or unattributed pane proves no abandonment.
+    /// The exact generation matters: an unreadable preparation or an
+    /// unreadable host proves no abandonment.
     async fn spare_claims_at_startup(&self) -> crate::spare_checkouts::LiveClaims {
-        let states = match self.tmux.pane_states_without_duplicates().await {
-            Ok(states) => states,
-            Err(error) => {
-                warn!(error = %error, "spare cleanup could not inspect panes; claims retained");
-                return crate::spare_checkouts::LiveClaims {
-                    uncertain: true,
-                    ..Default::default()
-                };
-            }
-        };
-        self.spare_claims_from_panes(&states).await
-    }
-
-    /// Combine one tmux observation with generation-fenced preparation reads.
-    /// Keeping collection separate lets tests exercise ambiguous pane ownership
-    /// without pretending a failed dummy shim is a live clone process.
-    async fn spare_claims_from_panes(
-        &self,
-        states: &HashMap<String, PaneState>,
-    ) -> crate::spare_checkouts::LiveClaims {
         let mut live = crate::spare_checkouts::LiveClaims::default();
-        let known = self.known_tmux_names().await;
         let entries: Vec<_> = self.sessions.lock().await.values().cloned().collect();
         for entry in entries {
-            let evidence = match &entry.terminal {
-                Some(Terminal::Tmux(terminal)) => Some(super::status::pane_evidence(
-                    &terminal.pane,
-                    &terminal.tmux_name,
-                    states,
-                    &known,
-                )),
+            let may_be_live = match &entry.terminal {
                 // The runtime's own evidence: a host that cannot be read is
-                // unattributed, and protects its claim like a renamed pane.
-                Some(Terminal::Host(host)) => Some(host.evidence().into()),
-                None => None,
-            };
-            let may_be_live = if let Some(evidence) = evidence {
-                match evidence {
-                    super::status::TerminalEvidence::Owned(pane) => !pane.dead,
+                // unattributed, and protects its claim.
+                Some(host) => match super::status::TerminalEvidence::from(host.evidence()) {
+                    super::status::TerminalEvidence::Owned(terminal) => !terminal.dead,
                     super::status::TerminalEvidence::Absent => false,
                     super::status::TerminalEvidence::Unattributed => true,
-                }
-            } else {
-                // Error rows can retain a recorded but unattributed pane even
-                // when reload supplies no terminal. Read that provenance rather
-                // than interpreting an empty in-memory terminal as abandonment.
-                match self.store.session(&entry.info.id).await {
+                },
+                // Error rows can retain a recorded terminal even when reload
+                // supplies none. Read that provenance rather than
+                // interpreting an empty in-memory terminal as abandonment.
+                None => match self.store.session(&entry.info.id).await {
                     Ok(Some(row)) if row.generation == entry.generation => {
                         match row.terminal_kind {
-                            TerminalKind::Tmux if row.terminal_address.is_empty() => {
-                                agent_pane_from_states(states, &session_tmux_name(&row.id), &row.id)
-                                    .is_some_and(|(_, pane)| !pane.dead)
-                            }
-                            TerminalKind::Tmux => match super::status::pane_evidence(
-                                &row.terminal_address,
-                                &session_tmux_name(&row.id),
-                                states,
-                                &known,
-                            ) {
-                                super::status::TerminalEvidence::Owned(pane) => !pane.dead,
-                                super::status::TerminalEvidence::Absent => false,
-                                super::status::TerminalEvidence::Unattributed => true,
-                            },
-                            // A host row's address is a socket name, which no pane
-                            // lookup may read: every such row would read as
-                            // abandoned. The host of the row's own launch decides,
-                            // found by the socket the row (or, unconfirmed, its
+                            // This start ended the old terminals before the
+                            // reload (`old_terminals`): nothing of an old-kind
+                            // row runs any more.
+                            TerminalKind::Tmux => false,
+                            // The host of the row's own launch decides, found
+                            // by the socket the row (or, unconfirmed, its
                             // launch record for this generation) names.
                             TerminalKind::Host => {
                                 host_handover::host_may_remain(
@@ -8208,7 +7860,7 @@ impl Supervisor {
                             .insert((entry.info.id.clone(), entry.generation));
                         continue;
                     }
-                }
+                },
             };
             if !may_be_live {
                 continue;
@@ -8254,7 +7906,7 @@ impl Supervisor {
         // probe-then-remove-then-bind sequence is a TOCTOU where two
         // racing supervisors can each pass the probe, and the slower one
         // then unlinks the faster one's freshly bound socket — leaving
-        // two processes driving the same tmux server with disjoint
+        // two processes driving the same state directory with disjoint
         // session maps. The lock itself is now taken in the CONSTRUCTOR
         // (see `StateDirOwnership`, and PLAN_M3.md item 2's requirement
         // that nothing durable be touched before it is held), so what
@@ -8311,11 +7963,11 @@ impl Supervisor {
                 let sessions = self.sessions.lock().await;
                 let adopted = sessions
                     .iter()
-                    .filter_map(|(id, entry)| match &entry.terminal {
-                        Some(Terminal::Host(host)) => {
-                            Some((id.clone(), (entry.generation, host.clone())))
-                        }
-                        Some(Terminal::Tmux(_)) | None => None,
+                    .filter_map(|(id, entry)| {
+                        entry
+                            .terminal
+                            .as_ref()
+                            .map(|host| (id.clone(), (entry.generation, host.clone())))
                     })
                     .collect();
                 // The constructor's tab runtimes, kept the same way.
@@ -8404,8 +8056,9 @@ impl Supervisor {
             .map(|(id, entry)| (id.clone(), entry.generation))
             .collect();
         sweep_launch_dir(&self.state_dir.join("launch"), &known_sessions).await;
-        sweep_tmux_config_temp_files(&self.state_dir).await;
-        // Surviving tmux shims hold repository locks independently of this
+        sweep_running_version_temp_files(&self.state_dir).await;
+        // Surviving launch shims (in hosts that outlived the last
+        // supervisor) hold repository locks independently of this
         // supervisor. The sweep skips those caches; recursive removal runs
         // off the async runtime, like other potentially blocking disk work.
         let cache_state_dir = self.state_dir.clone();
@@ -8506,7 +8159,7 @@ impl Supervisor {
     }
 
     /// The one true creation path: validate preconditions, hand the agent
-    /// argv to the launch shim, and start a tmux session running it.
+    /// argv to the launch shim, and start a terminal host running it.
     ///
     /// Failure semantics follow SPEC.md's split. Everything checkable up
     /// front — the directory exists, the invocation parses into an argv —
@@ -9254,10 +8907,10 @@ impl Supervisor {
     /// `agent_kind::ensure_resume_template`). A raw create is otherwise the
     /// door through which a
     /// command line that names no program — `''` splits into a one-element
-    /// argv holding the empty string — reaches tmux. An additional check
+    /// argv holding the empty string — reaches a terminal. An additional check
     /// refuses a `{cwd}` placeholder as the program
     /// (`agent_kind::ensure_no_cwd_program`): a raw create's argv is caller
-    /// data that reaches tmux, so the shape of the argv is checked here
+    /// data that reaches a terminal, so the shape of the argv is checked here
     /// rather than at whichever door it came through.
     ///
     /// One validation and snapshot path serves raw creates and derived
@@ -9381,7 +9034,7 @@ impl Supervisor {
         // that something was there.
         //
         // `cwd` and `invocation` are deliberately not swept: neither is a
-        // display label. `cwd` becomes tmux's working-directory argument
+        // display label. `cwd` becomes the host's working directory
         // and `invocation` is parsed into an argv — both are consumed as
         // data by something that already has to accept arbitrary bytes.
         // Fresh intent treats an empty label as an automatic numbered name.
@@ -9452,7 +9105,7 @@ impl Supervisor {
             destination,
             cwd: cwd.clone(),
             // A create has no prior identity to have verified, so the
-            // caller's own spelling is what tmux gets. See
+            // caller's own spelling is what the host gets. See
             // [`LaunchRequest::launch_cwd`].
             launch_cwd: launch_cwd.clone(),
             argv,
@@ -9882,14 +9535,14 @@ impl Supervisor {
     ///   agent would run in a directory the session never authorized. The
     ///   VERIFIED path is what the launch is then aimed at
     ///   ([`LaunchRequest::launch_cwd`]), so the same link cannot be
-    ///   repointed again between this check and the tmux call.
+    ///   repointed again between this check and the host start.
     /// - The stored invocation must still be an executable argv
     ///   (`agent_kind::ensure_executable_argv`) whose program is not the
     ///   `{cwd}` placeholder (`agent_kind::ensure_no_cwd_program`), and so
     ///   must the stored resume template. They were once, so this cannot
     ///   fail for a row this build wrote — but the database is a trust
     ///   boundary like any other input (`store`'s own decode says the
-    ///   same), and the alternative to checking is handing tmux a vector
+    ///   same), and the alternative to checking is handing a host a vector
     ///   that names no program, or (slot 0 is never substituted) one that
     ///   would exec a program literally named `{cwd}` instead of failing
     ///   loudly on the refusal.
@@ -10110,7 +9763,7 @@ impl Supervisor {
                 destination,
                 // The path `ensure_cwd_identity` just VERIFIED, so the launch
                 // cannot be aimed somewhere else by a symlink repointed between
-                // that check and the tmux call. `None` only for a row with no
+                // that check and the host start. `None` only for a row with no
                 // recorded identity, where there was nothing to verify.
                 launch_cwd: verified.unwrap_or_else(|| row.cwd.clone()),
                 argv,
@@ -10345,7 +9998,7 @@ impl Supervisor {
     }
 
     /// What is durably known about whether a reserved launch ever reached
-    /// tmux (PLAN_M3.md item 6's "the reserved identities' side effects").
+    /// a terminal (PLAN_M3.md item 6's "the reserved identities' side effects").
     ///
     /// The bias is deliberate and asymmetric: relaunching requires POSITIVE
     /// evidence of absence, and everything else counts as present. The two
@@ -10359,8 +10012,8 @@ impl Supervisor {
     /// Four independent sources, any one of which is enough to say a
     /// launch happened:
     ///
-    /// - **The durable row.** A recorded pane means something once saw this
-    ///   session in tmux. The outcome alone does not count (R1.2): a
+    /// - **The durable row.** A recorded terminal address means something
+    ///   once saw this session's terminal. The outcome alone does not count (R1.2): a
     ///   retained create-refusal is an `Error` row with an empty pane, and
     ///   `Interrupted` is written by the reboot conversion over `Launching`
     ///   rows too, so neither proves a launch happened and the physical
@@ -10374,25 +10027,26 @@ impl Supervisor {
     ///   which is the whole reason it is checked rather than being assumed
     ///   to imply the pane.
     /// - **The launch sentinel.** The shim wrote it, so the shim ran, so
-    ///   tmux started something — even when no pane was ever recorded.
+    ///   a terminal started something — even when no address was ever recorded.
     /// - **The launch's cgroup scope**, where this host has a user manager.
     ///   A unit with the reserved generation-0 name can only have been
     ///   created inside the reserved session's own terminal, and — unlike
-    ///   every other source here — it survives the agent, the pane, and the
-    ///   tmux session all being gone while a daemon it spawned runs on.
-    /// - **The terminal itself, right now**: tmux for a row whose launch
-    ///   starts in tmux, and for a host row the hosts in the socket
-    ///   directory, by their tags ([`Self::host_launch_evidence`]; a host
+    ///   every other source here — it survives the agent, the terminal, and
+    ///   its host all being gone while a daemon it spawned runs on.
+    /// - **The terminal itself, right now**: for a host row the hosts in the
+    ///   socket directory, by their tags ([`Self::host_launch_evidence`]; a host
     ///   carries its session and launch generation in its tag, so a host
     ///   the interrupted attempt started is found even though nothing
     ///   recorded its socket). Asked at DECISION time rather than inferred
     ///   from the session map, because the map is a snapshot taken at
     ///   reload: a create that completed after that snapshot (a cancelled
     ///   request whose work continued) is invisible to it and very visible
-    ///   to tmux or the host.
+    ///   to the host. A row of the old kind (a create an earlier release
+    ///   started in tmux) has no terminal to ask: this start ended the old
+    ///   terminals (`old_terminals`).
     ///
     /// A source that ERRORS is never read as absence: an unreadable
-    /// sentinel or an unreachable tmux is exactly the situation in which a
+    /// sentinel or an unreachable host is exactly the situation in which a
     /// wrong relaunch is most likely, so it yields `Unresolved`.
     async fn reserved_launch_evidence(&self, reservation: &Reservation) -> LaunchEvidence {
         let kind = match self.store.session(&reservation.session_id).await {
@@ -10402,7 +10056,7 @@ impl Supervisor {
                 // Launching/Interrupted — including a retained
                 // create-refusal's `Error` row, which has an EMPTY address —
                 // is no longer evidence BY ITSELF. The physical probes
-                // below (scope, sentinel, tmux) are what distinguish a
+                // below (scope, sentinel, host) are what distinguish a
                 // real launch from a refusal the refusal transaction
                 // wrote: a separately written Error must never imply
                 // Created, and every genuine launch leaves one of the
@@ -10423,13 +10077,12 @@ impl Supervisor {
         };
         // The launch's cgroup, where this host has one. A scope with the
         // reserved identities' generation-0 name can only have been created
-        // by `systemd-run` inside the reserved session's own terminal (its
-        // tmux window, or its terminal host's child), so
-        // its existence proves that window ran — and it proves it in the one
-        // case every other source misses: a wrapped launch whose agent
-        // daemonized something and then died, leaving no pane, no sentinel,
-        // and a tmux session already gone, while the daemon runs on inside
-        // the cgroup. Relaunching over that would be the duplicate this
+        // by `systemd-run` inside the reserved session's own terminal, so
+        // its existence proves that terminal ran — and it proves it in the
+        // one case every other source misses: a wrapped launch whose agent
+        // daemonized something and then died, leaving no sentinel and a
+        // terminal already gone, while the daemon runs on inside the
+        // cgroup. Relaunching over that would be the duplicate this
         // whole mechanism exists to exclude.
         //
         // Only asked when a manager is actually available, because `exists`
@@ -10461,32 +10114,16 @@ impl Supervisor {
             }
         }
         // The terminal itself, asked where the row's kind says the launch
-        // started it: tmux for a tmux row, the hosts' tags for a host row
-        // (the launching row records its kind before anything starts). A
-        // row that is gone (which a pending reservation's row never is) says
-        // nothing about where to look, so both are asked.
+        // started it: the hosts' tags for a host row (the launching row
+        // records its kind before anything starts), and for a row that is
+        // gone (which a pending reservation's row never is). An old-kind
+        // row's tmux terminal was ended at this supervisor's start
+        // (`old_terminals`), so nothing of it is left to find.
         match kind {
-            Some(TerminalKind::Tmux) => self.tmux_launch_evidence(reservation).await,
-            Some(TerminalKind::Host) => self.host_launch_evidence(&reservation.session_id).await,
-            None => match self.tmux_launch_evidence(reservation).await {
-                LaunchEvidence::Absent => self.host_launch_evidence(&reservation.session_id).await,
-                evidence @ (LaunchEvidence::Present | LaunchEvidence::Unresolved(_)) => evidence,
-            },
-        }
-    }
-
-    /// Whether the reserved launch's tmux session exists right now: the
-    /// last source of [`Self::reserved_launch_evidence`] for a tmux row.
-    /// The tmux session is the one the reserved session id names
-    /// ([`session_tmux_name`]), the only name a tmux launch of it uses.
-    async fn tmux_launch_evidence(&self, reservation: &Reservation) -> LaunchEvidence {
-        let tmux_name = session_tmux_name(&reservation.session_id);
-        match self.tmux.has_session(&tmux_name).await {
-            Ok(true) => LaunchEvidence::Present,
-            Ok(false) => LaunchEvidence::Absent,
-            Err(e) => LaunchEvidence::Unresolved(e.context(format!(
-                "asking tmux whether the reserved session {tmux_name} exists"
-            ))),
+            Some(TerminalKind::Tmux) => LaunchEvidence::Absent,
+            Some(TerminalKind::Host) | None => {
+                self.host_launch_evidence(&reservation.session_id).await
+            }
         }
     }
 
@@ -10575,7 +10212,7 @@ impl Supervisor {
                     .lock()
                     .await
                     .get(&row.id)
-                    .and_then(|entry| entry.terminal.as_ref().map(Terminal::wire_kind));
+                    .and_then(|entry| entry.terminal.as_ref().map(HostTerminal::wire_kind));
                 let info = SessionInfo {
                     screen_yolo: false,
                     claude_trust_prompt: false,
@@ -10740,7 +10377,7 @@ impl Supervisor {
     async fn publish_retained_launch(
         &self,
         info: &SessionInfo,
-        terminal: Option<Terminal>,
+        terminal: Option<HostTerminal>,
         snapshot: &IntegrationSnapshot,
         canonical_cwd: Option<&str>,
         outcome: LastOutcome,
@@ -10772,7 +10409,6 @@ impl Supervisor {
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
-                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(outcome)),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
@@ -10807,7 +10443,7 @@ impl Supervisor {
     }
 
     /// Perform one launch: the durable launching record, the launch spec,
-    /// the tmux session, and the confirmation — under whatever the
+    /// the terminal host, and the confirmation — under whatever the
     /// reservation table owes for it (see [`Reserved`]).
     ///
     /// Split out of `create_session` so that every one of the many failure
@@ -11204,7 +10840,7 @@ impl Supervisor {
         // The durable launching record, committed BEFORE any external side
         // effect exists (PLAN_M3.md item 2). The ordering is the whole
         // point and it is the INVERSE of M2's, which inserted the row only
-        // after tmux had the session: a crash between the two must leave
+        // after the terminal existed: a crash between the two must leave
         // evidence that a launch was attempted — a launching row whose
         // side effects reload then goes looking for — rather than either
         // silence (M2: an unlisted running agent) or, once restart exists,
@@ -11502,7 +11138,7 @@ impl Supervisor {
         // Fresh origin membership committed with its plan. No later
         // compensating write can expose a session without its reference.
         // The durable NotStarted preparation publication (Design D): the
-        // shim's state file exists BEFORE tmux is asked for anything, so a
+        // shim's state file exists BEFORE any host is started, so a
         // crash between spawn and the shim's first transition leaves an
         // honest "nothing started" record rather than an absent one. Also
         // re-derived on the retry path — see the retry block's notes.
@@ -11627,7 +11263,7 @@ impl Supervisor {
             // time this reply reaches the caller. `Unknown` is the
             // honest "not yet computed" answer, exactly like
             // `reload_sessions`'s own placeholder; `ListSessions` computes
-            // the real answer from tmux (`session_status`), and this
+            // the real answer from the terminal (`session_status`), and this
             // value is never persisted (see `StoredSession`'s docs)
             // either way.
             status: SessionStatus::Unknown,
@@ -11734,7 +11370,7 @@ impl Supervisor {
                 hooked,
                 spawning,
             }) => Ok(StartedLaunch {
-                terminal: Terminal::Host(host),
+                terminal: host,
                 artifacts,
                 hooked,
                 spawning: Some(spawning),
@@ -11838,8 +11474,8 @@ impl Supervisor {
                         // removing the row is removing the last handle
                         // anything has on this launch, so whatever the
                         // launch managed to start must be provably gone
-                        // FIRST. "tmux has no session" is not that proof —
-                        // a window that ran far enough to create its scope
+                        // FIRST. "the host is gone" is not that proof —
+                        // a launch that ran far enough to create its scope
                         // and daemonize something leaves exactly this
                         // shape — so the reap confirms its scope, keeping
                         // the portable sweep when containment is uncertain.
@@ -11965,7 +11601,7 @@ impl Supervisor {
             // committed while the launch was mid-flight. The delete won —
             // it was a deliberate user action against a session that
             // existed when it was issued — so this launch tears its own
-            // work back down rather than leaving a tmux session and an
+            // work back down rather than leaving a terminal host and an
             // agent behind with no row that knows about them. Reported as
             // Conflict because this attempt lost to Delete. A keyed retry
             // is now fresh regardless of the deleted claim's legacy scope.
@@ -12038,7 +11674,7 @@ impl Supervisor {
         if let Err(e) = confirmed {
             // The DB error is the root cause throughout — it is what
             // actually failed the create — but a kill failure on top of it
-            // is not safe to only log: it means an untracked tmux session
+            // is not safe to only log: it means an untracked terminal host
             // may now be running with nobody able to learn its id from the
             // caller's point of view, which the returned error must say so
             // the caller (and whoever reads the resulting log/HTTP body)
@@ -12095,8 +11731,8 @@ impl Supervisor {
             // included. Same reasoning for the status file, which the
             // shim may have started writing.
             artifacts.remove_failed_create_best_effort().await;
-            // Only once the terminal is CONFIRMED gone: an unkillable tmux
-            // session may still be running the agent, and the launching
+            // Only once the terminal is CONFIRMED gone: a host that could
+            // not be ended may still be running the agent, and the launching
             // row is then the sole record anyone could use to find it
             // again. Retaining it is the recoverable failure; deleting it
             // is not — and a retained row must leave its reservation
@@ -12157,7 +11793,7 @@ impl Supervisor {
         // Read before the entry takes the terminal: the reply below says
         // which kind it is, as every later reply does from the entry
         // (`entry_info`).
-        let agent_terminal = terminal.as_ref().map(Terminal::wire_kind);
+        let agent_terminal = terminal.as_ref().map(HostTerminal::wire_kind);
         sessions.insert(
             id,
             Arc::new(SessionEntry {
@@ -12168,7 +11804,6 @@ impl Supervisor {
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
-                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(LastOutcome::Running)),
                     // Input starts only the diagnostic timer, never identity admission.
                     first_input: Arc::new(std::sync::Mutex::new(None)),
@@ -12260,75 +11895,6 @@ impl Supervisor {
         Ok(info)
     }
 
-    /// Is `owner` the tmux session name of a session this supervisor
-    /// currently holds in its map? This is the discriminator every
-    /// lifecycle verb applies to a [`TerminalProbe::ForeignOwner`], and it
-    /// separates two situations the probe itself cannot tell apart but
-    /// which have opposite safety profiles.
-    ///
-    /// **Known owner ⇒ the recorded pane's terminal is provably dead.**
-    /// tmux pane ids are never reused within one server generation, so if
-    /// the current server handed our recorded id to a session THIS
-    /// supervisor launched, the recording must predate the current server
-    /// — i.e. the server that owned the recorded pane is gone, and with it
-    /// that pane, its terminal, and the agent that ran in it. This is the
-    /// 2026-08-16 incident. Proceeding without a pane root and without
-    /// stop-consent is then both safe and correct: there is no husk left
-    /// to clean up, and any daemonized survivor of the dead run is left
-    /// to the cleanup's scope or, where containment is uncertain, its
-    /// marker sweep, which SPEC.md already sanctions without consent.
-    ///
-    /// **Unknown owner ⇒ assume it may be OUR live terminal.** A pane
-    /// whose session name we do not recognize is most cheaply explained by
-    /// an out-of-band `rename-session` or `move-pane` on the private
-    /// socket — in which case the recorded pane is still this session's
-    /// running agent, merely answering to a different name. Every verb
-    /// then has something to lose by proceeding: restart and delete would
-    /// kill a live agent without consent, stop would record a plain exit
-    /// that never happened, and delete or close-tab would leave the
-    /// renamed tmux session, its scrollback, and its tabs behind while
-    /// reporting success. So the verbs fail closed there, exactly as they
-    /// did before the probe was made classifying.
-    ///
-    /// The residual blind spot, stated plainly: an external `move-pane`
-    /// that moved our LIVE pane into another farhelm session's tmux
-    /// session would present as the known-owner case and be treated as a
-    /// recycle. Nothing farhelm does can produce that arrangement, and
-    /// perfect defense against an operator deliberately rearranging their
-    /// own private tmux socket is a non-goal — the fence here is against
-    /// accident and against the incident shape, not against the account
-    /// owner.
-    ///
-    /// Matches both the name a session's `Terminal` currently records and
-    /// the name minted from its id ([`new_session_identity`]) — they are
-    /// the same string in every ordinary state, but an entry caught
-    /// between a relaunch's teardown and its republication has no recorded
-    /// terminal while its tmux session name is still very much farhelm's.
-    /// Either match establishes the same thing the proof needs: farhelm
-    /// launched that session, on this server.
-    pub(crate) async fn known_session_tmux_name(&self, owner: &str) -> bool {
-        self.known_tmux_names().await.contains(owner)
-    }
-
-    /// Every tmux session name [`Self::known_session_tmux_name`] would
-    /// recognize, as one snapshot for a pass that classifies many panes
-    /// (`status::pane_evidence`). The verbs and the observers read the same
-    /// derivation so they cannot disagree about whose pane a renamed one is.
-    pub(crate) async fn known_tmux_names(&self) -> super::status::KnownTmuxNames {
-        let sessions = self.sessions.lock().await;
-        super::status::KnownTmuxNames::from_sessions(sessions.iter().map(|(id, entry)| {
-            (
-                id.as_str(),
-                // A host terminal holds no tmux name; its session's minted
-                // one is counted by `from_sessions` all the same.
-                match &entry.terminal {
-                    Some(Terminal::Tmux(terminal)) => Some(terminal.tmux_name.as_str()),
-                    Some(Terminal::Host(_)) | None => None,
-                },
-            )
-        }))
-    }
-
     /// Send a follow-up into the current live agent without taking over an
     /// attachment. The target lifecycle claim spans both confirmed writes:
     /// Stop, Delete, or Restart cannot replace the checked pane mid-prompt.
@@ -12379,15 +11945,14 @@ impl Supervisor {
             RequestError::new(ErrorKind::Conflict, "the target agent is not running")
         })?;
         match terminal
-            .probe_process(self)
-            .await
-            .context("rechecking the prompt target's live pane")?
+            .probe()
+            .context("rechecking the prompt target's live terminal")?
         {
-            TerminalProbe::Owned(pane) if !pane.dead => {}
-            TerminalProbe::Owned(_) | TerminalProbe::Gone | TerminalProbe::ForeignOwner { .. } => {
+            TerminalProbe::Running(_) => {}
+            TerminalProbe::Dead | TerminalProbe::Gone => {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
-                    "the target agent is not running in its owned pane",
+                    "the target agent is not running in its terminal",
                 )
                 .into());
             }
@@ -12410,10 +11975,9 @@ impl Supervisor {
                 .into());
             }
         }
-        // Delivery is a bracketed paste, gated on the terminal's record of
-        // the program's paste mode: tmux's for a pane, the emulator's for a
-        // host terminal. Without it the program would read the prompt as
-        // typed keys, and its newlines as submits.
+        // Delivery is a bracketed paste, gated on the emulator's record of
+        // the program's paste mode. Without it the program would read the
+        // prompt as typed keys, and its newlines as submits.
         let paste_mode_off = || {
             RequestError::new(
                 ErrorKind::Conflict,
@@ -12426,52 +11990,24 @@ impl Supervisor {
         paste.extend_from_slice(prompt.as_bytes());
         paste.extend_from_slice(b"\x1b[201~");
         // Validation excludes ESC, so user text cannot close this paste.
-        match terminal {
-            Terminal::Tmux(terminal) => {
-                if !self
-                    .tmux
-                    .bracketed_paste_enabled(&terminal.tmux_name, &terminal.pane)
-                    .await?
-                {
-                    return Err(paste_mode_off().into());
-                }
-                let mut input = self
-                    .tmux
-                    .open_input_client(&terminal.tmux_name, &terminal.pane)
-                    .await?;
-                // One InputClient call retains its ordering and absolute
-                // exchange budget even when the confirmed path chunks a large
-                // frame internally.
-                input
-                    .send(&paste)
-                    .await
-                    .context("delivering the prompt paste; delivery may be partial")?;
-                input
-                    .send(submit)
-                    .await
-                    .context("submitting the prompt; delivery may be partial")?;
-            }
-            Terminal::Host(host) => {
-                // The emulator's modes are the program's only once the
-                // runtime has caught up with its host's journal: a
-                // recovered adoption replays it after adoption returns, and
-                // until then the modes are those of a past screen (the
-                // snapshot's, say), which the rest of the replay may change.
-                // The status sampler waits for the same.
-                if !host.status().caught_up {
-                    return Err(RequestError::new(
-                        ErrorKind::Conflict,
-                        "cannot send a prompt yet: the target agent's terminal is still being \
-                         restored after a supervisor restart",
-                    )
-                    .into());
-                }
-                if !host.modes().bracketed_paste {
-                    return Err(paste_mode_off().into());
-                }
-                deliver_prompt_to_host(host, &paste, submit).await?;
-            }
+        //
+        // The emulator's modes are the program's only once the runtime has
+        // caught up with its host's journal: a recovered adoption replays it
+        // after adoption returns, and until then the modes are those of a
+        // past screen (the snapshot's, say), which the rest of the replay may
+        // change. The status sampler waits for the same.
+        if !terminal.status().caught_up {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "cannot send a prompt yet: the target agent's terminal is still being restored \
+                 after a supervisor restart",
+            )
+            .into());
         }
+        if !terminal.modes().bracketed_paste {
+            return Err(paste_mode_off().into());
+        }
+        deliver_prompt_to_host(terminal, &paste, submit).await?;
         Ok(())
     }
 
@@ -12523,9 +12059,9 @@ impl Supervisor {
     ///   cannot silently relaunch a permissive agent somewhere else. The
     ///   RESOLVED path is then what the relaunch is aimed at, rather than
     ///   the session's own spelling of it — otherwise the same link could
-    ///   simply be repointed again between this check and the tmux call.
+    ///   simply be repointed again between this check and the host start.
     /// - **A working agent without explicit consent.** Liveness is
-    ///   RE-probed through the pane here and the activity reading taken
+    ///   RE-probed through the terminal here and the activity reading taken
     ///   now; the client's `status` is only ever a hint about whether to
     ///   show a confirm dialog, never the authorization to skip it (see
     ///   `stop_if_running`'s wire docs). Only a live agent reading working
@@ -12621,8 +12157,8 @@ impl Supervisor {
         // create holding the parent's claim while waiting for the
         // directory mutex. The admission is held through the pending-
         // archive/unresolved-plan check and the durable revalidation
-        // below, then released BEFORE any tmux work: no subprocess ever
-        // runs under it.
+        // below, then released BEFORE any terminal work: no host start or
+        // process sweep ever runs under it.
         let directory_admission = self.working_copy_operations.lock().await;
         // Taken SECOND, and released only when the whole restart is done —
         // including the republication. See the lock-order table in the
@@ -12831,71 +12367,30 @@ impl Supervisor {
         ensure_cwd_usable(&entry.info.cwd).await?;
         // The VERIFIED path travels with the relaunch rather than being
         // discarded once the comparison passes: `relaunch_into_terminal`
-        // hands it to tmux, so a symlink repointed between here and there
+        // hands it to the new host, so a symlink repointed between here and there
         // cannot aim the new agent somewhere nothing checked. `None` only
         // for a row with no recorded identity — see `ensure_cwd_identity`.
         let launch_cwd = ensure_cwd_identity(&entry.info.cwd, snapshot.canonical_cwd.as_deref())
             .await?
             .unwrap_or_else(|| entry.info.cwd.clone());
 
-        // Liveness as it is NOW, from the pane rather than from anything a
-        // client cached. A pane query that FAILS is not read as "not
-        // running": that would be the one direction that can kill nothing
-        // and relaunch beside a live agent.
-        let pane_state = match entry.terminal.as_ref() {
-            Some(terminal) => match terminal
-                .probe_process(self)
-                .await
+        // Liveness as it is NOW, from the terminal rather than from anything
+        // a client cached. A probe that FAILS is not read as "not running":
+        // that would be the one direction that can kill nothing and relaunch
+        // beside a live agent.
+        let alive_pid = match entry.terminal.as_ref() {
+            Some(terminal) => terminal
+                .probe()
                 .context("rechecking whether this session's agent is still running")?
-            {
-                TerminalProbe::Owned(pane) => Some(pane),
-                TerminalProbe::Gone => None,
-                // A RECOGNIZED owner reads exactly as `Gone`, and the
-                // consent question below is why that is not merely a
-                // convenience. Pane ids are unique within a server
-                // generation, so a session farhelm launched holding our
-                // recorded id proves the recording predates the current
-                // server — this session's agent died with the server that
-                // owned its pane. There is therefore no live agent for
-                // `stop_if_running` to protect, and the else-branch's
-                // survivors hunt (marker-keyed, not pane-keyed) is the
-                // no-consent reaping SPEC.md already assigns to a restart
-                // following an agent that exited on its own. The second
-                // half of `None` matters too: it makes `terminal_survives`
-                // false below, so the relaunch builds a fresh terminal
-                // instead of a reuse that could not have worked. Logged
-                // loudly because reaching it means a tmux server died
-                // under a running supervisor.
-                //
-                // An UNRECOGNIZED owner gets the pre-classification
-                // behavior back: the recheck fails and the restart never
-                // starts. The recorded pane may be this session's own
-                // agent under a renamed tmux session, and a restart that
-                // guessed otherwise would kill a live agent without the
-                // consent `stop_if_running` exists to obtain.
-                TerminalProbe::ForeignOwner { owner } => {
-                    if !self.known_session_tmux_name(&owner).await {
-                        return Err(anyhow::anyhow!(terminal.unknown_owner_refusal(&owner))
-                            .context("rechecking whether this session's agent is still running"));
-                    }
-                    warn!(
-                        session = %session_id, foreign_owner = %owner,
-                        "this session's recorded pane now belongs to another tmux session, so \
-                         the restart treats its terminal as gone and creates a fresh one"
-                    );
-                    None
-                }
-            },
+                .live_pid(),
             None => None,
         };
-        let alive_pane = pane_state.filter(|pane| !pane.dead);
-        // Capture the pane identity before recording the stop intent. That
-        // write and the subsequent sweep may outlive the original process;
-        // the start time prevents a recycled pid from becoming the root. A
-        // host terminal's root is its child as pinned at adoption
-        // (`Terminal::live_root`).
-        let alive_identity = match (alive_pane, entry.terminal.as_ref()) {
-            (Some(pane), Some(terminal)) => terminal.live_root(&pane).map_err(|error| {
+        // Capture the process identity before recording the stop intent.
+        // That write and the subsequent sweep may outlive the original
+        // process; the root is the host's child as pinned at adoption
+        // (`HostTerminal::sweep_root`), so a recycled pid cannot become it.
+        let alive_identity = match (alive_pid, entry.terminal.as_ref()) {
+            (Some(pid), Some(terminal)) => terminal.sweep_root(pid).map_err(|error| {
                 RequestError::new(ErrorKind::Internal, format!("not restarting: {error:#}"))
             })?,
             (None, _) | (_, None) => None,
@@ -12903,7 +12398,7 @@ impl Supervisor {
         // Asked first, before anything below touches a process, so that a
         // refusal in the common case changes nothing; asked again after the
         // settle, which can take seconds (see `refuse_unconsented_stop`).
-        refuse_unconsented_stop(alive_pane.is_some(), stop_if_running, &entry)?;
+        refuse_unconsented_stop(alive_pid.is_some(), stop_if_running, &entry)?;
         // A host start an earlier request (or supervisor) left behind can
         // still start an agent nothing below would reach: settled here, under
         // the claim and before anything is stopped, and any program found
@@ -12911,36 +12406,14 @@ impl Supervisor {
         // reap) below, before the new launch (`host_restart`,
         // "settle_outstanding_launches"). Refused when one cannot be settled,
         // with nothing stopped.
-        let host_agent = match &entry.terminal {
-            Some(Terminal::Host(_)) => true,
-            Some(Terminal::Tmux(_)) => false,
-            None => self
-                .store
-                .session(session_id)
-                .await?
-                .is_some_and(|row| row.terminal_kind == TerminalKind::Host),
-        };
-        // An old session whose private tmux server runs but cannot be used
-        // (`TmuxDriver::adopt_running_server`) reads as not alive, yet its
-        // agent may well still run there: a Restart would start a second
-        // one beside it, in the same checkout. Refused, with nothing
-        // stopped, until tmux is fixed or that agent is stopped. (Unreachable
-        // now: startup adopts no server, `old_terminals`.)
-        if !host_agent && let Some(refusal) = self.tmux.unusable_refusal_if_any() {
-            return Err(anyhow::Error::new(RequestError::new(
-                ErrorKind::Conflict,
-                format!("not restarting: {refusal:#}"),
-            )));
-        }
-        // Every new launch goes to a new terminal host: a host agent stays
-        // in hosts, and a tmux session moves into one (`host_restart`, "From
-        // a tmux pane"). A tmux session that moves is settled too: a host
-        // start an earlier move left (one that failed definitively keeps the
-        // row tmux) would otherwise go unseen.
+        // Every new launch goes to a new terminal host. A session with no
+        // terminal is settled too: a host start an earlier Restart left (one
+        // that failed definitively keeps the row as it was) would otherwise
+        // go unseen.
         let outstanding = self
             .settle_outstanding_launches(session_id, entry.terminal.as_ref())
             .await?;
-        // No pane to probe is not proof of no agent: an ambiguous create
+        // No terminal to probe is not proof of no agent: an ambiguous create
         // (`terminal_less_launch_may_be_live`) may have left one running.
         // Restart no longer asks about it, though. Its status reads unknown,
         // and an unknown-status agent restarts without consent (SPEC.md,
@@ -12954,8 +12427,8 @@ impl Supervisor {
         // the stop. A refusal here leaves what the settle did: first stages
         // ended and records of starts that left nothing removed, which are
         // strays either way; the programs it found running are not swept.
-        refuse_unconsented_stop(alive_pane.is_some(), stop_if_running, &entry)?;
-        if alive_pane.is_some() {
+        refuse_unconsented_stop(alive_pid.is_some(), stop_if_running, &entry)?;
+        if alive_pid.is_some() {
             let roots = alive_identity.into_iter().chain(outstanding);
             if let Err(failure) = stop_live_agent(self, session_id, &entry, roots).await {
                 match failure {
@@ -13013,16 +12486,10 @@ impl Supervisor {
         // A new host starts from the old terminal's history, read here,
         // after the stop and before the generation is claimed, so that a
         // crash or an orderly stop while it is read leaves the session as it
-        // was (`host_restart`, "restart_seed" and "tmux_restart_seed"). A
-        // tmux pane is read only while it is still this session's (the
-        // probe above owned it), dead or alive: a pane gone, or another
-        // session's now, has nothing of this session to keep.
+        // was (`host_restart`, "restart_seed").
         let seed = match entry.terminal.as_ref() {
-            Some(Terminal::Host(old)) => Some(self.restart_seed(session_id, old).await?),
-            Some(Terminal::Tmux(old)) if pane_state.is_some() => {
-                Some(self.tmux_restart_seed(session_id, old).await?)
-            }
-            Some(Terminal::Tmux(_)) | None => None,
+            Some(old) => Some(self.restart_seed(session_id, old).await?),
+            None => None,
         };
 
         // Everything from here on is destructive, and runs on a task this
@@ -13032,19 +12499,6 @@ impl Supervisor {
         // disconnects mid-restart loses only its reply.
         let sup = Arc::clone(self);
         let entry_for_task = Arc::clone(&entry);
-        // "Survives" means the recorded tmux pane is still THIS session's,
-        // so that a move into a host may remove its old agent window once
-        // the new host holds its history. A recognized foreign owner already
-        // collapsed to `None` above precisely so it lands here as "did not
-        // survive": a pane another session owns is never this session's to
-        // remove.
-        //
-        // A host terminal never survives in this sense: a host runs one
-        // child and cannot start another, so a Restart never reuses it.
-        let terminal_survives = match entry.terminal.as_ref() {
-            Some(Terminal::Tmux(_)) => pane_state.is_some(),
-            Some(Terminal::Host(_)) | None => false,
-        };
         // Asset-backed reporters must be usable before the transaction chooses
         // to retain a capture. Spawn verifies the same asset again for injection;
         // its warning-and-continue fallback cannot repair a retained old target.
@@ -13088,7 +12542,6 @@ impl Supervisor {
                     clear_capture,
                     argv,
                     launch_cwd,
-                    terminal_survives,
                     restart_with,
                     seed,
                 },
@@ -13151,7 +12604,6 @@ impl Supervisor {
             clear_capture,
             argv,
             launch_cwd,
-            terminal_survives,
             restart_with,
             seed,
         } = plan;
@@ -13177,9 +12629,9 @@ impl Supervisor {
                 // generation, as a create's goes in with its launching row:
                 // from here on a host may start for it, and a supervisor that
                 // dies before the confirmation must look for it by its host's
-                // tag. For a tmux session that moves this is where the row
-                // becomes a host row; a definitive failure's abort makes it
-                // tmux again.
+                // tag. For an old-kind row (its tmux terminal ended at
+                // startup) this is where the row becomes a host row; a
+                // definitive failure's abort restores its old kind.
                 Some(TerminalKind::Host),
             )
             .await
@@ -13237,7 +12689,7 @@ impl Supervisor {
         // in it that omitted the session made every client with it open
         // deselect it for good. The held row is the session as last listed
         // before the restart, status included, rather than anything read
-        // from the pane now: a pane mid-respawn would read as an exit,
+        // from the terminal now: an old host being replaced would read as an exit,
         // which is worse than showing the pre-restart state for a moment.
         // Swapped under the same lock, so no listing sees neither.
         //
@@ -13276,33 +12728,26 @@ impl Supervisor {
         if let Some(gate) = self.seams.faults.restart_window_gate() {
             gate().await;
         }
-        // Whatever is attached is attached to the PREVIOUS run: the pane is
-        // about to be respawned under it (or replaced outright), so the
-        // client is told to reattach rather than left watching a stream
-        // whose meaning changed underneath it.
-        let mut relaunched = match self.detach_for_restart(&id).await {
-            Ok(()) => {
-                self.relaunch_into_terminal(
-                    entry,
-                    restart_with
-                        .as_ref()
-                        .map_or(&entry.info.launch, |bundle| &bundle.launch),
-                    restart_with
-                        .as_ref()
-                        .map_or(&entry.snapshot, |bundle| &bundle.snapshot),
-                    claim.generation,
-                    launch_scope_unit(&id, claim.generation, claim.scoped),
-                    argv,
-                    launch_cwd,
-                    terminal_survives,
-                    seed,
-                )
-                .await
-            }
-            Err(error) => Err(RelaunchFailure::definitive(
-                error.context("detaching the previous run's terminal output"),
-            )),
-        };
+        // Whatever is attached is attached to the PREVIOUS run: its host is
+        // about to be replaced, so the client is told to reattach rather than
+        // left watching a terminal that is going away.
+        self.detach_for_restart(&id).await;
+        let mut relaunched = self
+            .relaunch_into_terminal(
+                entry,
+                restart_with
+                    .as_ref()
+                    .map_or(&entry.info.launch, |bundle| &bundle.launch),
+                restart_with
+                    .as_ref()
+                    .map_or(&entry.snapshot, |bundle| &bundle.snapshot),
+                claim.generation,
+                launch_scope_unit(&id, claim.generation, claim.scoped),
+                argv,
+                launch_cwd,
+                seed,
+            )
+            .await;
         // Publication, rather than reply construction, is the boundary at
         // which a spawned generation becomes this session's live run. Some
         // post-spawn failures publish it and withhold only the reply; those
@@ -13484,8 +12929,7 @@ impl Supervisor {
                 // stop gathered, so nothing else would close it.
                 // A launch went to a new host, never into the old terminal,
                 // so an ambiguous one leaves no terminal to name even when
-                // the old one survives (a tmux session that was moving into a
-                // host).
+                // the old one survives.
                 let terminal = if still_exists {
                     self.publishable(republished_terminal(definitive, entry.terminal.clone()))
                 } else {
@@ -13498,8 +12942,8 @@ impl Supervisor {
                 // handle lives, and a runtime still connected would take the
                 // host back from whatever settles it next (Delete, by its
                 // launch record). `publishable` stops one it replaces itself.
-                if let Some(Terminal::Host(previous)) = &entry.terminal
-                    && !matches!(&terminal, Some(Terminal::Host(kept)) if kept == previous)
+                if let Some(previous) = &entry.terminal
+                    && !matches!(&terminal, Some(kept) if kept == previous)
                 {
                     previous.abort();
                 }
@@ -13536,9 +12980,7 @@ impl Supervisor {
     /// The launch itself, once the generation is claimed and the session is
     /// off the map: start it in a new terminal host
     /// ([`Supervisor::relaunch_into_host`]), confirm it durably, and
-    /// republish the entry, replacing the old host, or the old tmux agent
-    /// window when `terminal_survives` says its pane is still this
-    /// session's and the new host starts with its history.
+    /// republish the entry, replacing the old host.
     ///
     /// `launch` and `snapshot` describe the selected execution, including
     /// Restart with's replacement before it is durably published. Reading
@@ -13564,38 +13006,24 @@ impl Supervisor {
         scope: Option<String>,
         argv: Vec<String>,
         launch_cwd: String,
-        terminal_survives: bool,
         seed: Option<host_restart::RestartSeed>,
     ) -> Result<SessionInfo, RelaunchFailure> {
-        // Read the tab strip before any side effect as a preflight. A read
-        // failure refuses the restart before anything destructive.
-        let tabs = self.session_tabs(entry).await.map_err(|e| {
-            RelaunchFailure::definitive(
-                e.context("reading this session's terminal tabs before relaunching it"),
-            )
-        })?;
-        // A host runs one child, so every launch goes to a new host: a host
-        // agent's, whether or not its session still holds the old host's
-        // runtime, and a tmux session's, whose old tabs stay in its tmux
-        // session while only the agent window goes. The old agent window
-        // goes once the new launch is published only when the new host
-        // starts with its history: a seed read without history (the pane
-        // not this session's any more, or too large to seed) leaves the
-        // window, which may hold the only copy, for the session's Delete.
-        let replacing = match entry.terminal.as_ref() {
-            Some(Terminal::Host(old)) => host_restart::Replacing::Host(old),
-            Some(Terminal::Tmux(old))
-                if terminal_survives
-                    && seed
-                        .as_ref()
-                        .is_some_and(host_restart::RestartSeed::holds_history) =>
-            {
-                host_restart::Replacing::TmuxWindow(old)
-            }
-            Some(Terminal::Tmux(_)) | None => host_restart::Replacing::Nothing,
-        };
+        // The tab strip as it is before any side effect: the reply reports
+        // it, since a Restart leaves the tabs as they are.
+        let tabs = self.session_tabs(entry);
+        // A host runs one child, so every launch goes to a new host, whether
+        // or not its session still holds the old host's runtime.
         self.relaunch_into_host(
-            entry, replacing, launch, snapshot, generation, scope, argv, launch_cwd, tabs, seed,
+            entry,
+            entry.terminal.as_ref(),
+            launch,
+            snapshot,
+            generation,
+            scope,
+            argv,
+            launch_cwd,
+            tabs,
+            seed,
         )
         .await
     }
@@ -13780,37 +13208,14 @@ impl Supervisor {
         info
     }
 
-    /// The input control client's pid for one live attachment, for tests.
-    ///
-    /// Killing that process is the only deterministic way to exercise the
-    /// connection handler's input-failure teardown. `tab_id = None` selects the
-    /// agent terminal; `Some(id)` selects that tab. Production has no caller.
-    pub async fn attachment_input_client_pid(
-        &self,
-        session_id: &str,
-        tab_id: Option<&str>,
-    ) -> Option<u32> {
-        let terminal = match tab_id {
-            Some(id) => TerminalId::Tab(id.to_string()),
-            None => TerminalId::Agent,
-        };
-        self.attachments
-            .lock()
-            .await
-            .get(&AttachmentKey::new(session_id, terminal))
-            .and_then(|attachment| attachment.backend.input_client_pid())
-    }
-
     /// Tear down whatever is attached to a session being relaunched,
     /// telling the client why.
     ///
-    /// A restart replaces the process behind the pane and can replace the
-    /// pane itself, so an attachment that survived it would either be
-    /// streaming a terminal whose meaning silently changed or, in the
-    /// fresh-terminal case, one that no longer exists at all. Detaching
-    /// both cases identically keeps the client's rule simple: after a
-    /// restart, reattach. The replay a reattach performs is also what puts
-    /// the reused pane's scrollback — the prior run's output — back on the
+    /// A restart replaces the terminal host behind the agent, so an
+    /// attachment that survived it would be streaming a terminal that no
+    /// longer exists. The client's rule stays simple: after a restart,
+    /// reattach. The catch-up a reattach performs is also what puts the
+    /// prior run's history, which the new host was seeded with, back on the
     /// client's screen.
     ///
     /// Scoped to the AGENT terminal, and that scope is a contract, not an
@@ -13819,55 +13224,31 @@ impl Supervisor {
     /// therefore their attachments — must survive it untouched
     /// (PLAN_M4.md item 2). A session-wide sweep here would detach a tab
     /// whose shell the restart never went near.
-    async fn detach_for_restart(&self, session_id: &str) -> anyhow::Result<()> {
+    async fn detach_for_restart(&self, session_id: &str) {
         let key = AttachmentKey::new(session_id, TerminalId::Agent);
         let mut attachments = self.attachments.lock().await;
         let attachment = attachments.remove(&key);
         let Some(attachment) = attachment else {
-            return Ok(());
+            return;
         };
-        // Stop before destructuring so the forwarder retains its cleanup tail;
-        // publishing while the map lock is still held prevents a replacement
-        // from observing neither the old entry nor its reap barrier. `..`
-        // then holds this attachment's pause sender to the end of this
-        // function, and its backend (input client and sink share) is dropped
-        // once the forwarder is joined.
-        self.begin_forwarder_shutdown(key.clone(), &attachment);
+        attachment.request_forwarder_shutdown();
         drop(attachments);
         let ActiveAttach {
             channel,
             notify,
             forwarder,
-            backend,
             ..
         } = attachment;
         // Stopped before the notice, exactly as the delete handler does, so
-        // the forwarder cannot race its own "terminal ended" detach against
-        // this truthful one.
-        let cleanup = self
-            .record_forwarder_join(key.clone(), forwarder.await)
-            .err();
-        let reaping = self.has_output_reap_for_key(&key);
-        drop(backend);
-        let restart_failure = match cleanup {
-            Some(cleanup) => Some(cleanup.to_string()),
-            None if reaping => Some(
-                "the previous run's terminal-output client is still being cleaned up".to_string(),
-            ),
-            None => None,
-        };
-        // The detach is irrevocable even when its cleanup blocks the relaunch.
-        // When this cleanup step refuses the relaunch, its detach notice must
-        // report that failure rather than claim the session restarted.
-        let reason = match &restart_failure {
-            Some(failure) => format!("session ended; restart failed: {failure}"),
-            None => "session restarted".to_string(),
-        };
-        notify_detached(&notify, channel, reason, DetachCode::Other);
-        if let Some(failure) = restart_failure {
-            anyhow::bail!("{failure}");
-        }
-        Ok(())
+        // the output task cannot race its own "terminal ended" detach
+        // against this truthful one.
+        join_forwarder(&key, forwarder).await;
+        notify_detached(
+            &notify,
+            channel,
+            "session restarted".to_string(),
+            DetachCode::Other,
+        );
     }
 
     /// The shell every launch of this supervisor runs through — the seam
@@ -13899,8 +13280,8 @@ impl Supervisor {
     /// terminal tab counts too, because a delete closes tabs and whatever
     /// runs in them; [`DeleteGuard::AgentEnded`](farhelm_proto::DeleteGuard)
     /// asks only about the agent, and an unconditional delete asks nothing.
-    /// Every "cannot tell" answers alive (a pane held by an unrecognized tmux
-    /// session) or fails (a tmux query error): the question exists to avoid
+    /// Every "cannot tell" answers alive (a host that could not be read) or
+    /// fails (a read error): the question exists to avoid
     /// killing something nobody agreed to kill, so uncertainty must never
     /// read as "safe".
     ///
@@ -13911,7 +13292,7 @@ impl Supervisor {
     /// running its program is a live agent (a leftover of an earlier
     /// generation included, which a delete whose confirmation said the agent
     /// had ended must not kill), a tab host still running its program is an
-    /// open tab beside the tmux ones (so is a tab runtime the session holds
+    /// open tab (so is a tab runtime the session holds
     /// whose shell runs, `SessionCells::host_tabs`), and a recorded host that
     /// does not answer usefully, or a tab runtime that can no longer read its
     /// host, is "cannot tell". A record that cannot be settled
@@ -13943,30 +13324,16 @@ impl Supervisor {
         }
         if let Some(terminal) = entry.terminal.as_ref() {
             match terminal
-                .probe_process(self)
-                .await
+                .probe()
                 .context("checking whether this session's agent is still running")?
             {
-                TerminalProbe::Owned(pane) if !pane.dead => {
+                TerminalProbe::Running(_) => {
                     return Ok((
                         Some("this session's agent is still running".to_string()),
                         None,
                     ));
                 }
-                TerminalProbe::Owned(_) | TerminalProbe::Gone => {}
-                TerminalProbe::ForeignOwner { owner } => {
-                    if !self.known_session_tmux_name(&owner).await {
-                        return Ok((
-                            Some(
-                                "this session's recorded terminal now belongs to an \
-                                 unrecognized tmux session, so whether its agent is running \
-                                 cannot be told"
-                                    .to_string(),
-                            ),
-                            None,
-                        ));
-                    }
-                }
+                TerminalProbe::Dead | TerminalProbe::Gone => {}
             }
         }
         let hosts = self
@@ -13987,46 +13354,13 @@ impl Supervisor {
         if guard == farhelm_proto::DeleteGuard::AgentEnded {
             return Ok((None, Some(hosts)));
         }
-        // Markers read unconditionally, not through `session_tabs`: that
-        // listing skips the marker read when it cannot matter, and this
-        // guard must never depend on that judgment being right (after the
-        // agent's own window is gone a surviving tab can be the session's
-        // only window; see `pane_states_with_markers`). Missing it here
-        // would let an "unconfirmed" delete kill that tab.
-        // Tmux tabs are windows in the session's tmux session, whatever the
-        // agent's kind (`tmux_tab_home`), including after its terminal is lost.
-        let tmux_tabs = match entry.terminal.as_ref() {
-            Some(terminal) => {
-                let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
-                let states = self
-                    .tmux
-                    .pane_states_with_markers()
-                    .await
-                    .context("listing this session's terminal tabs")?;
-                tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
-                    .into_iter()
-                    .filter(|tab| !tab.dead)
-                    .count()
-            }
-            None => {
-                let states = self
-                    .tmux
-                    .pane_states_with_markers()
-                    .await
-                    .context("listing this session's terminal tabs")?;
-                tabs_from_pane_states(states.values(), &session_tmux_name(&entry.info.id), None)
-                    .into_iter()
-                    .filter(|tab| !tab.dead)
-                    .count()
-            }
-        };
         if let Some(gate) = self.seams.faults.delete_tab_count_gate() {
             gate().await;
         }
-        let live_tabs = tmux_tabs + hosts.live_tabs();
-        // A running tab can become unreadable during the tmux round trip.
-        // Count first, then refuse uncertainty, so it cannot escape both
-        // the earlier check and this count without renewed consent.
+        let live_tabs = hosts.live_tabs();
+        // A running tab can become unreadable after the check above. Count
+        // first, then refuse uncertainty, so it cannot escape both the
+        // earlier check and this count without renewed consent.
         if let Some(untold) = hosts.untold() {
             return Ok((Some(untold), None));
         }
@@ -14043,181 +13377,67 @@ impl Supervisor {
         })
     }
 
-    /// One session's tabs, rediscovered from tmux, in creation order.
+    /// One session's tabs, in the order they were opened: its runtimes for
+    /// its tab hosts (`host_tabs::listed_host_tabs`), whatever the agent
+    /// terminal.
     ///
-    /// Fallible on purpose, and the two failure shapes are not the same
-    /// answer. tmux definitively reporting that there is no server (or no
-    /// panes) is `Ok(vec![])` — the session genuinely has no tmux tabs.
-    /// Any other query failure is an `Err`: "we could not ask" is not "there
-    /// are none", and a caller that flattened the two would publish an
-    /// empty tab strip for a session whose tabs are alive and attached.
-    /// [`crate::tmux::TmuxDriver::is_definitively_empty`] is what draws
-    /// the line, against tmux's own stderr rather than a rendered string.
-    ///
-    /// Its own tmux round trip, unlike the `ListSessions` path (which
-    /// reuses the pane-state map it already fetched for liveness), because
-    /// a single-session reply has no such map to share.
-    ///
-    /// Dead tabs are omitted, exactly as the `ListSessions` path omits
+    /// Exited tabs are omitted, exactly as the `ListSessions` path omits
     /// them (`status::entry_info`): a reaped-any-tick-now corpse is not a
     /// tab a REPLY should offer. Teardown must not use this — it
     /// enumerates per-tab scopes and a hidden corpse still owns one; see
     /// [`Self::session_tabs_including_dead`].
+    pub(crate) fn session_tabs(&self, entry: &SessionEntry) -> Vec<TabInfo> {
+        host_tabs::listed_host_tabs(&entry.session.host_tabs, false)
+    }
+
+    /// Whether a Stop that was not told to close the session's tabs would
+    /// leave any open. Unreadable host tabs count as open; uncertainty
+    /// cannot authorize their cleanup.
+    pub(crate) fn has_open_tabs_for_stop(&self, entry: &SessionEntry) -> bool {
+        !host_tabs::listed_host_tabs(&entry.session.host_tabs, false).is_empty()
+    }
+
+    /// [`Self::session_tabs`] with exited tabs INCLUDED — the teardown
+    /// spelling. Delete enumerates per-tab cgroup scopes from this list, and
+    /// a tab whose shell exited a moment ago still owns a scope (its
+    /// daemonized children live there until something stops it); the
+    /// reply-facing filter would skip exactly that scope in the
+    /// death-to-reap window. Each tab carries its scope selection too: an
+    /// absent guessed unit cannot prove that an unscoped tab's detached jobs
+    /// were contained, even when the agent had a scope.
     ///
-    /// The tmux tabs are the session's windows, wherever its agent runs
-    /// (`tmux_tab_home`), including when its agent terminal is lost.
-    /// The tabs in terminal hosts follow them in the order they were opened
-    /// (`host_tabs::listed_host_tabs`), whatever the agent terminal: they are
-    /// the session's runtimes, not anything tmux holds.
-    pub(crate) async fn session_tabs(&self, entry: &SessionEntry) -> anyhow::Result<Vec<TabInfo>> {
-        let mut tabs: Vec<TabInfo> = match entry.terminal.as_ref() {
-            Some(terminal) => {
-                let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
-                let states = self.tmux.pane_states().await?;
-                tabs_from_pane_states(states.values(), &tmux_name, agent_pane)
-                    .into_iter()
-                    .filter(|tab| !tab.dead)
-                    .map(DiscoveredTab::tab_info)
-                    .collect()
-            }
-            None => {
-                let states = self.tmux.pane_states().await?;
-                tabs_from_pane_states(states.values(), &session_tmux_name(&entry.info.id), None)
-                    .into_iter()
-                    .filter(|tab| !tab.dead)
-                    .map(DiscoveredTab::tab_info)
-                    .collect()
-            }
-        };
-        tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, false));
-        Ok(tabs)
-    }
-
-    /// Recheck no-tabs consent from authoritative markers, including a
-    /// sole tmux window after the agent's window vanished. Unreadable host
-    /// tabs count as open; uncertainty cannot authorize their cleanup.
-    pub(crate) async fn has_open_tabs_for_stop(
+    /// The second result says whether that selection is complete: only for
+    /// a session whose agent terminal is a host of its first launch, which
+    /// never had an old tmux tab. A later launch's session may have run in
+    /// tmux before an earlier release's Restart moved it into a host, and a
+    /// session with no terminal may be one whose old terminal this release
+    /// ended at startup (`old_terminals`); the old tabs of either leave no
+    /// inventory, and
+    /// manager globs cannot fill that gap, since only scoped jobs leave
+    /// units to discover.
+    pub(crate) fn session_tabs_including_dead(
         &self,
         entry: &SessionEntry,
-    ) -> anyhow::Result<bool> {
-        Ok(self
-            .tmux_tabs_for_stop(entry)
-            .await?
+    ) -> (Vec<(TabInfo, bool)>, bool) {
+        let complete = entry.terminal.is_some() && entry.generation == 0;
+        let tabs = host_tabs::host_tabs_of(&entry.session.host_tabs)
             .into_iter()
-            .any(|tab| !tab.dead)
-            || !host_tabs::listed_host_tabs(&entry.session.host_tabs, false).is_empty())
-    }
-
-    /// [`Self::session_tabs`] with dead tabs INCLUDED — the teardown
-    /// spelling. Delete enumerates per-tab cgroup scopes from
-    /// this list, and a tab whose shell exited a moment ago still owns a
-    /// scope (its daemonized children live there until something stops
-    /// it); the reply-facing filter would skip exactly that scope in the
-    /// death-to-reap window. The unit GLOB swept afterwards usually
-    /// catches strays anyway, but the explicit list must not depend on it
-    /// — the glob is the belt for units tmux can no longer name at all.
-    /// A tab in a terminal host is listed too, exited or not, until its
-    /// close or Delete ends its host. Carry each tab's scope selection too:
-    /// an absent guessed unit cannot prove that an unscoped tab's detached
-    /// jobs were contained, even when the agent had a scope.
-    /// The second result says whether that selection is complete: no agent
-    /// terminal, or an old tmux session missing from the listing, leaves no
-    /// inventory of its former unscoped tabs. Manager globs cannot fill that
-    /// gap, since only scoped jobs leave units to discover.
-    pub(crate) async fn session_tabs_including_dead(
-        &self,
-        entry: &SessionEntry,
-    ) -> anyhow::Result<(Vec<(TabInfo, TabScope)>, bool)> {
-        let (mut tabs, complete) = match entry.terminal.as_ref() {
-            Some(terminal) => {
-                let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
-                let states = self.tmux.pane_states().await?;
-                // A generation-zero host was created in a host and never
-                // had old tmux tabs. A later host may have migrated from
-                // tmux; current-presence caches and host tags cannot prove
-                // its old unscoped tab jobs ended after that server died.
-                let complete = matches!(terminal, Terminal::Host(_)) && entry.generation == 0
-                    || states.values().any(|pane| pane.session_name == tmux_name);
-                let mut tabs = Vec::new();
-                for tab in tabs_from_pane_states(states.values(), &tmux_name, agent_pane) {
-                    let scope = self
-                        .tmux
-                        .tab_scope_marker(&tmux_name, &tab.pane, &tab.id)
-                        .await
-                        .unwrap_or_else(|error| {
-                            // This extra read only permits omitting the
-                            // sweep. Its failure must not newly refuse a
-                            // Delete whose existing discovery succeeded.
-                            warn!(session = %entry.info.id, tab = %tab.id, %error,
-                                "could not read tab containment; retaining the portable sweep");
-                            TabScope::Unknown
-                        });
-                    tabs.push((tab.tab_info(), scope));
-                }
-                (tabs, complete)
-            }
-            None => (Vec::new(), false),
-        };
-        tabs.extend(
-            host_tabs::host_tabs_of(&entry.session.host_tabs)
-                .into_iter()
-                .map(|tab| {
-                    let scope = if tab.scoped {
-                        TabScope::Scoped
-                    } else {
-                        TabScope::Unscoped
-                    };
-                    (tab.tab_info(), scope)
-                }),
-        );
-        Ok((tabs, complete))
-    }
-
-    /// Stop must find old tmux tabs even without an agent terminal or with
-    /// only one surviving window. Once the existing tmux admission says
-    /// old tabs may remain, read markers unconditionally rather than relying
-    /// on the presentation query's marker-read optimization. Host-only
-    /// sessions still require no tmux executable or server.
-    async fn tmux_tabs_for_stop(&self, entry: &SessionEntry) -> anyhow::Result<Vec<DiscoveredTab>> {
-        if !super::terminals::may_have_tmux_terminals(
-            &self.tmux,
-            &entry.info.id,
-            entry.terminal.as_ref(),
-        ) {
-            return Ok(Vec::new());
-        }
-        let (tmux_name, agent_pane) = match entry.terminal.as_ref() {
-            Some(terminal) => tmux_tab_home(&entry.info.id, terminal),
-            None => (session_tmux_name(&entry.info.id).into(), None),
-        };
-        let states = self.tmux.pane_states_with_markers().await?;
-        Ok(tabs_from_pane_states(
-            states.values(),
-            &tmux_name,
-            agent_pane,
-        ))
+            .map(|tab| (tab.tab_info(), tab.scoped))
+            .collect();
+        (tabs, complete)
     }
 
     /// Finish Stop's tab cleanup without yielding its lifecycle claim.
-    /// Discovery and individual closes can fail independently: a failed
-    /// tmux read must not leave known host tabs running, and an unreadable
-    /// host must not prevent closing its siblings. Dead tabs are included
-    /// because their scopes and marked descendants may still need reaping.
+    /// Individual closes can fail independently: an unreadable host must not
+    /// prevent closing its siblings. Exited tabs are included because their
+    /// scopes and marked descendants may still need reaping.
     pub(crate) async fn close_tabs_for_stop(
         self: &Arc<Self>,
         lifecycle: &KeyedGuard,
         entry: &SessionEntry,
     ) -> Option<String> {
         let mut failures = Vec::new();
-        let mut tabs: Vec<TabInfo> = match self.tmux_tabs_for_stop(entry).await {
-            Ok(tabs) => tabs.into_iter().map(DiscoveredTab::tab_info).collect(),
-            Err(error) => {
-                failures.push(format!("could not list terminal tabs: {error:#}"));
-                Vec::new()
-            }
-        };
-        tabs.extend(host_tabs::listed_host_tabs(&entry.session.host_tabs, true));
-        for tab in tabs {
+        for tab in host_tabs::listed_host_tabs(&entry.session.host_tabs, true) {
             if let Err(error) = self
                 .close_tab_under_claim(lifecycle, &entry.info.id, &tab.id, false)
                 .await
@@ -14241,8 +13461,8 @@ impl Supervisor {
     /// land with it, returning the entry now published (PLAN_M5.md item 3).
     ///
     /// The caller builds the reply from what comes back, and deliberately
-    /// OUTSIDE this call — see `session_info_now`, which needs a tmux round
-    /// trip this function must not still be holding a claim across.
+    /// OUTSIDE this call — see `session_info_now`, which reads the checkout
+    /// registry, work this function must not still be holding a claim across.
     ///
     /// ## Why the write is two-part
     ///
@@ -14271,8 +13491,8 @@ impl Supervisor {
     ///
     /// The claim ends WITH THE COMMIT, before any reply is built. A claim
     /// is exclusive against stop, delete and restart, so holding one across
-    /// the reply's tmux probe would let a wedged tmux block this session's
-    /// teardown for as long as it stayed wedged — and the reply needs
+    /// the reply's construction would let a slow registry read block this
+    /// session's teardown for as long as it lasted — and the reply needs
     /// nothing the claim protects.
     ///
     /// ## Why the commit runs on a supervisor-owned task, and why it takes
@@ -14329,7 +13549,7 @@ impl Supervisor {
     /// took its permit with it.
     ///
     /// Everything outside the title is left alone, which SPEC.md's rename
-    /// is: tmux session names are internal identifiers no user sees, and
+    /// is: host tags are internal identifiers no user sees, and
     /// the create-idempotency fingerprint records the CREATE request as it
     /// was sent, so a later rename must not disturb an intent key's replay.
     /// Attachments are untouched for the same reason — nothing about a
@@ -14453,8 +13673,7 @@ impl Supervisor {
     /// Open a terminal tab: a terminal host of its own (`host_tabs`),
     /// running the user's login shell in the session's working directory
     /// (PLAN_M4.md item 2, `ControlMsg::OpenTab`'s contract), whatever the
-    /// session's agent runs in. A tmux agent's session then holds its old
-    /// tmux tabs and new host tabs side by side (a mixed session).
+    /// session's agent runs in.
     ///
     /// ## Ordering, and what each step buys
     ///
@@ -14524,41 +13743,24 @@ impl Supervisor {
         let Some(agent) = entry.terminal.clone() else {
             return Err(restart_first());
         };
-        // The gate is "the agent's terminal still exists", asked of its
-        // kind. A tmux agent's is its tmux session, which can be gone
-        // WITHOUT the entry knowing — this process may have been serving
-        // since before an external `kill-session`, or since before the whole
-        // tmux server died. Both are the same fact for a caller ("there is no
-        // terminal substrate here") and get the same restart-first advice; a
-        // raw tmux diagnostic would be honest and useless. Anything else
-        // propagates as itself, because "we could not ask" is not "it is
-        // gone". A host agent has no tmux session at all, so its gate is its
-        // host: one still running,
-        // with its program or its final screen, takes tabs as a tmux session
-        // with a dead agent pane does, one that has ended is the restart
-        // gap, and one that cannot be read is "could not tell" (the plan's
-        // D-16), which refuses rather than open a tab beside it.
-        match &agent {
-            Terminal::Tmux(tmux) => match self.tmux.has_session(&tmux.tmux_name).await {
-                Ok(true) => {}
-                Ok(false) => return Err(restart_first()),
-                Err(e) if self.tmux.is_definitively_empty(&e) => return Err(restart_first()),
-                Err(e) => return Err(RequestError::new(error_kind(&e), format!("{e:#}"))),
-            },
-            Terminal::Host(host) => match host.liveness() {
-                crate::hosts::Liveness::Running { .. } | crate::hosts::Liveness::Exited { .. } => {}
-                crate::hosts::Liveness::Gone => return Err(restart_first()),
-                crate::hosts::Liveness::Unavailable { reason, .. } => {
-                    return Err(RequestError::new(
-                        ErrorKind::Conflict,
-                        format!(
-                            "session {}'s agent terminal host cannot be read ({reason}), so no \
-                             terminal tab can be opened beside it",
-                            truncate_for_error(session_id)
-                        ),
-                    ));
-                }
-            },
+        // The gate is "the agent's terminal still exists": its host. One
+        // still running, with its program or its final screen, takes tabs;
+        // one that has ended is the restart gap, which gets restart-first
+        // advice; and one that cannot be read is "could not tell" (the
+        // plan's D-16), which refuses rather than open a tab beside it.
+        match agent.liveness() {
+            crate::hosts::Liveness::Running { .. } | crate::hosts::Liveness::Exited { .. } => {}
+            crate::hosts::Liveness::Gone => return Err(restart_first()),
+            crate::hosts::Liveness::Unavailable { reason, .. } => {
+                return Err(RequestError::new(
+                    ErrorKind::Conflict,
+                    format!(
+                        "session {}'s agent terminal host cannot be read ({reason}), so no \
+                         terminal tab can be opened beside it",
+                        truncate_for_error(session_id)
+                    ),
+                ));
+            }
         }
         let cwd = entry.info.cwd.clone();
         ensure_cwd_usable(&cwd)
@@ -14608,8 +13810,7 @@ impl Supervisor {
     /// is decided per OPEN the way an agent's is decided per launch, and
     /// since a tab has no durable row, the unit NAME is re-derived at close
     /// from the same two ids, while whether this open selected a scope at
-    /// all is recorded with the tab (a tmux tab's window marker,
-    /// `TAB_SCOPED_WINDOW_OPTION`; a host tab's client tag).
+    /// all is recorded with the tab, in its host's client tag.
     async fn tab_scope_prefix(
         &self,
         session_id: &str,
@@ -14724,41 +13925,15 @@ impl Supervisor {
     }
 
     /// Close a terminal tab: reap its shell and everything that shell left
-    /// behind, then drop its window (`ControlMsg::CloseTab`'s contract).
-    ///
-    /// ## The ordering, and why it is not the obvious one
-    ///
-    /// Never kill-window-first (PLAN_M4.md item 2). The window's pane is
-    /// what anchors the descendant walk — a PPID closure needs a live root
-    /// — so killing it up front would orphan the walk and leave only the
-    /// weaker marker scan, which a process that scrubbed its environment
-    /// escapes. So: reap while the pane is alive, THEN drop the window,
-    /// THEN sweep once more.
-    ///
-    /// That last pass is not redundant with the first. Between them the
-    /// window dies, and `kill-window` is itself a kill — it SIGHUPs the
-    /// pane's process group — so it is the step that ends anything the
-    /// first pass had no way to reach (a tab whose pane was already dead
-    /// has no root to walk from at all, and its shell's children may only
-    /// die with the pty). The second pass is what turns `TabClosed` into
-    /// the honest statement `SessionStopped` is: the reply is sent only
-    /// once nothing of this tab is left running, with the same
-    /// no-systemd-manager blind spot `kill_process_tree` documents.
-    ///
-    /// ## The attachment goes last, and unconditionally
-    ///
-    /// Once the window is gone, any client still attached to it is
-    /// streaming a terminal that does not exist, so the detach happens
-    /// even when the second sweep fails and this reports an error. A close
-    /// that returned an error while leaving a live attachment on a dead
-    /// window would leave the user with a frozen terminal and a retry that
-    /// answers `NotFound`.
+    /// behind, then end its host (`ControlMsg::CloseTab`'s contract). The
+    /// steps, and why they are in that order, are
+    /// `Supervisor::close_host_tab_under_claim`'s (`host_tabs`).
     ///
     /// An unknown tab id is `NotFound` (`resolve_terminal`'s answer, so
     /// close and attach agree on what "that tab is gone" means). A tab
     /// whose shell already exited still closes successfully — like
     /// `StopSession`, "make sure nothing is running" already holds, and
-    /// the window is dropped either way.
+    /// the host is ended either way.
     pub(crate) async fn close_tab(
         self: &Arc<Self>,
         session_id: &str,
@@ -14789,7 +13964,7 @@ impl Supervisor {
     /// resumes sampling immediately. Ticker shutdown stops new starts but
     /// leaves these closes running until runtime drop, just like an explicit
     /// close whose caller disconnected. Planned output shutdown shares the
-    /// close's attachment lock and cleanup barriers; it does not admit new sinks.
+    /// close's attachment lock.
     /// A user's explicit close still waits for [`Self::close_tab`]'s result.
     pub(crate) fn try_close_tab(self: &Arc<Self>, session_id: &str, tab_id: &str) -> Option<()> {
         let permit = Arc::clone(&self.tab_reap_inflight)
@@ -14875,221 +14050,12 @@ impl Supervisor {
         // The close-capable resolver: an exited-but-unreaped tab is exactly
         // what this path (the user's close, and the ticker's reap through
         // it) must still be able to find and destroy, while attach and
-        // resize already treat it as gone.
-        let terminal = if entry.terminal.is_none()
-            && find_host_tab(&entry.session.host_tabs, tab_id).is_none()
-        {
-            // Losing the agent's terminal does not erase surviving tmux
-            // tabs. The interactive resolver requires an agent terminal;
-            // a close instead rediscovers the marked tab under this claim.
-            let tab = self
-                .tmux_tabs_for_stop(&entry)
-                .await
-                .map_err(|error| {
-                    RequestError::new(
-                        ErrorKind::Internal,
-                        format!("could not rediscover terminal tab: {error:#}"),
-                    )
-                })?
-                .into_iter()
-                .find(|tab| tab.id == tab_id)
-                .ok_or_else(|| {
-                    RequestError::new(
-                        ErrorKind::NotFound,
-                        format!("no such terminal tab: {}", truncate_for_error(tab_id)),
-                    )
-                })?;
-            Terminal::Tmux(TmuxTerminal {
-                tmux_name: session_tmux_name(session_id),
-                pane: tab.pane,
-            })
-        } else {
-            resolve_terminal_for_close(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?
-        };
-        // Closing a tmux tab reaps its shell and kills its window, below; a
-        // tab in a terminal host has no window, and is closed by ending its
+        // resize already treat it as gone. A tab is closed by ending its
         // host (`host_tabs`).
-        let terminal = match terminal {
-            Terminal::Tmux(terminal) => terminal,
-            Terminal::Host(host) => {
-                return self
-                    .close_host_tab_under_claim(lifecycle, &entry, tab_id, host, only_if_dead)
-                    .await;
-            }
-        };
-        // The agent window the close must never take for a tab: a tmux
-        // agent's recorded pane, and none for a host agent, which has no
-        // window in the session's tmux session (`tmux_tab_home`).
-        let recorded_agent_pane = entry
-            .terminal
-            .as_ref()
-            .and_then(|agent| tmux_tab_home(session_id, agent).1.map(str::to_owned));
-
-        let closed = self
-            .close_tab_window(
-                session_id,
-                &terminal,
-                tab_id,
-                recorded_agent_pane.as_deref(),
-                only_if_dead,
-            )
-            .await;
-        if closed.is_ok() {
-            self.hint_sessions_changed();
-        }
-        closed
-    }
-
-    /// [`Self::close_tab`]'s side-effecting half, split out so the whole
-    /// of it runs on one supervisor-owned task. Automatic cleanup rechecks
-    /// every pane before granting any signal or window-removal authority.
-    async fn close_tab_window(
-        &self,
-        session_id: &str,
-        terminal: &TmuxTerminal,
-        tab_id: &str,
-        recorded_agent_pane: Option<&str>,
-        only_if_dead: bool,
-    ) -> Result<(), RequestError> {
-        if let Some(gate) = self.seams.faults.tab_close_gate() {
-            gate().await;
-        }
-        // A ticker snapshot only nominates a tab for cleanup. Resolve the
-        // entire window again under the lifecycle claim, immediately before
-        // any signals: an exited half of a split cannot condemn a live half.
-        let states = self.tmux.pane_states().await.map_err(|e| {
-            RequestError::new(
-                error_kind(&e),
-                format!("could not recheck terminal tab before closing it: {e:#}"),
-            )
-        })?;
-        if only_if_dead {
-            let dead =
-                tabs_from_pane_states(states.values(), &terminal.tmux_name, recorded_agent_pane)
-                    .into_iter()
-                    .any(|tab| tab.id == tab_id && tab.pane == terminal.pane && tab.dead);
-            if !dead {
-                return Err(RequestError::new(
-                    ErrorKind::NotFound,
-                    "the terminal tab is no longer confirmed dead; automatic cleanup was skipped",
-                ));
-            }
-            let death = self
-                .tmux
-                .pane_death_detail(&terminal.tmux_name, &terminal.pane)
-                .await
-                .map_err(|e| {
-                    RequestError::new(
-                        error_kind(&e),
-                        format!("could not read exited tab diagnostics: {e:#}"),
-                    )
-                })?;
-            if death.is_none() {
-                return Err(RequestError::new(
-                    ErrorKind::NotFound,
-                    "the terminal tab is no longer confirmed dead; automatic cleanup was skipped",
-                ));
-            }
-            info!(session = %session_id, tab = %tab_id, pane = %terminal.pane,
-                death = ?death, "automatically closing a terminal tab confirmed dead");
-        }
-        info!(session = %session_id, tab = %tab_id, pane = %terminal.pane,
-            reason = if only_if_dead { "shell_exited" } else { "user_close" },
-            "closing terminal tab");
-        // Recheck the pane-to-window identity immediately before any process
-        // reap or window kill. Discovery already excludes the recorded agent
-        // window, but a same-account process can change mutable markers after
-        // that read; pane identity is the trusted local exclusion that still
-        // holds at this destructive boundary. A stale or missing recorded
-        // pane supplies no evidence, so it deliberately does not block an
-        // otherwise valid tab close.
-        if let Some(recorded_agent_pane) = recorded_agent_pane {
-            let agent_window = states
-                .get(recorded_agent_pane)
-                .filter(|state| state.session_name == terminal.tmux_name)
-                .map(|state| state.window_ordinal);
-            let target_is_agent_window = agent_window.is_some_and(|agent_window| {
-                states
-                    .get(&terminal.pane)
-                    .filter(|state| state.session_name == terminal.tmux_name)
-                    .is_some_and(|state| state.window_ordinal == agent_window)
-            });
-            if target_is_agent_window {
-                return Err(RequestError::new(
-                    ErrorKind::NotFound,
-                    format!(
-                        "terminal tab {} is the session's recorded agent window",
-                        truncate_for_error(tab_id)
-                    ),
-                ));
-            }
-        }
-        // Read once, while the window still exists, and used for both reap
-        // passes: the second runs after `kill-window`, when there is no
-        // window left to ask.
-        let tab_scope = self
-            .tmux
-            .tab_scope_marker(&terminal.tmux_name, &terminal.pane, tab_id)
+        let host =
+            resolve_terminal_for_close(self, &entry, &TerminalId::Tab(tab_id.to_string())).await?;
+        self.close_host_tab_under_claim(lifecycle, &entry, tab_id, host, only_if_dead)
             .await
-            .map_err(|e| {
-                RequestError::new(
-                    error_kind(&e),
-                    format!(
-                        "could not read whether terminal tab {} has its own scope: {e:#}",
-                        truncate_for_error(tab_id)
-                    ),
-                )
-            })?;
-        // The process reap is shared with every kind of terminal, so it takes
-        // the `Terminal`; only this window machinery around it is tmux's.
-        let reaped = Terminal::Tmux(terminal.clone());
-        self.reap_tab_tree(
-            session_id,
-            &reaped,
-            tab_id,
-            tab_scope,
-            TabReapAnchor::PaneIfLive,
-        )
-        .await
-        .map_err(|e| {
-            RequestError::new(
-                ErrorKind::Internal,
-                format!("closing terminal tab {}: {e:#}", truncate_for_error(tab_id)),
-            )
-        })?;
-        self.tmux
-            .kill_window(&terminal.tmux_name, &terminal.pane)
-            .await
-            .map_err(|e| {
-                RequestError::new(
-                    error_kind(&e),
-                    format!(
-                        "terminal tab {}'s processes were reaped but its window could not be \
-                         removed: {e:#}",
-                        truncate_for_error(tab_id)
-                    ),
-                )
-            })?;
-        // The re-enumeration, marker-only: the pane that would have
-        // supplied a root died with the window a moment ago, and asking
-        // tmux about a pane it no longer has would resolve to a SIBLING
-        // TAB's pane — see `reap_tab_tree`'s `anchor` docs.
-        let survivors = self
-            .reap_tab_tree(
-                session_id,
-                &reaped,
-                tab_id,
-                tab_scope,
-                TabReapAnchor::MarkerOnly,
-            )
-            .await;
-        // Unconditional, and before reporting either error: the window is
-        // already gone, so its viewer must receive the terminal verdict even
-        // when process or output-client cleanup remains unconfirmed.
-        let detach = self.detach_closed_tab(session_id, tab_id).await;
-        tab_close_cleanup_result(tab_id, survivors, detach)?;
-        info!(session = %session_id, tab = %tab_id, pane = %terminal.pane, "terminal tab closed");
-        Ok(())
     }
 
     /// Tear down whatever attachment a just-closed tab still had.
@@ -15100,157 +14066,84 @@ impl Supervisor {
     /// 3 — the lease groups a session's channels, and this removes one of
     /// them rather than dissolving the group).
     ///
-    /// Stops and awaits the forwarder before notifying, like every other
+    /// Stops and awaits the output task before notifying, like every other
     /// teardown here, so it cannot race its own end-of-stream `Detached`
-    /// against this truthful one. The forwarder may transfer process reaping
-    /// to the published per-terminal barrier; in that case the notice still
-    /// goes out, but replacement attach remains fail-closed behind the barrier.
-    ///
-    /// This is also the ONLY thing that ends a tab's attachment while its
-    /// session lives, and that is worth knowing: a tab's forwarder holds a
-    /// control client attached to the tmux SESSION, so losing the tab's
-    /// WINDOW does not end that client the way losing the session would —
-    /// the stream simply goes quiet. Every path the product itself offers
-    /// is covered (a close comes through here; losing the whole tmux session
-    /// does end the client). A window killed
-    /// by hand, directly against the private tmux server, is the residual:
-    /// its viewer sees a terminal that stops updating until it detaches or
-    /// reattaches. Detecting it would mean teaching the output stream
-    /// tmux's window-close notifications, which no product path needs.
-    async fn detach_closed_tab(&self, session_id: &str, tab_id: &str) -> Result<(), RequestError> {
+    /// against this truthful one.
+    async fn detach_closed_tab(&self, session_id: &str, tab_id: &str) {
         let key = AttachmentKey::new(session_id, TerminalId::Tab(tab_id.to_string()));
         let mut attachments = self.attachments.lock().await;
         let attachment = attachments.remove(&key);
         let Some(attachment) = attachment else {
-            return Ok(());
+            return;
         };
-        // Install the handoff barrier before releasing the map lock, so a
-        // concurrent attach cannot slip into the removal-to-publication gap.
-        self.begin_forwarder_shutdown(key.clone(), &attachment);
+        attachment.request_forwarder_shutdown();
         drop(attachments);
-        // Dropping the backend once the forwarder is joined kills this
-        // attachment's input client (a no-output control client) and
-        // releases its sink share; `..` keeps the pause sender to the end.
         let ActiveAttach {
             channel,
             notify,
             forwarder,
-            backend,
             ..
         } = attachment;
-        let cleanup = self
-            .record_forwarder_join(key.clone(), forwarder.await)
-            .err();
-        let reaping = self.has_output_reap_for_key(&key);
-        drop(backend);
+        join_forwarder(&key, forwarder).await;
         notify_detached(
             &notify,
             channel,
             "terminal tab closed".to_string(),
             DetachCode::TabClosed,
         );
-        if let Some(cleanup) = cleanup {
-            return Err(RequestError::new(ErrorKind::Internal, cleanup.to_string()));
-        }
-        if reaping {
-            return Err(RequestError::new(
-                ErrorKind::Internal,
-                "the closed tab's terminal-output client is still being cleaned up",
-            ));
-        }
-        Ok(())
     }
 
     /// Reap one tab through its own cgroup scope where sufficient, otherwise
     /// retain the portable sweep keyed on that tab's marker.
     ///
-    /// Shared by `close_tab` and by the failed-open unwind so both reap
-    /// identically. It takes the [`Terminal`], not the tmux handles those
-    /// tmux window steps hold, because none of this is window machinery:
-    /// the scope/fallback decision is the same for every kind of terminal,
-    /// and the live-root probe and its refusal go through `Terminal`'s
-    /// exhaustive dispatches. The pane's own pid is looked up here rather than
-    /// passed in, and the answers are NOT the same: a live pane is
-    /// the PPID closure's root, a CONFIRMED-absent or dead pane means
-    /// there is no root to walk from (a dead pane's remembered pid may
-    /// already be recycled), a pane owned by a DIFFERENT session splits by
-    /// whether that owner is a session this supervisor knows (no root, or
-    /// a refusal — see the match arm below), and a pane query that FAILED
-    /// propagates — falling back to the marker scan there would let a
-    /// close report success having quietly swept less than it claims.
+    /// Shared by a tab's close and by the failed-open unwind so both reap
+    /// identically. The shell's own process is looked up here rather than
+    /// passed in, and the answers are NOT the same: a live child is the PPID
+    /// closure's root, a dead or ended one means there is no root to walk
+    /// from, and a probe that FAILED propagates — falling back to the marker
+    /// scan there would let a close report success having quietly swept less
+    /// than it claims.
     ///
-    /// `anchor` says whether to look the pane up at all, and the caller
-    /// that says `MarkerOnly` is not being lazy: after `kill-window` the
-    /// pane is gone BY CONSTRUCTION, and asking tmux about it again is not
-    /// merely pointless but unsafe — a `=session:.%pane` target for a
-    /// vanished pane falls back to the session's CURRENT pane (audited;
-    /// see `tmux::pane_in_session`), so the second sweep would anchor its
-    /// descendant walk on a SIBLING TAB and reap it. That is not
-    /// hypothetical: it is the bug this parameter exists to make
-    /// unexpressible.
+    /// `anchor` says whether to look the process up at all: a caller that
+    /// has already ended the tab's host has no live root left to find
+    /// (`MarkerOnly`).
     ///
     /// The scope unit's NAME is derived (see `scope::tab_unit_name`); whether
-    /// the tab has one is `tab_scope`, the answer its open wrote onto the
-    /// window ([`TAB_SCOPED_WINDOW_OPTION`]). A tab that was scoped has its
-    /// unit handled like a recorded one, even when this supervisor's
-    /// availability probe says there is no user manager: the scope may
-    /// predate this supervisor, or the probe may have run while the manager
-    /// was briefly unreachable. It then gets the one re-probe, and a unit
-    /// that still cannot be checked, or is found but not confirmed gone,
-    /// fails the reap. For a tab opened unscoped the name is only a guess
-    /// and is skipped quietly when there is no manager. A window from a
-    /// build that predates the marker is judged by its session's own launch
-    /// instead, the best evidence such a tab left behind, and still gets the
-    /// re-probe when that launch was unscoped (see the body).
+    /// the tab has one is `scoped`, the answer its host's tag records. A
+    /// tab that was scoped has its unit handled like a recorded one, even
+    /// when this supervisor's availability probe says there is no user
+    /// manager: the scope may predate this supervisor, or the probe may have
+    /// run while the manager was briefly unreachable. It then gets the one
+    /// re-probe, and a unit that still cannot be checked, or is found but not
+    /// confirmed gone, fails the reap. For a tab opened unscoped the name is
+    /// only a guess and is skipped quietly when there is no manager.
     async fn reap_tab_tree(
         &self,
         session_id: &str,
-        terminal: &Terminal,
+        terminal: &HostTerminal,
         tab_id: &str,
-        tab_scope: TabScope,
+        scoped: bool,
         anchor: TabReapAnchor,
     ) -> anyhow::Result<()> {
         let root_identity = match anchor {
             TabReapAnchor::PaneIfLive => match terminal
-                .probe_process(self)
-                .await
+                .probe()
                 .context("reading a terminal tab's pane process before reaping it")?
             {
-                // The root at the probe's boundary, per kind
-                // (`Terminal::live_root`): a host child's pinned identity,
+                // The root at the probe's boundary
+                // (`HostTerminal::sweep_root`): the child's pinned identity,
                 // never one read again from a bare pid.
-                TerminalProbe::Owned(state) => terminal.live_root(&state)?,
-                TerminalProbe::Gone => None,
-                // A RECOGNIZED foreign owner gives no root to walk from —
-                // the recorded pane died with a previous tmux server, and
-                // walking the stranger that inherited its id would reap
-                // THEIR tab — so the close falls back to the marker sweep
-                // and the tab's own scope, exactly as the confirmed-absent
-                // case does.
-                //
-                // An UNRECOGNIZED owner is an `Err`, which is the same
-                // fail-closed direction the failed-query case takes and
-                // for a stronger reason here: the pane may be this tab's
-                // own live shell under a renamed tmux session, so a close
-                // that swept by marker alone would report the tab removed
-                // while its window, pane, and shell went on living. The
-                // failed-open unwind inherits that too — it reports an
-                // incomplete cleanup instead of claiming removal.
-                TerminalProbe::ForeignOwner { owner } => {
-                    if !self.known_session_tmux_name(&owner).await {
-                        anyhow::bail!(terminal.unknown_owner_refusal(&owner));
-                    }
-                    None
-                }
+                TerminalProbe::Running(pid) => terminal.sweep_root(pid)?,
+                TerminalProbe::Dead | TerminalProbe::Gone => None,
             },
             TabReapAnchor::MarkerOnly => None,
         };
-        self.reap_tab_processes(session_id, tab_id, tab_scope, root_identity)
+        self.reap_tab_processes(session_id, tab_id, scoped, root_identity)
             .await
     }
 
     /// [`Self::reap_tab_tree`] past its root: the tab's scope unit (by the
-    /// provenance `tab_scope` gives it) and any required portable fallback
+    /// provenance `scoped` gives it) and any required portable fallback
     /// for `tab_id`, rooted at `root_identity` when a live root is pinned.
     /// Also for a failed tab-host open whose runtime never existed
     /// (`host_tabs`), which has no root it could trust and passes `None`.
@@ -15258,7 +14151,7 @@ impl Supervisor {
         &self,
         session_id: &str,
         tab_id: &str,
-        tab_scope: TabScope,
+        scoped: bool,
         root_identity: Option<(u32, u64)>,
     ) -> anyhow::Result<()> {
         // Which provenance the tab's scope name gets decides what a negative
@@ -15268,25 +14161,8 @@ impl Supervisor {
         // (SPEC.md "Lifecycle operations": believing there is no manager
         // does not excuse skipping a scope the tab may have). A tab opened
         // unscoped has nothing to find when there is no manager.
-        //
-        // An unmarked window (opened by a build that did not record the
-        // answer) leans on its session's own launch. A scoped session is
-        // durable evidence that the host had a manager when it started, so
-        // its tabs are treated as scoped. Otherwise the tab may still have
-        // been scoped, if the manager's verdict changed between the agent's
-        // launch and the tab's, so its unit still earns the one re-probe;
-        // only if the manager stays unusable after that is it skipped,
-        // since such a tab then looks exactly like one on a host that never
-        // had a manager, where refusing would leave it unclosable.
         let tab_unit = crate::scope::tab_unit_name(session_id, tab_id);
-        let session_scoped = tab_scope == TabScope::Unknown
-            && self
-                .sessions
-                .lock()
-                .await
-                .get(session_id)
-                .is_some_and(|entry| entry.scope.is_some());
-        let units = ScopeUnits::tab(tab_unit, tab_scope, session_scoped);
+        let units = ScopeUnits::tab(tab_unit, scoped);
         // `session_id` is carried purely for the log lines inside the
         // sweep; `SweepTarget::Tab` is what actually selects processes
         // here, by the session marker AND this tab's own id.
@@ -15412,8 +14288,8 @@ impl Supervisor {
 
     /// End the terminal of a create that will not be published (it lost to
     /// Delete, or its confirmation failed), once its process tree has been
-    /// swept: kill its tmux session, or end its host, through the protocol
-    /// or else by the verified signal ([`Self::end_launch_host`]).
+    /// swept: end its host, through the protocol or else by the verified
+    /// signal ([`Self::end_launch_host`]).
     ///
     /// `Ok` means the terminal is confirmed gone; an error means it may
     /// still run, which the callers turn into a retained launching record
@@ -15421,16 +14297,12 @@ impl Supervisor {
     /// unlisted).
     async fn end_unpublished_terminal(
         &self,
-        terminal: &Terminal,
+        terminal: &HostTerminal,
         session_id: &str,
     ) -> anyhow::Result<()> {
-        match terminal {
-            Terminal::Tmux(tmux) => self.tmux.kill_session(&tmux.tmux_name).await,
-            Terminal::Host(host) => self
-                .end_launch_host(Some(host), host.socket(), session_id)
-                .await
-                .map_err(|why| anyhow::anyhow!(why)),
-        }
+        self.end_launch_host(Some(terminal), terminal.socket(), session_id)
+            .await
+            .map_err(|why| anyhow::anyhow!(why))
     }
 
     /// Publish one launch's spec and compose the command its terminal runs:
@@ -15514,10 +14386,10 @@ impl Supervisor {
         // Placeholder substitution is the FIRST transformation and hook
         // injection the second, so the injected tail — literals this crate
         // wrote, never re-validated — is never itself a substitution
-        // target. `cwd` here is the directory tmux gets for this launch,
+        // target. `cwd` here is the directory the host gets for this launch,
         // which is the whole reason the fill lives in this function and
         // not at the split sites: it is the one value that makes "the
-        // wrapper's directory" and "the pane's directory" the same string
+        // wrapper's directory" and "the terminal's directory" the same string
         // on every path. The log names the cwd and never the argv, which
         // users do put credentials into (see `validate_create`).
         let argv = if crate::agent_kind::has_cwd_placeholder(&argv) {
@@ -15679,8 +14551,8 @@ impl Supervisor {
         // selection, hook tail included (the classifier skips the
         // injected `env` prefix, so the program is the launch's own).
         //
-        // BEFORE tmux starts anything, not after: a report requires a
-        // live agent, which requires the tmux start below, so
+        // BEFORE the host starts anything, not after: a report requires a
+        // live agent, which requires the host start below, so
         // publishing here means no report of this generation can ever
         // arrive ahead of its provenance. The write is best-effort — a
         // failure degrades to no capture (a create starts unknown, and a
@@ -15692,7 +14564,7 @@ impl Supervisor {
         //
         // A spec-publish failure above records nothing, and that is
         // safe rather than stale: it provably started nothing, so no
-        // reporter exists to read any marker. A tmux failure below
+        // reporter exists to read any marker. A host start failure below
         // keeps the decided values: the argv was fixed, so an
         // ambiguous survivor runs exactly what the row describes.
         self.record_launch_provenance(
@@ -15733,8 +14605,8 @@ impl Supervisor {
     /// that failure against the create's intent key.
     ///
     /// Reached only from the paths that CONFIRMED the session's terminal is
-    /// gone (the spec never landed; tmux said the session does not exist;
-    /// the terminal was killed successfully), which is what makes settling
+    /// gone (the spec never landed; the host never started; the terminal
+    /// was ended successfully), which is what makes settling
     /// `Failed` honest here and nowhere else: every retry of this intent
     /// now replays this exact error rather than re-deriving one from a
     /// world that has since changed. Paths that had to retain the row take
@@ -15742,7 +14614,7 @@ impl Supervisor {
     /// which is what leaves their reservation pending.
     ///
     /// A gone terminal is not proof that every descendant stopped. The
-    /// tmux-creation rollback sweeps with `ScopeKillFailure::Warn`, so an
+    /// host-creation rollback sweeps with `ScopeKillFailure::Warn`, so an
     /// unconfirmed scope kill passes once the portable sweep finds
     /// nothing, and after a failed database confirmation a sweep error only
     /// enriches the returned error. A survivor of either can outlive the
@@ -15937,7 +14809,7 @@ impl Supervisor {
     ///
     /// Deliberately DISTINCT from an ambiguous launch failure: this is
     /// only for failures that CONFIRMED no launch happened (spec write,
-    /// tmux confirmed absent, confirmation with the terminal confirmed
+    /// host confirmed never started, confirmation with the terminal confirmed
     /// gone, post-allocation bookkeeping) — anything possibly-live stays
     /// `Launching` and pending, exactly as before.
     async fn retain_create_refusal(
@@ -16067,7 +14939,6 @@ impl Supervisor {
                     launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     launch_error: Arc::new(std::sync::Mutex::new(None)),
-                    launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                     outcome: Arc::new(std::sync::Mutex::new(row.outcome.clone())),
                     first_input: Arc::new(std::sync::Mutex::new(None)),
                     capture: Arc::new(std::sync::Mutex::new(capture)),
@@ -16098,7 +14969,7 @@ impl Supervisor {
     }
 
     /// The durable NotStarted publication (Design D): the preparation
-    /// state file must exist before tmux admission. The registry claims
+    /// state file must exist before any host starts. The registry claims
     /// this one publication first; after that claim a missing file is an
     /// ambiguous loss, including a crash during publication itself. Only
     /// an intact NotStarted or Ready record can be reused on pending retry.
@@ -16296,7 +15167,7 @@ impl Supervisor {
     /// rules: a Codex pending-clear locator is durable but is not a resume
     /// target until its exact root record appears. A failed write changes
     /// nothing in memory and has no supervisor-owned retry queue beyond the
-    /// report file itself: a report refused for a store or tmux failure
+    /// report file itself: a report refused for a store or terminal failure
     /// (`Internal`) stays in its slot for the next pass (`report_files`),
     /// while any other refusal is final and another lifecycle event may send
     /// a fresh report. A store that
@@ -16648,20 +15519,6 @@ impl Supervisor {
         self.capture_pass(true).await;
     }
 
-    /// Record or resolve old-terminal notifications as the ticker's next
-    /// sample pass would, without sampling anything else.
-    ///
-    /// In-process tests do not start the ticker, and the e2e test of a
-    /// Restart that moves an old session's agent into a terminal host (whose
-    /// tmux tabs stay) needs to say "and now the supervisor has looked" at
-    /// fixed points, before and after the Restart and after a tab closes,
-    /// rather than wait for ticks. Compiled only for tests and the
-    /// `test-seams` feature (which the e2e tests enable).
-    #[cfg(any(test, feature = "test-seams"))]
-    pub async fn old_terminal_check_for_test(&self) {
-        super::ticker::old_terminal_check_for_test(self).await;
-    }
-
     /// Commit `conversation` as this session's reported identity, durably and
     /// in its live entry, exactly as an accepted report would — without a
     /// hook process to attribute it to.
@@ -16758,7 +15615,7 @@ impl Supervisor {
                 id.to_string(),
                 Arc::new(SessionEntry {
                     info: entry.info.clone(),
-                    terminal: Some(Terminal::Host(host.clone())),
+                    terminal: Some(host.clone()),
                     run: entry.run.clone(),
                     session: entry.session.clone(),
                     snapshot: entry.snapshot.clone(),
@@ -16769,28 +15626,18 @@ impl Supervisor {
             );
             entry.terminal.clone()
         };
-        let socket_name = Terminal::Host(host.clone()).recorded_address().to_string();
+        let socket_name = host.recorded_address().to_string();
         self.store
             .set_terminal_for_test(id, crate::store::TerminalKind::Host, &socket_name)
             .await?;
-        match replaced {
-            // No test can create a tmux terminal, so a tmux agent here is a
-            // session this supervisor adopted, which is not what this helper
-            // replaces.
-            Some(Terminal::Tmux(tmux)) => anyhow::bail!(
-                "session {id}'s agent runs in tmux session {}, which this helper does not replace",
-                tmux.tmux_name
-            ),
-            // The created host's runtime is no longer on the entry; ending
-            // it through that runtime hangs its agent up and removes its
-            // socket, as a confirmed shutdown does.
-            Some(Terminal::Host(created)) => {
-                let report = created.shutdown().await.map_err(|liveness| {
-                    anyhow::anyhow!("the created host could not be shut down: {liveness:?}")
-                })?;
-                anyhow::ensure!(report.ended, "the created host did not end: {report:?}");
-            }
-            None => {}
+        // The created host's runtime is no longer on the entry; ending it
+        // through that runtime hangs its agent up and removes its socket, as
+        // a confirmed shutdown does.
+        if let Some(created) = replaced {
+            let report = created.shutdown().await.map_err(|liveness| {
+                anyhow::anyhow!("the created host could not be shut down: {liveness:?}")
+            })?;
+            anyhow::ensure!(report.ended, "the created host did not end: {report:?}");
         }
         Ok(host)
     }
@@ -16799,16 +15646,12 @@ impl Supervisor {
     /// agent terminal is a host: for tests that observe a host the
     /// supervisor started itself (its screen, its liveness, its socket),
     /// without a second connection that would take the host over from the
-    /// supervisor's own. `None` for a session that is not published or whose
-    /// agent runs in tmux. Compiled only for tests and the `test-seams`
-    /// feature.
+    /// supervisor's own. `None` for a session that is not published or has
+    /// no terminal. Compiled only for tests and the `test-seams` feature.
     #[cfg(any(test, feature = "test-seams"))]
     pub async fn agent_host_for_test(&self, id: &str) -> Option<crate::hosts::HostTerminal> {
         let entry = self.sessions.lock().await.get(id).cloned()?;
-        match &entry.terminal {
-            Some(Terminal::Host(host)) => Some(host.clone()),
-            Some(Terminal::Tmux(_)) | None => None,
-        }
+        entry.terminal.clone()
     }
 
     /// Leave session `id` without an agent terminal, as a reload that has
@@ -16944,86 +15787,27 @@ impl Supervisor {
         Ok(())
     }
 
-    /// Resolve the session's owned pane to the anchor its reports' recorded
-    /// chains must reach: the pane process's pid, plus its start token while
-    /// it is alive (see `procs::TerminalAnchor`). The pane is recovered from tmux
-    /// during publication gaps. No lifecycle lock: a reporting hook may be
-    /// running inside the launch whose publication that lock protects.
+    /// The anchor a session's reports' recorded chains must reach (see
+    /// `procs::TerminalAnchor`): its agent host's child
+    /// ([`Self::host_agent_anchor`]). No lifecycle lock: a reporting hook may
+    /// be running inside the launch whose publication that lock protects.
     ///
-    /// A tmux that could not be asked is `Internal`, which the report drain
-    /// treats as transient and retries on a later pass; a pane that is gone
-    /// or no longer this session's is `Conflict`, a definitive refusal.
-    ///
-    /// A row whose agent runs in a terminal host is anchored at the host's
-    /// child instead ([`Self::host_agent_anchor`]); its terminal address is
-    /// the host's socket name, which no tmux lookup may read as a pane.
+    /// A row of the old kind ran its agent in a tmux terminal an earlier
+    /// release created, which this supervisor ended when it started
+    /// (`old_terminals`): nothing of it can report any more, and a report
+    /// still waiting from before is refused (`Conflict`, definitive).
     pub(crate) async fn owned_terminal_anchor(
         &self,
         row: &StoredSession,
     ) -> Result<crate::procs::TerminalAnchor, RequestError> {
         match row.terminal_kind {
-            crate::store::TerminalKind::Tmux => {}
-            crate::store::TerminalKind::Host => return self.host_agent_anchor(row).await,
+            crate::store::TerminalKind::Tmux => Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the session's agent ran in an old terminal, which was ended when this \
+                 supervisor started",
+            )),
+            crate::store::TerminalKind::Host => self.host_agent_anchor(row).await,
         }
-        let tmux_name = session_tmux_name(&row.id);
-        let pane = if row.terminal_address.is_empty() {
-            let states = self.tmux.pane_states().await.map_err(|_| {
-                RequestError::new(
-                    ErrorKind::Internal,
-                    "the session's foreground pane could not be inspected",
-                )
-            })?;
-            agent_pane_from_states(&states, &tmux_name, &row.id)
-                .map(|(pane, _)| pane)
-                .ok_or_else(|| {
-                    RequestError::new(
-                        ErrorKind::Conflict,
-                        "the session's foreground pane is unavailable",
-                    )
-                })?
-        } else {
-            row.terminal_address.clone()
-        };
-        let process = self
-            .tmux
-            .pane_process(&tmux_name, &pane)
-            .await
-            .map_err(|_| {
-                RequestError::new(
-                    ErrorKind::Internal,
-                    "the session's foreground process could not be inspected",
-                )
-            })?;
-        let crate::terminal_process::TerminalProbe::Owned(process) = process else {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "the session's foreground pane is no longer owned by this session",
-            ));
-        };
-        // tmux 3.8 stops reporting a pid once the pane's terminal closes
-        // (see `TerminalProcess::pid`), so a report still waiting to be applied
-        // after the agent exited has nothing to anchor to there and is
-        // refused, where the pinned tmux 3.7c would still anchor it by the
-        // stale pid below. A known gap, recorded in SPEC_impl.md: such a
-        // report can be the conversation a later Restart should resume.
-        let Some(pid) = process.pid else {
-            return Err(RequestError::new(
-                ErrorKind::Conflict,
-                "the session's foreground pane has exited and tmux no longer reports its process",
-            ));
-        };
-        // A live pane process anchors by pid and start token. One that has
-        // exited (still listed under `remain-on-exit`) or exits right now has
-        // no token left to read, and anchors by pid alone.
-        let start = if process.dead {
-            None
-        } else {
-            match crate::procs::read_process(pid) {
-                Ok(Some((_, start, crate::procs::ProcessState::Running))) => Some(start),
-                _ => None,
-            }
-        };
-        Ok(crate::procs::TerminalAnchor { pid, start })
     }
 
     /// The hook anchor of a row whose agent runs in a terminal host: the
@@ -17039,8 +15823,7 @@ impl Supervisor {
     /// describes another generation, the report is not refused: it is
     /// `Internal`, which the report drain retries on a later pass, once the
     /// entry this report belongs to is published. A host that cannot be
-    /// read gives no anchor, and is `Internal` the same way. Only an entry
-    /// of the row's generation whose terminal is not a host is `Conflict`.
+    /// read gives no anchor, and is `Internal` the same way.
     async fn host_agent_anchor(
         &self,
         row: &StoredSession,
@@ -17056,11 +15839,7 @@ impl Supervisor {
             return Err(not_yet());
         };
         match &entry.terminal {
-            Some(Terminal::Host(host)) => host.anchor().ok_or_else(not_yet),
-            Some(Terminal::Tmux(_)) => Err(RequestError::new(
-                ErrorKind::Conflict,
-                "the session's recorded terminal host is not the terminal it runs in",
-            )),
+            Some(host) => host.anchor().ok_or_else(not_yet),
             None => Err(not_yet()),
         }
     }
@@ -17104,37 +15883,24 @@ impl Supervisor {
     }
 }
 
-/// Preserve every cleanup failure after a tab's window is irreversibly gone.
-///
-/// A retry cannot recover the killed window, so dropping either the process
-/// sweep error or the output-client error would discard the only actionable
+/// A tab close's verdict once its host has ended: survivors of its shell
+/// that could not be confirmed reaped fail the close, since a retry cannot
+/// recover the ended host, and dropping the error would discard the only
 /// account of what may still be alive.
 fn tab_close_cleanup_result(
     tab_id: &str,
     survivors: anyhow::Result<()>,
-    detach: Result<(), RequestError>,
 ) -> Result<(), RequestError> {
-    match (survivors, detach) {
-        (Ok(()), Ok(())) => Ok(()),
-        (Ok(()), Err(detach)) => Err(detach),
-        (Err(survivors), Ok(())) => Err(RequestError::new(
+    survivors.map_err(|survivors| {
+        RequestError::new(
             ErrorKind::Internal,
             format!(
-                "terminal tab {}'s window is gone but survivors of its shell could not be \
+                "terminal tab {}'s terminal has ended but survivors of its shell could not be \
                  confirmed reaped: {survivors:#}",
                 truncate_for_error(tab_id)
             ),
-        )),
-        (Err(survivors), Err(detach)) => Err(RequestError::new(
-            ErrorKind::Internal,
-            format!(
-                "terminal tab {}'s window is gone, but process cleanup failed ({survivors:#}) \
-                 and terminal-output cleanup also failed ({})",
-                truncate_for_error(tab_id),
-                detach.message
-            ),
-        )),
-    }
+        )
+    })
 }
 
 /// How long a stopping supervisor spends closing its terminal-output
@@ -17142,9 +15908,9 @@ fn tab_close_cleanup_result(
 ///
 /// Comfortably inside systemd's default 90-second stop timeout, after which
 /// the unit would be SIGKILLed with the same abrupt close this exists to
-/// avoid. Ordinarily each client needs one acknowledged tmux round trip, so
-/// the budget only matters when tmux itself is wedged; the process still
-/// exits, having done what it could.
+/// avoid. Ordinarily each output task ends as soon as it is signalled, so
+/// the budget only matters when one is wedged; the process still exits,
+/// having done what it could.
 pub const SHUTDOWN_OUTPUT_BUDGET: Duration = Duration::from_secs(10);
 
 /// How long a stopping supervisor spends checkpointing its terminal hosts
@@ -17193,15 +15959,17 @@ const STATE_DIR_CLAIM_RETRY: Duration = Duration::from_millis(50);
 /// app's stdin tether; callers without one pass a future that never
 /// completes). On any of them the supervisor closes every terminal-output
 /// client through its orderly no-output boundary, within
-/// [`SHUTDOWN_OUTPUT_BUDGET`], followed on expiry by one best-effort quiet-down
-/// attempt lasting at most two more seconds, and then returns. That handler is the point
+/// [`SHUTDOWN_OUTPUT_BUDGET`], and then returns. That handler is the point
 /// of this function's shape, not ceremony: without it every planned stop,
 /// restart, or upgrade (which `KillMode=process` makes a SIGTERM to this
 /// process alone) killed the process with every output client still
-/// streaming, and tmux can abort its whole private server, and every
-/// session on the host, when such a client sees EOF with output queued. See
-/// [`Supervisor::shutdown_output_clients`]. SIGKILL, OOM kills and crashes
-/// remain the accepted residual recorded in BUGS.md.
+/// streaming (earlier releases' tmux could abort its whole private server,
+/// and every session on the host, when such a client saw EOF with output
+/// queued), and with no host checkpointed. See
+/// [`Supervisor::shutdown_output_clients`] and
+/// [`Supervisor::checkpoint_hosts_for_exit`]. SIGKILL, OOM kills and crashes
+/// run no handler: viewers lose their streams, and the next supervisor
+/// replays more of each host's output.
 ///
 /// SIGHUP is handled because its default action would kill the process on
 /// the spot, and a hangup is how a hand-started supervisor usually ends: its
@@ -17217,8 +15985,8 @@ const STATE_DIR_CLAIM_RETRY: Duration = Duration::from_millis(50);
 /// `startup` carries the already-resolved process-startup overrides (see
 /// [`SupervisorStartup`]), and every one of them is REQUIRED rather than
 /// optional: this is the whole supervisor entry point, so a caller that
-/// could omit one is a launch path that silently ignores `--tmux`,
-/// `FARHELM_TMUX`, or `FARHELM_AGENT_HOOKS`.
+/// could omit one is a launch path that silently ignores
+/// `FARHELM_AGENT_HOOKS` or another of them.
 ///
 /// Synchronous, and it owns its runtime: the state-folder claim is released
 /// only after that runtime, and every blocking job started on it, has ended
@@ -17265,9 +16033,9 @@ async fn serve_until_stopped(
     use tokio::signal::unix::{SignalKind, signal};
 
     // The stop is watched from the start, not only once serving: building a
-    // supervisor runs tmux commands with no timeout of their own, and a
-    // desktop app that quits while one of them hangs must still release its
-    // managed supervisor. Nothing streams yet at that point, so there is
+    // supervisor runs startup work that can take long (ending the old
+    // terminals, sweeps, reloading sessions), and a desktop app that quits
+    // while it runs must still release its managed supervisor. Nothing streams yet at that point, so there is
     // nothing to close in order.
     tokio::pin!(stop);
     let sup = tokio::select! {
@@ -17320,8 +16088,8 @@ impl Supervisor {
     /// [`HOST_CHECKPOINT_BUDGET`]); then wait for new sessions' windows to
     /// hold their version ([`Self::wait_for_pending_holds`]).
     ///
-    /// The first two run side by side because they are independent (tmux's
-    /// clients and the hosts' connections) and each can take its whole
+    /// The first two run side by side because they are independent (the
+    /// viewers' output tasks and the hosts' connections) and each can take its whole
     /// budget: one after the other they would lengthen every stop, and
     /// every wait sized against a stop's length ([`STATE_DIR_CLAIM_WAIT`],
     /// the desktop app's grace before it kills its supervisor) assumes the
@@ -17391,7 +16159,7 @@ impl Drop for StartingLaunch {
 /// its "held" mark appears, and the terminal its program runs in.
 struct PendingHold {
     held: PathBuf,
-    terminal: Terminal,
+    terminal: HostTerminal,
 }
 
 /// A terminal host [`Supervisor::reload_sessions_with_hosts`] found for a
@@ -17409,7 +16177,7 @@ struct FoundTerminal {
     /// runtime has replayed the record.
     state: super::status::OwnedTerminal,
     /// The entry's terminal.
-    terminal: Terminal,
+    terminal: HostTerminal,
     /// A host whose host reported its child reaped while the runtime has
     /// not yet replayed the exit record: `state` says running,
     /// provisionally.
@@ -17438,7 +16206,7 @@ impl FoundTerminal {
             status.liveness,
             crate::hosts::Liveness::Running { child: None }
         );
-        let terminal = Terminal::Host(host);
+        let terminal = host;
         FoundTerminal {
             address: terminal.recorded_address().to_string(),
             state,
@@ -18251,58 +17019,19 @@ pub(crate) mod tests {
         }
     }
 
-    /// Tab close reports both kinds of cleanup it could not confirm.
-    ///
-    /// The window is already gone when these failures are combined, so a
-    /// second close cannot recover whichever diagnostic the first response
-    /// discards. Keeping both is the only way to tell an operator about a
-    /// surviving process and an unresolved output client at the same time.
-    #[farhelm_testtrace::test]
-    fn tab_close_preserves_process_and_output_cleanup_failures() {
-        let error = tab_close_cleanup_result(
-            "tab-1",
-            Err(anyhow::anyhow!("injected survivor")),
-            Err(RequestError::new(
-                ErrorKind::Internal,
-                "injected output cleanup",
-            )),
-        )
-        .expect_err("both failed cleanup paths must fail the close");
-
-        assert!(
-            error.message.contains("injected survivor"),
-            "the process-sweep failure must survive aggregation: {error:?}"
-        );
-        assert!(
-            error.message.contains("injected output cleanup"),
-            "the output-client failure must survive aggregation: {error:?}"
-        );
-    }
-
-    /// A supervisor state directory that also kills the private tmux
-    /// server rooted inside it, and ends the terminal hosts whose sockets
-    /// are in it, when it goes out of scope.
+    /// A supervisor state directory that ends the terminal hosts whose
+    /// sockets are in it when it goes out of scope.
     ///
     /// Drop-based, and the drop is the whole point: a test that fails an
-    /// assertion never reaches an explicit teardown, and every test here
-    /// that creates a session starts a tmux server that nothing else will
-    /// ever stop. Measured before this existed: one `cargo test -p
-    /// farhelm-supervisor --lib` run left 24 tmux servers behind, and they
-    /// accumulate across runs until the host is visibly degraded (~2,000
-    /// were found on the development machine). A terminal host is the same
-    /// hazard and worse: it outlives the supervisor that started it by
-    /// design, and once its socket's directory is gone nothing can reach it.
-    ///
-    /// Wraps the directory rather than sitting beside it so the ordering is
-    /// not a rule each test has to remember: the server is killed in this
-    /// type's own `Drop`, which runs before the inner directory's and
-    /// therefore before the directory holding the server's socket is
-    /// removed. The directory is a [`farhelm_teststate::TestDir`] (a
-    /// `fh-it.` run directory under `/tmp`, locked while it lives), whose
-    /// own drop ends the hosts in it first and, when it cannot confirm they
-    /// all ended, keeps the directory, so that a later test process's sweep
-    /// retries them through their sockets. Its `path()` mirrors
-    /// `TempDir::path`, so call sites read exactly as they did.
+    /// assertion never reaches an explicit teardown, and a terminal host
+    /// outlives the supervisor that started it by design; once its socket's
+    /// directory is gone nothing can reach it. The directory is a
+    /// [`farhelm_teststate::TestDir`] (a `fh-it.` run directory under
+    /// `/tmp`, locked while it lives), whose own drop ends the hosts in it
+    /// first and, when it cannot confirm they all ended, keeps the
+    /// directory, so that a later test process's sweep retries them through
+    /// their sockets. Its `path()` mirrors `TempDir::path`, so call sites
+    /// read exactly as they did.
     pub(crate) struct StateDir(farhelm_teststate::TestDir);
 
     impl StateDir {
@@ -18312,47 +17041,6 @@ pub(crate) mod tests {
 
         pub(crate) fn path(&self) -> &std::path::Path {
             self.0.path()
-        }
-    }
-
-    /// How long [`StateDir`]'s teardown waits for `tmux kill-server` before
-    /// giving up on it.
-    ///
-    /// `Drop` cannot await, so this is a real blocking wait on a test
-    /// thread — and an unbounded one would let a single wedged tmux hang
-    /// the whole suite with no output and no clue why. A `kill-server` that
-    /// has not returned in this long is not going to; the server it was
-    /// aimed at leaks, which is a bounded cost, unlike the hang.
-    const KILL_SERVER_DEADLINE: Duration = Duration::from_secs(10);
-
-    impl Drop for StateDir {
-        fn drop(&mut self) {
-            // Best-effort: the common case is a test that never started a
-            // server at all, and `kill-server` on an absent socket is an
-            // error worth ignoring rather than reporting.
-            let Ok(mut child) = std::process::Command::new("tmux")
-                .arg("-S")
-                .arg(self.0.path().join("tmux.sock"))
-                .arg("kill-server")
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-            else {
-                return;
-            };
-            let deadline = std::time::Instant::now() + KILL_SERVER_DEADLINE;
-            loop {
-                match child.try_wait() {
-                    Ok(Some(_)) | Err(_) => return,
-                    Ok(None) if std::time::Instant::now() >= deadline => {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return;
-                    }
-                    // sleep-ok: give this guard's owned cleanup child time to exit before the bounded kill-and-reap fallback.
-                    Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-                }
-            }
         }
     }
 
@@ -18513,19 +17201,17 @@ pub(crate) mod tests {
         );
     }
 
-    /// Item 2's new sweep: a planted `.tmux.conf.tmp-*` orphan must be
-    /// removed while a REAL, current `tmux.conf` right next to it survives
-    /// untouched — proving the sweep is name-scoped rather than a blanket
-    /// removal of the state-dir root.
+    /// A planted `.running-version.tmp-*` orphan must be removed while the
+    /// REAL, current `running-version` right next to it survives untouched —
+    /// proving the sweep is name-scoped rather than a blanket removal of the
+    /// state-dir root.
     #[farhelm_testtrace::test]
-    async fn sweep_tmux_config_temp_files_removes_only_the_orphan() {
+    async fn sweep_running_version_temp_files_removes_only_the_orphan() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("tmux.conf"), b"set -g exit-empty off\n").unwrap();
-        std::fs::write(tmp.path().join(".tmux.conf.tmp-deadbeef"), b"partial").unwrap();
         std::fs::write(tmp.path().join("running-version"), b"9.9.9\n").unwrap();
         std::fs::write(tmp.path().join(".running-version.tmp-deadbeef"), b"9.9").unwrap();
 
-        sweep_tmux_config_temp_files(tmp.path()).await;
+        sweep_running_version_temp_files(tmp.path()).await;
 
         assert!(
             tmp.path().join("running-version").exists(),
@@ -18534,15 +17220,6 @@ pub(crate) mod tests {
         assert!(
             !tmp.path().join(".running-version.tmp-deadbeef").exists(),
             "an orphaned Running-record temp file must be removed"
-        );
-
-        assert!(
-            tmp.path().join("tmux.conf").exists(),
-            "the real, current tmux config must never be removed by this sweep"
-        );
-        assert!(
-            !tmp.path().join(".tmux.conf.tmp-deadbeef").exists(),
-            "an orphaned tmux-config temp file must be removed"
         );
     }
 
@@ -18846,8 +17523,7 @@ pub(crate) mod tests {
     /// host started from the test binary itself.
     ///
     /// Why: the unit tests that create real terminals rest on this; without
-    /// it they could only create old terminals, in tmux, and what they check
-    /// would hold for a kind of terminal no shipped supervisor creates.
+    /// it they could create no terminal at all.
     /// Spec: a create of a long-running command on [`host_supervisor`]
     /// publishes a host terminal whose child is running and whose host
     /// process is a separate process started from this binary (its command
@@ -19147,13 +17823,13 @@ pub(crate) mod tests {
     /// live (`still_alive_for_delete`; Restart no longer consults this).
     ///
     /// Only an unconfirmed launch qualifies. A rebooted (`Interrupted`) or
-    /// tmux-orphaned (`Exited`) row also reloads with no terminal, and
+    /// host-orphaned (`Exited`) row also reloads with no terminal, and
     /// nothing of it is running; if this predicate widened to them, an
     /// ordinary post-reboot delete would come back "still running". A row
-    /// that still has a terminal is never answered here: its pane is probed
-    /// instead.
+    /// that still has a terminal is never answered here: its terminal is
+    /// probed instead.
     #[farhelm_testtrace::test]
-    fn only_an_unconfirmed_terminal_less_launch_may_be_live() {
+    async fn only_an_unconfirmed_terminal_less_launch_may_be_live() {
         assert!(terminal_less_launch_may_be_live(&entry_with(
             None,
             LastOutcome::Launching
@@ -19175,9 +17851,8 @@ pub(crate) mod tests {
                 "{settled:?} without a terminal must not count as possibly live"
             );
         }
-        let terminal = Terminal::tmux("fh-s1".to_string(), "%1".to_string());
         assert!(!terminal_less_launch_may_be_live(&entry_with(
-            Some(terminal),
+            Some(a_terminal()),
             LastOutcome::Launching
         )));
     }
@@ -19569,13 +18244,7 @@ pub(crate) mod tests {
         // the manager available the tab's scope is found, killed and never
         // confirmed gone.
         let error = sup
-            .reap_tab_tree(
-                session,
-                &a_terminal(),
-                tab,
-                TabScope::Scoped,
-                TabReapAnchor::MarkerOnly,
-            )
+            .reap_tab_tree(session, &a_terminal(), tab, true, TabReapAnchor::MarkerOnly)
             .await
             .expect_err("a tab scope that cannot be confirmed gone must fail the close");
         assert!(
@@ -19592,94 +18261,19 @@ pub(crate) mod tests {
         );
     }
 
-    /// A tab window opened before tabs recorded their scope selection still
-    /// gets the re-probe when its session's own launch was unscoped, and its
-    /// scope is checked once the manager answers.
-    ///
-    /// Why it matters: tabs survive supervisor restarts and upgrades, so a
-    /// window with no scope marker can belong to a scoped tab of a session
-    /// whose agent launched while the manager was unreachable. Deciding from
-    /// the session alone would skip that tab's scope on a stale negative
-    /// verdict, leaving detached descendants alive behind a successful close
-    /// (SPEC.md "Lifecycle operations"). Specified: with an unscoped session,
-    /// an unmarked tab, and a manager that answers only on the re-probe, the
-    /// reap checks the tab's own unit and fails when it never confirms gone.
-    #[farhelm_testtrace::test]
-    async fn an_unmarked_tab_of_an_unscoped_session_still_gets_the_reprobe() {
-        let session = "4d5e6f70-8192-4a3b-9c4d-5e6f70819203";
-        let tab = "5e6f7081-92a3-4b4c-8d5e-6f708192a3b4";
-        let unit =
-            crate::scope::tab_unit_name(session, tab).expect("a UUID session names a tab scope");
-        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let sink: crate::scope::ScopeOpSink = {
-            let observed = Arc::clone(&observed);
-            Arc::new(move |op: &crate::scope::ScopeOp| observed.lock().unwrap().push(op.clone()))
-        };
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            dummy_exe(),
-            SupervisorTimeouts::default(),
-            SupervisorSeams {
-                scopes: Arc::new(crate::scope::ScopeManager::fake_reprobing(
-                    false, true, sink,
-                )),
-                ..SupervisorSeams::default()
-            },
-        )
-        .await
-        .expect("supervisor");
-        let mut entry = entry_with(None, LastOutcome::Running);
-        entry.info.id = session.to_string();
-        entry.scope = None;
-        sup.sessions
-            .lock()
-            .await
-            .insert(session.to_string(), Arc::new(entry));
-
-        // This fake's units never disappear, so a checked scope is found,
-        // killed and never confirmed gone.
-        let error = sup
-            .reap_tab_tree(
-                session,
-                &a_terminal(),
-                tab,
-                TabScope::Unknown,
-                TabReapAnchor::MarkerOnly,
-            )
-            .await
-            .expect_err("the re-probe finds a manager, so the tab's scope must be settled");
-        assert!(
-            format!("{error:#}").contains(&unit),
-            "the failure names the tab's unconfirmed scope: {error:#}"
-        );
-        assert!(
-            observed.lock().unwrap().iter().any(|op| matches!(
-                op,
-                crate::scope::ScopeOp::Exists(name) if name == &unit
-            )),
-            "the tab's scope must be checked after the re-probe: {:?}",
-            observed.lock().unwrap()
-        );
-    }
-
     /// With the systemd user manager unusable even after the re-probe, a tab
-    /// reap fails exactly when the tab itself was opened scoped; a window
-    /// without the scope marker is judged by its session's launch.
+    /// reap fails exactly when the tab itself was opened scoped, whatever its
+    /// session's launch did.
     ///
     /// Why it matters: a scope the tab really had may still hold detached
     /// descendants, so a manager that no longer answers is no proof it is
     /// empty (SPEC.md "Lifecycle operations"), while a tab opened without a
     /// scope has nothing to find and must still close on a manager-less host.
     /// The agent's and the tab's launches can see different manager verdicts,
-    /// so the session's scope record is not a reliable stand-in for the tab's
-    /// in either direction; it is only the fallback for windows opened before
-    /// tabs recorded their own answer. Specified, for every combination of
-    /// tab marker and session scope: a `Scoped` marker fails the reap, an
-    /// `Unscoped` marker succeeds, and an unmarked window fails only for a
-    /// scoped session (an unscoped session's unmarked tab gets the re-probe,
-    /// covered by `an_unmarked_tab_of_an_unscoped_session_still_gets_the_reprobe`,
-    /// and is skipped when that also says no).
+    /// so the session's scope record is not a stand-in for the tab's in
+    /// either direction. Specified, for every combination of tab selection
+    /// and session scope: a `Scoped` tab fails the reap, an `Unscoped` one
+    /// succeeds.
     #[farhelm_testtrace::test]
     async fn tab_reap_follows_the_tabs_own_scope_marker() {
         let tab = "3c4d5e6f-7081-4923-8a4b-5c6d7e8f9012";
@@ -19715,12 +18309,10 @@ pub(crate) mod tests {
         }
 
         for (session, marker, refuses) in [
-            (unscoped, TabScope::Scoped, true),
-            (scoped, TabScope::Scoped, true),
-            (scoped, TabScope::Unscoped, false),
-            (unscoped, TabScope::Unscoped, false),
-            (scoped, TabScope::Unknown, true),
-            (unscoped, TabScope::Unknown, false),
+            (unscoped, true, true),
+            (scoped, true, true),
+            (scoped, false, false),
+            (unscoped, false, false),
         ] {
             let result = sup
                 .reap_tab_tree(
@@ -19819,7 +18411,7 @@ pub(crate) mod tests {
     /// terminal-less guard applies instead. Specified: ambiguous gives
     /// `None`; definitive gives the prior terminal back.
     #[farhelm_testtrace::test]
-    fn an_ambiguous_relaunch_republishes_no_terminal() {
+    async fn an_ambiguous_relaunch_republishes_no_terminal() {
         let prior = Some(a_terminal());
         assert_eq!(republished_terminal(false, prior.clone()), None);
         assert_eq!(republished_terminal(true, prior.clone()), prior);
@@ -20473,7 +19065,7 @@ pub(crate) mod tests {
     /// A session entry with the given terminal and recorded outcome, for
     /// the entry-replacement tests below and the classification tests in
     /// `service::status` — which are about how those two inputs combine,
-    /// and need no tmux, no store, and no session at all.
+    /// and need no terminal host, no store, and no session at all.
     /// Build the doorway-validated report shape the admission tests feed
     /// `report_conversation` directly: most tests report without vendor
     /// evidence or a peer, so the struct literal would repeat four `None`
@@ -20534,17 +19126,17 @@ pub(crate) mod tests {
         reporter: crate::procs::ProcessIdentity,
     ) -> Vec<crate::procs::ChainLink> {
         let row = sup.store.session(id).await.unwrap().unwrap();
-        let pane = sup
+        let anchor = sup
             .owned_terminal_anchor(&row)
             .await
-            .expect("the session's pane anchors");
+            .expect("the session's terminal anchors");
         let ancestry = crate::procs::collect_ancestry(reporter).expect("collect");
-        crate::procs::anchor_chain(&ancestry.links, ancestry.ended.as_deref(), pane)
-            .expect("the reporter descends from the session's pane")
+        crate::procs::anchor_chain(&ancestry.links, ancestry.ended.as_deref(), anchor)
+            .expect("the reporter descends from the session's terminal")
             .to_vec()
     }
 
-    pub(crate) fn entry_with(terminal: Option<Terminal>, outcome: LastOutcome) -> SessionEntry {
+    pub(crate) fn entry_with(terminal: Option<HostTerminal>, outcome: LastOutcome) -> SessionEntry {
         SessionEntry {
             info: SessionInfo {
                 screen_yolo: false,
@@ -20578,7 +19170,6 @@ pub(crate) mod tests {
                 launch_reads_settled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_cleanup_done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 launch_error: Arc::new(std::sync::Mutex::new(None)),
-                launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
                 outcome: Arc::new(std::sync::Mutex::new(outcome)),
                 first_input: Arc::new(std::sync::Mutex::new(None)),
                 capture: Arc::new(std::sync::Mutex::new(CaptureState::Unclaimed)),
@@ -20604,7 +19195,7 @@ pub(crate) mod tests {
     }
 
     /// Seed the two representations rename must update together without
-    /// launching tmux.
+    /// launching a terminal.
     ///
     /// Rename is metadata-only, so a live process would add no signal to
     /// these tests. Keeping the durable row and published entry explicit
@@ -20781,20 +19372,11 @@ pub(crate) mod tests {
     /// which is the direction the bug actually takes: the writers hold the
     /// old entry and the readers use the new.
     #[farhelm_testtrace::test]
-    fn a_renamed_entry_shares_the_runs_cells_with_the_entry_it_replaces() {
+    async fn a_renamed_entry_shares_the_runs_cells_with_the_entry_it_replaces() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         let renamed = renamed_entry(&old, "new title".to_string());
         assert_eq!(renamed.info.title, "new title");
         assert_eq!(old.info.title, "t", "the replaced entry is left untouched");
-
-        // A failure observer may have pinned the entry before rename. Its
-        // launch boundary must remain the one the published entry reads.
-        *old.run.launch_excerpt.lock().unwrap() = Some(LaunchExcerptFence::for_test());
-        assert!(Arc::ptr_eq(
-            &old.run.launch_excerpt,
-            &renamed.run.launch_excerpt
-        ));
-        assert!(renamed.run.launch_excerpt.lock().unwrap().is_some());
 
         old.run
             .launch_reads_settled
@@ -20937,9 +19519,8 @@ pub(crate) mod tests {
     /// consistent policy would otherwise pick a policy that is wrong for
     /// one of them either way.
     #[farhelm_testtrace::test]
-    fn a_relaunched_entry_gets_fresh_cells_even_when_it_carries_the_values_over() {
+    async fn a_relaunched_entry_gets_fresh_cells_even_when_it_carries_the_values_over() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
-        *old.run.launch_excerpt.lock().unwrap() = Some(LaunchExcerptFence::for_test());
         old.run.activity.lock().unwrap().pending_work_started_at = Some(123_456);
         let first_input = std::time::Instant::now();
         *old.run.first_input.lock().unwrap() = Some(first_input);
@@ -20963,19 +19544,6 @@ pub(crate) mod tests {
             None,
             LastOutcome::Launching,
             false,
-        );
-        assert!(
-            relaunched.run.launch_excerpt.lock().unwrap().is_none(),
-            "a new launch cannot inherit a boundary into its predecessor's conversation"
-        );
-        assert!(!Arc::ptr_eq(
-            &old.run.launch_excerpt,
-            &relaunched.run.launch_excerpt
-        ));
-        *old.run.launch_excerpt.lock().unwrap() = Some(LaunchExcerptFence::for_test());
-        assert!(
-            relaunched.run.launch_excerpt.lock().unwrap().is_none(),
-            "a late observer of the abandoned launch cannot change the replacement's fence"
         );
         assert!(
             !relaunched
@@ -21086,7 +19654,7 @@ pub(crate) mod tests {
     /// Resume offer from, so a session that had just been resumed would
     /// immediately stop offering to resume until another report arrived.
     #[farhelm_testtrace::test]
-    fn a_resume_relaunch_keeps_the_identity_the_agent_reported() {
+    async fn a_resume_relaunch_keeps_the_identity_the_agent_reported() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         let first_input = std::time::Instant::now();
         *old.run.first_input.lock().unwrap() = Some(first_input);
@@ -21125,8 +19693,8 @@ pub(crate) mod tests {
     /// resumed process unattributed; but the deadline describes when the
     /// PREVIOUS process last got input, and carrying it over would warn
     /// before the replacement had received its first.
-    #[test]
-    fn a_relaunch_keeps_its_identity_and_resets_the_input_deadline() {
+    #[farhelm_testtrace::test]
+    async fn a_relaunch_keeps_its_identity_and_resets_the_input_deadline() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         *old.run.first_input.lock().unwrap() = Some(std::time::Instant::now());
         *old.run.capture.lock().unwrap() = CaptureState::Reported {
@@ -21168,7 +19736,7 @@ pub(crate) mod tests {
     /// silence the wire for the next broken launch — exactly the restart a
     /// user performs when trying to fix the thing the warning is about.
     #[farhelm_testtrace::test]
-    fn a_relaunch_mints_fresh_hook_cells_even_when_it_keeps_the_identity() {
+    async fn a_relaunch_mints_fresh_hook_cells_even_when_it_keeps_the_identity() {
         let ordering = std::sync::atomic::Ordering::Relaxed;
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         old.run.hooked.store(true, ordering);
@@ -21203,7 +19771,7 @@ pub(crate) mod tests {
     /// longer exists; inheriting them would classify the replacement from
     /// its predecessor's output. This is independent of carrying its identity.
     #[farhelm_testtrace::test]
-    fn a_relaunch_resets_the_activity_sample_rather_than_inheriting_the_dead_runs_screen() {
+    async fn a_relaunch_resets_the_activity_sample_rather_than_inheriting_the_dead_runs_screen() {
         let old = entry_with(Some(a_terminal()), LastOutcome::Running);
         old.run
             .activity
@@ -21242,39 +19810,13 @@ pub(crate) mod tests {
         );
     }
 
-    /// Establish the dead-pane premise before reload reconciles durable state.
-    ///
-    /// A launching row can lack a pane id, so one caller identifies its
-    /// fixture by session name; a stopped row retains the exact pane id.
-    /// Keep that choice explicit instead of accepting any dead pane on the
-    /// private server. The fixture remains owned while timeout diagnostics
-    /// report the states that failed to satisfy the selected boundary.
-    async fn wait_for_dead_fixture_pane(
-        sup: &Supervisor,
-        description: &str,
-        matches: impl Fn(&str, &crate::tmux::PaneState) -> bool,
-    ) {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-        loop {
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            if states
-                .iter()
-                .any(|(pane, state)| state.dead && matches(pane, state))
-            {
-                return;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the fixture pane never died ({description}); observed states: {states:?}"
-            );
-            // sleep-ok: tmux reports shell exit asynchronously; retry the selected dead-pane premise until the original deadline.
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-
     /// Create an owned raw-input recorder without a vendor binary or launch
-    /// shim. These tests exercise delivery, not launch compilation. The state
-    /// directory owns the private tmux server until all diagnostics finish.
+    /// shim, in a real terminal host started from this test binary
+    /// (`crate::hosts::test_program`), published as session `s1`'s agent.
+    /// These tests exercise delivery, not launch compilation: the recorder
+    /// turns bracketed paste on or off as `paste` says and writes every byte
+    /// it reads to the returned file. The host is ended when the state
+    /// directory is.
     pub(crate) async fn prompt_recorder(
         sup: &Supervisor,
         state: &StateDir,
@@ -21287,20 +19829,35 @@ pub(crate) mod tests {
             if paste { "h" } else { "l" },
             shell_words::quote(path.to_str().unwrap())
         );
-        let name = format!("fh-{}", uuid::Uuid::new_v4());
-        let pane = sup
-            .tmux
-            .create_session(
-                &name,
-                state.path().to_str().unwrap(),
-                80,
-                24,
-                &[],
-                &["/bin/sh".into(), "-c".into(), script],
-            )
-            .await
-            .unwrap();
-        let mut entry = entry_with(Some(Terminal::tmux(name, pane)), LastOutcome::Running);
+        let child = crate::hosts::ChildSpec {
+            argv: vec!["/bin/sh".into(), "-c".into(), script.into()],
+            cwd: state.path().to_path_buf(),
+            env: vec![("PATH".into(), "/usr/bin:/bin".into())],
+            size: terminal_host::protocol::Size { cols: 80, rows: 24 },
+            journal_cap: crate::hosts::DEFAULT_JOURNAL_CAP,
+            initial_snapshot: None,
+        };
+        let tag = crate::hosts::HostTag {
+            session_id: "s1".to_string(),
+            created_ns: crate::hosts::tag::creation_stamp(),
+            role: crate::hosts::HostRole::Agent { generation: 0 },
+        };
+        let spawned = crate::hosts::spawn_host(
+            &crate::hosts::test_program::unit_test_host_program(),
+            state.path(),
+            child,
+            &tag,
+        )
+        .await
+        .expect("start the recorder's host");
+        let host = crate::hosts::HostTerminal::adopt(
+            &spawned.socket,
+            crate::hosts::Adoption::Fresh,
+            crate::hosts::HostTerminalOptions::default(),
+        )
+        .await
+        .expect("adopt the recorder's host");
+        let mut entry = entry_with(Some(host.clone()), LastOutcome::Running);
         entry.snapshot.kind = kind;
         entry.info.agent_kind = kind;
         let entry = Arc::new(entry);
@@ -21308,29 +19865,20 @@ pub(crate) mod tests {
             .lock()
             .await
             .insert(entry.info.id.clone(), Arc::clone(&entry));
-        let terminal = entry.terminal.as_ref().unwrap().expect_tmux();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
-            let probe = sup
-                .tmux
-                .pane_process(&terminal.tmux_name, &terminal.pane)
-                .await
-                .unwrap();
+            let probe = host.probe().unwrap();
             assert!(
-                matches!(probe, TerminalProbe::Owned(ref process) if !process.dead),
+                matches!(probe, TerminalProbe::Running(_)),
                 "fixture recorder must remain alive: {probe:?}"
             );
-            let enabled = sup
-                .tmux
-                .bracketed_paste_enabled(&terminal.tmux_name, &terminal.pane)
-                .await
-                .unwrap();
+            let enabled = host.modes().bracketed_paste;
             if enabled == paste && path.exists() {
                 break;
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "recorder did not establish raw input and paste mode {paste}; pane={probe:?}, mode={enabled}, file={}",
+                "recorder did not establish raw input and paste mode {paste}; process={probe:?}, mode={enabled}, file={}",
                 path.exists()
             );
             // sleep-ok: poll this live recorder's paste-mode/file readiness until the original deadline.
@@ -21345,24 +19893,20 @@ pub(crate) mod tests {
     }
 
     /// Confirm the owned program consumed all accepted bytes, keeping its
-    /// liveness and last bounded observation in timeout diagnostics. tmux's
-    /// command acknowledgment precedes the recorder process reading its PTY.
+    /// liveness and last bounded observation in timeout diagnostics. The
+    /// supervisor's acceptance precedes the recorder process reading its pty.
     pub(crate) async fn recorded_prompt_bytes(
-        sup: &Supervisor,
+        _sup: &Supervisor,
         entry: &SessionEntry,
         path: &Path,
         expected: &[u8],
     ) {
-        let terminal = entry.terminal.as_ref().unwrap().expect_tmux();
+        let terminal = entry.terminal.as_ref().unwrap();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
         loop {
-            let probe = sup
-                .tmux
-                .pane_process(&terminal.tmux_name, &terminal.pane)
-                .await
-                .unwrap();
+            let probe = terminal.probe().unwrap();
             assert!(
-                matches!(probe, TerminalProbe::Owned(ref process) if !process.dead),
+                matches!(probe, TerminalProbe::Running(_)),
                 "recorder died before consuming the prompt: {probe:?}"
             );
             let observed = std::fs::read(path).unwrap();
@@ -21376,7 +19920,7 @@ pub(crate) mod tests {
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "live recorder consumed {} of {} bytes; pane={probe:?}",
+                "live recorder consumed {} of {} bytes; process={probe:?}",
                 observed.len(),
                 expected.len()
             );
@@ -21525,15 +20069,15 @@ pub(crate) mod tests {
             );
             assert!(std::fs::read(&path).unwrap().is_empty());
         }
+        // No terminal, a terminal whose host ended, and one whose program
+        // exited: none has a live program to type into.
         for target in [
             None,
-            Some(Terminal::tmux(
-                "absent-session".into(),
-                terminal.as_ref().unwrap().expect_tmux().pane.clone(),
-            )),
-            Some(Terminal::tmux(
-                terminal.as_ref().unwrap().expect_tmux().tmux_name.clone(),
-                "%999999".into(),
+            Some(HostTerminal::fixed_for_test(crate::hosts::Liveness::Gone)),
+            Some(HostTerminal::fixed_for_test(
+                crate::hosts::Liveness::Exited {
+                    exit: terminal_host::protocol::ChildExit::Code(0),
+                },
             )),
         ] {
             let mut missing = entry_with(target, LastOutcome::Running);
@@ -21557,56 +20101,13 @@ pub(crate) mod tests {
             ),
             ErrorKind::NotFound
         );
-        let dead_name = format!("fh-{}", uuid::Uuid::new_v4());
-        let dead_pane = sup
-            .tmux
-            .create_session(
-                &dead_name,
-                state.path().to_str().unwrap(),
-                80,
-                24,
-                &[],
-                &["/bin/sh".into(), "-c".into(), "exit 0".into()],
-            )
-            .await
-            .unwrap();
-        wait_for_dead_fixture_pane(&sup, "prompt target exited", |pane, _| pane == dead_pane).await;
-        assert!(
-            matches!(sup.tmux.pane_process(&dead_name, &dead_pane).await.unwrap(), TerminalProbe::Owned(process) if process.dead)
-        );
-        let mut dead = entry_with(
-            Some(Terminal::tmux(dead_name, dead_pane)),
-            LastOutcome::Running,
-        );
-        dead.snapshot.kind = AgentKind::Claude;
-        sup.sessions
-            .lock()
-            .await
-            .insert("s1".into(), Arc::new(dead));
-        assert!(sup.prompt_session("s1", "exited target").await.is_err());
-        assert!(std::fs::read(&path).unwrap().is_empty());
-        sup.sessions
-            .lock()
-            .await
-            .insert("s1".into(), Arc::clone(&entry));
-        let agent = terminal.unwrap().expect_tmux().clone();
-        sup.tmux.kill_pane_for_test(&agent.pane).await.unwrap();
-        assert!(matches!(
-            sup.tmux
-                .pane_process(&agent.tmux_name, &agent.pane)
-                .await
-                .unwrap(),
-            TerminalProbe::Gone
-        ));
-        assert!(sup.prompt_session("s1", "dead target").await.is_err());
-        assert!(std::fs::read(&path).unwrap().is_empty());
     }
 
     /// A live raw program that has not enabled bracketed paste is unsafe for
     /// prompt typing even when its stored activity says working. This refusal
-    /// must happen before opening/sending the input client.
+    /// must happen before anything is written to the terminal.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn prompt_delivery_refuses_live_panes_with_paste_mode_off() {
+    async fn prompt_delivery_refuses_live_programs_with_paste_mode_off() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
@@ -21675,17 +20176,13 @@ pub(crate) mod tests {
                     .get(&created.id)
                     .cloned()
                     .expect("session entry");
-                match current
+                current
                     .terminal
                     .as_ref()
                     .expect("agent terminal")
-                    .probe_process(&sup)
-                    .await
+                    .probe()
                     .expect("agent process probe")
-                {
-                    TerminalProbe::Owned(process) => process.live_pid(),
-                    _ => None,
-                }
+                    .live_pid()
             };
             let before = live_pid()
                 .await
@@ -22055,10 +20552,9 @@ pub(crate) mod tests {
                     .terminal
                     .as_ref()
                     .expect("agent terminal")
-                    .probe_process(&sup)
-                    .await
+                    .probe()
                     .expect("agent probe"),
-                TerminalProbe::Owned(process) if !process.dead
+                TerminalProbe::Running(_)
             ),
             "fixture premise: a live agent must reach the ordinary restart path"
         );
@@ -22152,25 +20648,12 @@ pub(crate) mod tests {
         assert!(format!("{refusal:#}").contains("this session cannot be restarted"));
     }
 
-    /// The tmux handles of `entry`'s agent terminal, for a test whose
-    /// fixture session was created on tmux: the shared spelling of that
-    /// assertion about the fixture (it has a terminal, and that terminal is
-    /// tmux's), so a test that needs the pane does not repeat it. A few
-    /// tests still spell the chain out with an `expect` message of their
-    /// own.
-    pub(crate) fn agent_tmux(entry: &SessionEntry) -> TmuxTerminal {
-        entry
-            .terminal
-            .as_ref()
-            .expect("agent terminal")
-            .expect_tmux()
-            .clone()
-    }
-
     /// The one terminal the entry-replacement tests above and
-    /// `service::status`'s classification tests use.
-    pub(crate) fn a_terminal() -> Terminal {
-        Terminal::tmux("fh-1".to_string(), "%0".to_string())
+    /// `service::status`'s classification tests use: a running one, with no
+    /// host behind it (`HostTerminal::fixed_for_test`), so it must be made
+    /// within a tokio runtime.
+    pub(crate) fn a_terminal() -> HostTerminal {
+        HostTerminal::fixed_for_test(crate::hosts::Liveness::Running { child: None })
     }
 
     /// PLAN_M3.md item 10's other reload contract, and the one host-
@@ -22186,11 +20669,11 @@ pub(crate) mod tests {
     /// prior run through its scope (and a restart additionally re-probes
     /// availability for the launch it is about to make).
     ///
-    /// Driven against a real tmux server, like the sibling reload tests
-    /// above, because `reload_sessions` is one pass and this is a property
-    /// of that pass rather than of `launch_scope_unit` in isolation
-    /// (already a one-line pure function with nothing else worth pinning
-    /// on its own).
+    /// Driven through `reload_sessions` because it is one pass and this is a
+    /// property of that pass rather than of `launch_scope_unit` in isolation
+    /// (already a one-line pure function with nothing else worth pinning on
+    /// its own). The row is a host row whose launch no host confirmed, which
+    /// reload keeps launching with no terminal.
     #[farhelm_testtrace::test]
     async fn reload_carries_forward_the_scope_a_stored_launch_recorded() {
         let state = StateDir::new();
@@ -22199,17 +20682,6 @@ pub(crate) mod tests {
             .expect("supervisor");
 
         let scoped_id = uuid::Uuid::new_v4().to_string();
-        sup.tmux
-            .create_session(
-                &session_tmux_name(&scoped_id),
-                "/tmp",
-                80,
-                24,
-                &[],
-                &["sh".to_string(), "-c".to_string(), "sleep 300".to_string()],
-            )
-            .await
-            .expect("create a tmux session directly");
         sup.store
             .insert_session(
                 StoredSession {
@@ -22233,7 +20705,7 @@ pub(crate) mod tests {
                         resume_template: None,
                     },
                     terminal_address: String::new(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: LastOutcome::Launching,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -22903,8 +21375,10 @@ pub(crate) mod tests {
 
     /// Exercise the full admission transaction across the former lock deadline.
     /// The row and mirror must start empty, so either publication missing after
-    /// release is visible. Only the parked-claim interval uses a virtual clock;
-    /// tmux and process inspection before and after it retain their real budgets.
+    /// release is visible. The fresh entry keeps the published entry's terminal,
+    /// whose child is what the report's chain is anchored at. Only the
+    /// parked-claim interval uses a virtual clock; process inspection before
+    /// and after it retains its real budgets.
     async fn assert_report_survives_busy_claim(
         sup: &Arc<Supervisor>,
         id: &str,
@@ -22912,7 +21386,13 @@ pub(crate) mod tests {
         kill_before_release: Option<crate::procs::ProcessIdentity>,
     ) {
         let row = sup.store.session(id).await.unwrap().unwrap();
-        let mut entry = entry_with(None, row.outcome.clone());
+        let terminal = sup
+            .sessions
+            .lock()
+            .await
+            .get(id)
+            .and_then(|published| published.terminal.clone());
+        let mut entry = entry_with(terminal, row.outcome.clone());
         entry.info.id = id.to_string();
         entry.info.agent_kind = row.agent_kind();
         entry.snapshot = IntegrationSnapshot::of(&row.launch);
@@ -22999,8 +21479,7 @@ pub(crate) mod tests {
     async fn claude_report_survives_the_former_claim_deadline() {
         let mut fixture = OmpAdmission::launch().await;
         let id = uuid::Uuid::new_v4().to_string();
-        let peer = fixture.spawn_claude_runtime(&id).await;
-        let sup = fixture.sup.as_ref().unwrap();
+        let sup = Arc::clone(fixture.sup.as_ref().unwrap());
         let integration = program_snapshot("claude");
         sup.store
             .insert_session(
@@ -23018,8 +21497,8 @@ pub(crate) mod tests {
                         agent_kind: AgentKind::Claude,
                         resume_template: integration.resume_template,
                     },
-                    terminal_address: "%0".into(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_address: String::new(),
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -23036,13 +21515,14 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
+        let peer = fixture.spawn_claude_runtime(&id).await;
         let mut report = reported(
             farhelm_proto::ReportVendor::Claude,
             "claude-after-wait".to_string(),
             "clear",
         );
-        report.ancestry = Some(anchored_ancestry(sup, &id, peer).await);
-        assert_report_survives_busy_claim(sup, &id, report, Some(peer)).await;
+        report.ancestry = Some(anchored_ancestry(&sup, &id, peer).await);
+        assert_report_survives_busy_claim(&sup, &id, report, Some(peer)).await;
     }
 
     /// OMP keeps its live ownership checks under the claim, yet contention
@@ -23374,12 +21854,7 @@ pub(crate) mod tests {
             .insert(id.clone(), Arc::clone(&entry));
         sup.capture_now().await;
         assert_eq!(
-            super::super::status::entry_info(
-                &entry,
-                &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default()
-            )
-            .restart_offer,
+            super::super::status::entry_info(&entry).restart_offer,
             RestartOffer::Resume,
             "report-only reconciliation must publish the ready offer users list"
         );
@@ -23415,12 +21890,7 @@ pub(crate) mod tests {
             .expect_err("Restart detects missing summary");
         sup.capture_now().await;
         assert_eq!(
-            super::super::status::entry_info(
-                &entry,
-                &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default()
-            )
-            .restart_offer,
+            super::super::status::entry_info(&entry).restart_offer,
             RestartOffer::NotCaptured,
             "losing either exact file must withdraw the public offer"
         );
@@ -23988,12 +22458,7 @@ pub(crate) mod tests {
             .insert(id.clone(), Arc::clone(&entry));
         sup.capture_now().await;
         assert_eq!(
-            super::super::status::entry_info(
-                &entry,
-                &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default()
-            )
-            .restart_offer,
+            super::super::status::entry_info(&entry).restart_offer,
             RestartOffer::Resume
         );
         let snapshot = sup.session_snapshot(&id).await.unwrap().unwrap();
@@ -24009,12 +22474,7 @@ pub(crate) mod tests {
         assert_eq!(error_kind(&error), ErrorKind::Conflict);
         sup.capture_now().await;
         assert_eq!(
-            super::super::status::entry_info(
-                &entry,
-                &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default()
-            )
-            .restart_offer,
+            super::super::status::entry_info(&entry).restart_offer,
             RestartOffer::NotCaptured
         );
         let withdrawn = sup.session_snapshot(&id).await.unwrap().unwrap();
@@ -24027,12 +22487,12 @@ pub(crate) mod tests {
         );
     }
 
-    /// The OMP proven-admission fixture: a supervisor whose tmux answers
-    /// pane queries from files beside the fake binary — script-relative,
-    /// never through the test process's environment, which this repo
-    /// forbids tests to mutate — and, where the test needs it, a REAL
-    /// Bun-executed entry-shaped runtime that spawns a hook-shaped
-    /// reporter child and publishes its pid. The runtime is launched
+    /// The OMP proven-admission fixture: a supervisor and, where the test
+    /// needs it, a REAL Bun-executed entry-shaped runtime that spawns a
+    /// hook-shaped reporter child and publishes its pid, run either as a
+    /// real terminal host's child published as the session's agent
+    /// terminal ([`Self::start_in_host`]) or directly
+    /// ([`Self::start_runtime`]). The runtime is launched
     /// through an `omp-shim` symlink to the bundle entry, reproducing
     /// the installed `omp` command's shape (the kernel hands Bun the
     /// launched spelling), so the live admission also proves the
@@ -24042,9 +22502,7 @@ pub(crate) mod tests {
     /// claim/CAS discipline, the `/proc` walk over live processes, the
     /// Bun interpreter image, the entry-point and reporter argv, the
     /// asset publish/verify, and the offer computation are all real.
-    /// Stood in are the tmux→pid mapping (the PR-1 framework leg the
-    /// Codex journey covers — the fake answers pane queries with the
-    /// fixture's own live pids) and the vendor session itself (a
+    /// Stood in is the vendor session itself (a
     /// deterministic entry-shaped script instead of the interactive CLI,
     /// whose pinned context semantics the asset-js suite pins against
     /// the real asset). Tests needing the Bun interpreter return early
@@ -24067,9 +22525,13 @@ pub(crate) mod tests {
     /// including timeout, panic, and cancellation paths that never
     /// learn its pid.
     struct OwnedRuntime {
-        child: std::process::Child,
-        /// The group id: `process_group(0)` makes the leader's pid the
-        /// group id, so this is `child.id()` captured at spawn.
+        /// The direct child, for a runtime this test process spawned;
+        /// `None` for one that runs as a terminal host's child
+        /// ([`OmpAdmission::start_in_host`]), which its host reaps.
+        child: Option<std::process::Child>,
+        /// The group id: the leader's pid, which leads its group either
+        /// way (`process_group(0)` here; a host's child leads a session of
+        /// its own).
         group: u32,
     }
 
@@ -24082,9 +22544,35 @@ pub(crate) mod tests {
         /// wait on them — under their bounded `sleep 25`.
         fn teardown(self) {
             kill_process_group(self.group);
-            let mut child = self.child;
-            let _ = child.kill();
-            let _ = child.wait();
+            if let Some(mut child) = self.child {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+
+        /// [`reporter_timeout_diagnostic`] for this runtime, from its child
+        /// when this process owns one, else from the process table.
+        fn timeout_diagnostic(&mut self) -> String {
+            match self.child.as_mut() {
+                Some(child) => reporter_timeout_diagnostic(child),
+                None => {
+                    let pid = self.group;
+                    match crate::procs::read_process(pid) {
+                        Ok(Some((_, _, crate::procs::ProcessState::Running))) => format!(
+                            "the entry script never published its reporter; \
+                             the owned runtime (pid {pid}) is still alive"
+                        ),
+                        Ok(_) => format!(
+                            "the entry script never published its reporter; \
+                             the owned runtime (pid {pid}) had already exited"
+                        ),
+                        Err(error) => format!(
+                            "the entry script never published its reporter; \
+                             the owned runtime (pid {pid}) could not be read: {error}"
+                        ),
+                    }
+                }
+            }
         }
     }
 
@@ -24180,10 +22668,9 @@ pub(crate) mod tests {
     }
 
     impl OmpAdmission {
-        /// The fixture root: entry-shaped runtime, hook-shaped sleeper
-        /// script, fake tmux, and the pane-answer files it reads. The
-        /// current asset is published for real, since admission verifies
-        /// its bytes.
+        /// The fixture root: entry-shaped runtime and hook-shaped sleeper
+        /// script. The current asset is published for real, since admission
+        /// verifies its bytes.
         async fn launch() -> Self {
             let state = StateDir::new();
             let scratch = farhelm_teststate::tempdir().expect("fixture directory");
@@ -24256,48 +22743,15 @@ await new Promise(() => {});
                 root.join("omp-shim-delayed"),
             )
             .expect("delayed entry symlink");
-            let fake_tmux = root.join("fake-tmux.sh");
-            std::fs::write(
-                &fake_tmux,
-                r#"#!/bin/sh
-# Fake tmux for the OMP admission tests. Version probes answer with the
-# pinned shape; pane queries answer from files beside this script, written
-# per test with the fixture's own live pids; everything else succeeds.
-here=$(dirname "$0")
-# The driver prefixes every invocation with `-u -S <socket> -f <config>`,
-# so the command word is found by scanning, never positionally.
-cmd=""
-for arg in "$@"; do
-  case "$arg" in
-    -V) echo "tmux 3.7c"; exit 0;;
-    *version*) echo "3.7c"; exit 0;;
-    list-panes|display-message) cmd="$arg";;
-  esac
-done
-if [ "$cmd" = "list-panes" ]; then cat "$here/panes_answer"; exit 0; fi
-if [ "$cmd" = "display-message" ]; then cat "$here/pane_answer"; exit 0; fi
-exit 0
-"#,
-            )
-            .expect("fake tmux");
             use std::os::unix::fs::PermissionsExt;
-            for path in [root.join("internal"), fake_tmux.clone()] {
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                    .expect("fixture executable");
-            }
-            let sup = Supervisor::new_with_seams(
-                state.path(),
-                dummy_exe(),
-                SupervisorTimeouts::default(),
-                SupervisorSeams {
-                    tmux_program: fake_tmux,
-                    ..SupervisorSeams::default()
-                },
+            std::fs::set_permissions(
+                root.join("internal"),
+                std::fs::Permissions::from_mode(0o755),
             )
-            .await
-            .expect("supervisor");
-            // The fake answers for a server that does not exist.
-            sup.tmux.forget_presence_for_test();
+            .expect("fixture executable");
+            let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+                .await
+                .expect("supervisor");
             crate::pi_extension::materialize_asset(state.path(), &crate::pi_extension::OMP_ASSET)
                 .await
                 .expect("asset publish");
@@ -24309,43 +22763,85 @@ exit 0
             }
         }
 
-        /// Point the fake pane answer at one live pid under one session.
-        fn write_pane_answer(&self, pid: u32, tmux_name: &str) {
-            std::fs::write(
-                self.scratch.path().join("pane_answer"),
-                format!("{pid} 0 {tmux_name}\n"),
+        /// Run `argv` (in the fixture root, with this test process's
+        /// environment) as the child of a real terminal host started from
+        /// this test binary (`crate::hosts::test_program`) in the fixture's
+        /// state directory, and publish that host as session `id`'s agent
+        /// terminal, as an agent runs in its session's host. The anchor a
+        /// report's recorded chain must reach is then that child
+        /// (`Supervisor::owned_terminal_anchor`). The child is owned from
+        /// the start, like [`Self::start_runtime`]'s: a host's child leads a
+        /// session of its own, so its group is the cleanup boundary, and
+        /// the host itself is ended with the state directory.
+        async fn start_in_host(&mut self, id: &str, argv: Vec<std::ffi::OsString>) -> u32 {
+            let sup = Arc::clone(self.sup.as_ref().expect("supervisor"));
+            let child = crate::hosts::ChildSpec {
+                argv,
+                cwd: self.scratch.path().to_path_buf(),
+                env: std::env::vars_os().collect(),
+                size: terminal_host::protocol::Size { cols: 80, rows: 24 },
+                journal_cap: crate::hosts::DEFAULT_JOURNAL_CAP,
+                initial_snapshot: None,
+            };
+            let tag = crate::hosts::HostTag {
+                session_id: id.to_string(),
+                created_ns: crate::hosts::tag::creation_stamp(),
+                role: crate::hosts::HostRole::Agent { generation: 0 },
+            };
+            let spawned = crate::hosts::spawn_host(
+                &crate::hosts::test_program::unit_test_host_program(),
+                self.state.path(),
+                child,
+                &tag,
             )
-            .expect("pane answer");
+            .await
+            .expect("start the runtime's host");
+            let host = crate::hosts::HostTerminal::adopt(
+                &spawned.socket,
+                crate::hosts::Adoption::Fresh,
+                crate::hosts::HostTerminalOptions::default(),
+            )
+            .await
+            .expect("adopt the runtime's host");
+            let pid = host
+                .live_root()
+                .expect("read the host's child")
+                .expect("the host's child runs")
+                .pid;
+            self.runtimes.push(OwnedRuntime {
+                child: None,
+                group: pid,
+            });
+            let row = sup
+                .store
+                .session(id)
+                .await
+                .expect("read the seeded row")
+                .expect("the session is seeded before its runtime starts");
+            let mut entry = entry_with(Some(host), LastOutcome::Running);
+            entry.info.id = id.to_string();
+            entry.snapshot = crate::agent_kind::IntegrationSnapshot::of(&row.launch);
+            entry.generation = row.generation;
+            sup.sessions
+                .lock()
+                .await
+                .insert(id.to_string(), Arc::new(entry));
+            pid
         }
 
-        /// Answer a `list-panes` sweep with one live pane for the
-        /// publication-gap path, which recovers the pane from tmux.
-        /// The zero before the session name is the fact query's tab-marker
-        /// presence flag; omitting it makes discovery reject the whole row.
-        fn write_panes_list(&self, tmux_name: &str) {
-            std::fs::write(
-                self.scratch.path().join("panes_answer"),
-                format!("%0 @0 0 0 s 0 {tmux_name}\n"),
-            )
-            .expect("panes answer");
-        }
-
-        /// Spawn the entry-shaped runtime and wait for its hook-shaped
-        /// reporter, returning the reporter's process identity (what a hook
-        /// at that process would record its ancestry from).
-        /// The pane answer names the runtime under `id`'s session. A
-        /// missing Bun interpreter is a `SKIPPED` early return, never a
-        /// failure: the substrate is absent, not the proof.
+        /// Spawn the entry-shaped runtime as session `id`'s agent, in a host
+        /// ([`Self::start_in_host`]), and wait for its hook-shaped reporter,
+        /// returning the reporter's process identity (what a hook at that
+        /// process would record its ancestry from). A missing Bun
+        /// interpreter is a `SKIPPED` early return, never a failure: the
+        /// substrate is absent, not the proof.
         async fn spawn_runtime(&mut self, id: &str) -> Option<crate::procs::ProcessIdentity> {
-            let peer = self.spawn_one().await?;
-            let runtime_pid = self.runtimes.last().expect("runtime child").child.id();
-            self.write_pane_answer(runtime_pid, &format!("fh-{id}"));
-            Some(peer)
+            self.spawn_one(id).await
         }
 
         /// Spawn a shell-shaped foreground chain for Claude's positional
         /// admission without requiring the Bun substrate used by OMP.
-        /// The inner hook process is the pane process's direct child, so the
+        /// The inner hook process is the host child's direct child, so the
         /// test can kill it while a report waits and prove attribution ran
         /// before the claim.
         async fn spawn_claude_runtime(&mut self, id: &str) -> crate::procs::ProcessIdentity {
@@ -24355,26 +22851,9 @@ exit 0
                 "sh internal hook --vendor claude & peer=$!; echo $peer > {}; wait",
                 peer_file.display()
             );
-            let mut command = std::process::Command::new("sh");
-            command
-                .arg("-c")
-                .arg(script)
-                .current_dir(&root)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            #[cfg(unix)]
-            {
-                use std::os::unix::process::CommandExt as _;
-                command.process_group(0);
-            }
-            let child = command.spawn().expect("spawn the Claude shell chain");
-            let pane_pid = child.id();
-            self.runtimes.push(OwnedRuntime {
-                child,
-                group: pane_pid,
-            });
-            self.write_pane_answer(pane_pid, &format!("fh-{id}"));
+            let pane_pid = self
+                .start_in_host(id, vec!["sh".into(), "-c".into(), script.into()])
+                .await;
             let peer_pid = Self::await_reporter(
                 &peer_file,
                 std::time::Instant::now() + std::time::Duration::from_secs(5),
@@ -24389,13 +22868,13 @@ exit 0
             assert_eq!(state, crate::procs::ProcessState::Running);
             assert_eq!(
                 parent, pane_pid,
-                "Claude reporter is the pane's direct child"
+                "Claude reporter is the host child's direct child"
             );
             peer
         }
 
-        /// Start a nested OMP runtime under the pane's existing runtime.
-        /// Its reporter reaches the pane, so rejection must come from the
+        /// Start a nested OMP runtime under the agent's existing runtime.
+        /// Its reporter reaches the anchor, so rejection must come from the
         /// nested-runtime corridor rather than an unrelated process tree.
         /// The parent's owned group covers the child before pid publication,
         /// including a timeout or failed ancestry premise below.
@@ -24405,7 +22884,7 @@ exit 0
             std::fs::create_dir(&nested).expect("nested runtime directory");
             std::fs::copy(root.join("internal"), nested.join("internal"))
                 .expect("nested reporter script");
-            let pane_pid = self.runtimes.first().expect("pane runtime").child.id();
+            let pane_pid = self.runtimes.first().expect("agent runtime").group;
             std::fs::write(root.join("start-nested"), b"").expect("request nested runtime");
             let reporter_pid = Self::await_reporter(
                 &nested.join("reporter.pid"),
@@ -24413,10 +22892,10 @@ exit 0
             )
             .await;
             let Some(reporter_pid) = reporter_pid else {
-                let parent = self.runtimes.first_mut().expect("owned pane runtime");
+                let parent = self.runtimes.first_mut().expect("owned agent runtime");
                 panic!(
                     "nested reporter publication failed; {}",
-                    reporter_timeout_diagnostic(&mut parent.child)
+                    parent.timeout_diagnostic()
                 );
             };
             let (runtime_pid, _, state) = crate::procs::read_process(reporter_pid)
@@ -24429,11 +22908,11 @@ exit 0
             assert_eq!(state, crate::procs::ProcessState::Running);
             assert_eq!(
                 parent_pid, pane_pid,
-                "nested runtime must descend from the pane"
+                "nested runtime must descend from the agent's runtime"
             );
             let (_, _, state) = crate::procs::read_process(pane_pid)
-                .expect("read pane runtime")
-                .expect("pane runtime exists");
+                .expect("read the agent's runtime")
+                .expect("the agent's runtime exists");
             assert_eq!(state, crate::procs::ProcessState::Running);
             crate::procs::ProcessIdentity::read(reporter_pid)
                 .expect("nested reporter has a live identity")
@@ -24449,15 +22928,28 @@ exit 0
         /// that depends on it: the reporter must be alive AND parented
         /// under the runtime, or the chain the walk must find does not
         /// exist and the test would refuse for the wrong reason.
-        async fn spawn_one(&mut self) -> Option<crate::procs::ProcessIdentity> {
+        async fn spawn_one(&mut self, id: &str) -> Option<crate::procs::ProcessIdentity> {
             if !require_bun().await {
                 return None;
             }
-            let (runtime_pid, pid_file) = self.start_runtime("omp-shim");
+            let root = self.scratch.path().to_path_buf();
+            let runtime_pid = self
+                .start_in_host(
+                    id,
+                    vec![
+                        "bun".into(),
+                        root.join("omp-shim").into(),
+                        root.clone().into(),
+                        "--resume".into(),
+                        root.join("conv.jsonl").into(),
+                    ],
+                )
+                .await;
+            let pid_file = root.join("reporter.pid");
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
             let Some(reporter_pid) = Self::await_reporter(&pid_file, deadline).await else {
                 let runtime = self.runtimes.last_mut().expect("the owned runtime");
-                panic!("{}", reporter_timeout_diagnostic(&mut runtime.child));
+                panic!("{}", runtime.timeout_diagnostic());
             };
             let (ppid, _, liveness) = crate::procs::read_process(reporter_pid)
                 .expect("read the reporter")
@@ -24514,7 +23006,7 @@ exit 0
             // Owned from the first instruction after the spawn.
             // `process_group(0)` makes the leader's pid the group id.
             self.runtimes.push(OwnedRuntime {
-                child,
+                child: Some(child),
                 group: runtime_pid,
             });
             (runtime_pid, root.join("reporter.pid"))
@@ -24561,15 +23053,16 @@ exit 0
 
         /// Seed one OMP session row: the marker and program carry the
         /// launch provenance (both `None` for a pre-upgrade launch), the
-        /// pane selects direct recovery (`%0`) or the publication-gap
-        /// path (`""`), and the template is the future resume command —
-        /// never the launch program, which is what `program` seeds.
+        /// row's terminal address is `address`, and the template is the
+        /// future resume command — never the launch program, which is what
+        /// `program` seeds. A host row: its agent terminal is the host
+        /// [`Self::start_in_host`] publishes.
         async fn seed_omp_session(
             &self,
             id: &str,
             marker: Option<&str>,
             program: Option<&str>,
-            pane: &str,
+            address: &str,
             template: Vec<String>,
         ) {
             self.sup
@@ -24591,8 +23084,8 @@ exit 0
                             agent_kind: farhelm_proto::AgentKind::Omp,
                             resume_template: Some(template),
                         },
-                        terminal_address: pane.into(),
-                        terminal_kind: crate::store::TerminalKind::Tmux,
+                        terminal_address: address.into(),
+                        terminal_kind: crate::store::TerminalKind::Host,
                         outcome: LastOutcome::Exited {
                             exit_code: Some(0),
                             annotation: None,
@@ -25443,7 +23936,7 @@ exit 0
         // Premise: the parent stays owned AND live while the sibling's
         // rejection is measured — a dead parent would refuse the child
         // reports for the wrong reason (no chain to walk past).
-        let parent_pid = fixture.runtimes.first().expect("parent runtime").child.id();
+        let parent_pid = fixture.runtimes.first().expect("parent runtime").group;
         let (_, _, liveness) = crate::procs::read_process(parent_pid)
             .expect("read the parent runtime")
             .expect("the parent runtime is alive");
@@ -25530,47 +24023,6 @@ exit 0
         assert_eq!(fixture.binding(&id).await, (Some(parent_token), 1));
     }
 
-    /// A parent report before publication succeeds through pane recovery:
-    /// with no pane id on the row, the supervisor finds the owned pane
-    /// through the tmux sweep and attributes the runtime beneath it.
-    ///
-    /// Why this test matters: it re-homes the legacy before-publication
-    /// coverage under the proof — startup reports during the
-    /// publication gap keep working, now with ownership evidence.
-    #[farhelm_testtrace::test]
-    async fn omp_publication_gap_parent_report_succeeds() {
-        let mut fixture = OmpAdmission::launch().await;
-        let id = uuid::Uuid::new_v4().to_string();
-        fixture
-            .seed_omp_session(
-                &id,
-                Some(crate::pi_extension::OMP_ASSET.file_name),
-                Some("omp"),
-                "",
-                vec![
-                    "omp".into(),
-                    "--resume".into(),
-                    crate::agent_kind::CONVERSATION_PLACEHOLDER.into(),
-                ],
-            )
-            .await;
-        fixture.write_panes_list(&format!("fh-{id}"));
-        let file = fixture.session_file("gap.jsonl", "omp-parent");
-        let Some(peer) = fixture.spawn_runtime(&id).await else {
-            return;
-        };
-        let token = fixture.locator_token("omp-parent", Some(&file));
-        fixture
-            .report(&id, token.clone(), "session_start", Some(peer))
-            .await
-            .expect("the publication-gap report admits");
-        assert_eq!(fixture.binding(&id).await, (Some(token), 1));
-        assert_eq!(
-            fixture.offer(&id).await,
-            farhelm_proto::RestartOffer::Resume
-        );
-    }
-
     /// An admitted capture outlives its owner and a supervisor reload:
     /// after the runtime and reporter are gone and the supervisor is
     /// reopened over the same state dir, the `Resume` offer stands on
@@ -25613,19 +24065,9 @@ exit 0
             "the handoff test must release a supervisor that owns its state dir"
         );
         drop(old);
-        let reopened = Supervisor::new_with_seams(
-            fixture.state.path(),
-            dummy_exe(),
-            SupervisorTimeouts::default(),
-            SupervisorSeams {
-                tmux_program: fixture.scratch.path().join("fake-tmux.sh"),
-                ..SupervisorSeams::default()
-            },
-        )
-        .await
-        .expect("reopened supervisor");
-        // The fake answers for a server that does not exist.
-        reopened.tmux.forget_presence_for_test();
+        let reopened = Supervisor::new_with_exe(fixture.state.path(), dummy_exe())
+            .await
+            .expect("reopened supervisor");
         assert!(
             reopened.owns_state_dir(),
             "the reopened supervisor must own the state dir, or the handoff exercised read-only mode"
@@ -25741,13 +24183,11 @@ exit 0
         // The diagnostic reports the owned runtime as still alive —
         // the wait failed for lack of publication, not for lack of a
         // runtime to publish it.
-        let diagnostic = reporter_timeout_diagnostic(
-            &mut fixture
-                .runtimes
-                .last_mut()
-                .expect("the owned runtime")
-                .child,
-        );
+        let diagnostic = fixture
+            .runtimes
+            .last_mut()
+            .expect("the owned runtime")
+            .timeout_diagnostic();
         assert!(
             diagnostic.contains("still alive"),
             "the timeout diagnostic must report runtime liveness: {diagnostic}"
@@ -26273,9 +24713,9 @@ exit 1
         std::fs::write(&trace, "1700000000 acked\n").expect("plant the doomed trace");
         std::fs::write(&survivor, "1700000000 acked\n").expect("plant the bystander's trace");
 
-        // No terminal, so the teardown skips tmux entirely: what is under
-        // test is the file cleanup that runs after the row is gone, and a
-        // real pane would only add a tmux server to the test.
+        // No terminal, so the teardown ends no host: what is under test is
+        // the file cleanup that runs after the row is gone, and a real
+        // terminal would only add a host to the test.
         let mut entry = entry_with(None, LastOutcome::Running);
         entry.info.id = doomed.to_string();
         // `TeardownError` carries no `Debug`, so the assertion says what
@@ -26284,7 +24724,7 @@ exit 1
             sup.teardown_session(&entry, doomed, test_admission(&sup).await)
                 .await
                 .is_ok(),
-            "a terminal-less session tears down without tmux"
+            "a terminal-less session tears down without a terminal"
         );
 
         assert!(
@@ -26471,39 +24911,19 @@ exit 1
     /// record fails, nothing may be killed, and SPEC.md requires the failure
     /// to be reported rather than a "stopped" that leaves the agent running.
     /// A terminal-less fixture exercises classification instead, even though
-    /// both failures say "nothing was killed". This direct owned pane pins
-    /// the intent-before-signal transaction with an actual survivor identity.
+    /// both failures say "nothing was killed". This live test host's child
+    /// pins the intent-before-signal transaction with an actual survivor
+    /// identity.
     #[farhelm_testtrace::test]
     async fn a_live_stop_that_cannot_record_its_intent_leaves_the_agent_running() {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
             .expect("supervisor");
-        let tmux_name = "fh-live-stop";
-        let pane = sup
-            .tmux
-            .create_session(
-                tmux_name,
-                "/tmp",
-                80,
-                24,
-                &[],
-                &["sleep".into(), "300".into()],
-            )
-            .await
-            .expect("create a live pane directly");
-        let TerminalProbe::Owned(process) = sup
-            .tmux
-            .pane_process(tmux_name, &pane)
-            .await
-            .expect("probe the live pane")
-        else {
-            panic!("fixture premise: the pane belongs to this session");
+        let (host, _test_host) = crate::hosts::terminal::test_host::adopt_test_host(None).await;
+        let TerminalProbe::Running(process_pid) = host.probe().expect("probe the live host") else {
+            panic!("fixture premise: the host reads as this session's, with its agent live");
         };
-        assert!(!process.dead, "fixture premise: the agent pane is live");
-        let process_pid = process
-            .live_pid()
-            .expect("fixture premise: tmux reports the live agent pane's pid");
         let (_, start, process_state) = crate::procs::read_process(process_pid)
             .expect("read the live agent identity")
             .expect("the agent exists");
@@ -26530,8 +24950,8 @@ exit 1
                         agent_kind: farhelm_proto::AgentKind::Generic,
                         resume_template: None,
                     },
-                    terminal_address: pane.clone(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_address: host.recorded_address().to_string(),
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -26544,10 +24964,7 @@ exit 1
             .expect("insert the live agent row");
         sup.sessions.lock().await.insert(
             "s1".into(),
-            Arc::new(entry_with(
-                Some(Terminal::tmux(tmux_name.into(), pane)),
-                LastOutcome::Running,
-            )),
+            Arc::new(entry_with(Some(host), LastOutcome::Running)),
         );
         let conn = rusqlite::Connection::open(state.path().join("supervisor.db"))
             .expect("open the database directly");
@@ -26608,7 +25025,7 @@ exit 1
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not run the launch shim");
         sup.store
             .insert_session(
                 StoredSession {
@@ -26798,9 +25215,7 @@ exit 1
     /// directory while it closes its output clients in order, and a
     /// successor started in that window used to give up at once. Pinned:
     /// a waiting claim that meets a held, unanswered lock keeps trying,
-    /// and takes the lock itself (the `true` half of the claim, which the
-    /// startup reap of stale tmux clients depends on) once the predecessor
-    /// lets go. The predecessor releases only from inside `on_busy`, so the
+    /// and takes the lock once the predecessor lets go. The predecessor releases only from inside `on_busy`, so the
     /// test proves the claim really met contention instead of racing past
     /// it, and needs no timing of its own.
     #[farhelm_testtrace::test]
@@ -26808,7 +25223,7 @@ exit 1
         let dir = tempfile::tempdir().expect("state dir");
         let predecessor = std::sync::Mutex::new(Some(hold_state_dir_lock(dir.path())));
         let busy = std::sync::atomic::AtomicUsize::new(0);
-        let (_, newly_acquired) =
+        let _claim =
             StateDirOwnership::claim_waiting_observed(dir.path(), Duration::from_secs(60), || {
                 busy.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 predecessor.lock().unwrap().take();
@@ -26820,7 +25235,6 @@ exit 1
             busy.load(std::sync::atomic::Ordering::SeqCst) >= 1,
             "the claim must have met the held lock before taking it"
         );
-        assert!(newly_acquired, "the successor took the OS lock itself");
     }
 
     /// A predecessor that never releases the directory and never answers
@@ -26948,7 +25362,7 @@ exit 1
             drop(stream);
         });
         let busy = std::sync::atomic::AtomicUsize::new(0);
-        let (_, newly_acquired) =
+        let _claim =
             StateDirOwnership::claim_waiting_observed(dir.path(), Duration::from_secs(60), || {
                 busy.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 predecessor.lock().unwrap().take();
@@ -26965,7 +25379,6 @@ exit 1
             busy.load(std::sync::atomic::Ordering::SeqCst) >= 1,
             "the claim must have met the held lock and taken the waiting branch"
         );
-        assert!(newly_acquired, "the successor took the OS lock itself");
     }
 
     /// A holder that completes the hello, or refuses it for a protocol
@@ -27115,7 +25528,6 @@ exit 1
         let sup = Supervisor::new_for_startup(
             state.path(),
             SupervisorStartup {
-                tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
                 agent_hooks: crate::agent_kind::AgentHooks::default(),
                 agent_instructions: crate::agent_kind::AgentInstructions::default(),
                 boot_id_file: None,
@@ -27167,8 +25579,8 @@ exit 1
     ///
     /// The scenario is an ordinary handoff — a candidate constructing
     /// while the incumbent is still serving. Its reload sees the
-    /// incumbent's sessions and, with a tmux server that knows nothing
-    /// about this row, would conclude "exited, unknown code" for every one
+    /// incumbent's sessions and, with no host it could adopt for this row,
+    /// would conclude "exited, unknown code" for every one
     /// of them. Writing that would be permanent (terminal outcomes are
     /// sticky) and wrong (the incumbent's agent is running), so the
     /// candidate classifies for its own map and writes nothing.
@@ -27288,7 +25700,7 @@ exit 1
         // Theme D of the M6.75 review-swarm batch: a claimless construction
         // must perform NO durable write, and minting a host identity is one
         // — exactly like the reconciliation checked below, just quieter,
-        // since nothing here observes tmux or sessions to notice it. Before
+        // since nothing here observes terminals or sessions to notice it. Before
         // the fix, `ensure_host_identity` ran unconditionally regardless of
         // `ownership`, so a losing racer against a genuinely fresh install
         // would durably mint an identity it had no standing to write.
@@ -27325,12 +25737,7 @@ exit 1
             "the candidate's map holds what is durable, not an unwritten conclusion"
         );
         assert_eq!(
-            session_status(
-                &entry,
-                &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default()
-            )
-            .0,
+            session_status(&entry).0,
             SessionStatus::Exited { exit_code: None },
             "it still classifies honestly for its own replies"
         );
@@ -27465,8 +25872,7 @@ exit 1
 
     /// Serve `sup` in an abandoned task and wait until its socket answers,
     /// the point by which [`Supervisor::serve`] has published the Running
-    /// record. The task is returned so the caller can abort it; `StateDir`'s
-    /// drop reaps the tmux server.
+    /// record. The task is returned so the caller can abort it.
     pub(crate) async fn serve_until_answering(
         sup: &Arc<Supervisor>,
     ) -> tokio::task::JoinHandle<anyhow::Result<()>> {
@@ -27561,20 +25967,17 @@ exit 1
         served.abort();
     }
 
-    /// Outside the layout nothing changes: sessions get the supervisor's
-    /// own program, as before. A Running record left by an earlier
-    /// supervisor from the layout is removed when this one serves, so the
-    /// forwarder in an older session sends its commands to the Installed
-    /// version rather than to one that is no longer running.
-    /// An orderly stop waits, briefly, for the windows it just started to
-    /// hold their version, and counts only a "held" mark that names the
-    /// window's own pane process. This is the design's narrowing of the
-    /// session-start gap: without it, quitting Farhelm right after starting
-    /// a session drops the app's and the supervisor's holds before the new
-    /// window's keeper exists. A mark with another pid (left by an earlier
-    /// attempt) must not count, and a window that is gone needs no wait.
+    /// The stop's wait covers a launch that is still starting its terminal
+    /// when the wait begins.
+    ///
+    /// Why: a session started in the same instant as a quit must get the
+    /// same narrowing of its start gap as one started a moment earlier
+    /// (design, section 1), or an install could remove the version it needs.
+    /// Spec: with a launch counted as starting before the wait begins, which
+    /// registers against a running test host and writes the host child's
+    /// mark only after the wait has begun, the wait settles.
     #[farhelm_testtrace::test]
-    async fn an_orderly_stop_waits_for_new_windows_to_hold_their_version() {
+    async fn the_stop_wait_covers_launches_still_starting() {
         let state = StateDir::new();
         let program = state
             .path()
@@ -27582,97 +25985,8 @@ exit 1
         let sup = Supervisor::new_with_exe(state.path(), program)
             .await
             .expect("supervisor");
-        let name = "fh-hold-wait";
-        let pane = sup
-            .tmux
-            .create_session(
-                name,
-                "/",
-                80,
-                24,
-                &[],
-                &["sh".to_string(), "-c".to_string(), "sleep 60".to_string()],
-            )
-            .await
-            .expect("a window standing in for a new session's");
-        let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
-            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                pid: Some(pid),
-                dead: false,
-            }) => pid,
-            other => panic!("fixture: the window must be running: {other:?}"),
-        };
-        let spec = crate::launch::spec_path_for_launch(state.path(), "s", 0);
-        let held = crate::session_hold::held_mark_path(&spec);
-        std::fs::create_dir_all(spec.parent().unwrap()).expect("launch dir");
-        let short = Duration::from_millis(300);
-
-        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
-        assert!(
-            !sup.wait_for_pending_holds(short).await,
-            "no mark yet: the wait runs out"
-        );
-
-        std::fs::write(&held, format!("{}\n", pane_pid + 1)).expect("a stale mark");
-        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
-        assert!(
-            !sup.wait_for_pending_holds(short).await,
-            "a mark naming another process does not count"
-        );
-
-        std::fs::write(&held, format!("{pane_pid}\n")).expect("this window's mark");
-        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
-        assert!(
-            sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
-            "the window's own mark settles it"
-        );
-
-        std::fs::remove_file(&held).expect("clear the mark");
-        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
-        sup.tmux.kill_session(name).await.expect("close the window");
-        assert!(
-            sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
-            "a window that is gone needs no wait"
-        );
-    }
-
-    /// The stop's wait is bounded even when tmux does not answer, and it
-    /// covers a launch that is still creating its window when the wait
-    /// begins. Both protect promises the design makes: a quit must not hang
-    /// on a wedged tmux server (each probe is cut off at what is left of the
-    /// budget, and its client killed), and a session started in the same
-    /// instant as a quit gets the same narrowing as one started a moment
-    /// earlier. The non-answering server is this test's own private one,
-    /// stopped with SIGSTOP and resumed by a guard whatever happens.
-    #[farhelm_testtrace::test]
-    async fn the_stop_wait_is_bounded_and_covers_launches_still_starting() {
-        let state = StateDir::new();
-        let program = state
-            .path()
-            .join("Farhelm.app/Contents/Versions/9.9.9/farhelm");
-        let sup = Supervisor::new_with_exe(state.path(), program)
-            .await
-            .expect("supervisor");
-        let name = "fh-hold-bound";
-        let pane = sup
-            .tmux
-            .create_session(
-                name,
-                "/",
-                80,
-                24,
-                &[],
-                &["sh".to_string(), "-c".to_string(), "sleep 60".to_string()],
-            )
-            .await
-            .expect("a window standing in for a new session's");
-        let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
-            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                pid: Some(pid),
-                dead: false,
-            }) => pid,
-            other => panic!("fixture: the window must be running: {other:?}"),
-        };
+        let (host, test_host) = crate::hosts::terminal::test_host::adopt_test_host(None).await;
+        let child = test_host.child_pid();
         let spec = crate::launch::spec_path_for_launch(state.path(), "s", 0);
         std::fs::create_dir_all(spec.parent().unwrap()).expect("launch dir");
 
@@ -27685,16 +25999,15 @@ exit 1
         let register = {
             let sup = Arc::clone(&sup);
             let spec = spec.clone();
-            let pane = pane.clone();
             tokio::spawn(async move {
                 // sleep-ok: scheduling stimulus; the launch registers after the wait has begun.
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 std::fs::write(
                     crate::session_hold::held_mark_path(&spec),
-                    format!("{pane_pid}\n"),
+                    format!("{child}\n"),
                 )
-                .expect("the window's mark");
-                sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane));
+                .expect("the host child's mark");
+                sup.track_pending_hold(&spec, host);
                 drop(starting);
             })
         };
@@ -27703,44 +26016,14 @@ exit 1
             "the launch that was still starting is waited for and settles"
         );
         register.await.expect("registration task");
-
-        // A wedged tmux server: the probe must give up at the budget.
-        std::fs::remove_file(crate::session_hold::held_mark_path(&spec)).expect("clear the mark");
-        sup.track_pending_hold(&spec, Terminal::tmux(name.to_string(), pane.clone()));
-        let (server, _, _) = crate::procs::read_process(pane_pid)
-            .expect("read the window's process")
-            .expect("the window's process exists");
-        struct Resume(i32);
-        impl Drop for Resume {
-            fn drop(&mut self) {
-                // SAFETY: resuming this test's own stopped tmux server.
-                unsafe { libc::kill(self.0, libc::SIGCONT) };
-            }
-        }
-        let server = i32::try_from(server).expect("pid");
-        // SAFETY: stopping this test's own private tmux server, which the
-        // guard below resumes.
-        assert_eq!(unsafe { libc::kill(server, libc::SIGSTOP) }, 0);
-        let _resume = Resume(server);
-        let budget = Duration::from_millis(500);
-        let started = tokio::time::Instant::now();
-        assert!(
-            !sup.wait_for_pending_holds(budget).await,
-            "an unanswered probe does not settle a launch"
-        );
-        let took = started.elapsed();
-        assert!(
-            took < budget + Duration::from_secs(2),
-            "the wait stayed near its budget even with tmux stopped: {took:?}"
-        );
     }
 
     /// A terminal tab's window starts the tab helper through the app's
     /// forwarder in the version layout, and through the supervisor's own
     /// program outside it.
     ///
-    /// Why: tmux can start a tab's window after the supervisor that asked
-    /// for it has stopped, so a window naming the version's program directly
+    /// Why: a tab's login shell can reach the helper after the supervisor
+    /// that opened it has stopped, so a tab naming the version's program directly
     /// would run it unheld until the helper's own lock, and an install could
     /// remove that version in between; the forwarder claims the version
     /// before starting it (design, section 1: using a version means holding
@@ -27810,106 +26093,11 @@ exit 1
         );
     }
 
-    /// A launch that registers while the stop's wait is probing another
-    /// one, and stops counting as starting before that probe answers, is
-    /// still waited for.
-    ///
-    /// Why: the wait used to end as soon as its own list had settled and
-    /// the starting count read zero, without looking at the queue again,
-    /// so such a launch went unexamined and the stop returned at once
-    /// instead of narrowing that session's start gap (design, section 1).
-    /// The tmux server is stopped so the first probe is still running when
-    /// the second launch registers; the queue holding exactly that one
-    /// launch at that moment proves the wait had already taken the first.
-    #[farhelm_testtrace::test]
-    async fn the_stop_wait_sees_a_launch_registered_during_another_probe() {
-        let state = StateDir::new();
-        let program = state
-            .path()
-            .join("Farhelm.app/Contents/Versions/9.9.9/farhelm");
-        let sup = Supervisor::new_with_exe(state.path(), program)
-            .await
-            .expect("supervisor");
-        let name = "fh-hold-handover";
-        let pane = sup
-            .tmux
-            .create_session(
-                name,
-                "/",
-                80,
-                24,
-                &[],
-                &["sh".to_string(), "-c".to_string(), "sleep 60".to_string()],
-            )
-            .await
-            .expect("a window standing in for the new sessions'");
-        let pane_pid = match sup.tmux.pane_process(name, &pane).await.expect("probe") {
-            TerminalProbe::Owned(crate::terminal_process::TerminalProcess {
-                pid: Some(pid),
-                dead: false,
-            }) => pid,
-            other => panic!("fixture: the window must be running: {other:?}"),
-        };
-        let first = crate::launch::spec_path_for_launch(state.path(), "a", 0);
-        let second = crate::launch::spec_path_for_launch(state.path(), "b", 0);
-        std::fs::create_dir_all(first.parent().unwrap()).expect("launch dir");
-        // The first launch has held: it settles as soon as tmux answers.
-        std::fs::write(
-            crate::session_hold::held_mark_path(&first),
-            format!("{pane_pid}\n"),
-        )
-        .expect("the first window's mark");
-        let starting = sup
-            .starting_launch()
-            .expect("launches are open before the stop's wait")
-            .expect("the versioned layout counts launches");
-        sup.track_pending_hold(&first, Terminal::tmux(name.to_string(), pane.clone()));
-
-        let (server, _, _) = crate::procs::read_process(pane_pid)
-            .expect("read the window's process")
-            .expect("the window's process exists");
-        let server = i32::try_from(server).expect("pid");
-        struct Resume(i32);
-        impl Drop for Resume {
-            fn drop(&mut self) {
-                // SAFETY: resuming this test's own stopped tmux server.
-                unsafe { libc::kill(self.0, libc::SIGCONT) };
-            }
-        }
-        // SAFETY: stopping this test's own private tmux server, which the
-        // guard below and the registering task resume.
-        assert_eq!(unsafe { libc::kill(server, libc::SIGSTOP) }, 0);
-        let _resume = Resume(server);
-        let register = {
-            let sup = Arc::clone(&sup);
-            let pane = pane.clone();
-            tokio::spawn(async move {
-                // sleep-ok: scheduling stimulus; the second launch registers while the wait is blocked in the first probe.
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                sup.track_pending_hold(&second, Terminal::tmux(name.to_string(), pane));
-                let queued = sup
-                    .pending_holds
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .len();
-                drop(starting);
-                // SAFETY: resuming this test's own stopped tmux server.
-                unsafe { libc::kill(server, libc::SIGCONT) };
-                queued
-            })
-        };
-        let settled = sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await;
-        let queued = register.await.expect("registration task");
-        assert_eq!(
-            queued, 1,
-            "fixture premise: the wait had taken the first launch before the second registered"
-        );
-        assert!(
-            !settled,
-            "the second launch never held, so the wait runs to its budget rather than ending early"
-        );
-    }
-
+    /// Outside the layout nothing changes: sessions get the supervisor's
+    /// own program, as before. A Running record left by an earlier
+    /// supervisor from the layout is removed when this one serves, so the
+    /// forwarder in an older session sends its commands to the Installed
+    /// version rather than to one that is no longer running.
     #[farhelm_testtrace::test]
     async fn a_supervisor_outside_the_layout_keeps_its_program_and_clears_the_record() {
         let state = StateDir::new();
@@ -27944,22 +26132,21 @@ exit 1
         served.abort();
     }
 
-    /// Item 9: a launch spec that fails to publish must mean the tmux
-    /// window that would `exec farhelm internal launch <spec>` never
-    /// gets created at all — the shim must never have a CHANCE to
-    /// observe a partial spec, because there must never BE one to
-    /// observe. Driven through the REAL `create_session` call site (a
-    /// genuine `EACCES` from an unwritable `launch/` directory, not a
-    /// synthetic seam substitution), so this pins the actual ordering
-    /// `prepare_launch` relies on (`?` on the spec write, strictly before
-    /// `self.tmux.create_session`) rather than only the write helper's
-    /// own atomicity in isolation.
+    /// Item 9: a launch spec that fails to publish must mean the terminal
+    /// host that would `exec farhelm internal launch <spec>` never starts
+    /// at all — the shim must never have a CHANCE to observe a partial
+    /// spec, because there must never BE one to observe. Driven through the
+    /// REAL `create_session` call site (a genuine `EACCES` from an
+    /// unwritable `launch/` directory, not a synthetic seam substitution),
+    /// so this pins the actual ordering `prepare_launch` relies on (`?` on
+    /// the spec write, strictly before the host starts) rather than only the
+    /// write helper's own atomicity in isolation.
     #[farhelm_testtrace::test]
-    async fn create_session_never_launches_tmux_after_a_failed_spec_publish() {
+    async fn create_session_never_starts_a_terminal_after_a_failed_spec_publish() {
         let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not touch the launch shim");
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(
@@ -28013,13 +26200,10 @@ exit 1
             sup.sessions.lock().await.is_empty(),
             "no session may be recorded for a spec that never made it to disk"
         );
+        let hosts = state.path().join(crate::hosts::HOSTS_DIR_NAME);
         assert!(
-            sup.tmux
-                .pane_states()
-                .await
-                .expect("query tmux after refused create")
-                .is_empty(),
-            "a failed spec publication must never create a tmux pane"
+            std::fs::read_dir(&hosts).map_or(true, |mut entries| entries.next().is_none()),
+            "a failed spec publication must never start a terminal host"
         );
         // The DURABLE half, which the in-memory map cannot show: the
         // launching row this create committed before touching the disk
@@ -29198,7 +27382,7 @@ exit 1
     /// `CreateSession` (or a test), never from `farhelm spawn`, which only
     /// inherits a launch. So `{cwd}` as the command's PROGRAM has to be
     /// refused here, in the shared wording — otherwise a wrapper-shaped
-    /// command given directly to the create path would reach tmux.
+    /// command given directly to the create path would reach a terminal.
     #[farhelm_testtrace::test]
     async fn a_raw_create_refuses_a_cwd_placeholder_as_the_program() {
         let state = StateDir::new();
@@ -29452,7 +27636,7 @@ exit 1
     /// request differing only in one launch field is a `Conflict`.
     ///
     /// The failure is provoked by an unwritable `launch/` (the same
-    /// genuine `EACCES` `create_session_never_launches_tmux_after_a_failed_
+    /// genuine `EACCES` `create_session_never_starts_a_terminal_after_a_failed_
     /// spec_publish` uses), and permissions are RESTORED before the
     /// replays — so a replay that re-ran the create instead of reading the
     /// stored outcome would visibly succeed rather than quietly return the
@@ -31243,12 +29427,9 @@ exit 1
             sup.sessions.lock().await.contains_key("stranded"),
             "a takeover that retains its row must restore the entry it removed"
         );
+        let hosts = state.path().join(crate::hosts::HOSTS_DIR_NAME);
         assert!(
-            sup.tmux
-                .pane_states()
-                .await
-                .expect("pane states")
-                .is_empty(),
+            std::fs::read_dir(&hosts).map_or(true, |mut entries| entries.next().is_none()),
             "and nothing was launched"
         );
     }
@@ -31542,12 +29723,7 @@ exit 1
             .cloned()
             .expect("the restarted session is back on the map");
         assert_eq!(
-            crate::service::status::entry_info(
-                &live,
-                &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default()
-            )
-            .last_activity_at,
+            crate::service::status::entry_info(&live).last_activity_at,
             observed_at,
             "the replacement entry must read the same cell the pre-restart entry was written \
              through; a per-launch cell would report the build-time value instead"
@@ -32121,7 +30297,7 @@ exit 1
     /// and a path that stats fine but will not resolve is exactly that shape
     /// — so the one input most deserving refusal was the one waved through.
     /// And a successful comparison used to be discarded, with the ORIGINAL
-    /// symlinked path handed to tmux afterwards, leaving a
+    /// symlinked path handed to the terminal afterwards, leaving a
     /// time-of-check/time-of-use window several awaits and a subprocess
     /// wide.
     ///
@@ -32178,8 +30354,8 @@ exit 1
     ///
     /// Why it matters: the canonical path is the directory's recorded
     /// identity, and a restart or create retry launches into it. Converted
-    /// lossily it named a directory that does not exist, tmux started the
-    /// agent in the home directory instead, and the relaunch reported
+    /// lossily it named a directory that does not exist, the tmux that ran
+    /// terminals then started the agent in the home directory instead, and the relaunch reported
     /// success. Rows created before this fix carry that lossy text, which the
     /// old check computed again and so waved through; the relaunch half
     /// below uses exactly that value.
@@ -32247,8 +30423,8 @@ exit 1
     }
 
     /// A retry launches into the directory it VERIFIED, even when the
-    /// symlink it was given is repointed after the check and before tmux
-    /// sees it.
+    /// symlink it was given is repointed after the check and before the
+    /// host sees it.
     ///
     /// This is the time-of-check/time-of-use window `ensure_cwd_identity`
     /// closes, forced open deterministically: the create-lifecycle seam runs
@@ -33978,12 +32154,11 @@ exit 1
     ///
     /// It stops at [`Supervisor::with_hook_argv`] rather than driving a
     /// real create: the decision is what the constructor is on the hook
-    /// for, and a create would drag tmux into a test about a struct field.
+    /// for, and a create would drag a terminal host into a test about a struct field.
     #[farhelm_testtrace::test]
     async fn a_startup_opt_out_reaches_the_launch_decision() {
         let state = StateDir::new();
         let startup = |agent_hooks| SupervisorStartup {
-            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             agent_hooks,
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             boot_id_file: None,
@@ -34041,7 +32216,6 @@ exit 1
     async fn a_startup_instructions_switch_reaches_the_launch_decision() {
         let state = StateDir::new();
         let startup = |agent_instructions| SupervisorStartup {
-            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions,
             boot_id_file: None,
@@ -34088,7 +32262,7 @@ exit 1
     ///
     /// A simulated reboot against a real supervisor process rests on both
     /// halves: a harness starts the process with `--boot-id-file`, kills
-    /// the tmux server, rewrites the file, and restarts the supervisor on
+    /// the terminal hosts, rewrites the file, and restarts the supervisor on
     /// the same state directory expecting the live sessions to come back
     /// interrupted. A value read once into the seam would satisfy the
     /// first construction and silently never notice the rewrite, so the
@@ -34096,14 +32270,13 @@ exit 1
     /// The recorded id in `supervisor_meta` is the observable: it is what
     /// `record_boot` writes from the seam, and what the next startup
     /// compares against. (Rewriting the file alone is not a reboot: reload
-    /// keeps a pane it still finds, so a harness that leaves tmux running
-    /// gets its terminal back rather than an interruption.)
+    /// keeps a host it still finds, so a harness that leaves the hosts
+    /// running gets its terminal back rather than an interruption.)
     #[farhelm_testtrace::test]
     async fn a_startup_boot_id_file_is_what_the_classifier_reads() {
         let state = StateDir::new();
         let boot_file = state.path().join("boot-id");
         let startup = || SupervisorStartup {
-            tmux_program: PathBuf::from(crate::tmux::DEFAULT_TMUX_PROGRAM),
             agent_hooks: crate::agent_kind::AgentHooks::default(),
             agent_instructions: crate::agent_kind::AgentInstructions::default(),
             boot_id_file: Some(boot_file.clone()),
@@ -36416,8 +34589,7 @@ exit 1
     ///
     /// For a launch interrupted before its confirmation the record is the
     /// only durable pointer to its host (`host_launch`, "The launch record"):
-    /// the row's `terminal_address` is still empty, as an unconfirmed tmux
-    /// launch's pane id is.
+    /// the row's `terminal_address` is still empty.
     async fn launch_host_socket(sup: &Supervisor, row: &StoredSession) -> PathBuf {
         let artifacts = LaunchArtifacts::for_launch(&sup.state_dir, &row.id, row.generation);
         let record = super::host_launch::read_launch_record(artifacts.host())
@@ -36451,7 +34623,7 @@ exit 1
     /// shell fails to run it and exits at once, and the host keeps serving
     /// the exit record until it is told to stop (`crates/terminal-host/SPEC.md`,
     /// "Child exit and end of output"). That record is what a runtime reads
-    /// as a dead terminal, the host counterpart of a dead tmux pane; until
+    /// as a dead terminal; until
     /// the runtime has replayed it the host reads as running
     /// (`HostStatus::evidence`), so a classification before this wait would
     /// test a live terminal instead. The handle returned is the only runtime
@@ -36644,7 +34816,7 @@ exit 1
             "premise: startup stopped before classification"
         );
         let exit_code = host.exit_code();
-        let terminal = Terminal::Host(host);
+        let terminal = host;
         let address = terminal.recorded_address().to_string();
         let spec = crate::launch::spec_path_for_launch(fixture.state.path(), &row.id, 0);
         if scoped {
@@ -36753,7 +34925,7 @@ exit 1
     /// restart finds it with no runtime attached.
     fn release_fixture_host(entry: &SessionEntry) {
         match &entry.terminal {
-            Some(Terminal::Host(host)) => host.abort(),
+            Some(host) => host.abort(),
             other => panic!("premise: the fixture entry holds a host terminal: {other:?}"),
         }
     }
@@ -36775,21 +34947,15 @@ exit 1
     ) {
         let entries: Vec<Arc<SessionEntry>> = reloaded
             .values()
-            .filter(|entry| matches!(entry.terminal, Some(Terminal::Host(_))))
+            .filter(|entry| entry.terminal.is_some())
             .cloned()
             .collect();
         for entry in &entries {
-            if let Some(Terminal::Host(host)) = &entry.terminal {
+            if let Some(host) = &entry.terminal {
                 wait_for_host_exit(host, "the reloaded host").await;
             }
         }
-        super::super::ticker::observe_entries(
-            sup,
-            &entries,
-            &HashMap::new(),
-            &super::super::status::KnownTmuxNames::default(),
-        )
-        .await;
+        super::super::ticker::observe_entries(sup, &entries).await;
     }
 
     /// The observer must skip both wrapper and checkout-preparation inference
@@ -36802,14 +34968,9 @@ exit 1
     async fn pending_stop_observation_ignores_inferred_startup_failures() {
         for fresh in [false, true] {
             let (fixture, entry) = pending_startup_stop_fixture(fresh, true).await;
-            let observed = super::super::status::observe_entry(
-                &fixture.sup,
-                &entry,
-                &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default(),
-            )
-            .await
-            .unwrap();
+            let observed = super::super::status::observe_entry(&fixture.sup, &entry)
+                .await
+                .unwrap();
             assert!(observed.sentinel.is_none());
             fixture
                 .sup
@@ -36840,7 +35001,7 @@ exit 1
         for fresh in [false, true] {
             for absent in [false, true] {
                 let (fixture, entry) = pending_startup_stop_fixture(fresh, true).await;
-                let Some(Terminal::Host(host)) = &entry.terminal else {
+                let Some(host) = &entry.terminal else {
                     panic!("premise: the fixture's entry holds its host");
                 };
                 if absent {
@@ -36862,7 +35023,7 @@ exit 1
                 .await
                 .unwrap();
                 assert_eq!(
-                    matches!(reloaded[&entry.info.id].terminal, Some(Terminal::Host(_))),
+                    reloaded[&entry.info.id].terminal.is_some(),
                     !absent,
                     "premise: the reload found the host exactly when it still runs"
                 );
@@ -36914,14 +35075,9 @@ exit 1
             .unwrap();
             match classifier {
                 "observer" => {
-                    let observed = super::super::status::observe_entry(
-                        &fixture.sup,
-                        &entry,
-                        &HashMap::new(),
-                        &super::super::status::KnownTmuxNames::default(),
-                    )
-                    .await
-                    .unwrap();
+                    let observed = super::super::status::observe_entry(&fixture.sup, &entry)
+                        .await
+                        .unwrap();
                     assert!(!observed.inferred);
                     fixture
                         .sup
@@ -37087,21 +35243,16 @@ exit 1
         let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
         assert!(spec.exists());
         assert!(!crate::launch::status_path_for_spec(&spec).exists());
-        let terminal = Terminal::Host(host.clone());
+        let terminal = host.clone();
         let address = terminal.recorded_address().to_string();
         let mut entry = entry_with(Some(terminal), LastOutcome::Launching);
         entry.info.id = row.id.clone();
         // This fixture selected no scope: an unconsumed spec under its
         // exited host child now proves that its login shell never reached
         // the shim.
-        let observed = super::super::status::observe_entry(
-            &sup,
-            &Arc::new(entry),
-            &HashMap::new(),
-            &super::super::status::KnownTmuxNames::default(),
-        )
-        .await
-        .unwrap();
+        let observed = super::super::status::observe_entry(&sup, &Arc::new(entry))
+            .await
+            .unwrap();
         assert!(
             observed
                 .sentinel
@@ -38390,8 +36541,7 @@ exit 1
     }
 
     /// `sup`'s published host terminal for session `id`, checked to be the
-    /// agent host of that session's launch `generation` by its tag: the host
-    /// counterpart of a pane found under the session's own tmux name.
+    /// agent host of that session's launch `generation` by its tag.
     async fn own_agent_host(
         sup: &Supervisor,
         id: &str,
@@ -38452,7 +36602,7 @@ exit 1
             "premise: the accepted host's child runs: {:?}",
             host.liveness()
         );
-        let claims = || async { sup.spare_claims_from_panes(&HashMap::new()).await };
+        let claims = || async { sup.spare_claims_at_startup().await };
         for (preparation, protect) in [
             (crate::launch::PreparationState::NotStarted, true),
             (crate::launch::PreparationState::CloneStarted, true),
@@ -38509,7 +36659,7 @@ exit 1
         let with_terminal = |terminal: crate::hosts::HostTerminal| {
             Arc::new(SessionEntry {
                 info: entry.info.clone(),
-                terminal: Some(Terminal::Host(terminal)),
+                terminal: Some(terminal),
                 run: entry.run.clone(),
                 session: entry.session.clone(),
                 snapshot: entry.snapshot.clone(),
@@ -38666,16 +36816,11 @@ exit 1
                 host.liveness()
             );
             assert!(
-                super::super::status::observe_entry(
-                    &sup,
-                    &entry,
-                    &HashMap::new(),
-                    &super::super::status::KnownTmuxNames::default()
-                )
-                .await
-                .unwrap()
-                .sentinel
-                .is_none()
+                super::super::status::observe_entry(&sup, &entry)
+                    .await
+                    .unwrap()
+                    .sentinel
+                    .is_none()
             );
             let ended = host.shutdown().await.expect("end the session's host");
             assert!(ended.ended, "premise: the host confirmed its end");
@@ -38683,14 +36828,9 @@ exit 1
                 matches!(host.evidence(), crate::hosts::HostEvidence::Absent),
                 "premise: terminal is gone"
             );
-            let observed = super::super::status::observe_entry(
-                &sup,
-                &entry,
-                &HashMap::new(),
-                &super::super::status::KnownTmuxNames::default(),
-            )
-            .await
-            .unwrap();
+            let observed = super::super::status::observe_entry(&sup, &entry)
+                .await
+                .unwrap();
             let should_error = !matches!(evidence, "ready" | "borrower");
             assert_eq!(observed.sentinel.is_some(), should_error, "{evidence}");
             if let Some(detail) = observed.sentinel {
@@ -38774,9 +36914,7 @@ exit 1
         // test waits for rather than racing, so this proof depends on
         // neither process timing nor Git.
         wait_for_host_exit(&host, "the missing launch shim").await;
-        let known = super::super::status::KnownTmuxNames::default();
-        super::super::ticker::observe_entries(&sup, &[Arc::clone(&entry)], &HashMap::new(), &known)
-            .await;
+        super::super::ticker::observe_entries(&sup, &[Arc::clone(&entry)]).await;
         assert!(
             entry
                 .run
@@ -38797,7 +36935,7 @@ exit 1
             crate::launch::read_preparation_state(&path, &plan.id).is_err(),
             "premise: another parse would fail"
         );
-        let observed = super::super::status::observe_entry(&sup, &entry, &HashMap::new(), &known)
+        let observed = super::super::status::observe_entry(&sup, &entry)
             .await
             .unwrap();
         assert!(
@@ -38860,8 +36998,7 @@ exit 1
         // once. Wait for that owned-dead boundary so this test concerns
         // evidence caching, not process timing.
         wait_for_host_exit(&host, "the missing launch shim").await;
-        let known = super::super::status::KnownTmuxNames::default();
-        super::super::ticker::observe_entries(&sup, &[entry], &HashMap::new(), &known).await;
+        super::super::ticker::observe_entries(&sup, &[entry]).await;
         let exited = sup.store.session(&info.id).await.unwrap().unwrap().outcome;
         assert!(matches!(
             exited,
@@ -38883,13 +37020,7 @@ exit 1
         let entry = reloaded[&info.id].clone();
         assert!(entry.run.launch_boot_ended);
         assert_eq!(*entry.run.outcome.lock().unwrap(), exited);
-        super::super::ticker::observe_entries(
-            &sup,
-            std::slice::from_ref(&entry),
-            &HashMap::new(),
-            &known,
-        )
-        .await;
+        super::super::ticker::observe_entries(&sup, std::slice::from_ref(&entry)).await;
         assert!(
             entry
                 .run
@@ -38901,7 +37032,7 @@ exit 1
             crate::launch::read_preparation_state(&path, &plan.id).is_err(),
             "premise: another parse would fail"
         );
-        let observed = super::super::status::observe_entry(&sup, &entry, &HashMap::new(), &known)
+        let observed = super::super::status::observe_entry(&sup, &entry)
             .await
             .unwrap();
         assert!(observed.sentinel.is_none());
@@ -38951,7 +37082,6 @@ exit 1
                     clear_capture: false,
                     argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
                     launch_cwd: "/tmp".into(),
-                    terminal_survives: false,
                     restart_with: None,
                     seed: None,
                 },

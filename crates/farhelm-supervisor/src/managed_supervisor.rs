@@ -27,8 +27,8 @@
 //!
 //! The stop is the supervisor's own orderly shutdown: SIGTERM, which runs the
 //! same output-client teardown as a systemd stop. A kill after the grace is
-//! the caller's choice, because killing the supervisor can take its tmux
-//! server and every session with it; uninstall never kills. A stop that
+//! the caller's choice, because killing the supervisor skips the orderly
+//! stop it would otherwise run for its sessions; uninstall never kills. A stop that
 //! cannot be confirmed (the process could not be read or signalled) is an
 //! error, never "gone": callers keep the record and refuse, so a supervisor
 //! that is still running keeps the record that lets it be stopped later.
@@ -567,8 +567,8 @@ mod tests {
     /// reported stopped. A process that ignores it stays running unless the
     /// caller allows a kill, and then it is SIGKILLed.
     ///
-    /// Why it matters: uninstall must never kill (a kill can take the tmux
-    /// server and its sessions), while the app may kill only its own wedged
+    /// Why it matters: uninstall must never kill (a kill skips the orderly
+    /// stop), while the app may kill only its own wedged
     /// supervisor. The exit signal is checked, not just the outcome, because
     /// a kill would also make the process go.
     #[farhelm_testtrace::test]

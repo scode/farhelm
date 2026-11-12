@@ -183,7 +183,7 @@ async fn remote_supervisor() -> RemoteSupervisor {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams::default(),
     )
     .await

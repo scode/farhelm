@@ -754,12 +754,9 @@ mkdir -p "$(dirname "$SENTINEL_TMUX")"
 # Logs the COMPLETE argv of every invocation, one per line, rather than
 # writing a single fixed marker: the desktop's own tmux preflight calls
 # this wrapper with a plain `-V` (immediately before the managed
-# supervisor it is about to spawn), and every invocation by the managed
-# supervisor itself carries its private-server `-u -S <socket> -f <config>`
-# prefix. The smoke's sessions are all new terminals, so the supervisor
-# must run none at all (crates/farhelm-supervisor/src/tmux.rs,
-# `adopt_running_server`); the later assertion requires every logged line
-# to be the preflight's plain `-V`.
+# supervisor it is about to spawn). The supervisor runs no tmux at all (it keeps only the version
+# policy in crates/farhelm-supervisor/src/tmux.rs); the later assertion
+# requires every logged line to be the preflight's plain `-V`.
 printf '%s\n' \
   '#!/bin/sh' \
   'printf "%s\n" "$*" >>"$FARHELM_SMOKE_TMUX_MARKER"' \
@@ -2033,8 +2030,8 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
   # reused exactly as it stands, so its tmux is authoritative regardless of
   # what this process's own `FARHELM_TMUX` says — the preflight must not
   # even run. Proving that needs a real existing supervisor, which is what
-  # this leg spins up by hand: a `farhelm supervisor run` with a KNOWN-GOOD
-  # tmux, then a fresh desktop process pointed at that SAME state directory
+  # this leg spins up by hand: a bare `farhelm supervisor run` (it runs no
+  # tmux), then a fresh desktop process pointed at that SAME state directory
   # with a `FARHELM_TMUX` that names a path nothing occupies. If the
   # preflight ever moved ahead of discovery (or discovery stopped being
   # tried first), this candidate would be exactly what makes it refuse.
@@ -2048,7 +2045,7 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
   mkdir -m 0700 "$ANSWERING_STATE"
   ANSWERING_SUPERVISOR_LOG="$X/answering-supervisor.log"
   # setsid gives the supervisor a process group of its own; see stop_answering.
-  setsid "$BUILT_FARHELM" supervisor run --state-dir "$ANSWERING_STATE" --tmux "$HOST_TMUX" \
+  setsid "$BUILT_FARHELM" supervisor run --state-dir "$ANSWERING_STATE" \
     >"$ANSWERING_SUPERVISOR_LOG" 2>&1 &
   ANSWERING_SUPERVISOR_PID=$!
   for _ in $(seq 1 30); do

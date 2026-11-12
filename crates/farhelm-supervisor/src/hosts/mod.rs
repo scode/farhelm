@@ -32,12 +32,12 @@
 //! - [`terminal`]: a host terminal's runtime, the one task per host that
 //!   owns its connection and the terminal's emulator: output fed and
 //!   queries answered, the child's liveness, input, resizes and shutdown,
-//!   and adapters to the types the supervisor decides with for tmux panes.
+//!   and adapters to the types the supervisor's lifecycle verbs decide with.
 //! - `test_program` (unit tests only): this crate's test binary as a host
 //!   program, so that its unit tests run their sessions in real hosts.
 //!
 //! The service's terminal switch points handle a session whose terminal is
-//! a [`terminal::HostTerminal`] (`service::terminals::Terminal::Host`). Every
+//! a [`terminal::HostTerminal`]. Every
 //! create starts its agent in a host, and every new tab opens in one. A
 //! restarted supervisor finds
 //! the hosts of its host rows again with [`registry`] and adopts them

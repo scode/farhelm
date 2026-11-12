@@ -9,7 +9,6 @@ use crate::harness::*;
 
 use crate::boot_id_durable_outcome::listed;
 use crate::restart_with_resume::{RC_MARKER_VAR, write_rc_files};
-use crate::terminal_backpressure::drain_for;
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -1403,11 +1402,6 @@ async fn input_reaches_only_the_terminal_it_was_sent_to() {
 /// agent's stream, the terminal the user is actually looking at. The agent
 /// is round-tripped repeatedly for longer than the stall window that could
 /// interfere, so a check that finished early cannot miss the interaction.
-///
-/// On old terminals the same claim is why per-terminal tmux control
-/// clients exist (tmux's `pause-after` belongs to a control client); that
-/// mechanism, and the session sink that keeps every pane readable, are
-/// tested in the supervisor's `tmux/sink.rs`, not by this one.
 #[farhelm_testtrace::test]
 async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
     let h = harness().await;

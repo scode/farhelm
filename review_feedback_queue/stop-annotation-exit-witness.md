@@ -23,12 +23,13 @@ outcome before return; handlers.rs:927-930,1140-1145 then sends SessionStopped. 
 durable-stop/reconciliation premise.
 
 The missing named oracle is the same supervisor runtime reaching Liveness::Exited after processing the host exit record.
-dead_pane_exit_code at status.rs:629-644 simply reads host.exit_code and explicitly allows that record to lag the sweep.
-HostStatus::evidence at hosts/terminal.rs:847-861 remains dead=false while Liveness::Running, and session_status at
-status.rs:345-347 hides every annotation under live evidence, regardless of the already committed StopCompleted.
-list_all at listing.rs:90-98,184-203 only reads this status; it does not wait for an exit record or run reconciliation.
-The Stop reply, durable store write, reply transport and one listing add scheduling opportunities, but none is an
-acknowledgement that the independent host runtime processed Exit.
+Stop's exit-code read (`entry.terminal.as_ref().and_then(|host| host.exit_code())` in service/sweep.rs
+`stop_live_agent`, which replaced the since-removed `dead_pane_exit_code`) simply reads host.exit_code and explicitly
+allows that record to lag the sweep. HostStatus::evidence at hosts/terminal.rs:847-861 remains dead=false while
+Liveness::Running, and session_status at status.rs:345-347 hides every annotation under live evidence, regardless of the
+already committed StopCompleted. list_all at listing.rs:90-98,184-203 only reads this status; it does not wait for an
+exit record or run reconciliation. The Stop reply, durable store write, reply transport and one listing add scheduling
+opportunities, but none is an acknowledgement that the independent host runtime processed Exit.
 
 Use wait_for_dead_agent(&h.sup, h.state.path(), id) at this boundary (harness.rs:1471-1515), or a bounded listing
 predicate for the annotation, before the assertion and launch-directory permission change. Explicit reconciliation is

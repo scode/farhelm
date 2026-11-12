@@ -692,7 +692,7 @@ async fn a_reclaim_whose_discovery_runs_out_of_time_ends_nothing() {
     };
     let timeouts = SupervisorTimeouts {
         orphan_reclaim: Duration::from_secs(1),
-        ..suite_timeouts()
+        ..SupervisorTimeouts::default()
     };
     let (sup, client) = stack
         .supervisor_with(

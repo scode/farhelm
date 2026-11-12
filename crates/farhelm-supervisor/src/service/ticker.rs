@@ -5,26 +5,23 @@
 //! reads that must not carry the side effect).
 //!
 //! The reap also has an event to ride, so that an exited tab does not wait
-//! up to a whole interval for the next tick: the private tmux server's
-//! `pane-died` hook signals a `wait-for` channel, and the same task wakes on
-//! it and publishes pane deaths before reaping (see [`start_ticker`]). Live
-//! attachments use the same observation to recover final output that tmux
-//! may have discarded at EOF. A terminal host has no hook: its runtime
+//! up to a whole interval for the next tick: a terminal host's runtime
 //! announces its program's exit on the supervisor's liveness notifier
-//! (`crate::hosts::LivenessNotifier`), and the task wakes on that the same
-//! way. Passing unavailability changes also wake the re-adoption task, so
-//! recovering an agent's or tab's host need not wait for a periodic tick. The
-//! periodic snapshot remains the fallback for a missed hook or an
-//! attachment registered after the earlier observation.
+//! (`crate::hosts::LivenessNotifier`), and the task wakes on that (see
+//! [`start_ticker`]). Passing unavailability changes also wake the
+//! re-adoption task, so recovering an agent's or tab's host need not wait
+//! for a periodic tick. The periodic tick remains the fallback for a close
+//! a busy session put off.
 //!
 //! # Timer-owned reconciliation
 //!
 //! The timer observes launch outcomes without a polling helm and backs up the
 //! independent file watcher that applies hook reports promptly (`report_watch`).
-//! Lists and rename replies read that state, plus fresh pane liveness and tabs:
-//! launch-error classification, exact-record readiness and notifications may lag
-//! by one nominal tick. The pane-death wake promptly commits newly dead owned
-//! agent panes, without sampling screens or sweeping the stopped population.
+//! Lists and rename replies read that state, plus fresh terminal liveness and
+//! tabs: launch-error classification, exact-record readiness and notifications
+//! may lag by one nominal tick. The liveness wake promptly commits newly dead
+//! owned agent terminals, without sampling screens or sweeping the stopped
+//! population.
 //! Startup, reload and decision-time Restart retain their capture pass.
 //! There is no global pass lock or reply-driven coalescing.
 //!
@@ -39,7 +36,7 @@
 //!   attach, input, or resize path awaits either.
 //! - The tick takes its permit from [`Supervisor::sampling_admission`],
 //!   NOT from the request-handling `admission` semaphore. Sharing the
-//!   latter looked reasonable — same tmux subprocesses — and was a SPEC
+//!   latter looked reasonable — the same kind of terminal work — and was a SPEC
 //!   violation: periodic work holding a request permit can park
 //!   `handle_control`, and with it the connection read loop that
 //!   dispatches keystrokes. That field's docs carry the full argument.
@@ -90,7 +87,7 @@
 //! interval does not push every later tick later, and it is floored so a
 //! pass that OVERRUNS its interval is not followed instantly by the next
 //! one — which is what a supervisor too loaded to keep up would otherwise
-//! do, spawning tmux subprocesses as fast as it could retire them.
+//! do, starting passes as fast as it could finish them.
 //! [`next_deadline`] is both rules, as a pure function, for the same
 //! reason the thresholds live in `status`: it can then be asserted rather
 //! than timed.
@@ -102,7 +99,7 @@
 //! cancelled or unwound the handle drops and the task stops. The task
 //! additionally holds only a `Weak<Supervisor>`, so a supervisor dropped
 //! out from under it ends the loop cleanly rather than keeping a whole
-//! state directory, tmux driver, and SQLite connection alive for as long
+//! state directory, its terminal hosts' runtimes, and SQLite connection alive for as long
 //! as the runtime lives.
 //!
 //! Dropping the handle does NOT abort the task. An abort could land
@@ -111,12 +108,12 @@
 //! places it is honoured are chosen:
 //!
 //! - At the top of the loop, before sleeping.
-//! - Between individual pending work-start retries and pane samples. A
+//! - Between individual pending work-start retries and terminal samples. A
 //!   retry keeps its lifecycle claim through its generation-fenced SQLite
-//!   write; a sample keeps one bounded tmux subprocess whole.
-//! - NOT inside either operation. Splitting a retry could separate its
-//!   durable write from the in-memory state that mirrors it, while aborting
-//!   a capture could leave the tmux subprocess behind.
+//!   write; a sample keeps its screen read and the write that follows it
+//!   whole.
+//! - NOT inside either operation. Splitting either could separate a
+//!   durable write from the in-memory state that mirrors it.
 //! - NOT during a conversation-capture pass: once begun, its durable writes
 //!   and in-memory mirrors complete together before shutdown returns.
 //!
@@ -142,16 +139,14 @@
 //! started. Each close retains its session's lifecycle claim until completion,
 //! or until runtime drop, as an explicit close does after caller cancellation.
 
-use super::core::{SampleRead, SessionEntry, Supervisor};
+use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::cleanup_error_once;
-#[cfg(test)]
 use super::status::observe_entry;
-use super::status::observe_entry_with_capture_budget;
-use super::terminals::{Terminal, tabs_from_pane_states, tmux_tab_home};
 use crate::agent_kind::screen_reader::{
     QUIET_SAMPLES_BEFORE_IDLE, Reading, SAMPLE_TAIL_BYTES, SampleCounts, Screen, ScreenReader,
-    ScreenState, generic_reading, reader_for,
+    ScreenState, reader_for,
 };
+use crate::hosts::HostTerminal;
 use crate::store::LastOutcome;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -193,12 +188,12 @@ use tracing::{debug, error, warn};
 /// which is how tests get a cadence measured in milliseconds.
 pub(crate) const TICKER_INTERVAL: Duration = Duration::from_secs(2);
 
-/// How many pane tails one tick may capture.
+/// How many terminal tails one tick may read.
 ///
-/// Each tail is a `capture-pane` subprocess, so an unbounded pass would
-/// make the supervisor's per-second subprocess load scale with the number
-/// of live sessions — the same multiplication `TmuxDriver::pane_states`
-/// exists to avoid for liveness. Sessions past the budget are not skipped,
+/// Each tail renders a host's screen to text and runs the agent's screen
+/// reader over it, so an unbounded pass would make the ticker's per-tick
+/// work scale with the number of live sessions. (The budget dates from
+/// when each tail was a tmux `capture-pane` subprocess.) Sessions past the budget are not skipped,
 /// they are DEFERRED: the pass resumes where the previous one stopped, so
 /// a live session is sampled once every `ceil(live / budget)` ticks rather
 /// than every tick. That is the real guarantee, and it is weaker than
@@ -246,7 +241,7 @@ pub(crate) const ACTIVITY_STAMP_QUANTUM: Duration = Duration::from_secs(60);
 ///
 /// Split out as a pure function because it is the entire quantization
 /// rule, and a rule that lives inside the sampling loop is one only a
-/// running tmux can test. `None` means "leave it alone" — the observation
+/// running terminal can test. `None` means "leave it alone" — the observation
 /// still happened, it simply falls inside the minute the stored value
 /// already covers.
 ///
@@ -411,8 +406,7 @@ pub(crate) struct ActivitySample {
     /// in.
     pub(crate) unchanged_streak: u64,
     /// The screen text compared with the preceding sample, bounded to
-    /// [`SAMPLE_TAIL_BYTES`]. `None` before the first sample and after a
-    /// failed capture ([`ActivitySample::forget_tail`]).
+    /// [`SAMPLE_TAIL_BYTES`]. `None` before the first sample.
     pub(crate) comparison: Option<String>,
     /// What the session's screen reader concluded from the most recent
     /// successful capture that said anything about the agent, or the
@@ -519,7 +513,7 @@ impl ActivitySample {
         Arc::new(std::sync::Mutex::new(ActivitySample::default()))
     }
 
-    /// Start a reloaded run without treating a live tmux pane as evidence
+    /// Start a reloaded run without treating a live terminal as evidence
     /// that its agent is producing output right now.
     pub(crate) fn reloaded() -> Arc<std::sync::Mutex<ActivitySample>> {
         Arc::new(std::sync::Mutex::new(ActivitySample {
@@ -549,9 +543,9 @@ impl ActivitySample {
 
     /// Fold one freshly captured screen into this sample.
     ///
-    /// Change is detected by comparing screens rather than by asking tmux
-    /// for an activity timestamp, because tmux's notion of window activity
-    /// counts any write to the pty — a redraw of an unchanged screen, a
+    /// Change is detected by comparing screens rather than by an activity
+    /// timestamp of output (what tmux's window activity was, when terminals
+    /// ran there), because output activity counts any write to the pty — a redraw of an unchanged screen, a
     /// cursor blink from a TUI's own timer — which for status purposes is
     /// exactly the noise that would report an idle agent as working. What
     /// this can miss in exchange is output that lands and is overwritten
@@ -567,24 +561,9 @@ impl ActivitySample {
     ///
     /// `true` means a comparison against a RETAINED screen actually found
     /// a difference — the only positive evidence of output this type ever
-    /// has. Every case where no such comparison was possible returns
-    /// `false`: a pane's first sample (nothing to compare against, and
-    /// treating a baseline as output would make every session look busy
-    /// the moment it was first looked at) and the first sample after a
-    /// [`ActivitySample::forget_tail`] dropped the baseline.
-    ///
-    /// That second case is where the reported change and the streak reset
-    /// deliberately DISAGREE, and the asymmetry is the point. The streak
-    /// resets after a forget because a session whose captures are failing
-    /// must not decay to `Idle` on evidence nobody has — "we do not know"
-    /// is answered conservatively, as `Running`. Dating an activity is the
-    /// opposite kind of claim: it is written down, it outlives the process
-    /// that wrote it, and it orders a list. Guessing there does not
-    /// degrade gracefully — after a server-wide capture failure every idle
-    /// session would re-baseline at once and jump ahead of the sessions
-    /// that were genuinely producing output, permanently. So an
-    /// unverifiable change is treated as no change, and the next
-    /// comparison against the re-established baseline reports the truth.
+    /// has. A terminal's first sample returns `false`: there is nothing to
+    /// compare against, and treating a baseline as output would make every
+    /// session look busy the moment it was first looked at.
     /// Fold a screen through the generic reader, returning whether it
     /// changed: a test convenience for the change-counting path.
     #[cfg(test)]
@@ -618,10 +597,10 @@ impl ActivitySample {
                     self.unchanged_streak = 0;
                     changed = true;
                 }
-                // No retained screen: `forget_tail` dropped it after a
-                // failed capture. The streak still resets (see above and
-                // `forget_tail`), but this sample only re-establishes the
-                // baseline — it is not evidence that anything changed.
+                // No retained screen to compare against, which only the first
+                // sample has (and that one is not counted here): this sample
+                // only establishes the baseline — it is not evidence that
+                // anything changed.
                 None => self.unchanged_streak = 0,
             }
         }
@@ -694,58 +673,11 @@ impl ActivitySample {
         self.unchanged_streak = unchanged_streak;
         let reading = match screen {
             Some(text) => reader_for(kind).read(self.counts(), &Screen { text, title: "" }),
-            None => generic_reading(self.counts()),
+            None => crate::agent_kind::screen_reader::generic_reading(self.counts()),
         };
         if reading.state != ScreenState::Unknown {
             self.reading = reading;
         }
-    }
-
-    /// Drop the retained screen after a capture this session was SELECTED
-    /// for failed, without recording an observation.
-    ///
-    /// The bug this closes is specific and durable, which is why forgetting
-    /// is worth doing at all. A stored reading is not refreshed until the
-    /// next successful capture, so a reading taken from a screen would
-    /// otherwise outlive that screen indefinitely. So a session whose pane
-    /// showed an approval prompt, whose user then answered it, and whose
-    /// captures then began failing
-    /// — a pane that is still alive, so still classified from its
-    /// baseline — would go on reporting `Waiting` forever on the strength
-    /// of a screen that stopped being true at the first failure. Nothing
-    /// recovers from that except a successful capture, and the whole
-    /// premise of the case is that none is coming.
-    ///
-    /// What it deliberately does NOT do is count as a sample or as a quiet
-    /// look: an unreachable pane is not evidence of stillness, and letting
-    /// a run of failures decay a session to `Idle` would be the same wrong
-    /// inference `sample_pass` refuses to make when tmux answers nothing at
-    /// all. The baseline simply stops moving, which is honest, and the
-    /// reading falls back to change counting, which claims nothing about the
-    /// screen — that is the point.
-    ///
-    /// Change detection is unaffected in the way that matters: the next
-    /// SUCCESSFUL capture has nothing to compare against, so it records no
-    /// change (`observe` only compares when a previous sample exists...
-    /// which it does — `samples` is untouched here — so a first capture
-    /// after a forget compares against `None` and resets the streak).
-    /// Resetting the streak is the conservative direction: it means
-    /// `Running`, which is what "we do not know" has meant on this path
-    /// since the beginning.
-    ///
-    /// The activity STAMP takes the opposite branch of that same "we do
-    /// not know": a
-    /// re-baselining sample reports no change, so recovering from a
-    /// capture failure never dates an observation nobody made. The two
-    /// readings are not in tension — one is a cosmetic status that
-    /// self-corrects on the next sample, the other is a durable ordering
-    /// key that does not.
-    pub(crate) fn forget_tail(&mut self) {
-        self.claude_trust_prompt = false;
-        self.workspace_trust_prompt = false;
-        self.comparison = None;
-        self.reading = generic_reading(self.counts());
-        self.transition_ready = false;
     }
 }
 
@@ -859,21 +791,6 @@ impl TickerHandle {
     }
 }
 
-/// The failure a test has installed in place of one of a sampling pass's
-/// tmux reads, if any — see [`SampleFault`](super::core::SampleFault) for
-/// why the two failure paths need a seam at all.
-///
-/// `None` in production, always, so each call site is one `Option` check
-/// next to a subprocess round trip.
-fn injected_sample_fault(sup: &Supervisor, read: SampleRead<'_>) -> Option<anyhow::Error> {
-    sup.seams
-        .faults
-        .sample_fault()
-        .as_ref()
-        .and_then(|fault| fault(read))
-        .map(anyhow::Error::msg)
-}
-
 /// Where the sampler's round robin resumes: the id of the last session it
 /// sampled, or `None` to start at the head of the order.
 ///
@@ -924,7 +841,7 @@ const MIN_TICK_GAP_DIVISOR: u32 = 2;
 ///   already struggling. Pushing the deadline past `now` is what bounds it.
 ///
 /// A pure function of three values, so the schedule can be tested without a
-/// clock, a runtime, or a tmux (`next_deadline_*` below). That is the whole
+/// clock, a runtime, or a terminal (`next_deadline_*` below). That is the whole
 /// reason it is not inlined into the loop: a scheduling rule verified only
 /// by timing a real loop is verified by a stopwatch on a shared CI runner.
 fn next_deadline(
@@ -964,11 +881,6 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
     let report_watch = super::report_watch::start_report_watch(sup);
     let interval = sup.seams.ticker_interval;
     let weak = Arc::downgrade(sup);
-    // A clone of the driver rather than a reach through `weak` each time:
-    // the wait below is a long-lived future, and holding an upgraded `Arc`
-    // across it would keep the supervisor alive for as long as tmux stays
-    // quiet, which is exactly what the `Weak` exists to avoid.
-    let sup_tmux = sup.tmux.clone();
     // The receiving end of the host terminals' liveness notifier, taken
     // here because there is one ticker (see `Supervisor::host_liveness`).
     let mut host_changes = sup.take_host_liveness_receiver();
@@ -999,36 +911,21 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
         // sustained overrun (a pass that takes longer than the interval,
         // which a loaded host with many live sessions can genuinely do)
         // every tick is already overdue by the time it is awaited and the
-        // passes run back to back forever. That is a supervisor spawning
-        // tmux subprocesses as fast as it can retire them, with no pause in
-        // which anything could recover; see `next_deadline` for the rule
+        // passes run back to back forever. That is a supervisor sampling as
+        // fast as it can, with no pause in which anything could recover; see `next_deadline` for the rule
         // that replaces it, and for why anchoring is still what the
         // non-overrun case gets.
         let mut deadline = tokio::time::Instant::now() + interval;
-        // The pane-death wakeup. It lives in this loop, as a third arm of
-        // the same `select!`, rather than in a task of its own, so reap
-        // passes stay serial with the tick's. The closes they start do run
-        // on their own tasks; what keeps two of them off the same corpse is
-        // the lifecycle claim each takes with `try_claim` before starting,
-        // and `tab_reap_inflight` caps how many run at once. Being part of
-        // this task also means the wakeup stops with it, and dropping the
-        // future kills the `tmux wait-for` client (see
-        // `TmuxDriver::wait_for_pane_death`).
-        //
-        // While no private server runs (a host with no old terminals), the
-        // wait itself waits without spawning anything, so this arm stays
-        // quiet for the life of the process (`TmuxDriver::wait_for_pane_death`).
-        // A failed wait is still paced by one interval before the next
-        // attempt: a server that went away unseen fails it at once, and so
-        // can anything else, and retrying straight away would spin tmux
-        // spawns. The tick's own reap still covers that stretch.
-        let tmux = sup_tmux;
-        let mut pane_died = pane_death_wait(tmux.clone(), None);
+        // The liveness wakeup lives in this loop, as a second arm of the same
+        // `select!`, rather than in a task of its own, so reap passes stay
+        // serial with the tick's. The closes they start do run on their own
+        // tasks; what keeps two of them off the same corpse is the lifecycle
+        // claim each takes with `try_claim` before starting, and
+        // `tab_reap_inflight` caps how many run at once.
         loop {
             let wake = tokio::select! {
                 _ = &mut stop_rx => break,
                 _ = tokio::time::sleep_until(deadline) => Wake::Tick,
-                died = &mut pane_died => Wake::PaneDied(died),
                 changed = next_host_change(&mut host_changes) => Wake::HostChanged(changed),
             };
             let Some(sup) = weak.upgrade() else {
@@ -1038,18 +935,6 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
                 Wake::Tick => {
                     tick(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop_rx).await;
                     deadline = next_deadline(deadline, tokio::time::Instant::now(), interval);
-                }
-                Wake::PaneDied(Ok(())) => {
-                    pane_died = pane_death_wait(tmux.clone(), None);
-                    reap_pass(&sup, &mut stop_rx).await;
-                }
-                Wake::PaneDied(Err(e)) => {
-                    debug!(
-                        error = %format!("{e:#}"),
-                        "waiting for a pane death failed; the tick's reap covers exited tabs \
-                         until the next attempt"
-                    );
-                    pane_died = pane_death_wait(tmux.clone(), Some(interval));
                 }
                 Wake::HostChanged(Some(change)) => {
                     // Every change already queued is covered by this one
@@ -1094,8 +979,6 @@ pub(crate) fn start_ticker(sup: &Arc<Supervisor>) -> TickerHandle {
 enum Wake {
     /// The periodic deadline: run the whole [`tick`].
     Tick,
-    /// The pane-death wait finished, with its result.
-    PaneDied(anyhow::Result<()>),
     /// A host terminal's runtime announced a change of its liveness (its
     /// program exited, or its host ended or became unreadable); `None` when
     /// the notifier's channel closed. Passing unavailability wakes
@@ -1117,68 +1000,19 @@ async fn next_host_change(
     }
 }
 
-/// One pane-death wait for the ticker's `select!`, optionally delayed.
-///
-/// Boxed and pinned so the loop can hold it across iterations and replace
-/// it after each wake without re-borrowing anything; the delay is how a
-/// failed wait is paced (see [`start_ticker`]).
-fn pane_death_wait(
-    tmux: crate::tmux::TmuxDriver,
-    delay: Option<Duration>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send>> {
-    Box::pin(async move {
-        if let Some(delay) = delay {
-            // sleep-ok: paces retries after a failed wait, which fails at once while the tmux server is gone.
-            tokio::time::sleep(delay).await;
-        }
-        tmux.wait_for_pane_death().await
-    })
-}
-
-/// The whole server's pane states, or the empty map tmux would give, without
-/// asking, when no entry may have an old terminal to find
-/// (`terminals::may_have_tmux_terminals`).
-///
-/// The ticker's passes run every couple of seconds for every session, so on
-/// a host whose sessions are all new terminals they must not poll a server
-/// that only holds tmux sessions no entry owns (a husk, or something a
-/// program made on the private socket), which would otherwise keep tmux
-/// traffic going for the life of the process.
-async fn pane_states_if_needed(
-    sup: &Supervisor,
-    entries: &[Arc<SessionEntry>],
-) -> anyhow::Result<std::collections::HashMap<String, crate::tmux::PaneState>> {
-    let needed = entries.iter().any(|entry| {
-        super::terminals::may_have_tmux_terminals(
-            &sup.tmux,
-            &entry.info.id,
-            entry.terminal.as_ref(),
-        )
-    });
-    if needed {
-        sup.tmux.pane_states().await
-    } else {
-        Ok(std::collections::HashMap::new())
-    }
-}
-
 /// Reap dead tabs and commit newly dead owned agents between ticks.
 ///
-/// Two wakes run it: tmux's `pane-died` hook, and a host terminal's runtime
-/// announcing that its program exited (or its host ended or became
-/// unreadable; see [`start_ticker`]). The wake hints before its pane query,
-/// and successful outcome changes hint again. It shares sampling admission
-/// with ticks but runs neither screen sampling nor capture: a tab death must
-/// not pull the fleet sweep forward. Already-terminal outcomes and absent or
-/// unattributed terminals wait for the tick.
-///
-/// A host terminal's evidence needs no tmux, so a pane query that fails
-/// still lets a host agent's exit be recorded now; only the tmux half (pane
-/// deaths, tab reaping, tmux agents) waits for the next tick then.
+/// A host terminal's runtime announcing that its program exited (or its host
+/// ended or became unreadable; see [`start_ticker`]) runs it. The wake hints
+/// first, and successful outcome changes hint again. It shares sampling
+/// admission with ticks but runs neither screen sampling nor capture: a tab
+/// death must not pull the fleet sweep forward. Already-terminal outcomes and
+/// absent or unattributed terminals wait for the tick.
 async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
-    // A pane died, which listings show at once: a dead tab drops out of its
-    // session's list before any reap, and a dead agent pane is an exit. That
-    // is the change, whatever the reap below then finds (see `hints`).
+    // A terminal's program exited, which listings show at once: an exited
+    // tab drops out of its session's list before any reap, and an exited
+    // agent is an exit. That is the change, whatever the reap below then
+    // finds (see `hints`).
     sup.hint_sessions_changed();
     let _permit = Arc::clone(&sup.sampling_admission)
         .acquire_owned()
@@ -1188,24 +1022,6 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
     if entries.is_empty() {
         return;
     }
-    let probe_started = tokio::time::Instant::now();
-    let states = match pane_states_if_needed(sup, &entries).await {
-        Ok(states) => Some(states),
-        Err(e) => {
-            debug!(
-                error = %format!("{e:#}"),
-                "could not read pane state for a pane-death reap; the next tick retries the \
-                 tmux terminals"
-            );
-            None
-        }
-    };
-    if let Some(states) = &states {
-        publish_pane_deaths(sup, states, probe_started);
-        reap_dead_tabs(sup, states, &entries, stop).await;
-    }
-    // Tabs in terminal hosts need no pane map: this is the wake their exit
-    // drives, so a failed tmux query never holds them back.
     reap_dead_host_tabs(sup, &entries, stop);
     // A dead tab must not turn the wake into a fleet sweep. Only an owned
     // dead agent terminal with an unsettled outcome needs prompt persistence;
@@ -1217,11 +1033,7 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
                 *entry.run.outcome.lock().expect("outcome mutex poisoned"),
                 LastOutcome::Running | LastOutcome::StopRequested
             ) && match &entry.terminal {
-                Some(Terminal::Tmux(terminal)) => states
-                    .as_ref()
-                    .and_then(|states| states.get(&terminal.pane))
-                    .is_some_and(|state| state.session_name == terminal.tmux_name && state.dead),
-                Some(Terminal::Host(host)) => matches!(
+                Some(host) => matches!(
                     host.evidence(),
                     crate::hosts::HostEvidence::Owned { dead: true, .. }
                 ),
@@ -1233,40 +1045,7 @@ async fn reap_pass(sup: &Arc<Supervisor>, stop: &mut oneshot::Receiver<()>) {
     if newly_dead.is_empty() {
         return;
     }
-    let known = sup.known_tmux_names().await;
-    // Without a pane map only host agents made it into `newly_dead`, and
-    // their evidence does not read it.
-    let states = states.unwrap_or_default();
-    observe_entries(sup, &newly_dead, &states, &known).await;
-}
-
-/// Latch death before tab reaping can discard its pane, without waiting for
-/// an attachment or its consumer. A busy map defers observation to the next
-/// hook or periodic snapshot; acquiring it here could wait behind teardown.
-/// The normal hook is prompt, with the nominal two-second tick as fallback,
-/// but contention, failed probes and client backpressure preclude a hard bound.
-pub(super) fn publish_pane_deaths(
-    sup: &Supervisor,
-    states: &std::collections::HashMap<String, crate::tmux::PaneState>,
-    probe_started: tokio::time::Instant,
-) {
-    let observations: Vec<_> = match sup.attachments.try_lock() {
-        Ok(attachments) => attachments
-            .values()
-            .filter_map(|attachment| attachment.backend.observed_death(states, probe_started))
-            .collect(),
-        Err(_) => return,
-    };
-    for observed in observations {
-        observed.send_if_modified(|dead| {
-            if *dead {
-                false
-            } else {
-                *dead = true;
-                true
-            }
-        });
-    }
+    observe_entries(sup, &newly_dead).await;
 }
 
 /// Whether the ticker has been asked to stop.
@@ -1279,14 +1058,14 @@ fn stop_requested(stop: &mut oneshot::Receiver<()>) -> bool {
     !matches!(stop.try_recv(), Err(oneshot::error::TryRecvError::Empty))
 }
 
-/// One period's work: reap dead tabs, sample a slice of the live panes,
-/// then advance conversation capture.
+/// One period's work: reap dead tabs, sample a slice of the live
+/// terminals, then advance conversation capture.
 ///
 /// All three phases are periodic and sequential, so each pushes the next
 /// by up to its own duration; sampling precedes capture because its
 /// result is what a drain arriving mid-tick will read, while a capture
 /// arriving a beat later costs nothing anybody can observe. The REAP
-/// phase (inside `sample_pass`, riding its pane snapshot) starts bounded
+/// phase (inside `sample_pass`) starts bounded
 /// owned work and returns without awaiting teardown. A close retains the
 /// target session's LIFECYCLE claim, so an interactive lifecycle operation
 /// on that same session may wait behind it; sampling and requests on other
@@ -1301,7 +1080,7 @@ fn stop_requested(stop: &mut oneshot::Receiver<()>) -> bool {
 ///
 /// `budget` and `stop` are parameters rather than constants read here so
 /// that tests can drive an OVER-budget population without standing up
-/// seventeen tmux sessions, and can observe the cooperative stop without
+/// seventeen terminals, and can observe the cooperative stop without
 /// racing the loop that owns it.
 async fn tick(
     sup: &Arc<Supervisor>,
@@ -1326,61 +1105,29 @@ async fn tick(
     sup.capture_now().await;
 }
 
-/// Forget `entry`'s last screen after a failed capture, hinting connected
-/// helms if that changes the status it lists.
-///
-/// Forgetting the screen drops a recognized reading back to change counting,
-/// so a session listed as waiting can list as running or idle from here on
-/// with no successful sample to notice the change (see `hints`); repeated
-/// failures would otherwise leave that change to the helm's backstop poll.
-fn forget_tail_hinted(sup: &Supervisor, entry: &SessionEntry) {
-    let status_before = super::status::live_status(entry);
-    let trust_changed = {
-        let mut activity = entry.run.activity.lock().expect("activity mutex poisoned");
-        let was_trust = activity.claude_trust_prompt || activity.workspace_trust_prompt;
-        activity.forget_tail();
-        was_trust
-    };
-    if trust_changed || super::status::live_status(entry) != status_before {
-        sup.hint_sessions_changed();
-    }
-}
-
 /// Observe and commit the caller's session snapshot without sampling screens.
 ///
-/// The ticker, pane-death wake and deterministic test seam need the same
+/// The ticker, liveness wake and deterministic test seam need the same
 /// launch-failure precedence and generation-fenced outcome writes. Keeping
 /// this phase separate lets tests advance durable state without changing
 /// activity classifications or waiting for the timer. The caller decides
-/// which entries its pane evidence permits it to observe.
+/// which entries to observe.
 ///
 /// A failed artifact read defers that entry; a failed batch keeps its
 /// launch evidence for the next observation. Neither failure prevents the
 /// rest of the fleet from making progress.
 /// Error cleanup shares its per-run success latch with Stop. Sampling admission
 /// still serializes only observer passes, not those lifecycle requests.
-pub(super) async fn observe_entries(
-    sup: &Supervisor,
-    entries: &[Arc<SessionEntry>],
-    states: &std::collections::HashMap<String, crate::tmux::PaneState>,
-    known: &super::status::KnownTmuxNames,
-) {
-    // Persist exit evidence before the pane disappears. The shared observer
-    // checks launch failures first: a failed exec and an ordinary exit leave
-    // the same dead pane, but only the former must become Error. Ownership
-    // comes from the caller's complete name snapshot, even when it selects
-    // only a subset of entries for this pass.
+pub(super) async fn observe_entries(sup: &Supervisor, entries: &[Arc<SessionEntry>]) {
+    // Persist exit evidence while the terminal still holds it. The shared
+    // observer checks launch failures first: a failed exec and an ordinary
+    // exit leave the same dead terminal, but only the former must become
+    // Error.
     let mut observations = Vec::new();
     let mut sentinel_hits = HashSet::new();
     let mut negative_reads = Vec::new();
-    // One wedged optional capture must not turn N never-started sessions
-    // into N tmux deadlines. Pane classification and durable writes continue
-    // after this budget is spent; only the terminal quote is omitted.
-    let mut capture_available = true;
     for entry in entries {
-        match observe_entry_with_capture_budget(sup, entry, states, known, &mut capture_available)
-            .await
-        {
+        match observe_entry(sup, entry).await {
             Ok(observed) => {
                 if observed.settled_error {
                     cleanup_error_once(sup, entry).await;
@@ -1419,7 +1166,8 @@ pub(super) async fn observe_entries(
             Err(e) => error!(
                 session = %entry.info.id, error = %format!("{e:#}"),
                 "could not read this session's launch evidence; deferring its ticker exit \
-                 observation rather than risking a durable misclassification from pane state alone"
+                 observation rather than risking a durable misclassification from terminal state \
+                 alone"
             ),
         }
     }
@@ -1429,7 +1177,7 @@ pub(super) async fn observe_entries(
                 // `transition_many` returns the current durable value when
                 // a restart beat this snapshot. Mirroring that
                 // value, rather than the proposed transition, prevents an
-                // old pane's death from overwriting a fresh launch in RAM.
+                // old terminal's death from overwriting a fresh launch in RAM.
                 for entry in entries {
                     if let Some(outcome) = committed.get(&entry.info.id) {
                         sup.mirror_committed_outcome(entry, outcome);
@@ -1483,24 +1231,6 @@ pub(super) async fn observe_entries(
     }
 }
 
-/// Run the sample pass's old-terminal notification check once, for tests
-/// that do not start `serve`, from the same pane-state query the pass makes
-/// (`pane_states_if_needed`); nothing is sampled or observed. A failed query
-/// checks nothing, as in the pass.
-#[cfg(any(test, feature = "test-seams"))]
-pub(super) async fn old_terminal_check_for_test(sup: &Supervisor) {
-    let entries: Vec<Arc<SessionEntry>> = sup.sessions.lock().await.values().cloned().collect();
-    match pane_states_if_needed(sup, &entries).await {
-        Ok(states) => {
-            sup.reconcile_old_terminal_notifications(&entries, &states)
-                .await
-        }
-        Err(error) => {
-            error!(error = %format!("{error:#}"), "could not ask tmux for the old-terminal check");
-        }
-    }
-}
-
 /// Run the observation half of a pass for tests that do not start `serve`.
 ///
 /// Lists will no longer advance durable state. This seam deliberately
@@ -1512,30 +1242,15 @@ pub(super) async fn observe_for_test(sup: &Supervisor) {
     if entries.is_empty() {
         return;
     }
-    let states = match sup.tmux.pane_states().await {
-        Ok(states) => states,
-        Err(error) => {
-            error!(error = %format!("{error:#}"), "could not observe test reconciliation pane states");
-            return;
-        }
-    };
-    let known = sup.known_tmux_names().await;
-    observe_entries(sup, &entries, &states, &known).await;
+    observe_entries(sup, &entries).await;
 }
 
-/// Snapshot a BUDGETED slice of the live agent panes into their entries'
-/// [`ActivitySample`] cells.
+/// Snapshot a BUDGETED slice of the live agent terminals into their
+/// entries' [`ActivitySample`] cells.
 ///
-/// Liveness comes from ONE batched `pane_states` call for the whole
-/// server, the same read the list path uses and for the same reason: a
-/// per-session probe would multiply subprocess spawns by the session
-/// count on every tick. Only a pane found under BOTH its remembered pane
-/// id and its remembered tmux session name is sampled — the identity
-/// cross-check `session_status` documents, since a recycled pane id would
-/// otherwise let one session's screen be recorded as another's.
-///
-/// Dead panes and terminal-less entries are skipped rather than sampled
-/// as empty: their status is decided entirely by the durable record, so a
+/// Liveness is each host runtime's own state, read from memory. Dead
+/// terminals, unreadable hosts and terminal-less entries are skipped rather
+/// than sampled as empty: their status is decided entirely by the durable record, so a
 /// sample would be work whose result nothing consults.
 ///
 /// # Rotation, and why it is keyed by session ID
@@ -1561,163 +1276,64 @@ pub(super) async fn observe_for_test(sup: &Supervisor) {
 /// makes that harmless it is still not what the first pass over a fresh
 /// population should do.
 ///
-/// A FAILED liveness probe is the one early return that does not reset,
-/// and the difference is the point: "there are no live sessions" is an
-/// answer about the population, while "tmux could not be asked" is no
-/// answer at all, and rewinding the rotation on it would resample the head
-/// of the list every time a flaky tmux dropped a query.
-///
 /// # Cancellation
 ///
-/// `stop` is re-checked between individual captures — and, in the reap
+/// `stop` is re-checked between individual samples — and, in the reap
 /// phase this pass opens with, between individual close starts — so a
-/// shutdown waits out at most one `capture-pane` and its immediate write.
+/// shutdown waits out at most one sample and its immediate write.
 /// Already-started tab closes keep running independently; the pass never
 /// waits for their kill grace periods. The cursor is still
 /// advanced past what was actually sampled, so a resumed ticker would not
 /// redo work — though in practice nothing resumes a stopped ticker.
 ///
-/// SAMPLING failures are logged at DEBUG and the pass moves on. A ticker
-/// that WARNED here would turn a tmux server that is down (or a pane that
-/// vanished between the two calls, which is ordinary) into a log entry
-/// every interval forever; the paths where a user is actually waiting on
-/// the answer — the list path — still warn, which is where the signal
-/// belongs. The REAP phase is the deliberate exception: a real close
-/// failure warns (see `reap_dead_tabs`), because it can mean leftover
-/// processes with no user-visible handle left to retry through.
+/// A close the REAP phase started that fails warns (see
+/// `Supervisor::try_close_tab`), because it can mean leftover processes with
+/// no user-visible handle left to retry through.
 async fn sample_pass(
     sup: &Arc<Supervisor>,
     cursor: &mut SampleCursor,
     budget: usize,
     stop: &mut oneshot::Receiver<()>,
 ) {
-    // Cloned out of the map and the lock released before any tmux call:
-    // the session mutex is never held across an await (see `Supervisor`'s
-    // lock discipline), and every line below awaits a subprocess.
+    // Cloned out of the map and the lock released before anything below
+    // awaits: the session mutex is never held across an await (see
+    // `Supervisor`'s lock discipline).
     let entries: Vec<Arc<SessionEntry>> = sup.sessions.lock().await.values().cloned().collect();
     if entries.is_empty() {
         *cursor = None;
         return;
     }
     // Durable retry is independent of current liveness and capture. A
-    // session may finish, or the tmux probe may fail, after its immediate
-    // write failed; neither event invalidates the burst already observed.
+    // session may finish after its immediate write failed, which does not
+    // invalidate the burst already observed.
     for entry in &entries {
         if stop_requested(stop) {
             return;
         }
         persist_work_started(sup, entry, false).await;
     }
-    let probe_started = tokio::time::Instant::now();
-    let states = match injected_sample_fault(sup, SampleRead::PaneStates) {
-        Some(fault) => Err(fault),
-        None => pane_states_if_needed(sup, &entries).await,
-    };
-    // Only tmux terminals depend on this probe. A host terminal's evidence
-    // and screen come from its runtime, so a failed probe ends the pass for
-    // tmux terminals (and terminal-less entries) only, and host terminals
-    // are observed and sampled as usual; nothing tmux could not report is
-    // ever read from an empty map in its place.
-    let states = match states {
-        Ok(states) => Some(states),
-        Err(e) => {
-            debug!(
-                error = %format!("{e:#}"),
-                "could not probe pane liveness for this sampling pass; forgetting every \
-                 retained tmux screen so nothing is read from stale evidence"
-            );
-            // Nothing was looked at, so nothing may be CLASSIFIED from what
-            // was last seen either. The per-pane failure below invalidates
-            // one session's evidence for exactly this reason, and a probe
-            // that failed for the whole server is the same fact about every
-            // session at once — a prompt that has since been answered would
-            // otherwise hold its session at `Waiting` for as long as these
-            // probes keep failing, which is indefinitely, and which the
-            // LIST path cannot correct because its own probe succeeding is
-            // what makes those sessions live enough to be classified at all.
-            //
-            // Sample counts are deliberately untouched, for the same reason
-            // they are on the per-pane path: an unreachable tmux is not
-            // evidence of stillness, and decaying a fleet to `Idle` on it
-            // would be a wrong answer rather than an absent one.
-            for entry in &entries {
-                match &entry.terminal {
-                    Some(Terminal::Tmux(_)) | None => forget_tail_hinted(sup, entry),
-                    Some(Terminal::Host(_)) => {}
-                }
-            }
-            None
-        }
-    };
-    // Dead-tab reaping rides this pass's pane-state fetch, BEFORE the
-    // agent-liveness filtering below: a session whose agent exited can
-    // still hold tabs, and the early return on an all-dead fleet would
-    // otherwise leave their corpses unreaped forever.
-    if let Some(states) = &states {
-        publish_pane_deaths(sup, states, probe_started);
-        reap_dead_tabs(sup, states, &entries, stop).await;
-    }
-    // The tick's fallback for tabs in terminal hosts, whose exits normally
-    // wake `reap_pass` at once: a close the busy session deferred, or one
-    // that failed, is started again here.
+    // The tick's fallback for tabs, whose exits normally wake `reap_pass` at
+    // once: a close the busy session deferred, or one that failed, is
+    // started again here.
     reap_dead_host_tabs(sup, &entries, stop);
+    observe_entries(sup, &entries).await;
 
-    // Ownership classification belongs to the shared observer. In particular,
-    // an unattributed pane permits sentinel evidence, and a pane recycled into
-    // another session is absent for this launch even while that pane is alive.
-    // Without a pane map, only host terminals are observed: their evidence
-    // does not read it.
-    let known = sup.known_tmux_names().await;
-    match &states {
-        Some(states) => observe_entries(sup, &entries, states, &known).await,
-        None => {
-            let hosts: Vec<_> = entries
-                .iter()
-                .filter(|entry| match &entry.terminal {
-                    Some(Terminal::Host(_)) => true,
-                    Some(Terminal::Tmux(_)) | None => false,
-                })
-                .cloned()
-                .collect();
-            observe_entries(sup, &hosts, &std::collections::HashMap::new(), &known).await;
-        }
-    }
-    // The old-terminal notification reads this pass's pane map, before the
-    // live-agent filter below: a session whose agent stopped can still run
-    // old tabs. Not on a failed probe, which says nothing about what runs.
-    if let Some(states) = &states {
-        sup.reconcile_old_terminal_notifications(&entries, states)
-            .await;
-    }
-    // The live set keeps each `Terminal` whole: the budget, the screen
-    // readers and the work-start persistence below apply to every kind of
-    // terminal, and their screen and title reads dispatch per kind. Only
-    // liveness is decided here, per kind, from this pass's evidence.
-    let mut live: Vec<(Arc<SessionEntry>, Terminal)> = entries
+    // Running as far as its screen goes: the exit record has not been
+    // processed. An unreadable host is not sampled. Nor is one still
+    // catching up with its host's journal (a recovered adoption replays it
+    // into the emulator after adoption returns): its screen is a past one,
+    // and a sample of it would date activity and report prompts that are no
+    // longer there.
+    let mut live: Vec<(Arc<SessionEntry>, HostTerminal)> = entries
         .into_iter()
         .filter_map(|entry| {
             let terminal = entry.terminal.clone()?;
-            let alive = match &terminal {
-                Terminal::Tmux(tmux) => states
-                    .as_ref()
-                    .and_then(|states| states.get(&tmux.pane))
-                    .is_some_and(|state| state.session_name == tmux.tmux_name && !state.dead),
-                // Running as far as its screen goes: the exit record has not
-                // been processed. An unreadable host is not sampled, as an
-                // unattributed pane is not. Nor is one still catching up with
-                // its host's journal (a recovered adoption replays it into
-                // the emulator after adoption returns): its screen is a past
-                // one, and a sample of it would date activity and report
-                // prompts that are no longer there.
-                Terminal::Host(host) => {
-                    let status = host.status();
-                    status.caught_up
-                        && matches!(
-                            status.evidence(),
-                            crate::hosts::HostEvidence::Owned { dead: false, .. }
-                        )
-                }
-            };
+            let status = terminal.status();
+            let alive = status.caught_up
+                && matches!(
+                    status.evidence(),
+                    crate::hosts::HostEvidence::Owned { dead: false, .. }
+                );
             alive.then_some((entry, terminal))
         })
         .collect();
@@ -1748,58 +1364,21 @@ async fn sample_pass(
         }
         let (entry, terminal) = &live[(start + offset) % live.len()];
         let reader = reader_for(entry.snapshot.kind);
-        // Advanced BEFORE the capture rather than after it, so a pass that
-        // stops (or whose capture fails) still leaves the rotation past
-        // this session: the alternative would resample whatever the ticker
-        // was cut off at, forever, every time a shutdown or a flaky pane
-        // landed on the same entry.
+        // Advanced BEFORE the sample rather than after it, so a pass that
+        // stops still leaves the rotation past this session: the
+        // alternative would resample whatever the ticker was cut off at,
+        // forever, every time a shutdown landed on the same entry.
         *cursor = Some(entry.info.id.clone());
-        let captured = match injected_sample_fault(
-            sup,
-            SampleRead::Tail {
-                session: &entry.info.id,
-            },
-        ) {
-            Some(fault) => Err(fault),
-            None => terminal.screen_tail(sup, SAMPLE_TAIL_BYTES).await,
-        };
-        let tail = match captured {
-            Ok(tail) => tail,
-            Err(e) => {
-                debug!(
-                    session = %entry.info.id, error = %format!("{e:#}"),
-                    "could not sample this session's pane; forgetting the screen it last showed \
-                     so nothing is read from stale evidence"
-                );
-                // The SELECTED-but-failed case: this session's pane was
-                // reachable enough to be chosen and its screen could not be
-                // read, so whatever it last showed is of unknown age from
-                // here on. See `ActivitySample::forget_tail` for why that
-                // must not count as a quiet look.
-                forget_tail_hinted(sup, entry);
-                continue;
-            }
-        };
-        // The title is the reader's to ask for: a separate read (for tmux,
-        // a separate call), and only Codex uses it (its spinner lives there
-        // while prose streams). A title that cannot be read is simply
-        // absent evidence; the screen still gets read.
+        let tail = terminal.screen_tail(SAMPLE_TAIL_BYTES);
+        // The title is the reader's to ask for: only Codex uses it (its
+        // spinner lives there while prose streams).
         let title = if reader.wants_title() {
-            match terminal.title(sup).await {
-                Ok(title) => title,
-                Err(e) => {
-                    debug!(
-                        session = %entry.info.id, error = %format!("{e:#}"),
-                        "could not read this session's pane title; reading its screen without it"
-                    );
-                    String::new()
-                }
-            }
+            terminal.title()
         } else {
             String::new()
         };
         // The status this session lists, before and after this sample: a
-        // sample is the only thing that moves a live pane's status (the
+        // sample is the only thing that moves a live terminal's status (the
         // three-sample settling into idle included), so comparing across it
         // is how a status transition is noticed (see `hints`). Screen tails
         // and comparison counts change every sample and are not compared:
@@ -1816,8 +1395,8 @@ async fn sample_pass(
             (observation, report, permission_changed)
         };
         if report_fallback {
-            // No screen content in the log: pane text can carry anything the
-            // user typed or the agent printed, secrets included.
+            // No screen content in the log: screen text can carry anything
+            // the user typed or the agent printed, secrets included.
             warn!(
                 session = %entry.info.id, kind = ?entry.snapshot.kind,
                 "this session's screen has matched none of its agent's recognized layouts for \
@@ -2036,113 +1615,13 @@ async fn note_activity(sup: &Arc<Supervisor>, entry: &Arc<SessionEntry>) {
 /// exiting at a time) with room for a burst.
 pub(crate) const REAP_BUDGET_PER_TICK: usize = 4;
 
-/// Close every tab whose window's panes are ALL dead — the enforcement
-/// half of SPEC.md's "a tab whose process exits is reaped automatically"
-/// (the listing paths hide dead tabs; this is what actually removes them).
-///
-/// Lives on the ticker rather than the listing paths deliberately:
-/// listings are reads and stay side-effect-free. Two triggers call it: the
-/// tick, and the pane-death wakeup's [`reap_pass`], which is what makes an
-/// exited tab disappear without waiting for the next tick.
-/// DISCOVERY rides this pass's already-fetched `pane_states` snapshot,
-/// grouped by session in one O(panes) pass; each CLOSE then pays its own
-/// resolution probe inside [`Supervisor::close_tab`], which is the
-/// ordinary close — the same lifecycle claim, process sweep, window kill,
-/// and attached-client notice a user-initiated close performs — so a
-/// reaped tab is indistinguishable from a closed one. (The client treats
-/// that notice's tab-closed reason as silent removal, per SPEC.)
-///
-/// Starts are bounded by [`REAP_BUDGET_PER_TICK`] and re-checked against
-/// `stop`. The owned task holds the lifecycle claim through teardown and
-/// logs the result; a busy session, including its other dead tabs, waits
-/// for a later pass. Sampling never waits for a close's grace periods. The
-/// expected failure is a race with a manual close of the same tab
-/// (`NotFound`, logged at DEBUG — the dead-at-open refusal path can also
-/// destroy a marked window the same instant this sees it); any OTHER
-/// failure warns, because it may mean a close that killed the window and
-/// then failed its process sweep — a tab that no longer exists to retry
-/// through, with only its scope/marker sweeps left to catch stragglers.
-///
-/// Pane-state marker collection is skipped only when no session on the
-/// private tmux server has two or more windows and no window carries a tab
-/// marker (`TmuxDriver::pane_states`), so a tab that is its session's only
-/// window (a host agent's last old tab, or a server reduced by hand to
-/// single-window sessions) is still discovered and reaped.
-///
-/// Retired containerized sessions are Delete-only: their tabs stay for
-/// whole-session cleanup rather than repeatedly starting a refused close.
-async fn reap_dead_tabs(
-    sup: &Arc<Supervisor>,
-    states: &std::collections::HashMap<String, crate::tmux::PaneState>,
-    entries: &[Arc<SessionEntry>],
-    stop: &mut oneshot::Receiver<()>,
-) {
-    // One pass over the server-wide snapshot, partitioned by session —
-    // handing the full map to every session's rediscovery would rescan
-    // all panes per session, a quadratic cost paid every two seconds on
-    // hosts with many sessions, dead tabs or none. Borrowed, not cloned:
-    // this runs every tick whether anything is dead or not.
-    let mut by_session: std::collections::HashMap<&str, Vec<&crate::tmux::PaneState>> =
-        std::collections::HashMap::new();
-    for state in states.values() {
-        by_session
-            .entry(state.session_name.as_str())
-            .or_default()
-            .push(state);
-    }
-    let mut budget = REAP_BUDGET_PER_TICK;
-    for entry in entries {
-        // Retirement is stored launch intent, not a property of the agent
-        // or the host. Exclude it before discovery and admission so retained
-        // tabs cannot spend the budget ordinary sessions need to make progress.
-        if crate::container::is_retired(&entry.info.launch) {
-            continue;
-        }
-        let Some(terminal) = entry.terminal.as_ref() else {
-            continue;
-        };
-        // Tmux tabs are windows, found by their markers in the session's
-        // tmux session's pane states, whatever the agent's kind
-        // (`tmux_tab_home`).
-        let (tmux_name, agent_pane) = tmux_tab_home(&entry.info.id, terminal);
-        let Some(session_states) = by_session.get(tmux_name.as_ref()) else {
-            continue;
-        };
-        for tab in tabs_from_pane_states(session_states.iter().copied(), &tmux_name, agent_pane) {
-            if !tab.dead {
-                continue;
-            }
-            if stop_requested(stop) {
-                return;
-            }
-            if budget == 0 {
-                debug!(
-                    "the tick's tab-reap budget is spent; remaining dead tabs stay hidden \
-                     and the next tick continues"
-                );
-                return;
-            }
-            // Never wait for the session's lifecycle claim here; see
-            // `Supervisor::try_close_tab`. A busy session is skipped without
-            // spending budget, and its dead tabs are reaped on a later tick.
-            let Some(()) = sup.try_close_tab(&entry.info.id, &tab.id) else {
-                debug!(
-                    session = %entry.info.id, tab = %tab.id,
-                    "an exited tab's session is busy with another operation; the reap retries \
-                     on a later tick"
-                );
-                continue;
-            };
-            budget -= 1;
-        }
-    }
-}
-
-/// Start the automatic close of every tab in a terminal host whose shell
-/// has exited (or whose host ended under it, or whose earlier close could
-/// not confirm its host ended: `HostTab::reap_due`), the host-tab half of SPEC.md's
-/// "a tab whose process exits is reaped automatically" ([`reap_dead_tabs`]
-/// is the tmux half).
+/// Start the automatic close of every tab whose shell has exited (or whose
+/// host ended under it, or whose earlier close could not confirm its host
+/// ended: `HostTab::reap_due`): the enforcement half of SPEC.md's "a tab
+/// whose process exits is reaped automatically" (the listing paths hide
+/// exited tabs; this is what actually removes them). It lives on the ticker
+/// rather than the listing paths deliberately: listings are reads and stay
+/// side-effect-free.
 ///
 /// Driven by the host's exit event, not a poll: the tab's runtime announces
 /// its processed exit record on the supervisor's liveness notifier, which
@@ -2153,10 +1632,12 @@ async fn reap_dead_tabs(
 /// close under the session's lifecycle claim, taken without waiting, which
 /// checks again that the tab's shell exited before it ends anything. Starts
 /// are bounded by [`REAP_BUDGET_PER_TICK`] per pass and re-checked against
-/// `stop`, as for tmux tabs; nothing here waits for a close.
+/// `stop`; nothing here waits for a close.
 ///
-/// The same Delete-only retirement exclusion as the tmux reap applies
-/// before reading the tab cell or taking any close permit or lifecycle claim.
+/// Retired containerized sessions are Delete-only: their tabs stay for
+/// whole-session cleanup, excluded before reading the tab cell or taking any
+/// close permit or lifecycle claim, so they cannot repeatedly start a refused
+/// close or spend the budget ordinary sessions need.
 fn reap_dead_host_tabs(
     sup: &Arc<Supervisor>,
     entries: &[Arc<SessionEntry>],
@@ -2196,9 +1677,8 @@ mod tests {
     /// Trust questions reach live replies, clear as soon as their screen is
     /// lost, and belong only to one run. Non-Claude dialogs must never set
     /// the compatibility flag consumed by older UIs without a harness check.
-    #[test]
-    fn trust_evidence_reaches_replies_and_resets_with_the_run() {
-        use crate::tmux::PaneState;
+    #[farhelm_testtrace::test]
+    async fn trust_evidence_reaches_replies_and_resets_with_the_run() {
         use farhelm_proto::LaunchHarness;
         let cases = [
             (
@@ -2224,20 +1704,28 @@ mod tests {
         ];
         for (kind, harness, trust, legacy) in cases {
             let mut entry = entry_with(Some(a_terminal()), LastOutcome::Running);
-            let live = HashMap::from([("%0".to_string(), PaneState::for_test("fh-1", "%0", "@0"))]);
             let reader = reader_for(kind);
             {
                 let mut sample = entry.run.activity.lock().unwrap();
                 assert!(sample.observe_trust(Some(harness), reader, trust));
                 assert!(!sample.observe_trust(Some(harness), reader, trust));
             }
-            let reply = super::super::status::entry_info(&entry, &live, &Default::default());
+            let reply = super::super::status::entry_info(&entry);
             assert!(reply.workspace_trust_prompt, "{harness:?}");
             assert_eq!(reply.claude_trust_prompt, legacy, "{harness:?}");
+            let without_terminal = SessionEntry {
+                terminal: None,
+                info: entry.info.clone(),
+                run: entry.run.clone(),
+                session: entry.session.clone(),
+                snapshot: entry.snapshot.clone(),
+                canonical_cwd: entry.canonical_cwd.clone(),
+                generation: entry.generation,
+                scope: entry.scope.clone(),
+            };
             assert!(
-                !super::super::status::entry_info(&entry, &Default::default(), &Default::default())
-                    .workspace_trust_prompt,
-                "an absent pane cannot advertise its last question"
+                !super::super::status::entry_info(&without_terminal).workspace_trust_prompt,
+                "an absent terminal cannot advertise its last question"
             );
             {
                 let mut sample = entry.run.activity.lock().unwrap();
@@ -2245,13 +1733,9 @@ mod tests {
                 assert!(!sample.workspace_trust_prompt);
                 assert!(!sample.claude_trust_prompt);
                 assert!(sample.observe_trust(Some(harness), reader, trust));
-                sample.forget_tail();
-                assert!(!sample.workspace_trust_prompt);
-                assert!(!sample.claude_trust_prompt);
-                assert!(sample.observe_trust(Some(harness), reader, trust));
             }
             entry.run.activity = ActivitySample::replacement(&entry.run.activity);
-            let replaced = super::super::status::entry_info(&entry, &live, &Default::default());
+            let replaced = super::super::status::entry_info(&entry);
             assert!(!replaced.workspace_trust_prompt);
             assert!(!replaced.claude_trust_prompt);
         }
@@ -2264,8 +1748,8 @@ mod tests {
     /// Once bypass reaches replies, neither a manual footer nor an unreadable
     /// screen can withdraw it during the run. Repeated evidence sends no change
     /// hint; replacement and reload reset it so a new process inherits no evidence.
-    #[test]
-    fn permission_evidence_reaches_replies_and_resets_with_the_run() {
+    #[farhelm_testtrace::test]
+    async fn permission_evidence_reaches_replies_and_resets_with_the_run() {
         use farhelm_proto::LaunchHarness;
         let mut entry = entry_with(Some(a_terminal()), LastOutcome::Running);
         let yolo = "⏵⏵ bypass permissions on (shift+tab to cycle)";
@@ -2278,8 +1762,7 @@ mod tests {
             assert!(!sample.observe_permission(Some(LaunchHarness::Claude), yolo));
             assert!(!sample.observe_permission(Some(LaunchHarness::Claude), "dialog"));
         }
-        let reply =
-            super::super::status::entry_info(&entry, &Default::default(), &Default::default());
+        let reply = super::super::status::entry_info(&entry);
         assert!(reply.screen_yolo);
         assert!(
             !entry
@@ -2289,10 +1772,7 @@ mod tests {
                 .unwrap()
                 .observe_permission(Some(LaunchHarness::Claude), "⏸ manual mode on")
         );
-        assert!(
-            super::super::status::entry_info(&entry, &Default::default(), &Default::default())
-                .screen_yolo
-        );
+        assert!(super::super::status::entry_info(&entry).screen_yolo);
         assert!(
             !entry
                 .run
@@ -2302,17 +1782,13 @@ mod tests {
                 .observe_permission(Some(LaunchHarness::Claude), yolo)
         );
         entry.run.activity = ActivitySample::replacement(&entry.run.activity);
-        assert!(
-            !super::super::status::entry_info(&entry, &Default::default(), &Default::default())
-                .screen_yolo
-        );
+        assert!(!super::super::status::entry_info(&entry).screen_yolo);
         assert!(!ActivitySample::reloaded().lock().unwrap().screen_yolo);
     }
 
     use super::super::channels::ConnectionChannels;
     use super::super::connection::{CONNECTION_WRITER_QUEUE, ConnectionCtx};
-    use super::super::core::RunCells;
-    use super::super::core::tests::{StateDir, a_terminal, agent_tmux, dummy_exe, entry_with};
+    use super::super::core::tests::{StateDir, a_terminal, dummy_exe, entry_with};
     use super::super::core::{SupervisorSeams, SupervisorTimeouts};
     use super::super::handlers::handle_control;
     use super::super::status::live_status;
@@ -2321,31 +1797,30 @@ mod tests {
     use crate::agent_kind::IntegrationSnapshot;
     use crate::store::{LastOutcome, StoredSession, Transition, now_unix};
     use farhelm_proto::{AgentKind, ControlMsg, SessionStatus};
-    use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
     use tokio::sync::mpsc;
 
     /// A cadence short enough that a test spends milliseconds rather than
     /// production intervals waiting for a tick, and long enough that the
-    /// ticker is not spawning tmux subprocesses faster than a loaded CI
-    /// runner can retire them.
+    /// ticker is not sampling faster than a loaded CI runner can keep up
+    /// with.
     const TEST_INTERVAL: Duration = Duration::from_millis(50);
 
     /// How long the polling assertions below are willing to wait. Sized
-    /// for a loaded runner where a `capture-pane` subprocess can take a
-    /// surprising fraction of a second, not for the tick cadence.
+    /// for a loaded runner where a host's start and its program's output
+    /// can take a surprising fraction of a second, not for the tick
+    /// cadence.
     const TEST_DEADLINE: Duration = Duration::from_secs(30);
 
-    /// The retry cadence for a local state transition that does not depend
-    /// on tmux completing another command.
+    /// The retry cadence for a local state transition.
     const TEST_READY_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-    /// The retry cadence for observations whose answer comes from tmux or
-    /// from a process that tmux just asked to stop.
-    const TEST_TMUX_POLL_INTERVAL: Duration = Duration::from_millis(50);
+    /// The retry cadence for observations whose answer comes from a
+    /// terminal host's program.
+    const TEST_HOST_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-    /// The cadence used while proving that the rotating busy-pane fixture
-    /// produced a new visible screen before its next sample.
+    /// The cadence used while proving that the rotating busy-terminal
+    /// fixture produced a new visible screen before its next sample.
     const TEST_BUSY_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(80);
 
     /// A supervisor whose ticker cadence is [`TEST_INTERVAL`], with the
@@ -2368,46 +1843,63 @@ mod tests {
         .expect("supervisor")
     }
 
-    /// Start a real tmux session named `name` running `command`, and
-    /// return its pane id.
+    /// Start a real terminal host for session `id` running `sh -c command`,
+    /// from this test binary as the host program
+    /// (`crate::hosts::test_program`), and adopt it as freshly started: the
+    /// agent terminal a live session has.
     ///
     /// Deliberately NOT `create_session`: a create launches through the
-    /// farhelm shim, and these tests point at [`dummy_exe`], so the pane
-    /// would be dead before anything could sample it. Driving tmux
-    /// directly is what lets a test choose what the pane DOES, which for a
-    /// sampler is the entire subject.
-    async fn spawn_pane(sup: &Arc<Supervisor>, name: &str, command: &str) -> String {
-        let argv = ["sh".to_string(), "-c".to_string(), command.to_string()];
-        sup.tmux
-            .create_session(name, "/tmp", 80, 24, &[], &argv)
-            .await
-            .expect("create a tmux session directly");
-        let states = sup.tmux.pane_states().await.expect("pane states");
-        states
-            .iter()
-            .find(|(_, state)| state.session_name == name)
-            .map(|(pane, _)| pane.clone())
-            .expect("the session just created has a pane")
+    /// farhelm shim, and these tests point at [`dummy_exe`], so the agent
+    /// would be dead before anything could sample it. Starting the host
+    /// directly is what lets a test choose what the program DOES, which for
+    /// a sampler is the entire subject. The host runs in the supervisor's
+    /// state directory, whose teardown (`farhelm_teststate::TestDir`) ends
+    /// it.
+    async fn spawn_host(sup: &Arc<Supervisor>, id: &str, command: &str) -> HostTerminal {
+        let child = crate::hosts::ChildSpec {
+            argv: vec!["sh".into(), "-c".into(), command.into()],
+            cwd: "/tmp".into(),
+            env: vec![
+                ("PATH".into(), "/usr/local/bin:/usr/bin:/bin".into()),
+                ("TERM".into(), "xterm-256color".into()),
+            ],
+            size: terminal_host::protocol::Size { cols: 80, rows: 24 },
+            journal_cap: crate::hosts::DEFAULT_JOURNAL_CAP,
+            initial_snapshot: None,
+        };
+        let tag = crate::hosts::HostTag {
+            session_id: id.to_string(),
+            created_ns: crate::hosts::tag::creation_stamp(),
+            role: crate::hosts::HostRole::Agent { generation: 0 },
+        };
+        let spawned = crate::hosts::spawn_host(
+            &crate::hosts::test_program::unit_test_host_program(),
+            &sup.state_dir,
+            child,
+            &tag,
+        )
+        .await
+        .expect("start a terminal host");
+        crate::hosts::HostTerminal::adopt(
+            &spawned.socket,
+            crate::hosts::Adoption::Fresh,
+            crate::hosts::HostTerminalOptions::default(),
+        )
+        .await
+        .expect("adopt the terminal host")
     }
 
-    /// Put an entry addressing `terminal` into the session map under `id`.
+    /// Put an entry addressing `terminal` into the session map under `id`,
+    /// claiming agent `kind`.
     ///
     /// Reuses `core`'s own entry fixture rather than building a
     /// `SessionEntry` by hand so that a future field addition lands in one
-    /// place — and so these tests keep asserting against the same shape
-    /// every other classification test uses.
-    async fn install_entry(sup: &Arc<Supervisor>, id: &str, terminal: Terminal) {
-        install_entry_of_kind(sup, id, terminal, AgentKind::Generic).await;
-    }
-
-    /// [`install_entry`] for a session that claims an integrated agent
-    /// kind, which is what makes that kind's screen reader apply to it. The
-    /// snapshot is the only thing classification reads to decide that, so
-    /// no launch has to be faked.
+    /// place. The snapshot's kind is the only thing classification reads to
+    /// decide which screen reader applies, so no launch has to be faked.
     async fn install_entry_of_kind(
         sup: &Arc<Supervisor>,
         id: &str,
-        terminal: Terminal,
+        terminal: HostTerminal,
         kind: AgentKind,
     ) {
         let mut entry = entry_with(Some(terminal), LastOutcome::Running);
@@ -2440,8 +1932,8 @@ mod tests {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// A live session: a real pane running `command`, and a map entry that
-    /// truthfully addresses it.
+    /// A live session: a real terminal host running `command`, and a map
+    /// entry that truthfully addresses it.
     async fn install_live_session(sup: &Arc<Supervisor>, id: &str, command: &str) {
         install_live_session_of_kind(sup, id, command, AgentKind::Generic).await;
     }
@@ -2453,23 +1945,22 @@ mod tests {
         command: &str,
         kind: AgentKind,
     ) {
-        let tmux_name = format!("fh-{id}");
-        let pane = spawn_pane(sup, &tmux_name, command).await;
-        install_entry_of_kind(sup, id, Terminal::tmux(tmux_name, pane), kind).await;
+        let terminal = spawn_host(sup, id, command).await;
+        install_entry_of_kind(sup, id, terminal, kind).await;
     }
 
     /// Install one `Running` session in both places a witnessed exit must
     /// reach: the durable row the ticker transitions and the entry it must
     /// immediately mirror for replies from this supervisor.
     ///
-    /// This deliberately bypasses `create_session`. The pane is started by
-    /// the fixture, so the test can make it exit at a known code without
-    /// involving the launch shim; what matters here is the ticker's bridge
-    /// from a real tmux observation to the already-existing session row.
+    /// This deliberately bypasses `create_session`. The host is started by
+    /// the fixture, so the test can make its program exit at a known code
+    /// without involving the launch shim; what matters here is the ticker's
+    /// bridge from a real host's state to the already-existing session row.
     async fn install_durable_running_entry(
         sup: &Arc<Supervisor>,
         id: &str,
-        terminal: Terminal,
+        terminal: HostTerminal,
     ) -> Arc<SessionEntry> {
         let now = now_unix();
         sup.store
@@ -2494,8 +1985,8 @@ mod tests {
                         agent_kind: AgentKind::Generic,
                         resume_template: None,
                     },
-                    terminal_address: terminal.expect_tmux().pane.clone(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_address: terminal.recorded_address().to_string(),
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: None,
@@ -2530,93 +2021,114 @@ mod tests {
             .outcome
     }
 
-    /// One timed-out optional quote must not charge every failed launch a
-    /// separate tmux deadline. The wrapper stalls only capture invocations;
-    /// real tmux panes establish owned deadness, and all rows must still gain
-    /// their durable never-started error after the first capture fails.
-    #[farhelm_testtrace::test]
-    async fn one_excerpt_timeout_disables_the_rest_of_the_observer_pass() {
-        use std::os::unix::fs::PermissionsExt;
-        let state = StateDir::new();
-        let attempts = state.path().join("capture-attempts");
-        let wrapper = state.path().join("capture-timeout-tmux");
-        std::fs::write(
-            &wrapper,
-            format!(
-                "#!/bin/sh\nfor arg do\n case \"$arg\" in\n *capture-pane*) printf 'attempt\\n' >> {}; exec /usr/bin/sleep 60;;\n esac\ndone\nexec tmux \"$@\"\n",
-                shell_words::quote(&attempts.to_string_lossy())
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let sup = supervisor_with(
-            &state,
-            SupervisorSeams {
-                tmux_program: wrapper,
-                ..SupervisorSeams::default()
-            },
-        )
-        .await;
-        let mut entries = Vec::new();
-        for id in ["first-startup", "second-startup"] {
-            let name = format!("fh-{id}");
-            let pane = spawn_pane(&sup, &name, "printf 'fixture startup failure\\n'; exit 9").await;
-            wait_for_dead_pane(&sup, &pane).await;
-            let fence = sup
-                .tmux
-                .establish_launch_excerpt_fence(&name, &pane)
-                .await
-                .unwrap();
-            let entry = install_durable_running_entry(&sup, id, Terminal::tmux(name, pane)).await;
-            *entry.run.launch_excerpt.lock().unwrap() = Some(fence);
-            let spec = crate::launch::spec_path_for_launch(state.path(), id, entry.generation);
-            std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
-            std::fs::write(&spec, br#"{"scope_waypoint_expected":false}"#).unwrap();
-            entries.push(entry);
-        }
-        let states = sup.tmux.pane_states().await.unwrap();
-        for entry in &entries {
-            let terminal = entry.terminal.as_ref().unwrap().expect_tmux();
-            let pane = &states[&terminal.pane];
-            assert!(pane.dead && pane.session_name == terminal.tmux_name);
-            assert!(entry.run.launch_excerpt.lock().unwrap().is_some());
-        }
-        assert!(
-            !attempts.exists(),
-            "no capture has been attempted during setup"
-        );
-        let known =
-            super::super::status::KnownTmuxNames::from_sessions(entries.iter().map(|entry| {
-                (
-                    entry.info.id.as_str(),
-                    entry
-                        .terminal
-                        .as_ref()
-                        .map(|t| t.expect_tmux().tmux_name.as_str()),
-                )
-            }));
-        observe_entries(&sup, &entries, &states, &known).await;
-        assert_eq!(std::fs::read_to_string(&attempts).unwrap(), "attempt\n");
-        for entry in &entries {
-            let LastOutcome::Error { detail } = stored_outcome(&sup, &entry.info.id).await else {
-                panic!("a capture timeout must not discard the never-started verdict");
-            };
-            assert!(detail.contains("your login shell exited (code 9)"));
-            assert!(!detail.contains("last terminal output:"));
+    /// A tab whose host has already ended (a handle with no adopted
+    /// process), which the reap closes by removing what is left of it: no
+    /// peer whose lifetime could obscure the admission boundary these tests
+    /// are about.
+    fn exited_tab(socket: &std::path::Path) -> super::super::core::HostTab {
+        super::super::core::HostTab {
+            tab_id: uuid::Uuid::new_v4().to_string(),
+            created_ns: 1,
+            scoped: false,
+            host: crate::hosts::HostTerminal::gone(socket, None),
+            end_failed: false,
+            failed_ends: 0,
+            retry_at: None,
         }
     }
 
+    /// Put session `id` into the map with no agent terminal, an exited
+    /// agent (so no observation has anything to record), and one exited tab
+    /// ([`exited_tab`]), and return the entry and the tab's id.
+    async fn install_exited_tab(sup: &Arc<Supervisor>, id: &str) -> (Arc<SessionEntry>, String) {
+        let mut entry = entry_with(
+            None,
+            LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+        );
+        entry.info.id = id.to_string();
+        let tab = exited_tab(&sup.state_dir.join("hosts").join(format!("gone-{id}")));
+        let tab_id = tab.tab_id.clone();
+        entry.session.host_tabs = super::super::core::host_tab_cell(vec![tab]);
+        assert_eq!(
+            super::super::core::reap_due_host_tabs(&entry.session.host_tabs),
+            vec![tab_id.clone()],
+            "premise: the exited tab is eligible for automatic cleanup"
+        );
+        let entry = Arc::new(entry);
+        sup.sessions
+            .lock()
+            .await
+            .insert(id.to_string(), Arc::clone(&entry));
+        (entry, tab_id)
+    }
+
+    /// Wait until every one of `entries`' tabs is closed (gone from its
+    /// session's cell) and no session's lifecycle claim is held any more,
+    /// since the owned close holds that claim until it finishes. A timeout
+    /// reports the tabs and claims left, so a still-running close is
+    /// distinguishable from a missed start.
+    async fn wait_for_closed_tabs(sup: &Arc<Supervisor>, entries: &[Arc<SessionEntry>]) {
+        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
+        loop {
+            let open: Vec<&str> = entries
+                .iter()
+                .filter(|entry| !entry.session.host_tabs.lock().unwrap().is_empty())
+                .map(|entry| entry.info.id.as_str())
+                .collect();
+            let claimed: Vec<&str> = entries
+                .iter()
+                .map(|entry| entry.info.id.as_str())
+                .filter(|id| sup.lifecycle_locks.claimed_for_test(id))
+                .collect();
+            if open.is_empty() && claimed.is_empty() {
+                return;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "automatic close did not finish: tabs left in {open:?}; live claims: {claimed:?}"
+            );
+            // sleep-ok: poll the owned close's completion, bounded by TEST_DEADLINE.
+            tokio::time::sleep(TEST_READY_POLL_INTERVAL).await;
+        }
+    }
+
+    /// `entry` with `terminal` as its agent terminal, sharing its cells (the
+    /// outcome mirror, the launch-read latches): for an observation of the
+    /// same launch through evidence of another shape, such as a host that
+    /// has ended.
+    fn on_terminal(entry: &SessionEntry, terminal: HostTerminal) -> Arc<SessionEntry> {
+        Arc::new(SessionEntry {
+            info: entry.info.clone(),
+            terminal: Some(terminal),
+            run: entry.run.clone(),
+            session: entry.session.clone(),
+            snapshot: entry.snapshot.clone(),
+            canonical_cwd: entry.canonical_cwd.clone(),
+            generation: entry.generation,
+            scope: entry.scope.clone(),
+        })
+    }
+
+    /// A terminal whose host has ended, which the observers read as absent.
+    fn gone_terminal(sup: &Supervisor, id: &str) -> HostTerminal {
+        crate::hosts::HostTerminal::gone(
+            &sup.state_dir.join("hosts").join(format!("gone-{id}")),
+            None,
+        )
+    }
+
     /// What a `ListSessions` reply would say about this session right now,
-    /// computed exactly the way one is: probe tmux once, then classify the
-    /// entry against the result.
+    /// computed exactly the way one is.
     ///
     /// Going through the real [`session_status`] rather than reading the
     /// sample cell is the entire point of the tests below — the unit tests
     /// in `status` already pin the classifier against hand-built cells,
-    /// and what is left to prove is that a REAL pane, sampled by the REAL
-    /// ticker, reaches it.
+    /// and what is left to prove is that a REAL terminal, sampled by the
+    /// REAL ticker, reaches it.
     async fn classify(sup: &Arc<Supervisor>, id: &str) -> SessionStatus {
-        let states = sup.tmux.pane_states().await.expect("pane states");
         let entry = sup
             .sessions
             .lock()
@@ -2624,7 +2136,7 @@ mod tests {
             .get(id)
             .cloned()
             .expect("the session is in the map");
-        session_status(&entry, &states, &Default::default()).0
+        session_status(&entry).0
     }
 
     /// This session's sample cell, cloned out so an assertion never holds
@@ -2644,8 +2156,8 @@ mod tests {
     /// Poll `condition` until it holds or [`TEST_DEADLINE`] passes.
     ///
     /// Kept local to this module because the condition is synchronous;
-    /// the async waiters below name their tmux, process, and sampling
-    /// boundaries directly so their evidence remains visible at the call.
+    /// the async waiters below name their terminal and sampling boundaries
+    /// directly so their evidence remains visible at the call.
     async fn wait_until(what: &str, mut condition: impl FnMut() -> bool) {
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
         loop {
@@ -2658,66 +2170,25 @@ mod tests {
         }
     }
 
-    /// Wait until tmux reports that this pane is dead.
+    /// Wait until this terminal's program has exited and its host's exit
+    /// record has been processed, which is when status and the observers
+    /// read it as dead with its code.
     ///
-    /// A tab's shell exits independently of the command that created its
-    /// window. The reap tests therefore establish this state before asking
-    /// the ticker to remove it; a successful `new_window` alone would make
-    /// the cleanup assertion vacuous.
-    async fn wait_for_dead_pane(sup: &Arc<Supervisor>, pane: &str) {
+    /// The tests below establish this state before asking the ticker to
+    /// observe it; a started host alone would make the assertions vacuous.
+    async fn wait_for_dead_terminal(terminal: &HostTerminal) {
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            if states.get(pane).is_some_and(|state| state.dead) {
-                return;
-            }
+        while !matches!(
+            terminal.evidence(),
+            crate::hosts::HostEvidence::Owned { dead: true, .. }
+        ) {
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "the tab's shell never exited into a dead pane"
+                "the terminal's program never exited: {:?}",
+                terminal.liveness()
             );
-            // sleep-ok: tmux has not yet reported the shell's exit; retain the original bounded observation cadence.
-            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
-        }
-    }
-
-    /// Observe owned close completion without treating sampler return as teardown.
-    ///
-    /// The close runs on its own task. Pane absence alone is not its end: the
-    /// window is killed before the close's marker sweep and detach, so a test
-    /// returning then would tear its fixture down under supervisor work still
-    /// in flight. Completion is panes gone AND every session's lifecycle claim
-    /// released, since the close holds that claim until it finishes. A
-    /// timeout reports remaining panes and claims so a still-running close is
-    /// distinguishable from a missed start.
-    async fn wait_for_reaped_panes(sup: &Arc<Supervisor>, panes: &[String]) {
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            let remaining: Vec<_> = panes
-                .iter()
-                .filter(|pane| states.contains_key(*pane))
-                .collect();
-            let claimed = sup
-                .sessions
-                .lock()
-                .await
-                .keys()
-                .any(|id| sup.lifecycle_locks.claimed_for_test(id));
-            if remaining.is_empty() && !claimed {
-                return;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "automatic close did not remove panes {remaining:?}; live claims: {:?}",
-                sup.sessions
-                    .lock()
-                    .await
-                    .keys()
-                    .filter(|id| sup.lifecycle_locks.claimed_for_test(id))
-                    .collect::<Vec<_>>()
-            );
-            // sleep-ok: poll the owned close's pane-removal boundary, bounded by TEST_DEADLINE.
-            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+            // sleep-ok: the host's exit record has not been processed yet; bounded by TEST_DEADLINE.
+            tokio::time::sleep(TEST_HOST_POLL_INTERVAL).await;
         }
     }
 
@@ -2741,7 +2212,7 @@ mod tests {
         }
 
         /// Expose the existing async fault-hook shape at the teardown boundary.
-        fn hook(&self) -> super::super::core::SinkReservationGate {
+        fn hook(&self) -> super::super::core::BoundaryGate {
             let entered = Arc::clone(&self.entered);
             let release = Arc::clone(&self.release);
             Arc::new(move || {
@@ -2762,58 +2233,16 @@ mod tests {
         }
     }
 
-    /// Read the daemon's self-reported PID once its detached child exists.
-    ///
-    /// The child writes this file after the parent pane can die, so this
-    /// waits for the fixture's own evidence rather than treating the shell
-    /// command having returned as proof that there is a process to reap.
-    #[cfg(target_os = "linux")]
-    async fn wait_for_daemon_pid(path: &std::path::Path) -> u32 {
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            if let Ok(pid) = std::fs::read_to_string(path)
-                .map_err(|_| ())
-                .and_then(|contents| contents.trim().parse().map_err(|_| ()))
-            {
-                return pid;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the dead tab's command never wrote its daemon's pid"
-            );
-            // sleep-ok: the detached process writes this fixture file on a scheduler beat, so retry at the original bounded cadence.
-            tokio::time::sleep(TEST_READY_POLL_INTERVAL).await;
-        }
-    }
-
-    /// Wait for the reaped tab's detached child to disappear from procfs.
-    ///
-    /// This observes the marker sweep's process result, after the pane has
-    /// already disappeared, so the test distinguishes a real tab close from
-    /// a bare tmux window kill.
-    #[cfg(target_os = "linux")]
-    async fn wait_for_process_absence(pid: u32) {
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        while std::path::Path::new(&format!("/proc/{pid}")).exists() {
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the reaped tab's daemonized child (pid {pid}) must be swept"
-            );
-            // sleep-ok: poll process disappearance while the asynchronous marker sweep completes.
-            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
-        }
-    }
-
     /// Wait for the busy fixture to expose a screen different from its last
     /// sampled screen before the next budget-one pass looks at it.
     ///
-    /// This is deliberately a pane observation rather than another
+    /// This is deliberately a terminal observation rather than another
     /// [`sample_pass`]: the test below owns exactly twelve rotation passes,
-    /// and an extra sample would change the cursor and the quiet panes'
+    /// and an extra sample would change the cursor and the quiet terminals'
     /// counts. A missing baseline still needs a `tick <integer>` producer
     /// line, otherwise startup text could satisfy a comparison that
     /// establishes nothing about the busy fixture.
-    async fn wait_for_busy_pane_to_change(sup: &Arc<Supervisor>, id: &str) {
+    async fn wait_for_busy_terminal_to_change(sup: &Arc<Supervisor>, id: &str) {
         let entry = sup
             .sessions
             .lock()
@@ -2823,10 +2252,8 @@ mod tests {
             .expect("the busy session is in the map");
         let terminal = entry
             .terminal
-            .as_ref()
-            .expect("the busy session has an owned terminal")
-            .expect_tmux()
-            .clone();
+            .clone()
+            .expect("the busy session has an owned terminal");
         let baseline = entry
             .run
             .activity
@@ -2836,52 +2263,41 @@ mod tests {
             .clone();
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
         let last_captured = loop {
-            let capture = sup
-                .tmux
-                .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
-                .await;
-            let changed = capture.as_ref().is_ok_and(|captured| {
-                baseline.as_ref().map_or_else(
-                    || {
-                        captured.lines().any(|line| {
-                            line.strip_prefix("tick ")
-                                .is_some_and(|number| number.parse::<u64>().is_ok())
-                        })
-                    },
-                    |previous| previous != captured,
-                )
-            });
+            let captured = terminal.screen_tail(SAMPLE_TAIL_BYTES);
+            let changed = baseline.as_ref().map_or_else(
+                || {
+                    captured.lines().any(|line| {
+                        line.strip_prefix("tick ")
+                            .is_some_and(|number| number.parse::<u64>().is_ok())
+                    })
+                },
+                |previous| *previous != captured,
+            );
             if changed {
                 return;
             }
 
             if tokio::time::Instant::now() >= deadline {
-                break match capture {
-                    Ok(captured) => captured,
-                    Err(error) => format!("capture failed: {error:#}"),
-                };
+                break captured;
             }
             // sleep-ok: preserve the fixture's original 80ms observation cadence while waiting for an actual producer screen change.
             tokio::time::sleep(TEST_BUSY_OUTPUT_POLL_INTERVAL).await;
         };
-        let pane_live = sup.tmux.pane_states().await.ok().and_then(|states| {
-            states
-                .get(&terminal.pane)
-                .map(|state| state.session_name == terminal.tmux_name && !state.dead)
-        });
         panic!(
-            "busy pane never produced a changed screen before its next rotation sample; \
+            "busy terminal never produced a changed screen before its next rotation sample; \
              last sampled tail: {baseline:?}; last capture: {last_captured:?}; \
-             pane live: {pane_live:?}"
+             liveness: {:?}",
+            terminal.liveness()
         );
     }
 
-    /// Wait until an owned pane exposes the complete frame a fixture wrote.
+    /// Wait until an owned terminal exposes the complete frame a fixture
+    /// wrote.
     ///
-    /// Exact equality after the production capture trimming proves both
-    /// that the shell consumed the phase file and that tmux published the
-    /// whole requested frame before a sampler pass uses it as evidence.
-    async fn wait_for_pane_frame(sup: &Arc<Supervisor>, id: &str, expected: &str) -> String {
+    /// Exact equality with the screen text the sampler reads proves both
+    /// that the shell consumed the phase file and that the emulator holds
+    /// the whole requested frame before a sampler pass uses it as evidence.
+    async fn wait_for_terminal_frame(sup: &Arc<Supervisor>, id: &str, expected: &str) -> String {
         let entry = sup
             .sessions
             .lock()
@@ -2889,27 +2305,19 @@ mod tests {
             .get(id)
             .cloned()
             .expect("the session is in the map");
-        let terminal = entry
-            .terminal
-            .as_ref()
-            .expect("the session has a terminal")
-            .expect_tmux();
+        let terminal = entry.terminal.as_ref().expect("the session has a terminal");
         let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
         loop {
-            let captured = sup
-                .tmux
-                .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
-                .await
-                .expect("the owned pane remains readable");
+            let captured = terminal.screen_tail(SAMPLE_TAIL_BYTES);
             if captured == expected {
                 return captured;
             }
             assert!(
                 tokio::time::Instant::now() < deadline,
-                "owned pane never rendered the complete expected frame {expected:?}; last capture: {captured:?}"
+                "owned terminal never rendered the complete expected frame {expected:?}; last capture: {captured:?}"
             );
-            // sleep-ok: poll the owned shell's phase-file render until tmux exposes the complete frame.
-            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+            // sleep-ok: poll the owned shell's phase-file render until the emulator holds the complete frame.
+            tokio::time::sleep(TEST_HOST_POLL_INTERVAL).await;
         }
     }
 
@@ -2930,36 +2338,8 @@ mod tests {
                 return;
             }
             assert!(tokio::time::Instant::now() < deadline, "{timeout}");
-            // sleep-ok: retain the original tmux-paced retry interval between the sampler passes that are this helper's stimulus.
-            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
-        }
-    }
-
-    /// Wait until no installed agent pane remains live before sampling the
-    /// dead-tab-only fixture.
-    async fn wait_for_no_live_agent_pane(sup: &Arc<Supervisor>) {
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            let entries: Vec<Arc<SessionEntry>> =
-                sup.sessions.lock().await.values().cloned().collect();
-            let any_live_agent = entries.iter().any(|entry| {
-                entry.terminal.as_ref().is_some_and(|terminal| {
-                    let terminal = terminal.expect_tmux();
-                    states.get(&terminal.pane).is_some_and(|state| {
-                        state.session_name == terminal.tmux_name && !state.dead
-                    })
-                })
-            });
-            if !any_live_agent {
-                return;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the agent pane never went dead"
-            );
-            // sleep-ok: wait for tmux's liveness report at the original bounded cadence before exercising the all-dead pass.
-            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+            // sleep-ok: retain the original retry interval between the sampler passes that are this helper's stimulus.
+            tokio::time::sleep(TEST_HOST_POLL_INTERVAL).await;
         }
     }
 
@@ -2974,170 +2354,8 @@ mod tests {
         tokio::time::sleep(window).await;
     }
 
-    /// A shared fixture for the reap tests: a tmux window on `tmux_name`,
-    /// marked as a tab, whose command has already exited into a dead pane.
-    ///
-    /// Driven through tmux directly (window + marker) rather than
-    /// `open_tab` so the shell's immediate exit is the test's choice and
-    /// no launch machinery is in the frame. Returns the pane id — the
-    /// handle the assertions watch for disappearing.
-    async fn dead_tab_in(sup: &Arc<Supervisor>, tmux_name: &str) -> String {
-        dead_tab_running(sup, tmux_name, "true").await.0
-    }
-
-    /// [`dead_tab_in`] with the tab's command chosen by the test, and the
-    /// spawn-authority env vars a REAL `open_tab` would set — which is
-    /// what lets a command daemonize a child the close's marker sweep can
-    /// find. Returns `(pane, tab_id)`.
-    async fn dead_tab_running(
-        sup: &Arc<Supervisor>,
-        tmux_name: &str,
-        command: &str,
-    ) -> (String, String) {
-        let tab_id = uuid::Uuid::new_v4().to_string();
-        let session_id = tmux_name.strip_prefix("fh-").expect("fh- prefixed name");
-        let env = vec![
-            (
-                crate::launch::SESSION_ID_ENV_VAR.to_string(),
-                session_id.to_string(),
-            ),
-            (crate::launch::TAB_ID_ENV_VAR.to_string(), tab_id.clone()),
-        ];
-        let (_window, pane) = sup
-            .tmux
-            .new_window(
-                tmux_name,
-                "/tmp",
-                &env,
-                &["sh".to_string(), "-c".to_string(), command.to_string()],
-            )
-            .await
-            .expect("create the tab window");
-        sup.tmux
-            .mark_window(tmux_name, &pane, crate::tmux::TAB_WINDOW_OPTION, &tab_id)
-            .await
-            .expect("mark the tab window");
-        wait_for_dead_pane(sup, &pane).await;
-        (pane, tab_id)
-    }
-
-    /// Tabs whose shells exited are REAPED by successive ticks while a live sibling tab
-    /// survives untouched. This is the enforcement half of SPEC.md's "a
-    /// tab whose process exits is reaped automatically" (BUGS_BURNDOWN.md
-    /// issue 3; the listing paths only HIDE dead tabs).
-    ///
-    /// Pinned at the ticker because nothing else may do it: listings are
-    /// side-effect-free reads. (The pane-death wakeup calls the same reap;
-    /// `a_tab_is_reaped_on_pane_death_without_waiting_for_a_tick` covers
-    /// that trigger.) Two dead tabs in one session because a first-match-only
-    /// reap would pass a single-corpse test while leaving simultaneous exits
-    /// behind. Plain exited commands keep this coverage portable; the Linux
-    /// daemon-sweep test below checks detached descendants separately.
-    /// The live sibling is checked after the close tasks release their claims,
-    /// so their marker sweep and detach are included in the survival guarantee.
-    #[farhelm_testtrace::test]
-    async fn dead_tab_panes_are_reaped_by_the_tick_and_live_tabs_survive() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        install_live_session(&sup, "reap-tab", "sleep 600").await;
-        let tmux_name = "fh-reap-tab";
-
-        let dead_a = dead_tab_in(&sup, tmux_name).await;
-        let dead_b = dead_tab_in(&sup, tmux_name).await;
-        let live_id = uuid::Uuid::new_v4().to_string();
-        let (_window, live_pane) = sup
-            .tmux
-            .new_window(
-                tmux_name,
-                "/tmp",
-                &[],
-                &["sleep".to_string(), "600".to_string()],
-            )
-            .await
-            .expect("create the live tab window");
-        sup.tmux
-            .mark_window(
-                tmux_name,
-                &live_pane,
-                crate::tmux::TAB_WINDOW_OPTION,
-                &live_id,
-            )
-            .await
-            .expect("mark the live tab window");
-
-        // Before the reap: the two reply-facing listings split exactly on
-        // deadness. `session_tabs` (single-session replies) hides the
-        // corpses; `session_tabs_including_dead` (teardown's scope
-        // enumeration) still names them — a hidden corpse still owns a
-        // cgroup scope that delete must stop.
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get("reap-tab")
-            .cloned()
-            .expect("the session is installed");
-        assert!(entry.terminal.is_some(), "the session has a terminal");
-        let listed = sup.session_tabs(&entry).await.expect("session_tabs");
-        assert_eq!(
-            listed.iter().map(|tab| tab.id.as_str()).collect::<Vec<_>>(),
-            vec![live_id.as_str()],
-            "reply-facing tab listing must hide dead tabs even before the reap"
-        );
-        let with_dead = sup
-            .session_tabs_including_dead(&entry)
-            .await
-            .expect("session_tabs_including_dead");
-        assert_eq!(
-            with_dead.0.len(),
-            3,
-            "the teardown-facing listing must still name every dead tab's scope-bearing id"
-        );
-
-        let mut cursor = None;
-        let (_stop_tx, mut stop) = oneshot::channel();
-        // One close owns the session claim at a time. Drive later ticks until
-        // both siblings disappear rather than confusing start with completion.
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            if !states.contains_key(&dead_a) && !states.contains_key(&dead_b) {
-                break;
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "dead sibling tabs were not reaped; claim held: {}",
-                sup.lifecycle_locks.claimed_for_test("reap-tab")
-            );
-            // sleep-ok: later passes are the stimulus for sibling closes deferred by the session's claim.
-            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
-        }
-        // Windows disappear before the close's marker sweep and detach. Observe
-        // the released lifecycle claims before checking the live sibling.
-        wait_for_reaped_panes(&sup, &[dead_a.clone(), dead_b.clone()]).await;
-        let states = sup
-            .tmux
-            .pane_states()
-            .await
-            .expect("pane states after reap");
-        assert!(
-            !states.contains_key(&dead_a) && !states.contains_key(&dead_b),
-            "every dead tab's window must eventually be gone, not just the first"
-        );
-        let survivors = tabs_from_pane_states(states.values(), tmux_name, None);
-        assert_eq!(
-            survivors
-                .iter()
-                .map(|tab| tab.id.as_str())
-                .collect::<Vec<_>>(),
-            vec![live_id.as_str()],
-            "the live sibling tab must survive the reap untouched"
-        );
-    }
-
-    /// Retired sessions retain their dead tabs for Delete without taking
-    /// claims or crowding ordinary sessions out of either automatic reap.
+    /// Retired sessions retain their exited tabs for Delete without taking
+    /// claims or crowding ordinary sessions out of the automatic reap.
     ///
     /// Put a full budget of retired sessions first, then a full budget of
     /// ordinary ones. The close gate holds ordinary cleanup in flight, making
@@ -3149,295 +2367,107 @@ mod tests {
     /// container choice differs. New recipe-backed environments run ordinary
     /// supervisor launches and therefore take the ordinary branch too.
     #[farhelm_testtrace::test(flavor = "current_thread")]
-    async fn automatic_tab_reapers_leave_retired_sessions_out_of_the_budget() {
-        for host_tabs in [false, true] {
-            let state = StateDir::new();
-            let held = HeldTabCloses::new();
-            let sup = supervisor_with(
-                &state,
-                SupervisorSeams {
-                    faults: super::super::core::FaultHooks {
-                        tab_close_gate: Some(held.hook()),
-                        ..Default::default()
-                    },
+    async fn automatic_tab_reaper_leaves_retired_sessions_out_of_the_budget() {
+        let state = StateDir::new();
+        let held = HeldTabCloses::new();
+        let sup = supervisor_with(
+            &state,
+            SupervisorSeams {
+                faults: super::super::core::FaultHooks {
+                    tab_close_gate: Some(held.hook()),
                     ..Default::default()
                 },
-            )
-            .await;
-            let mut entries = Vec::new();
-            let mut panes = Vec::new();
-            for retired in [true, false] {
-                // Distinct sessions keep the lifecycle claim from masking
-                // budget spent by an earlier tab in the same session.
-                for _ in 0..REAP_BUDGET_PER_TICK {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    let mut entry = if host_tabs {
-                        let mut entry = entry_with(None, LastOutcome::Running);
-                        let socket = state.path().join("hosts").join(&id);
-                        assert!(!socket.exists(), "premise: this tab's host is gone");
-                        // A gone handle with no adopted process exercises
-                        // host-tab cleanup without a peer whose lifetime
-                        // could obscure the admission boundary being tested.
-                        entry.session.host_tabs =
-                            super::super::core::host_tab_cell(vec![super::super::core::HostTab {
-                                tab_id: uuid::Uuid::new_v4().to_string(),
-                                created_ns: 1,
-                                scoped: false,
-                                host: crate::hosts::HostTerminal::gone(&socket, None),
-                                end_failed: false,
-                                failed_ends: 0,
-                                retry_at: None,
-                            }]);
-                        assert_eq!(
-                            super::super::core::reap_due_host_tabs(&entry.session.host_tabs).len(),
-                            1,
-                            "premise: the gone host tab is eligible for automatic cleanup"
-                        );
-                        entry
-                    } else {
-                        let name = format!("fh-{id}");
-                        let agent = spawn_pane(&sup, &name, "sleep 600").await;
-                        panes.push(dead_tab_in(&sup, &name).await);
-                        entry_with(Some(Terminal::tmux(name, agent)), LastOutcome::Running)
-                    };
-                    entry.info.id = id.clone();
-                    entry.info.launch = farhelm_proto::SessionLaunch::Agent {
-                        selection: farhelm_proto::LaunchSelection {
-                            harness: farhelm_proto::LaunchHarness::Codex,
-                            model: None,
-                            effort: None,
-                            permissions: None,
-                            permission_flags: None,
-                            wrapper_prefix: None,
-                            workspace_trust: None,
-                            container: retired.then(|| farhelm_proto::ContainerConfig {
-                                engine: farhelm_proto::ContainerEngine::Podman,
-                                image: "example.invalid/retired:latest".into(),
-                                api_proxy_port: 42000,
-                                github_token_file: None,
-                            }),
-                        },
-                        start: vec!["agent".into(), "{farhelm_args}".into()],
-                        resume: None,
-                    };
-                    entry.snapshot = IntegrationSnapshot::of(&entry.info.launch);
-                    entry.info.agent_kind = entry.snapshot.kind;
-                    assert_eq!(crate::container::is_retired(&entry.info.launch), retired);
-                    let entry = Arc::new(entry);
-                    sup.sessions.lock().await.insert(id, Arc::clone(&entry));
-                    entries.push(entry);
-                }
-            }
-            let states = sup.tmux.pane_states().await.expect("fixture pane states");
-            for pane in &panes {
-                assert!(states.get(pane).is_some_and(|state| state.dead));
-            }
-            let (retired, ordinary) = entries.split_at(REAP_BUDGET_PER_TICK);
-            let (_stop_tx, mut stop) = oneshot::channel();
-            if host_tabs {
-                reap_dead_host_tabs(&sup, &entries, &mut stop);
-            } else {
-                reap_dead_tabs(&sup, &states, &entries, &mut stop).await;
-            }
-            assert!(
-                retired
-                    .iter()
-                    .all(|entry| !sup.lifecycle_locks.claimed_for_test(&entry.info.id)),
-                "retired tabs must not start even an immediately refused close (host tabs: {host_tabs})"
-            );
-            assert!(
-                ordinary
-                    .iter()
-                    .all(|entry| sup.lifecycle_locks.claimed_for_test(&entry.info.id)),
-                "retired tabs must leave the full admission budget for ordinary tabs (host tabs: {host_tabs})"
-            );
-            wait_until("every ordinary close reached teardown", || {
-                held.entered.load(Ordering::SeqCst) == REAP_BUDGET_PER_TICK
-            })
-            .await;
-            held.release.add_permits(REAP_BUDGET_PER_TICK);
-            let ordinary_panes = if host_tabs {
-                &[][..]
-            } else {
-                &panes[REAP_BUDGET_PER_TICK..]
-            };
-            wait_for_reaped_panes(&sup, ordinary_panes).await;
-            if host_tabs {
-                assert!(
-                    ordinary
-                        .iter()
-                        .all(|entry| { entry.session.host_tabs.lock().unwrap().is_empty() })
-                );
-                assert!(
-                    retired
-                        .iter()
-                        .all(|entry| { entry.session.host_tabs.lock().unwrap().len() == 1 })
-                );
-            } else {
-                let states = sup
-                    .tmux
-                    .pane_states()
-                    .await
-                    .expect("pane states after cleanup");
-                assert!(
-                    panes[..REAP_BUDGET_PER_TICK]
-                        .iter()
-                        .all(|pane| states.get(pane).is_some_and(|state| state.dead))
-                );
-            }
-        }
-    }
-
-    /// Reaping a dead tab must sweep its detached child as well as its window.
-    ///
-    /// This proof needs Linux's setsid and procfs. On macOS, platform binaries
-    /// withhold the environment markers the sweep needs; the portable test
-    /// above still proves dead-window cleanup and live-sibling preservation.
-    #[farhelm_testtrace::test]
-    #[cfg(target_os = "linux")]
-    async fn dead_tab_reaping_sweeps_a_live_daemonized_child() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        install_live_session(&sup, "reap-daemon", "sleep 600").await;
-        let tmux_name = "fh-reap-daemon";
-        let daemon_pid_file = state.path().join("reap-daemon.pid");
-        // The daemon publishes its own PID after detaching. A setsid launcher
-        // may fork, so $! need not name the surviving process; the pane also
-        // holds until publication so its exit cannot kill an undetached child.
-        let (dead, _tab_id) = dead_tab_running(
-            &sup,
-            tmux_name,
-            &format!(
-                "( setsid /bin/sh -c 'echo $$ > {pid}; exec sleep 300' \
-                 </dev/null >/dev/null 2>&1 & ); \
-                 while [ ! -s {pid} ]; do sleep 0.05; done",
-                pid = daemon_pid_file.display()
-            ),
-        )
-        .await;
-        let daemon_pid = wait_for_daemon_pid(&daemon_pid_file).await;
-        assert!(
-            std::path::Path::new(&format!("/proc/{daemon_pid}")).exists(),
-            "the daemonized child must be alive before the reap for its death to mean anything"
-        );
-
-        let mut cursor = None;
-        let (_stop_tx, mut stop) = oneshot::channel();
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        wait_for_reaped_panes(&sup, std::slice::from_ref(&dead)).await;
-        let states = sup.tmux.pane_states().await.expect("pane states");
-        assert!(
-            !states.contains_key(&dead),
-            "the dead tab's window must be gone after the tick"
-        );
-        // Pane removal alone would also pass for a bare kill-window. The live
-        // daemon must disappear to prove that the ordinary close swept it.
-        wait_for_process_absence(daemon_pid).await;
-    }
-
-    /// A tab whose shell exits is reaped on the pane-death wakeup, without
-    /// waiting for the next tick.
-    ///
-    /// Why this matters: a tab's shell exiting used to leave its dead pane in
-    /// place until the next tick found it, up to a whole interval later, so a
-    /// closed shell visibly lingered. The private server's `pane-died` hook
-    /// now wakes the ticker, which runs the same reap at once. Specifies: with
-    /// the tick interval set far beyond the wait below, a live tab survives
-    /// until its shell exits, and is then closed well before any tick could
-    /// have run. The first tick is a full interval out, so only the wakeup
-    /// can explain the reap. Wait for the close's lifecycle claim to be released
-    /// before tearing down the fixture; pane absence alone is an earlier boundary.
-    #[farhelm_testtrace::test]
-    async fn a_tab_is_reaped_on_pane_death_without_waiting_for_a_tick() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            dummy_exe(),
-            SupervisorTimeouts::default(),
-            SupervisorSeams {
-                ticker_interval: Duration::from_secs(600),
-                ..SupervisorSeams::default()
+                ..Default::default()
             },
         )
-        .await
-        .expect("supervisor");
-        install_live_session(&sup, "wake-reap", "sleep 600").await;
-        let tmux_name = "fh-wake-reap";
-        let trigger = state.path().join("exit-now");
-        let tab_id = uuid::Uuid::new_v4().to_string();
-        let env = vec![
-            (
-                crate::launch::SESSION_ID_ENV_VAR.to_string(),
-                "wake-reap".to_string(),
-            ),
-            (crate::launch::TAB_ID_ENV_VAR.to_string(), tab_id.clone()),
-        ];
-        // The shell holds until the test creates the trigger file, so the
-        // tab is provably live when the ticker starts and dies only after.
-        let (_window, pane) = sup
-            .tmux
-            .new_window(
-                tmux_name,
-                "/tmp",
-                &env,
-                &[
-                    "sh".to_string(),
-                    "-c".to_string(),
-                    format!("while [ ! -e {} ]; do sleep 0.05; done", trigger.display()),
-                ],
-            )
-            .await
-            .expect("create the tab window");
-        sup.tmux
-            .mark_window(tmux_name, &pane, crate::tmux::TAB_WINDOW_OPTION, &tab_id)
-            .await
-            .expect("mark the tab window");
-
-        let ticker = start_ticker(&sup);
-        let states = sup.tmux.pane_states().await.expect("pane states");
-        assert!(
-            states.get(&pane).is_some_and(|state| !state.dead),
-            "premise: the tab is live before its shell is told to exit"
-        );
-        std::fs::write(&trigger, b"").expect("create the trigger file");
-
-        let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
-        loop {
-            let states = sup.tmux.pane_states().await.expect("pane states");
-            let Some(state) = states.get(&pane) else {
-                break;
-            };
-            // On timeout, say which premise failed: a pane still alive means
-            // the fixture's shell never saw the trigger, while a dead pane
-            // that lingers means the wakeup or its reap did not happen.
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the tab was not reaped by the pane-death wakeup (pane dead: {})",
-                state.dead
-            );
-            // sleep-ok: waits for the wakeup's reap to remove the pane; bounded by TEST_DEADLINE, far below the 600 s tick.
-            tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+        .await;
+        let mut entries = Vec::new();
+        for retired in [true, false] {
+            // Distinct sessions keep the lifecycle claim from masking
+            // budget spent by an earlier tab in the same session.
+            for _ in 0..REAP_BUDGET_PER_TICK {
+                let id = uuid::Uuid::new_v4().to_string();
+                let mut entry = entry_with(None, LastOutcome::Running);
+                let socket = state.path().join("hosts").join(&id);
+                assert!(!socket.exists(), "premise: this tab's host is gone");
+                entry.session.host_tabs =
+                    super::super::core::host_tab_cell(vec![exited_tab(&socket)]);
+                assert_eq!(
+                    super::super::core::reap_due_host_tabs(&entry.session.host_tabs).len(),
+                    1,
+                    "premise: the gone host tab is eligible for automatic cleanup"
+                );
+                entry.info.id = id.clone();
+                entry.info.launch = farhelm_proto::SessionLaunch::Agent {
+                    selection: farhelm_proto::LaunchSelection {
+                        harness: farhelm_proto::LaunchHarness::Codex,
+                        model: None,
+                        effort: None,
+                        permissions: None,
+                        permission_flags: None,
+                        wrapper_prefix: None,
+                        workspace_trust: None,
+                        container: retired.then(|| farhelm_proto::ContainerConfig {
+                            engine: farhelm_proto::ContainerEngine::Podman,
+                            image: "example.invalid/retired:latest".into(),
+                            api_proxy_port: 42000,
+                            github_token_file: None,
+                        }),
+                    },
+                    start: vec!["agent".into(), "{farhelm_args}".into()],
+                    resume: None,
+                };
+                entry.snapshot = IntegrationSnapshot::of(&entry.info.launch);
+                entry.info.agent_kind = entry.snapshot.kind;
+                assert_eq!(crate::container::is_retired(&entry.info.launch), retired);
+                let entry = Arc::new(entry);
+                sup.sessions.lock().await.insert(id, Arc::clone(&entry));
+                entries.push(entry);
+            }
         }
-        wait_for_reaped_panes(&sup, &[pane]).await;
-        ticker.shutdown().await;
+        let (retired, ordinary) = entries.split_at(REAP_BUDGET_PER_TICK);
+        let (_stop_tx, mut stop) = oneshot::channel();
+        reap_dead_host_tabs(&sup, &entries, &mut stop);
+        assert!(
+            retired
+                .iter()
+                .all(|entry| !sup.lifecycle_locks.claimed_for_test(&entry.info.id)),
+            "retired tabs must not start even an immediately refused close"
+        );
+        assert!(
+            ordinary
+                .iter()
+                .all(|entry| sup.lifecycle_locks.claimed_for_test(&entry.info.id)),
+            "retired tabs must leave the full admission budget for ordinary tabs"
+        );
+        wait_until("every ordinary close reached teardown", || {
+            held.entered.load(Ordering::SeqCst) == REAP_BUDGET_PER_TICK
+        })
+        .await;
+        held.release.add_permits(REAP_BUDGET_PER_TICK);
+        wait_for_closed_tabs(&sup, ordinary).await;
+        assert!(
+            retired
+                .iter()
+                .all(|entry| { entry.session.host_tabs.lock().unwrap().len() == 1 })
+        );
     }
 
     /// The automatic reap never waits for a session's lifecycle claim: while
     /// another operation holds it, the sample pass still completes and the
-    /// dead tab is left for a later tick, which then reaps it.
+    /// exited tab is left for a later tick, which then reaps it.
     ///
     /// Why it matters: the reap runs inside the serial sample pass, so a
     /// waiting close froze status for every session on the host for as long
     /// as one session's Stop, Restart or Delete ran (SPEC.md "Waiting between
     /// operations on one host"). Specified: with the claim held elsewhere the
-    /// pass returns within the bound and the tab's pane survives it; once the
-    /// claim is free the next pass removes it.
+    /// pass returns within the bound and the tab survives it; once the claim
+    /// is free the next pass removes it.
     #[farhelm_testtrace::test]
-    async fn dead_tab_reap_skips_a_session_whose_lifecycle_claim_is_busy() {
+    async fn exited_tab_reap_skips_a_session_whose_lifecycle_claim_is_busy() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        install_live_session(&sup, "busy-reap", "sleep 600").await;
-        let dead = dead_tab_in(&sup, "fh-busy-reap").await;
+        let (entry, _tab) = install_exited_tab(&sup, "busy-reap").await;
         let holder = sup.lifecycle_locks.claim("busy-reap").await;
         assert!(
             sup.lifecycle_locks.claimed_for_test("busy-reap"),
@@ -3452,92 +2482,18 @@ mod tests {
         )
         .await
         .expect("the sample pass must not wait for a busy lifecycle claim");
-        assert!(
-            sup.tmux
-                .pane_states()
-                .await
-                .expect("pane states")
-                .contains_key(&dead),
-            "a busy session's dead tab is left for a later tick"
+        assert_eq!(
+            entry.session.host_tabs.lock().unwrap().len(),
+            1,
+            "a busy session's exited tab is left for a later tick"
         );
 
         drop(holder);
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        wait_for_reaped_panes(&sup, std::slice::from_ref(&dead)).await;
-        assert!(
-            !sup.tmux
-                .pane_states()
-                .await
-                .expect("pane states")
-                .contains_key(&dead),
-            "once the claim is free the next tick reaps the dead tab"
-        );
+        wait_for_closed_tabs(&sup, std::slice::from_ref(&entry)).await;
     }
 
-    /// A stale dead observation grants no authority to kill a live shell.
-    /// The close gate sits after discovery but before its destructive boundary;
-    /// respawning there must leave the revived pane running and un-signalled.
-    #[farhelm_testtrace::test]
-    async fn automatic_tab_close_rechecks_death_after_waiting_to_teardown() {
-        let state = StateDir::new();
-        let held = HeldTabCloses::new();
-        let sup = supervisor_with(
-            &state,
-            SupervisorSeams {
-                faults: super::super::core::FaultHooks {
-                    tab_close_gate: Some(held.hook()),
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        )
-        .await;
-        install_live_session(&sup, "recheck-reap", "sleep 600").await;
-        let (pane, tab) = dead_tab_running(&sup, "fh-recheck-reap", "true").await;
-        assert!(sup.try_close_tab("recheck-reap", &tab).is_some());
-        wait_until("automatic close reached teardown gate", || {
-            held.entered.load(Ordering::SeqCst) == 1
-        })
-        .await;
-        sup.tmux
-            .relaunch_in_pane(
-                "fh-recheck-reap",
-                &pane,
-                "/",
-                &[],
-                &["sh".into(), "-c".into(), "sleep 600".into()],
-            )
-            .await
-            .unwrap();
-        assert!(matches!(
-            sup.tmux
-                .pane_process("fh-recheck-reap", &pane)
-                .await
-                .unwrap(),
-            crate::terminal_process::TerminalProbe::Owned(
-                crate::terminal_process::TerminalProcess { dead: false, .. }
-            )
-        ));
-        held.release.add_permits(1);
-        wait_until("automatic close released its lifecycle claim", || {
-            !sup.lifecycle_locks.claimed_for_test("recheck-reap")
-        })
-        .await;
-        assert!(
-            matches!(
-                sup.tmux
-                    .pane_process("fh-recheck-reap", &pane)
-                    .await
-                    .unwrap(),
-                crate::terminal_process::TerminalProbe::Owned(
-                    crate::terminal_process::TerminalProcess { dead: false, .. }
-                )
-            ),
-            "a revived tab must survive automatic cleanup based on stale evidence"
-        );
-    }
-
-    /// The per-tick reap budget defers, never drops: a burst of dead tabs
+    /// The per-tick reap budget defers, never drops: a burst of exited tabs
     /// larger than [`REAP_BUDGET_PER_TICK`] is finished by the NEXT pass,
     /// with the budget boundary observable in between.
     ///
@@ -3561,13 +2517,12 @@ mod tests {
             },
         )
         .await;
-        let mut corpses = Vec::new();
+        let mut entries = Vec::new();
         let mut sessions = Vec::new();
         // Distinct sessions avoid the per-session claim masking a broken cap.
         for index in 0..(REAP_BUDGET_PER_TICK + 1) {
             let id = format!("reap-burst-{index}");
-            install_live_session(&sup, &id, "sleep 600").await;
-            corpses.push(dead_tab_in(&sup, &format!("fh-{id}")).await);
+            entries.push(install_exited_tab(&sup, &id).await.0);
             sessions.push(id);
         }
 
@@ -3587,14 +2542,13 @@ mod tests {
             "one pass starts exactly its budget while all closes remain held"
         );
         assert_eq!(held.entered.load(Ordering::SeqCst), REAP_BUDGET_PER_TICK);
-        let started: Vec<_> = sessions
+        let started: Vec<_> = entries
             .iter()
-            .zip(&corpses)
-            .filter(|(id, _)| sup.lifecycle_locks.claimed_for_test(id))
-            .map(|(_, pane)| pane.clone())
+            .filter(|entry| sup.lifecycle_locks.claimed_for_test(&entry.info.id))
+            .cloned()
             .collect();
         held.release.add_permits(REAP_BUDGET_PER_TICK);
-        wait_for_reaped_panes(&sup, &started).await;
+        wait_for_closed_tabs(&sup, &started).await;
         wait_until("first closes released their claims", || {
             sessions
                 .iter()
@@ -3608,15 +2562,15 @@ mod tests {
         })
         .await;
         held.release.add_permits(1);
-        wait_for_reaped_panes(&sup, &corpses).await;
+        wait_for_closed_tabs(&sup, &entries).await;
     }
 
     /// Sampling advances while a tab's owned close is held inside teardown.
     ///
     /// The gate establishes a real close under its lifecycle claim, rather than
-    /// inferring slow cleanup from elapsed time. Both tick and pane-death passes
-    /// must return while it is held; a newer live screen sample proves the host's
-    /// status work continued. A duplicate automatic start is refused and an
+    /// inferring slow cleanup from elapsed time. Both tick and liveness-wake
+    /// passes must return while it is held; a newer live screen sample proves
+    /// the host's status work continued. A duplicate automatic start is refused and an
     /// explicit close still waits for the session claim and its final result.
     #[farhelm_testtrace::test]
     async fn tab_teardown_does_not_block_fresh_samples_or_start_duplicate_closes() {
@@ -3633,14 +2587,13 @@ mod tests {
             },
         )
         .await;
-        install_live_session(&sup, "slow-reap", "sleep 600").await;
+        let (slow, tab) = install_exited_tab(&sup, "slow-reap").await;
         install_live_session(
             &sup,
             "sampling-peer",
             "i=0; while :; do i=$((i+1)); echo \"tick $i\"; sleep 0.05; done",
         )
         .await;
-        let (pane, tab) = dead_tab_running(&sup, "fh-slow-reap", "true").await;
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
         tokio::time::timeout(
@@ -3673,10 +2626,10 @@ mod tests {
             before.is_some(),
             "first pass must establish a live baseline"
         );
-        wait_for_busy_pane_to_change(&sup, "sampling-peer").await;
+        wait_for_busy_terminal_to_change(&sup, "sampling-peer").await;
         tokio::time::timeout(TEST_DEADLINE, reap_pass(&sup, &mut stop))
             .await
-            .expect("pane-death pass must not join held teardown");
+            .expect("liveness-wake pass must not join held teardown");
         tokio::time::timeout(
             TEST_DEADLINE,
             sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop),
@@ -3705,7 +2658,7 @@ mod tests {
             result.expect_err("the original tab is now gone").kind,
             farhelm_proto::ErrorKind::NotFound
         );
-        wait_for_reaped_panes(&sup, std::slice::from_ref(&pane)).await;
+        wait_for_closed_tabs(&sup, std::slice::from_ref(&slow)).await;
     }
 
     /// A pass over a REAL pane that is producing output dates the
@@ -3727,7 +2680,7 @@ mod tests {
     /// durable half is covered where a real create exists — the store's
     /// own tests, and the farhelm crate's e2e suite.
     #[farhelm_testtrace::test]
-    async fn a_sampling_pass_dates_a_changing_pane_and_leaves_a_still_one_alone() {
+    async fn a_sampling_pass_dates_a_changing_terminal_and_leaves_a_still_one_alone() {
         let state = StateDir::new();
         let sup = supervisor_with(
             &state,
@@ -3776,10 +2729,10 @@ mod tests {
         );
     }
 
-    /// A real tmux pane runs the Codex reader end to end: four different
+    /// A real terminal runs the Codex reader end to end: four different
     /// composer frames (sparkle animation, draft edits) read idle and never
     /// move the durable activity cell, although every one of them changed
-    /// the screen; a spinner in the pane title, which is how Codex shows a
+    /// the screen; a spinner in the terminal title, which is how Codex shows a
     /// running turn, then reads running and dates the session.
     ///
     /// Why it matters: this is the redraw-while-idle case that made idle
@@ -3788,10 +2741,10 @@ mod tests {
     ///
     /// The phase file is the stimulus, and exact equality with the requested
     /// trimmed frame is the readiness oracle. The test therefore waits for
-    /// tmux to publish every row before sampling rather than treating one
+    /// the emulator to hold every row before sampling rather than treating one
     /// phase-specific marker as proof that the rest of the frame arrived.
     #[farhelm_testtrace::test]
-    async fn codex_composer_redraws_do_not_date_a_real_pane_but_output_does() {
+    async fn codex_composer_redraws_do_not_date_a_real_terminal_but_output_does() {
         let state = StateDir::new();
         let phase_file = state.path().join("codex-activity-phase");
         std::fs::write(&phase_file, "a").expect("seed the owned phase file");
@@ -3819,7 +2772,7 @@ mod tests {
         )
         .await;
         install_live_session_of_kind(&sup, "codex", &command, AgentKind::Codex).await;
-        wait_for_pane_frame(
+        wait_for_terminal_frame(
             &sup,
             "codex",
             "agent output\n\n› Ask Codex to do anything\n\n  custom footer",
@@ -3856,7 +2809,7 @@ mod tests {
             ),
         ] {
             std::fs::write(&phase_file, phase).expect("advance the owned phase file");
-            wait_for_pane_frame(&sup, "codex", frame).await;
+            wait_for_terminal_frame(&sup, "codex", frame).await;
             sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
         }
         assert_eq!(classify(&sup, "codex").await, SessionStatus::Idle);
@@ -3867,7 +2820,7 @@ mod tests {
         );
 
         std::fs::write(&phase_file, "output").expect("request real output");
-        wait_for_pane_frame(
+        wait_for_terminal_frame(
             &sup,
             "codex",
             "agent output\nreal tool output\n\n› another draft\n\n  custom footer",
@@ -3881,127 +2834,27 @@ mod tests {
         assert_eq!(classify(&sup, "codex").await, SessionStatus::Running);
     }
 
-    /// A dead agent pane whose marker was removed or malformed may carry a
-    /// forged tab marker, but automatic dead-tab cleanup must exclude its
-    /// whole recorded window. A separate genuine dead tab proves the reap
-    /// still performs its normal destructive work for real tabs.
-    #[farhelm_testtrace::test]
-    async fn dead_tab_reap_excludes_a_forged_marker_on_the_agent_window() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        install_live_session(&sup, "forged-agent-reap", "true").await;
-        let tmux_name = "fh-forged-agent-reap";
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get("forged-agent-reap")
-            .cloned()
-            .expect("the session is installed");
-        let agent = agent_tmux(&entry);
-        let genuine_dead_pane = dead_tab_in(&sup, tmux_name).await;
-        let forged_id = uuid::Uuid::new_v4().to_string();
-        sup.tmux
-            .mark_window(
-                tmux_name,
-                &agent.pane,
-                crate::tmux::AGENT_WINDOW_OPTION,
-                "malformed-agent-marker",
-            )
-            .await
-            .expect("corrupt the mutable agent marker");
-        sup.tmux
-            .mark_window(
-                tmux_name,
-                &agent.pane,
-                crate::tmux::TAB_WINDOW_OPTION,
-                &forged_id,
-            )
-            .await
-            .expect("forge a tab marker on the agent window");
-
-        // The fixture premise is that the agent and genuine tab are both
-        // dead before the reap; otherwise the protected window could look
-        // safe merely because it was still live.
-        wait_for_no_live_agent_pane(&sup).await;
-        let before = sup
-            .tmux
-            .pane_states()
-            .await
-            .expect("pane states before reap");
-        assert!(
-            before.contains_key(&agent.pane),
-            "remain-on-exit keeps the agent pane"
-        );
-        assert!(
-            before.contains_key(&genuine_dead_pane),
-            "genuine dead tab is present"
-        );
-
-        let listed = sup.session_tabs(&entry).await.expect("tab listing");
-        assert!(
-            listed.is_empty(),
-            "dead forged and genuine tabs stay hidden from listing"
-        );
-        let mut cursor = None;
-        let (_stop_tx, mut stop) = oneshot::channel();
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        wait_for_reaped_panes(&sup, std::slice::from_ref(&genuine_dead_pane)).await;
-        let after = sup
-            .tmux
-            .pane_states()
-            .await
-            .expect("pane states after reap");
-        assert!(
-            after.contains_key(&agent.pane),
-            "automatic dead-tab reap must retain the recorded agent window"
-        );
-        assert!(
-            !after.contains_key(&genuine_dead_pane),
-            "automatic dead-tab reap must still remove a genuine dead tab"
-        );
-        assert!(
-            tabs_from_pane_states(after.values(), tmux_name, Some(&agent.pane)).is_empty(),
-            "the forged marker remains excluded after the reap"
-        );
-    }
-
-    /// The reap still runs when NO agent pane on the whole server is live
-    /// — the sampler's `live.is_empty()` early return must not be reached
-    /// before it (an easy regression: reaping placed after that return
-    /// would strand tabs on exactly the sessions whose agents exited).
+    /// The reap still runs when NO agent terminal is live — the sampler's
+    /// `live.is_empty()` early return must not be reached before it (an easy
+    /// regression: reaping placed after that return would strand tabs on
+    /// exactly the sessions whose agents exited).
     ///
-    /// A dedicated supervisor whose ONLY session has a dead agent pane, so
-    /// the emptiness is real rather than incidental: an earlier version of
-    /// this scenario shared a supervisor with a live-agent test and proved
-    /// nothing. Deliberately a dead agent PANE, not a killed window — a
-    /// by-hand window kill is the residual state the product cannot reach,
-    /// and it also drops the session toward the single-window regime where
-    /// the marker query is skipped server-wide.
+    /// A dedicated supervisor whose ONLY session has an exited agent, so the
+    /// emptiness is real rather than incidental.
     #[farhelm_testtrace::test]
-    async fn a_dead_tab_is_reaped_when_no_agent_pane_is_live() {
+    async fn an_exited_tab_is_reaped_when_no_agent_is_live() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        install_live_session(&sup, "reap-dead-agent", "true").await;
-        let tmux_name = "fh-reap-dead-agent";
-        let tab_pane = dead_tab_in(&sup, tmux_name).await;
-
-        // The premise the test exists for: no live agent pane anywhere.
-        wait_for_no_live_agent_pane(&sup).await;
+        let (entry, _tab) = install_exited_tab(&sup, "reap-dead-agent").await;
+        assert!(
+            entry.terminal.is_none(),
+            "premise: no live agent terminal anywhere"
+        );
 
         let mut cursor = None;
         let (_stop_tx, mut stop) = oneshot::channel();
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        wait_for_reaped_panes(&sup, std::slice::from_ref(&tab_pane)).await;
-        let states = sup.tmux.pane_states().await.expect("pane states");
-        assert!(
-            !states.contains_key(&tab_pane),
-            "a dead tab must be reaped even with no live agent pane anywhere"
-        );
-        assert!(
-            tabs_from_pane_states(states.values(), tmux_name, None).is_empty(),
-            "no tab may remain discoverable on the dead-agent session after the reap"
-        );
+        wait_for_closed_tabs(&sup, std::slice::from_ref(&entry)).await;
     }
 
     /// A tick retains an agent exit even when no client asks for a list,
@@ -4009,8 +2862,9 @@ mod tests {
     ///
     /// The durable assertion is the important half: without it, an exit
     /// caught between list requests would be lost on the next host reboot,
-    /// when reload can no longer recover the dead pane's status code. The
-    /// read-only case uses a second real dead pane so it verifies that the
+    /// when reload can no longer recover the dead terminal's status code.
+    /// The read-only case uses a second real dead terminal so it verifies
+    /// that the
     /// `may_record` gate covers ticker witnessing itself, not merely a
     /// later failure to mirror a successful write.
     #[farhelm_testtrace::test]
@@ -4018,20 +2872,14 @@ mod tests {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
 
-        let recorded_name = "fh-ticker-exit";
-        let recorded_pane = spawn_pane(&sup, recorded_name, "exit 7").await;
-        let recorded = install_durable_running_entry(
-            &sup,
-            "ticker-exit",
-            Terminal::tmux(recorded_name.to_string(), recorded_pane.clone()),
-        )
-        .await;
-        wait_for_dead_pane(&sup, &recorded_pane).await;
-        let states = sup.tmux.pane_states().await.expect("pane states");
+        let recorded_terminal = spawn_host(&sup, "ticker-exit", "exit 7").await;
+        let recorded =
+            install_durable_running_entry(&sup, "ticker-exit", recorded_terminal.clone()).await;
+        wait_for_dead_terminal(&recorded_terminal).await;
         assert_eq!(
-            states.get(&recorded_pane).and_then(|pane| pane.exit_code),
+            recorded_terminal.exit_code(),
             Some(7),
-            "the fixture must retain tmux's real exit code before the ticker observes it"
+            "the fixture must hold the program's real exit code before the ticker observes it"
         );
 
         let mut cursor = None;
@@ -4055,15 +2903,11 @@ mod tests {
             "the ticker must mirror its committed outcome for immediate replies"
         );
 
-        let readonly_name = "fh-ticker-read-only";
-        let readonly_pane = spawn_pane(&sup, readonly_name, "exit 7").await;
-        let readonly = install_durable_running_entry(
-            &sup,
-            "ticker-read-only",
-            Terminal::tmux(readonly_name.to_string(), readonly_pane.clone()),
-        )
-        .await;
-        wait_for_dead_pane(&sup, &readonly_pane).await;
+        let readonly_terminal = spawn_host(&sup, "ticker-read-only", "exit 7").await;
+        let readonly =
+            install_durable_running_entry(&sup, "ticker-read-only", readonly_terminal.clone())
+                .await;
+        wait_for_dead_terminal(&readonly_terminal).await;
         sup.may_record.store(false, Ordering::SeqCst);
 
         sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
@@ -4080,101 +2924,21 @@ mod tests {
         );
     }
 
-    /// A pane id that now belongs to another tmux session is not evidence
-    /// about the entry that remembered the old name.
-    ///
-    /// tmux recycles pane ids after a server restart, and a manual rename
-    /// has the same observable shape. This fixture keeps the pane alive so
-    /// an incorrect id-only match would be visible as a false conclusion;
-    /// the required result is no transition at all, not an exit inferred
-    /// from a pane Farhelm does not positively own.
-    #[farhelm_testtrace::test]
-    async fn a_moved_pane_never_produces_a_ticker_exit_transition() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let moved_pane = spawn_pane(&sup, "fh-current-owner", "sleep 600").await;
-        let entry = install_durable_running_entry(
-            &sup,
-            "moved",
-            Terminal::tmux("fh-previous-owner".to_string(), moved_pane),
-        )
-        .await;
-
-        let mut cursor = None;
-        let (_stop_tx, mut stop) = never_stopped();
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-
-        assert_eq!(
-            stored_outcome(&sup, "moved").await,
-            LastOutcome::Running,
-            "a pane assigned to another tmux session must not update this row"
-        );
-        assert_eq!(
-            *entry.run.outcome.lock().expect("outcome mutex"),
-            LastOutcome::Running,
-            "an unmatched pane must not change the in-memory outcome either"
-        );
-    }
-
-    /// Spec: a list reply leaves a running session whose pane tmux now
-    /// reports under a session name no farhelm session answers to recorded
-    /// as running, and reports its status as unknown.
-    ///
-    /// Why: that shape is what an out-of-band `rename-session` or
-    /// `move-pane` on the private socket leaves, and the pane is then most
-    /// likely still this session's agent. A list must neither infer a durable exit nor change the outcome;
-    /// the tick also refuses exit inference from this unattributed pane.
-    #[farhelm_testtrace::test]
-    async fn a_list_never_records_an_exit_for_a_pane_renamed_out_of_band() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let pane = spawn_pane(&sup, "renamed-by-hand", "sleep 600").await;
-        install_durable_running_entry(
-            &sup,
-            "renamed",
-            Terminal::tmux("fh-renamed".to_string(), pane),
-        )
-        .await;
-
-        let reply = super::super::listing::list_all(&sup).await.expect("list");
-        let info = reply
-            .sessions
-            .iter()
-            .find(|info| info.id == "renamed")
-            .expect("the session is listed");
-        assert_eq!(
-            info.status,
-            SessionStatus::Unknown,
-            "a pane farhelm cannot attribute decides neither liveness nor an exit"
-        );
-        assert_eq!(
-            stored_outcome(&sup, "renamed").await,
-            LastOutcome::Running,
-            "the list must not durably record an exit nobody observed"
-        );
-    }
-
-    /// A pane-death wake preserves an owned agent's exit before the next tick.
+    /// A liveness wake preserves an owned agent's exit before the next tick.
     /// Lists show that exit immediately but never store it; the wake must
-    /// commit so losing the pane cannot discard its final exit code.
+    /// commit so losing the terminal cannot discard its final exit code.
     ///
     /// The hint check only shows that the wake told the helm something
-    /// changed: `reap_pass` hints unconditionally on entry, because a pane
-    /// death is visible to lists before any reap, so it cannot tell whether
-    /// the commit hinted again. The durable outcome is what pins the commit.
+    /// changed: `reap_pass` hints unconditionally on entry, because an exit
+    /// is visible to lists before any reap, so it cannot tell whether the
+    /// commit hinted again. The durable outcome is what pins the commit.
     #[farhelm_testtrace::test]
-    async fn a_pane_death_wake_commits_an_exit_and_hints() {
+    async fn a_liveness_wake_commits_an_exit_and_hints() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let name = "fh-list-exit";
-        let pane = spawn_pane(&sup, name, "exit 3").await;
-        install_durable_running_entry(
-            &sup,
-            "list-exit",
-            Terminal::tmux(name.to_string(), pane.clone()),
-        )
-        .await;
-        wait_for_dead_pane(&sup, &pane).await;
+        let terminal = spawn_host(&sup, "list-exit", "exit 3").await;
+        install_durable_running_entry(&sup, "list-exit", terminal.clone()).await;
+        wait_for_dead_terminal(&terminal).await;
         let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
 
         let reply = super::super::listing::list_all(&sup).await.expect("list");
@@ -4185,7 +2949,7 @@ mod tests {
         assert_eq!(
             stored_outcome(&sup, "list-exit").await,
             LastOutcome::Running,
-            "a list must not commit even a positively owned dead pane"
+            "a list must not commit even a positively owned dead terminal"
         );
         let (_stop_tx, mut stop) = never_stopped();
         reap_pass(&sup, &mut stop).await;
@@ -4198,24 +2962,19 @@ mod tests {
             },
             "fixture premise: the wake recorded the exit"
         );
-        hints.expect_hint("the pane death the wake observed").await;
+        hints.expect_hint("the exit the wake observed").await;
     }
 
     /// A read-only observer retains launch errors for repeated cached replies.
-    /// The failure detail cannot be reconstructed from a dead pane, and neither
-    /// listing nor a pane-death wake may consume queued hook reports.
+    /// The failure detail cannot be reconstructed from a dead terminal, and
+    /// neither listing nor a liveness wake may consume queued hook reports.
     #[farhelm_testtrace::test]
     async fn a_wake_caches_uncommitted_launch_errors_without_sweeping_reports() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let pane = spawn_pane(&sup, "fh-wake-failure", "exit 7").await;
-        let entry = install_durable_running_entry(
-            &sup,
-            "wake-failure",
-            Terminal::tmux("fh-wake-failure".into(), pane.clone()),
-        )
-        .await;
-        wait_for_dead_pane(&sup, &pane).await;
+        let terminal = spawn_host(&sup, "wake-failure", "exit 7").await;
+        let entry = install_durable_running_entry(&sup, "wake-failure", terminal.clone()).await;
+        wait_for_dead_terminal(&terminal).await;
         let spec = crate::launch::spec_path_for_launch(state.path(), "wake-failure", 0);
         std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
         let sentinel = crate::launch::status_path_for_spec(&spec);
@@ -4276,7 +3035,7 @@ mod tests {
         );
     }
 
-    /// Owned pane death makes successful negative reads final for this launch.
+    /// Owned terminal death makes successful negative reads final for this launch.
     /// Poisoning the file afterward distinguishes a skipped read from a read
     /// whose result merely happens not to change the durable outcome. Reload
     /// must reset the obligation and discover evidence afresh.
@@ -4284,14 +3043,9 @@ mod tests {
     async fn settled_launch_reads_stop_until_supervisor_reload() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let pane = spawn_pane(&sup, "fh-settled", "exit 4").await;
-        let entry = install_durable_running_entry(
-            &sup,
-            "settled",
-            Terminal::tmux("fh-settled".into(), pane.clone()),
-        )
-        .await;
-        wait_for_dead_pane(&sup, &pane).await;
+        let terminal = spawn_host(&sup, "settled", "exit 4").await;
+        let entry = install_durable_running_entry(&sup, "settled", terminal.clone()).await;
+        wait_for_dead_terminal(&terminal).await;
         observe_for_test(&sup).await;
         assert!(matches!(
             stored_outcome(&sup, "settled").await,
@@ -4311,17 +3065,19 @@ mod tests {
                 .is_err(),
             "premise: an actual read would fail"
         );
-        let states = sup.tmux.pane_states().await.unwrap();
-        let known =
-            super::super::status::KnownTmuxNames::from_sessions([("settled", Some("fh-settled"))]);
         assert!(
-            observe_entry(&sup, &entry, &states, &known)
+            observe_entry(&sup, &entry)
                 .await
                 .unwrap()
                 .sentinel
                 .is_none()
         );
         std::fs::write(&sentinel, b"exec_failed argv0=agent errno=2").unwrap();
+        // Let go of the host as an orderly stop does, so that the reload
+        // below adopts it rather than meeting this supervisor's runtime
+        // still connected and leaving the session unread.
+        sup.stop_in_order().await;
+        drop((terminal, entry));
         drop(sup);
         let reloaded = supervisor_with(&state, SupervisorSeams::default()).await;
         assert!(
@@ -4338,14 +3094,13 @@ mod tests {
     }
 
     /// Inconclusive observations remain retryable, even after an inferred exit.
-    /// Same-boot absence and foreign names cannot prove the shim finished;
+    /// Same-boot absence cannot prove the shim finished;
     /// authority, read and write failures cannot settle it either. A cached
     /// uncommitted error also remains an outstanding evidence obligation.
     #[farhelm_testtrace::test]
     async fn unsettled_launch_reads_keep_discovering_late_failures() {
         for mode in [
             "absent",
-            "unattributed",
             "read-only",
             "read-error",
             "write-error",
@@ -4353,27 +3108,20 @@ mod tests {
         ] {
             let state = StateDir::new();
             let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-            let pane = spawn_pane(&sup, "fh-retry-read", "exit 5").await;
-            let entry = install_durable_running_entry(
-                &sup,
-                "retry-read",
-                Terminal::tmux("fh-retry-read".into(), pane.clone()),
-            )
-            .await;
-            wait_for_dead_pane(&sup, &pane).await;
+            let terminal = spawn_host(&sup, "retry-read", "exit 5").await;
+            let entry = install_durable_running_entry(&sup, "retry-read", terminal.clone()).await;
+            wait_for_dead_terminal(&terminal).await;
             let spec = crate::launch::spec_path_for_launch(state.path(), "retry-read", 0);
             std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
             let sentinel = crate::launch::status_path_for_spec(&spec);
-            let mut states = sup.tmux.pane_states().await.unwrap();
-            assert!(states[&pane].dead, "premise: owned process has finished");
+            // The entry the observer reads: the dead host itself, or, for
+            // "absent", the same launch on a host that has ended, which
+            // isolates the missing-evidence contract from the host's own
+            // retention of its final state.
+            let mut observed = Arc::clone(&entry);
             match mode {
-                // A controlled observation map isolates the missing/foreign
-                // evidence contract from tmux's actual dead-pane retention.
                 "absent" => {
-                    states.clear();
-                }
-                "unattributed" => {
-                    states.get_mut(&pane).unwrap().session_name = "renamed-outside-farhelm".into();
+                    observed = on_terminal(&entry, gone_terminal(&sup, "retry-read"));
                 }
                 "read-only" => {
                     sup.may_record.store(false, Ordering::SeqCst);
@@ -4395,11 +3143,7 @@ mod tests {
                 }
                 _ => unreachable!(),
             }
-            let known = super::super::status::KnownTmuxNames::from_sessions([(
-                "retry-read",
-                Some("fh-retry-read"),
-            )]);
-            observe_entries(&sup, &[Arc::clone(&entry)], &states, &known).await;
+            observe_entries(&sup, std::slice::from_ref(&observed)).await;
             assert!(
                 !entry.run.launch_reads_settled.load(Ordering::Relaxed),
                 "{mode}"
@@ -4432,7 +3176,7 @@ mod tests {
                     .is_some(),
                 "premise: late failure is readable"
             );
-            observe_entries(&sup, &[Arc::clone(&entry)], &states, &known).await;
+            observe_entries(&sup, std::slice::from_ref(&observed)).await;
             assert!(
                 matches!(
                     stored_outcome(&sup, "retry-read").await,
@@ -4455,22 +3199,21 @@ mod tests {
             ..SupervisorSeams::default()
         };
         let sup = supervisor_with(&state, seams("boot-a")).await;
-        let pane = spawn_pane(&sup, "fh-ended-boot", "exit 4").await;
-        install_durable_running_entry(
-            &sup,
-            "ended-boot",
-            Terminal::tmux("fh-ended-boot".into(), pane.clone()),
-        )
-        .await;
-        wait_for_dead_pane(&sup, &pane).await;
+        let terminal = spawn_host(&sup, "ended-boot", "exit 4").await;
+        install_durable_running_entry(&sup, "ended-boot", terminal.clone()).await;
+        wait_for_dead_terminal(&terminal).await;
         observe_for_test(&sup).await;
         let exited = LastOutcome::Exited {
             exit_code: Some(4),
             annotation: None,
         };
         assert_eq!(stored_outcome(&sup, "ended-boot").await, exited);
-        sup.tmux.kill_session("fh-ended-boot").await.unwrap();
-        assert!(sup.tmux.pane_states().await.unwrap().is_empty());
+        let report = terminal.shutdown().await.expect("end the fixture's host");
+        assert!(report.ended, "premise: the host has ended: {report:?}");
+        assert!(
+            !terminal.socket().exists(),
+            "premise: nothing serves the host's socket"
+        );
         drop(sup);
 
         let same_boot = supervisor_with(&state, seams("boot-a")).await;
@@ -4491,7 +3234,7 @@ mod tests {
         for _ in 0..2 {
             let sup = supervisor_with(&state, seams("boot-b")).await;
             assert_eq!(stored_outcome(&sup, "ended-boot").await, exited);
-            assert!(sup.tmux.pane_states().await.unwrap().is_empty());
+            assert!(!terminal.socket().exists());
             let entry = sup.sessions.lock().await["ended-boot"].clone();
             assert!(entry.run.launch_boot_ended);
             assert!(!entry.run.launch_reads_settled.load(Ordering::Relaxed));
@@ -4518,50 +3261,40 @@ mod tests {
                     .is_err(),
                 "premise: a repeated read would fail"
             );
-            assert!(
-                observe_entry(
-                    &sup,
-                    &entry,
-                    &HashMap::new(),
-                    &super::super::status::KnownTmuxNames::default()
-                )
-                .await
-                .is_ok()
-            );
+            assert!(observe_entry(&sup, &entry).await.is_ok());
             std::fs::remove_file(&sentinel).unwrap();
         }
     }
 
-    /// Boot interruption is final without an owned pane: the previous boot's
+    /// Boot interruption is final without an owned terminal: the previous boot's
     /// shim cannot write more evidence. Use the store's actual conversion so
     /// the fixture does not invent another meaning for Interrupted.
     #[farhelm_testtrace::test]
-    async fn boot_interrupted_launch_reads_settle_without_a_pane() {
+    async fn boot_interrupted_launch_reads_settle_without_a_terminal() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let pane = spawn_pane(&sup, "fh-boot-settled", "exit 0").await;
-        let entry = install_durable_running_entry(
-            &sup,
-            "boot-settled",
-            Terminal::tmux("fh-boot-settled".into(), pane.clone()),
-        )
-        .await;
-        wait_for_dead_pane(&sup, &pane).await;
+        let terminal = spawn_host(&sup, "boot-settled", "exit 0").await;
+        let entry = install_durable_running_entry(&sup, "boot-settled", terminal.clone()).await;
+        wait_for_dead_terminal(&terminal).await;
         sup.store
-            .record_boot("new-test-boot", true, HashMap::new(), None)
+            .record_boot(
+                "new-test-boot",
+                true,
+                std::collections::HashMap::new(),
+                None,
+            )
             .await
             .unwrap();
         let outcome = stored_outcome(&sup, "boot-settled").await;
         assert_eq!(outcome, LastOutcome::Interrupted);
         sup.mirror_committed_outcome(&entry, &outcome);
-        let states = HashMap::new();
-        let known = super::super::status::KnownTmuxNames::default();
-        observe_entries(&sup, &[Arc::clone(&entry)], &states, &known).await;
+        let absent = on_terminal(&entry, gone_terminal(&sup, "boot-settled"));
+        observe_entries(&sup, std::slice::from_ref(&absent)).await;
         assert!(entry.run.launch_reads_settled.load(Ordering::Relaxed));
         let spec = crate::launch::spec_path_for_launch(state.path(), "boot-settled", 0);
         std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
         std::fs::write(crate::launch::status_path_for_spec(&spec), b"").unwrap();
-        assert!(observe_entry(&sup, &entry, &states, &known).await.is_ok());
+        assert!(observe_entry(&sup, &absent).await.is_ok());
     }
 
     /// Artifact removal is retried until it succeeds, then stops for this Error.
@@ -4571,14 +3304,9 @@ mod tests {
     async fn error_cleanup_retries_failures_then_stops_after_success() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let pane = spawn_pane(&sup, "fh-cleanup-once", "exit 0").await;
-        let entry = install_durable_running_entry(
-            &sup,
-            "cleanup-once",
-            Terminal::tmux("fh-cleanup-once".into(), pane.clone()),
-        )
-        .await;
-        wait_for_dead_pane(&sup, &pane).await;
+        let terminal = spawn_host(&sup, "cleanup-once", "exit 0").await;
+        let entry = install_durable_running_entry(&sup, "cleanup-once", terminal.clone()).await;
+        wait_for_dead_terminal(&terminal).await;
         let outcome = sup
             .store
             .transition(
@@ -4587,7 +3315,7 @@ mod tests {
                 Transition::SentinelError {
                     inferred: false,
                     detail: "failed launch".into(),
-                    address: Some(pane),
+                    address: Some(terminal.recorded_address().to_string()),
                 },
             )
             .await
@@ -4634,98 +3362,6 @@ mod tests {
         );
     }
 
-    /// Spec: the tick observes a launch sentinel for a session
-    /// whose pane is unattributed, and records the Error.
-    ///
-    /// Why: the sentinel is the shim's report that this launch never
-    /// exec'd, which is evidence about the launch rather than about any
-    /// pane. Declining to infer anything from a renamed pane must not also
-    /// bury a failed launch that was renamed before anyone looked.
-    #[farhelm_testtrace::test]
-    async fn a_tick_reports_the_launch_sentinel_of_an_unattributed_pane() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let pane = spawn_pane(&sup, "renamed-by-hand", "sleep 600").await;
-        install_durable_running_entry(
-            &sup,
-            "failed",
-            Terminal::tmux("fh-failed".to_string(), pane),
-        )
-        .await;
-        let spec = crate::launch::spec_path_for_launch(state.path(), "failed", 0);
-        std::fs::create_dir_all(spec.parent().expect("spec directory")).unwrap();
-        std::fs::write(
-            crate::launch::status_path_for_spec(&spec),
-            b"exec_failed argv0=agent errno=2",
-        )
-        .unwrap();
-
-        let mut cursor = None;
-        let (_stop_tx, mut stop) = never_stopped();
-        sample_pass(&sup, &mut cursor, 0, &mut stop).await;
-
-        let reply = super::super::listing::list_all(&sup).await.expect("list");
-        let info = reply
-            .sessions
-            .iter()
-            .find(|info| info.id == "failed")
-            .expect("the session is listed");
-        assert!(
-            matches!(info.status, SessionStatus::Error { .. }),
-            "the sentinel outranks the unattributed pane, got {:?}",
-            info.status
-        );
-        assert!(matches!(
-            stored_outcome(&sup, "failed").await,
-            LastOutcome::Error { .. }
-        ));
-    }
-
-    /// Spec: the tick reads a recorded pane id that tmux now
-    /// reports under ANOTHER farhelm session's name as this session's pane
-    /// having gone, and records the exit.
-    ///
-    /// Why: pane ids restart at `%0` on a fresh tmux server, so after a
-    /// server death a stale row's id can be handed to one of our newer
-    /// sessions. Treating every foreign owner as unattributable (the fix the
-    /// test above pins) must not also freeze those rows as running forever.
-    #[farhelm_testtrace::test]
-    async fn a_tick_reads_a_pane_recycled_into_another_farhelm_session_as_gone() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let pane = spawn_pane(&sup, "fh-newer", "sleep 600").await;
-        install_entry(
-            &sup,
-            "newer",
-            Terminal::tmux("fh-newer".to_string(), pane.clone()),
-        )
-        .await;
-        install_durable_running_entry(&sup, "stale", Terminal::tmux("fh-stale".to_string(), pane))
-            .await;
-
-        let mut cursor = None;
-        let (_stop_tx, mut stop) = never_stopped();
-        sample_pass(&sup, &mut cursor, 0, &mut stop).await;
-
-        let reply = super::super::listing::list_all(&sup).await.expect("list");
-        let info = reply
-            .sessions
-            .iter()
-            .find(|info| info.id == "stale")
-            .expect("the session is listed");
-        assert_eq!(info.status, SessionStatus::Exited { exit_code: None });
-        assert!(
-            matches!(
-                stored_outcome(&sup, "stale").await,
-                LastOutcome::Exited {
-                    exit_code: None,
-                    ..
-                }
-            ),
-            "a recycled pane id is evidence the recorded pane is gone"
-        );
-    }
-
     /// The sampling half, against real panes: one that keeps printing
     /// accumulates observed CHANGE, one that prints nothing does not, and
     /// both are sampled.
@@ -4741,7 +3377,7 @@ mod tests {
     /// pane at the instant its peer reaches a threshold can legitimately
     /// catch one unchanged grid on a loaded runner.
     #[farhelm_testtrace::test]
-    async fn samples_accumulate_for_a_busy_pane_and_stay_quiet_for_a_still_one() {
+    async fn samples_accumulate_for_a_busy_terminal_and_stay_quiet_for_a_still_one() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         // Distinct text on every line: a loop echoing a CONSTANT would
@@ -4934,8 +3570,7 @@ mod tests {
     /// A ticker outliving its supervisor ends by itself.
     ///
     /// The `Weak` is not a stylistic choice: a task holding an `Arc` would
-    /// keep the state directory's claim, the tmux driver, and the SQLite
-    /// connection alive for as long as the runtime lived, so an embedder
+    /// keep the state directory's claim and the SQLite connection alive for as long as the runtime lived, so an embedder
     /// dropping a supervisor would silently keep one running against it.
     /// Proven WITHOUT sending the stop signal, because the stop signal
     /// would prove nothing about the upgrade.
@@ -4972,7 +3607,7 @@ mod tests {
     /// The whole of what one cell records, in sequence: the first look is
     /// not evidence, repeats accumulate, and any change resets.
     ///
-    /// A unit test rather than a tmux one because each mistake it guards
+    /// A unit test rather than one on a real terminal because each mistake it guards
     /// against is one character wide with a large blast radius. Counting
     /// sample one as quiet would start every session's decay a step in —
     /// including every session on a supervisor that just restarted.
@@ -5018,80 +3653,6 @@ mod tests {
         assert!(sample.observe("hello there".to_string()));
         assert_eq!(sample.unchanged_streak, 0);
         assert_eq!(sample.samples, 5);
-
-        // A forgotten screen leaves nothing to compare against, so the
-        // next capture re-establishes the baseline and reports NO change —
-        // while still resetting the streak. The two answers to "we do not
-        // know" diverge here deliberately; `observe`'s docs carry the
-        // argument, and the recovery test below pins the consequence.
-        sample.forget_tail();
-        sample.unchanged_streak = 7;
-        assert!(
-            !sample.observe("hello there".to_string()),
-            "a re-baselining sample has no retained screen to have seen change against"
-        );
-        assert_eq!(
-            sample.unchanged_streak, 0,
-            "the status side is unchanged by any of this: a failed capture still refuses to \
-             decay a session toward idle"
-        );
-        assert!(
-            sample.observe("hello elsewhere".to_string()),
-            "and the baseline it re-established is live again immediately"
-        );
-    }
-
-    /// Recovering from failed captures must not INVENT activity — neither
-    /// for one pane nor, worse, for a whole server at once.
-    ///
-    /// This is the regression with the ugliest failure mode in the whole
-    /// feature, which is why it gets a test of its own rather than a line
-    /// in the unit test above. `forget_tail` runs on every capture failure,
-    /// and capture failures are rarely solitary: a tmux server that stops
-    /// answering for a stretch drops the baseline of EVERY session on it.
-    /// If the first sample afterwards counted as a change, every idle
-    /// session on that host would be dated to the moment of recovery — in
-    /// one batch, ahead of the sessions that had actually been producing
-    /// output — and nothing would ever correct it, because the value is
-    /// durable and monotonic. A most-recently-active list would put the
-    /// quietest sessions on top for as long as they existed.
-    ///
-    /// Asserted through the same `observe` the sampler calls, since that
-    /// return value is the sole input to whether the stamp moves at all.
-    #[farhelm_testtrace::test]
-    fn a_recovered_capture_re_baselines_without_reporting_activity() {
-        // One pane: baseline, failure, recovery to a DIFFERENT screen than
-        // the one that was forgotten. Even that is not evidence — the
-        // change may have happened while nobody could look, and the honest
-        // answer is that this supervisor did not see it happen.
-        let mut one = ActivitySample::default();
-        one.observe("before".to_string());
-        one.forget_tail();
-        assert!(
-            !one.observe("after".to_string()),
-            "a screen that changed while captures were failing was not OBSERVED changing"
-        );
-        assert!(
-            one.observe("after and more".to_string()),
-            "the very next comparison is real evidence again"
-        );
-
-        // A whole server: every session forgets, every session recovers,
-        // and not one of them may report activity in that batch.
-        let mut fleet: Vec<ActivitySample> = (0..8).map(|_| ActivitySample::default()).collect();
-        for (index, sample) in fleet.iter_mut().enumerate() {
-            sample.observe(format!("idle screen {index}"));
-        }
-        for sample in &mut fleet {
-            sample.forget_tail();
-        }
-        for (index, sample) in fleet.iter_mut().enumerate() {
-            assert!(
-                !sample.observe(format!("idle screen {index}")),
-                "session {index} sat at the same screen throughout; a server-wide capture \
-                 outage must not date every idle session to the recovery"
-            );
-        }
     }
 
     /// Codex composer redraws and draft edits change the screen but read
@@ -5128,47 +3689,6 @@ mod tests {
         let running = sample.observe_screen(reader, frames[7], "⠋ task | codex");
         assert_eq!(sample.reading.state, ScreenState::Working);
         assert!(running.dates_activity() && running.starts_work());
-    }
-
-    /// A failed capture withdraws the screen's reading and makes the next
-    /// sample a baseline: it neither dates nor promotes, even when it shows
-    /// the agent working, and the sample after it counts again.
-    ///
-    /// Why it matters: capture failures come in batches (a tmux server that
-    /// stops answering drops every session's baseline at once); if recovery
-    /// counted as a transition, every session on the host would be dated
-    /// and promoted to the moment of recovery.
-    #[farhelm_testtrace::test]
-    fn capture_failure_recovery_is_a_baseline_that_neither_dates_nor_promotes() {
-        let reader = reader_for(AgentKind::Codex);
-        let idle = "output\n\n› Ask Codex to do anything\n\nfooter";
-        let mut sample = ActivitySample::default();
-        sample.observe_screen(reader, idle, "codex");
-        sample.forget_tail();
-        assert_eq!(sample.comparison, None);
-        assert!(
-            !sample.reading.anchored,
-            "the failure withdraws what the last screen showed"
-        );
-
-        let recovered = sample.observe_screen(reader, idle, "⠙ task | codex");
-        assert_eq!(recovered.prior, None, "recovery is a baseline");
-        assert!(!recovered.changed && !recovered.dates_activity() && !recovered.starts_work());
-        assert_eq!(
-            sample.reading.state,
-            ScreenState::Working,
-            "fresh positive evidence is still the status"
-        );
-
-        let later = sample.observe_screen(reader, idle, "⠹ task | codex");
-        assert!(
-            later.dates_activity(),
-            "the next working sample dates again"
-        );
-        assert!(
-            !later.starts_work(),
-            "continued work in one burst keeps its ordering key"
-        );
     }
 
     /// A reloaded run stays provisional through "can't tell" screens,
@@ -5965,9 +4485,9 @@ mod tests {
     /// - NEVER IMMEDIATE. A pass that overruns its interval must not be
     ///   followed instantly by the next one. Every deadline is already in
     ///   the past once work exceeds the period, so an anchor-only rule
-    ///   schedules back-to-back passes forever — a supervisor spawning tmux
-    ///   subprocesses as fast as it can retire them, on precisely the host
-    ///   already too loaded to keep up.
+    ///   schedules back-to-back passes forever — a supervisor sampling as
+    ///   fast as it can, on precisely the host already too loaded to keep
+    ///   up.
     #[farhelm_testtrace::test]
     fn next_deadline_anchors_when_on_cadence_and_backs_off_when_overrunning() {
         const INTERVAL: Duration = Duration::from_millis(100);
@@ -6069,34 +4589,22 @@ mod tests {
         );
     }
 
-    /// A pass that finds no live panes leaves every previous sample
+    /// A pass that finds no live terminals leaves every previous sample
     /// exactly as it was, and the capture half of the tick runs anyway.
     ///
-    /// The tempting bug is treating "tmux told us nothing" as "these
-    /// sessions are quiet". Blanking or re-observing the cells here would
-    /// make a supervisor whose tmux server vanished report its entire
-    /// fleet as freshly sampled and unchanged — which decays to `Idle`
-    /// within a few ticks, for every session, on the strength of no
-    /// observation at all. Leaving the cells untouched means the
-    /// classification simply stops moving, which is the honest answer for
-    /// a pass that saw nothing.
+    /// The tempting bug is treating "no terminal to read" as "these sessions
+    /// are quiet". Blanking or re-observing the cells here would make a
+    /// supervisor whose terminals all ended report its entire fleet as
+    /// freshly sampled and unchanged — which decays to `Idle` within a few
+    /// ticks, for every session, on the strength of no observation at all.
+    /// Leaving the cells untouched means the classification simply stops
+    /// moving, which is the honest answer for a pass that saw nothing.
     ///
     /// The capture half is asserted separately because the two halves of a
     /// tick are independent: report refresh and its diagnostic timer must
-    /// keep running when tmux is unreachable.
-    ///
-    /// Scope note: killing the server exercises `pane_states`'
-    /// DEFINITIVELY-EMPTY path (tmux answers "no server running", which the
-    /// driver reports as an empty map), not its ERROR path. The two are
-    /// deliberately different: an empty answer is an answer — those panes
-    /// are gone, so nothing will be classified from them — while a failed
-    /// query is no answer at all and additionally invalidates every
-    /// retained screen (`a_failed_sample_stops_the_session_being_read_
-    /// from_a_stale_screen`, which reaches that path through
-    /// `SupervisorSeams::sample_fault`). The empty case also resets the
-    /// rotation cursor, where a failed query leaves it alone.
+    /// keep running when no terminal is live.
     #[farhelm_testtrace::test]
-    async fn a_pass_that_finds_no_live_panes_preserves_every_sample_and_still_captures() {
+    async fn a_pass_that_finds_no_live_terminals_preserves_every_sample_and_still_captures() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         install_live_session(&sup, "one", "sleep 300").await;
@@ -6112,11 +4620,21 @@ mod tests {
         assert_eq!(samples, 1, "premise: the pass before the failure worked");
         assert_eq!(cursor.as_deref(), Some("one"));
 
-        // The whole private tmux server, gone out from under the
-        // supervisor — the shape a crashed or reaped server leaves behind.
-        sup.tmux.kill_session("fh-one").await.expect(
-            "the premise of this test is that the server really is gone; a kill that \
-                     silently failed would leave the pass below succeeding for the wrong reason",
+        // The session's host, ended out from under the supervisor. A
+        // shutdown that silently failed would leave the pass below succeeding
+        // for the wrong reason.
+        let terminal = sup.sessions.lock().await["one"]
+            .terminal
+            .clone()
+            .expect("premise: the session has a terminal");
+        let report = terminal.shutdown().await.expect("end the session's host");
+        assert!(report.ended, "premise: the host has ended: {report:?}");
+        assert!(
+            !matches!(
+                terminal.evidence(),
+                crate::hosts::HostEvidence::Owned { dead: false, .. }
+            ),
+            "premise: nothing reads the terminal as live any more"
         );
         let warning_entry = {
             let mut entry = entry_with(None, crate::store::LastOutcome::Running);
@@ -6136,7 +4654,7 @@ mod tests {
             let after = sample.lock().expect("activity mutex");
             assert_eq!(
                 after.samples, samples,
-                "a pass that found no live pane must not record an observation"
+                "a pass that found no live terminal must not record an observation"
             );
             assert_eq!(
                 after.comparison, tail,
@@ -6144,55 +4662,13 @@ mod tests {
             );
             assert_eq!(
                 after.unchanged_streak, 0,
-                "least of all may it count as a quiet look; that is how a vanished tmux \
-                 would decay a whole fleet to idle"
+                "least of all may it count as a quiet look; that is how a fleet of ended \
+                 terminals would decay to idle"
             );
         }
         assert!(
             warning_entry.run.hook_warned.load(Ordering::Relaxed),
-            "report diagnostics still run when tmux has no live panes"
-        );
-    }
-
-    /// A pane the entry cannot prove belongs to it is not sampled — the
-    /// identity cross-check `session_status` documents, enforced here so a
-    /// recycled pane id cannot write one session's screen into another
-    /// session's sample.
-    ///
-    /// Driven through the real pass with a deliberately mismatched entry,
-    /// because the filter is one `&&` away from silently passing
-    /// everything and no end state would show it.
-    #[farhelm_testtrace::test]
-    async fn a_pane_under_another_sessions_name_is_not_sampled() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let pane = spawn_pane(&sup, "fh-real", "sleep 300").await;
-        // The pane genuinely exists; the entry simply remembers it under
-        // a session name it does not have — the shape a pane-id reset
-        // after a tmux server restart produces.
-        install_entry(
-            &sup,
-            "one",
-            Terminal::tmux("fh-somebody-else".to_string(), pane),
-        )
-        .await;
-        let sample = sample_of(&sup, "one").await;
-
-        let (_stop, mut stop) = never_stopped();
-        // A cursor naming a session that is not in this population at all:
-        // resuming means "the first one ordered after it", which is well
-        // defined whether or not that session still exists.
-        let mut cursor: SampleCursor = Some("zzz-gone".to_string());
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            sample.lock().expect("activity mutex").samples,
-            0,
-            "a pane whose session name does not match must not be sampled at all"
-        );
-        assert_eq!(
-            cursor, None,
-            "a pass with nothing eligible must RESET the rotation rather than leave a resume \
-             point that a later, different population would start partway into"
+            "report diagnostics still run when no terminal is live"
         );
     }
 
@@ -6201,7 +4677,7 @@ mod tests {
     ///
     /// The budget is a parameter precisely so this is reachable: pinning
     /// it through the production constant would mean standing up
-    /// seventeen real tmux sessions, a cost out of all proportion to the
+    /// seventeen real terminal hosts, a cost out of all proportion to the
     /// property. Driving three sessions at a budget of one is the same
     /// arithmetic with the same failure modes — a cursor that never
     /// advances (every pass resampling the head, starving the tail
@@ -6224,7 +4700,7 @@ mod tests {
         let (a, b, c) = (samples("a").await, samples("b").await, samples("c").await);
 
         // A budget of one against three sessions: the interesting case,
-        // and one that would otherwise need seventeen real tmux sessions
+        // and one that would otherwise need seventeen real terminal hosts
         // to reach through the production constant.
         let (_stop, mut stop) = never_stopped();
         let mut cursor: SampleCursor = None;
@@ -6362,336 +4838,6 @@ mod tests {
         drop(b);
     }
 
-    /// A capture that FAILS still advances the rotation, so the next pass
-    /// moves on rather than retrying the same session forever.
-    ///
-    /// The cursor is written before the capture is attempted, and that
-    /// ordering is the whole point: a pane that has become unreadable —
-    /// wedged tmux, a pane vanishing between the liveness probe and the
-    /// capture — would otherwise pin the rotation to itself. At a budget of
-    /// one that starves every other session outright; at the production
-    /// budget it costs one slot per pass indefinitely. Either way nothing
-    /// reports a problem, because a failed capture is logged at DEBUG by
-    /// design.
-    ///
-    /// The fault is aimed at ONE session and then lifted, so the pass after
-    /// it is an ordinary successful one: an implementation that advanced
-    /// only on success would resample the failed session there, which is
-    /// exactly what the assertions below refuse.
-    #[farhelm_testtrace::test]
-    async fn a_failed_capture_still_advances_the_rotation() {
-        let state = StateDir::new();
-        // Aimed at "b" alone: the pass-wide `pane_states` probe must keep
-        // working, or nothing would be selected at all and the branch under
-        // test would never be reached.
-        let failing: Arc<AtomicBool> = Arc::default();
-        let sup = {
-            let failing = Arc::clone(&failing);
-            supervisor_with(
-                &state,
-                SupervisorSeams {
-                    faults: crate::service::FaultHooks {
-                        sample_fault: Some(Arc::new(move |asked| {
-                            let asked_about_b =
-                                matches!(asked, SampleRead::Tail { session } if session == "b");
-                            (asked_about_b && failing.load(Ordering::SeqCst))
-                                .then(|| "injected capture failure".to_string())
-                        })),
-                        ..crate::service::FaultHooks::default()
-                    },
-                    ..SupervisorSeams::default()
-                },
-            )
-            .await
-        };
-        for id in ["a", "b", "c"] {
-            install_live_session(&sup, id, "sleep 300").await;
-        }
-        let (b, c) = (sample_of(&sup, "b").await, sample_of(&sup, "c").await);
-
-        let (_stop, mut stop) = never_stopped();
-        let mut cursor: SampleCursor = None;
-        sample_pass(&sup, &mut cursor, 1, &mut stop).await;
-        assert_eq!(cursor.as_deref(), Some("a"), "premise: the head is first");
-
-        failing.store(true, Ordering::SeqCst);
-        sample_pass(&sup, &mut cursor, 1, &mut stop).await;
-        assert_eq!(
-            cursor.as_deref(),
-            Some("b"),
-            "a pass whose capture failed must still leave the rotation past the session it \
-             selected"
-        );
-        assert_eq!(
-            b.lock().expect("activity mutex").samples,
-            0,
-            "premise: the injected fault means b really was not observed"
-        );
-
-        failing.store(false, Ordering::SeqCst);
-        sample_pass(&sup, &mut cursor, 1, &mut stop).await;
-        assert_eq!(
-            c.lock().expect("activity mutex").samples,
-            1,
-            "the pass after the failure moves on to c rather than retrying b"
-        );
-        assert_eq!(
-            b.lock().expect("activity mutex").samples,
-            0,
-            "and b is not resampled ahead of it, however readable it has become"
-        );
-    }
-
-    /// A reloaded pane may recognize a wait from its first captured screen.
-    /// That observation must end the provisional interval so a later failed
-    /// capture can withdraw the old prompt instead of preserving it in the
-    /// helm cache through an `Unknown` reply.
-    #[farhelm_testtrace::test]
-    fn a_first_startup_wait_can_be_withdrawn_after_capture_failure() {
-        let base = entry_with(Some(a_terminal()), LastOutcome::Running);
-        let entry = SessionEntry {
-            snapshot: IntegrationSnapshot {
-                kind: AgentKind::Claude,
-                wrapper_prefix_words: 0,
-                resume_template: None,
-            },
-            run: RunCells {
-                launch_excerpt: Arc::new(std::sync::Mutex::new(None)),
-                launch_error: Arc::new(std::sync::Mutex::new(None)),
-                activity: ActivitySample::reloaded(),
-                ..base.run
-            },
-            ..entry_with(Some(a_terminal()), LastOutcome::Running)
-        };
-        entry
-            .run
-            .activity
-            .lock()
-            .expect("activity mutex")
-            .observe_screen(
-                reader_for(AgentKind::Claude),
-                CLAUDE_APPROVAL_DIALOG,
-                CLAUDE_APPROVAL_DIALOG,
-            );
-        assert_eq!(live_status(&entry), SessionStatus::Waiting);
-        assert!(
-            !entry
-                .run
-                .activity
-                .lock()
-                .expect("activity mutex")
-                .startup_provisional
-        );
-
-        entry
-            .run
-            .activity
-            .lock()
-            .expect("activity mutex")
-            .forget_tail();
-        assert_eq!(live_status(&entry), SessionStatus::Running);
-    }
-
-    /// Spec: a failed capture that withdraws a recognized wait hints
-    /// connected helms, because the status the session lists changed.
-    ///
-    /// Why: a failed capture never reaches the successful sample's
-    /// before-and-after comparison, and captures that keep failing never
-    /// will, so without its own hint the helm would show `Waiting` until its
-    /// backstop poll.
-    #[farhelm_testtrace::test]
-    async fn a_failed_capture_that_withdraws_a_wait_hints() {
-        let state = StateDir::new();
-        let sup = Supervisor::new(state.path()).await.expect("supervisor");
-        let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
-        let entry = SessionEntry {
-            snapshot: IntegrationSnapshot {
-                kind: AgentKind::Claude,
-                wrapper_prefix_words: 0,
-                resume_template: None,
-            },
-            ..entry_with(Some(a_terminal()), LastOutcome::Running)
-        };
-        entry
-            .run
-            .activity
-            .lock()
-            .expect("activity mutex")
-            .observe_screen(
-                reader_for(AgentKind::Claude),
-                CLAUDE_APPROVAL_DIALOG,
-                CLAUDE_APPROVAL_DIALOG,
-            );
-        assert_eq!(
-            live_status(&entry),
-            SessionStatus::Waiting,
-            "fixture premise: the session lists as waiting"
-        );
-
-        forget_tail_hinted(&sup, &entry);
-
-        assert_ne!(live_status(&entry), SessionStatus::Waiting);
-        hints.expect_hint("the withdrawn wait").await;
-    }
-
-    /// A prompt that has since been ANSWERED must not hold its session at
-    /// `Waiting` through a run of failing captures — driven through
-    /// `sample_pass` with an injected failure, not by calling
-    /// `forget_tail` by hand.
-    ///
-    /// The distinction is the whole point of the seam. A direct call
-    /// asserts that `forget_tail` does what it says; this asserts that the
-    /// SAMPLER calls it, which is the half that regresses. A change that
-    /// dropped the invalidation from the failure path would leave a
-    /// unit-level test perfectly green while every session whose captures
-    /// started failing sat at `Waiting` forever.
-    ///
-    /// Both failure paths, because they are separately reachable and
-    /// separately wrong: one session's own capture failing while the pass
-    /// otherwise succeeds, and the server-wide liveness probe failing so
-    /// the pass learns nothing about anything. The second is the one a
-    /// user actually notices, since the LIST path's own probe can keep
-    /// succeeding — so the session stays live, stays read as waiting, and keeps
-    /// reporting a question that was answered long ago.
-    ///
-    /// ## And the RECOVERY, which is the half a forget can silently break
-    ///
-    /// Invalidating the tail is only correct if a later successful capture
-    /// puts the session back on its feet, and the way that works is subtle
-    /// enough to be worth pinning: `forget_tail` clears the screen but
-    /// deliberately leaves `samples` alone, so the next `observe` still
-    /// takes the comparison branch — comparing against `None`, finding a
-    /// difference, and resetting the streak to zero. Two plausible
-    /// implementations get this wrong in opposite directions. One treats a
-    /// missing tail as "unchanged" and increments the streak, so a session
-    /// that lost its screen keeps decaying toward `Idle` on no evidence.
-    /// The other leaves the pre-failure streak standing, so a session that
-    /// was nine quiet samples deep stays `Idle` through a screen that has
-    /// visibly changed. The continuation below fails on both.
-    ///
-    /// A reloaded session has one extra boundary: its first recognized
-    /// prompt must end the provisional interval, or a later capture
-    /// failure yields `Unknown` and the helm keeps that stale `Waiting`.
-    /// The focused test below pins that transition separately from the
-    /// ordinary failed-sample paths this fixture exercises.
-    #[farhelm_testtrace::test]
-    async fn a_failed_sample_stops_the_session_being_read_from_a_stale_screen() {
-        for read in ["tail", "pane_states"] {
-            let state = StateDir::new();
-            let failing: Arc<AtomicBool> = Arc::default();
-            let sup = {
-                let failing = Arc::clone(&failing);
-                supervisor_with(
-                    &state,
-                    SupervisorSeams {
-                        faults: crate::service::FaultHooks {
-                            sample_fault: Some(Arc::new(move |asked| {
-                                let asked_about = matches!(
-                                    (read, asked),
-                                    ("tail", SampleRead::Tail { .. })
-                                        | ("pane_states", SampleRead::PaneStates)
-                                );
-                                (asked_about && failing.load(Ordering::SeqCst))
-                                    .then(|| "injected sampling failure".to_string())
-                            })),
-                            ..crate::service::FaultHooks::default()
-                        },
-                        ..SupervisorSeams::default()
-                    },
-                )
-                .await
-            };
-            // A live claude session showing an approval dialog. The pane
-            // itself only has to be alive; what is classified is the
-            // TAIL, which the sample below writes.
-            install_live_session(&sup, "one", "sleep 300").await;
-            let entry = {
-                let sessions = sup.sessions.lock().await;
-                let entry = sessions.get("one").cloned().expect("installed");
-                drop(sessions);
-                Arc::new(SessionEntry {
-                    snapshot: IntegrationSnapshot {
-                        kind: AgentKind::Claude,
-                        wrapper_prefix_words: 0,
-                        resume_template: None,
-                    },
-                    info: entry.info.clone(),
-                    terminal: entry.terminal.clone(),
-                    run: entry.run.clone(),
-                    session: entry.session.clone(),
-                    canonical_cwd: entry.canonical_cwd.clone(),
-                    generation: entry.generation,
-                    scope: entry.scope.clone(),
-                })
-            };
-            sup.sessions
-                .lock()
-                .await
-                .insert("one".to_string(), Arc::clone(&entry));
-            {
-                let mut activity = entry.run.activity.lock().expect("activity mutex");
-                activity.set_for_test(AgentKind::Claude, 9, 9, Some(CLAUDE_APPROVAL_DIALOG));
-            }
-            let states = sup.tmux.pane_states().await.expect("probe");
-            assert_eq!(
-                session_status(&entry, &states, &Default::default()).0,
-                SessionStatus::Waiting,
-                "premise ({read}): the screen on file is an unanswered prompt"
-            );
-
-            failing.store(true, Ordering::SeqCst);
-            let (_stop, mut stop) = never_stopped();
-            let mut cursor: SampleCursor = None;
-            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-
-            assert_ne!(
-                session_status(&entry, &states, &Default::default()).0,
-                SessionStatus::Waiting,
-                "a {read} failure must invalidate the screen it can no longer confirm"
-            );
-            {
-                let activity = entry.run.activity.lock().expect("activity mutex");
-                assert_eq!(
-                    (activity.samples, activity.unchanged_streak),
-                    (9, 9),
-                    "and must not count as an observation, least of all a quiet one ({read})"
-                );
-                assert_eq!(
-                    activity.comparison, None,
-                    "premise ({read}): the screen really is gone, not merely unread"
-                );
-            }
-
-            // Recovery: the reads start working again and one ordinary pass
-            // has to put the session back on its feet.
-            failing.store(false, Ordering::SeqCst);
-            sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-
-            let activity = entry.run.activity.lock().expect("activity mutex");
-            assert_eq!(
-                activity.samples, 10,
-                "the recovering pass is one observation, not a re-baseline ({read})"
-            );
-            assert!(
-                activity.comparison.is_some(),
-                "and it restores the screen the failure dropped ({read})"
-            );
-            assert_eq!(
-                activity.unchanged_streak, 0,
-                "a capture that had nothing to compare against is a CHANGE, not a quiet look: \
-                 carrying the pre-failure streak forward would hold a moved screen at Idle, and \
-                 treating the missing tail as unchanged would decay it on no evidence ({read})"
-            );
-            drop(activity);
-            assert_eq!(
-                session_status(&entry, &states, &Default::default()).0,
-                SessionStatus::Running,
-                "so the session classifies from what is on the pane NOW, not from the dialog it \
-                 was showing before the failures ({read})"
-            );
-        }
-    }
-
     /// A Claude permission dialog as it renders at the bottom of a pane,
     /// ending in the key-hint footer the Claude reader anchors on; the real
     /// captures live in `tests/fixtures/screens/claude/`.
@@ -6714,96 +4860,13 @@ mod tests {
         oneshot::channel()
     }
 
-    /// A failed tmux probe does not hold up host terminals: the pass still
-    /// samples a live host's screen and records a gone host's exit.
-    ///
-    /// Why: a host terminal's evidence and screen come from its runtime, not
-    /// from tmux; a pass that ended on a wedged tmux would leave a host
-    /// session's screen unread and a host that ended durably Running for as
-    /// long as tmux kept failing. tmux sessions keep their behaviour: nothing
-    /// is concluded for them without the probe. Spec: with every pane-state
-    /// probe failing, one pass over a running host session and a session
-    /// whose host has ended samples the first once and records the second
-    /// as exited with no code.
-    #[farhelm_testtrace::test]
-    async fn a_failed_tmux_probe_still_samples_and_observes_host_terminals() {
-        let state = StateDir::new();
-        let sup = supervisor_with(
-            &state,
-            SupervisorSeams {
-                faults: crate::service::FaultHooks {
-                    sample_fault: Some(Arc::new(|asked| {
-                        matches!(asked, SampleRead::PaneStates)
-                            .then(|| "injected pane-state failure".to_string())
-                    })),
-                    ..crate::service::FaultHooks::default()
-                },
-                ..SupervisorSeams::default()
-            },
-        )
-        .await;
-        let (live, live_host) = crate::hosts::terminal::test_host::adopt_test_host(None).await;
-        let (gone, gone_host) = crate::hosts::terminal::test_host::adopt_test_host(None).await;
-        for (id, terminal, test_host) in [("live", &live, &live_host), ("gone", &gone, &gone_host)]
-        {
-            sup.store
-                .insert_session(
-                    super::super::core::tests::host_terminals::host_row(id, test_host.socket()),
-                    None,
-                )
-                .await
-                .expect("insert the row");
-            let mut entry =
-                entry_with(Some(Terminal::Host(terminal.clone())), LastOutcome::Running);
-            entry.info.id = id.to_string();
-            sup.sessions
-                .lock()
-                .await
-                .insert(id.to_string(), Arc::new(entry));
-        }
-        assert!(
-            live.status().caught_up,
-            "premise: the live host is caught up"
-        );
-        drop(gone_host);
-        let mut status = gone.subscribe();
-        tokio::time::timeout(
-            TEST_DEADLINE,
-            status.wait_for(|status| status.liveness == crate::hosts::Liveness::Gone),
-        )
-        .await
-        .expect("premise: the ended host reads as gone in time")
-        .expect("the runtime publishes its end");
-        let live_sample = sample_of(&sup, "live").await;
-
-        let (_stop, mut stop) = never_stopped();
-        let mut cursor: SampleCursor = None;
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-
-        assert_eq!(
-            live_sample.lock().expect("activity mutex").samples,
-            1,
-            "the live host's screen was sampled"
-        );
-        let row = sup.store.session("gone").await.expect("read").expect("row");
-        assert_eq!(
-            row.outcome,
-            LastOutcome::Exited {
-                exit_code: None,
-                annotation: None
-            },
-            "the ended host's exit is recorded"
-        );
-        drop(live_host);
-    }
-
     /// SPEC.md's status rule, at the one place it can actually be
     /// violated: a saturated SAMPLER must not delay a request.
     ///
     /// The regression this pins is subtle and was shipped once. The
     /// sampler originally drew its permit from the same
     /// `HANDLER_ADMISSION_PERMITS` semaphore the slow handlers use, which
-    /// reads as prudent — it is the same tmux subprocesses being bounded —
+    /// reads as prudent — it is the same kind of work being bounded —
     /// but a permit held by periodic work is a permit a REQUEST cannot
     /// have, and a request that parks inside `handle_control` parks
     /// `handle_connection`'s read loop, which is the loop that dispatches
@@ -6946,7 +5009,7 @@ mod tests {
     /// Before the final classification, the busy pane must expose a changed
     /// screen of its own; its quiet neighbour cannot prove that producer ran.
     #[farhelm_testtrace::test]
-    async fn a_busy_pane_classifies_running_and_a_quiet_one_decays_to_idle() {
+    async fn a_busy_terminal_classifies_running_and_a_quiet_one_decays_to_idle() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         // Distinct text per line, for the reason the sampling test above
@@ -6974,7 +5037,7 @@ mod tests {
         )
         .await;
         ticker.shutdown().await;
-        wait_for_busy_pane_to_change(&sup, "busy").await;
+        wait_for_busy_terminal_to_change(&sup, "busy").await;
         let (_stop, mut stop) = never_stopped();
         sample_pass(&sup, &mut None, SAMPLE_TAIL_BUDGET, &mut stop).await;
         assert_eq!(
@@ -7002,13 +5065,13 @@ mod tests {
     /// many other sessions the host is running.
     ///
     /// Driven at a budget of one so three sessions are enough to be
-    /// over-budget; the production constant would need seventeen real tmux
-    /// sessions to reach the same arithmetic. Passes are driven directly
+    /// over-budget; the production constant would need seventeen real terminal
+    /// hosts to reach the same arithmetic. Passes are driven directly
     /// rather than by the ticker so the test controls how many samples each
     /// session gets, with a gap between them big enough that the busy pane
     /// has genuinely printed since its previous look.
     #[farhelm_testtrace::test]
-    async fn a_busy_pane_stays_running_when_the_rotation_samples_it_rarely() {
+    async fn a_busy_terminal_stays_running_when_the_rotation_samples_it_rarely() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         install_live_session(
@@ -7026,7 +5089,7 @@ mod tests {
         // more than the quiet sessions need to cross the threshold.
         for _ in 0..12 {
             sample_pass(&sup, &mut cursor, 1, &mut stop).await;
-            wait_for_busy_pane_to_change(&sup, "busy").await;
+            wait_for_busy_terminal_to_change(&sup, "busy").await;
         }
 
         assert_eq!(
@@ -7044,19 +5107,19 @@ mod tests {
         }
     }
 
-    /// A pending question on a real pane reaches the per-kind screen reader
-    /// and classifies `Waiting` — the end-to-end path PLAN_M6_75.md item
-    /// 2's user-visible promise rides on.
+    /// A pending question on a real terminal reaches the per-kind screen
+    /// reader and classifies `Waiting` — the end-to-end path PLAN_M6_75.md
+    /// item 2's user-visible promise rides on.
     ///
-    /// Deliberately not the fake agent: these tests drive tmux directly
-    /// (see [`spawn_pane`]), so the shortest honest fixture is a shell that
+    /// Deliberately not the fake agent: these tests start hosts directly
+    /// (see [`spawn_host`]), so the shortest honest fixture is a shell that
     /// prints the dialog and then waits, exactly as an agent blocked on an
     /// approval does. What this adds over `agent_kind`'s recognition tests
-    /// is every step between them — capture-pane's rendering, the tail
+    /// is every step between them — the emulator's screen text, the tail
     /// bound, the sample cell, the snapshot lookup that decides which
     /// screen reader applies.
     ///
-    /// The pane is SILENT after printing, so its unchanged-sample streak has
+    /// The terminal is SILENT after printing, so its unchanged-sample streak has
     /// carried the baseline to idle by the time it is classified: `Waiting`
     /// here can only be a promotion by the screen reader, never the generic
     /// classifier's answer wearing a different name.
@@ -7064,9 +5127,9 @@ mod tests {
     /// The fixture ends in the dialog footer Claude draws under every
     /// question, which is what the Claude reader anchors waiting on.
     /// Both footers must be visible before quiet samples count: an unchanged
-    /// blank pane would correctly classify Idle while its shell starts.
+    /// blank terminal would correctly classify Idle while its shell starts.
     #[farhelm_testtrace::test]
-    async fn a_prompt_on_a_real_pane_classifies_waiting_through_the_sampler() {
+    async fn a_prompt_on_a_real_terminal_classifies_waiting_through_the_sampler() {
         let state = StateDir::new();
         let sup = supervisor_with(&state, SupervisorSeams::default()).await;
         const DIALOG: &str = "printf 'Do you want to proceed?\\n ❯ 1. Yes\\n   2. No, and tell \
@@ -7085,30 +5148,22 @@ mod tests {
                 .get(id)
                 .expect("fixture session")
                 .terminal
-                .as_ref()
-                .expect("fixture terminal")
-                .expect_tmux()
-                .clone();
+                .clone()
+                .expect("fixture terminal");
             let deadline = tokio::time::Instant::now() + TEST_DEADLINE;
             loop {
-                let capture = sup
-                    .tmux
-                    .capture_pane_tail(&terminal.tmux_name, &terminal.pane, SAMPLE_TAIL_BYTES)
-                    .await;
-                if capture
-                    .as_ref()
-                    .is_ok_and(|tail| tail.contains("Esc to cancel"))
-                {
+                let capture = terminal.screen_tail(SAMPLE_TAIL_BYTES);
+                if capture.contains("Esc to cancel") {
                     break;
                 }
                 if tokio::time::Instant::now() >= deadline {
-                    let panes = sup.tmux.pane_states().await;
                     panic!(
-                        "{id} never drew the dialog footer; capture: {capture:?}; panes: {panes:?}"
+                        "{id} never drew the dialog footer; capture: {capture:?}; liveness: {:?}",
+                        terminal.liveness()
                     );
                 }
-                // sleep-ok: poll the real pane's dialog footer before starting quiet-streak sampling.
-                tokio::time::sleep(TEST_TMUX_POLL_INTERVAL).await;
+                // sleep-ok: poll the real terminal's dialog footer before starting quiet-streak sampling.
+                tokio::time::sleep(TEST_HOST_POLL_INTERVAL).await;
             }
         }
 
@@ -7116,7 +5171,7 @@ mod tests {
         let unintegrated = sample_of(&sup, "unintegrated").await;
         let ticker = start_ticker(&sup);
         for (what, sample) in [("asking", &asking), ("unintegrated", &unintegrated)] {
-            wait_until(&format!("the {what} pane decayed to quiet"), || {
+            wait_until(&format!("the {what} terminal decayed to quiet"), || {
                 sample.lock().expect("activity mutex").unchanged_streak >= 3
             })
             .await;
@@ -7136,11 +5191,11 @@ mod tests {
         );
     }
 
-    /// A real pane leaving a recognized waiting screen promotes and writes
-    /// the authoritative session row in the same sampler visit.
+    /// A real terminal leaving a recognized waiting screen promotes and
+    /// writes the authoritative session row in the same sampler visit.
     ///
     /// This is the owned integration boundary for recent-work ordering: it
-    /// drives `capture-pane`, the shared classifier, allocation, the
+    /// drives the emulator's screen text, the shared classifier, allocation, the
     /// generation fence, and SQLite. A sort-helper test cannot establish
     /// that the key users receive survives supervisor restart.
     #[farhelm_testtrace::test]
@@ -7155,10 +5210,8 @@ mod tests {
             },
         )
         .await;
-        let tmux_name = "fh-resuming".to_string();
-        let pane = spawn_pane(&sup, &tmux_name, "printf 'work resumed\\n'; sleep 300").await;
-        let base =
-            install_durable_running_entry(&sup, "resuming", Terminal::tmux(tmux_name, pane)).await;
+        let terminal = spawn_host(&sup, "resuming", "printf 'work resumed\\n'; sleep 300").await;
+        let base = install_durable_running_entry(&sup, "resuming", terminal).await;
         let mut integrated = entry_with(base.terminal.clone(), LastOutcome::Running);
         integrated.info = base.info.clone();
         integrated.snapshot = IntegrationSnapshot {
@@ -7228,300 +5281,4 @@ mod tests {
     }
 
     // ---- The old-terminal notification ---------------------------------------------
-
-    /// The stored old-terminal notifications of session `id`, oldest first,
-    /// as `(generation, resolved)`, read from the store rather than the cell
-    /// so an assertion sees what survives a restart.
-    async fn old_terminal_rows(sup: &Arc<Supervisor>, id: &str) -> Vec<(i64, bool)> {
-        let mut rows: Vec<_> = sup
-            .store
-            .session_notification_records(id)
-            .await
-            .expect("read the session's notifications")
-            .into_iter()
-            .filter(|stored| stored.kind == "old_terminal")
-            .collect();
-        rows.sort_by_key(|stored| stored.notification.seq);
-        rows.into_iter()
-            .map(|stored| (stored.generation, stored.notification.resolved))
-            .collect()
-    }
-
-    /// An agent pane in its own tmux session that stays alive until `gate`
-    /// exists, so a test can end it at a moment of its choosing (the
-    /// supervisor's tmux keeps the dead pane, as Stop leaves one).
-    async fn gated_agent(sup: &Arc<Supervisor>, tmux_name: &str, gate: &std::path::Path) -> String {
-        let gate = shell_words::quote(&gate.to_string_lossy()).into_owned();
-        spawn_pane(
-            sup,
-            tmux_name,
-            &format!("while [ ! -e {gate} ]; do sleep 0.05; done"),
-        )
-        .await
-    }
-
-    /// A live, marked tab window running `sleep 600` in tmux session
-    /// `tmux_name`, returning its pane.
-    async fn live_tab_in(sup: &Arc<Supervisor>, tmux_name: &str) -> String {
-        let (_window, pane) = sup
-            .tmux
-            .new_window(
-                tmux_name,
-                "/tmp",
-                &[],
-                &["sleep".to_string(), "600".to_string()],
-            )
-            .await
-            .expect("create the tab window");
-        sup.tmux
-            .mark_window(
-                tmux_name,
-                &pane,
-                crate::tmux::TAB_WINDOW_OPTION,
-                &uuid::Uuid::new_v4().to_string(),
-            )
-            .await
-            .expect("mark the tab window");
-        pane
-    }
-
-    /// Spec (SPEC.md, "Status"): a session whose agent runs in an old
-    /// terminal gets one old-terminal notification, with the maintainer's
-    /// text, from the ticker alone (no client asks); later passes add no
-    /// second one; it stays unresolved while an old tab is still open after
-    /// the agent stopped; and it is resolved once nothing old runs, the
-    /// agent's dead pane included.
-    ///
-    /// Why: this is how a user hears about a session they never open, and
-    /// the notification must not nag about a stopped session that only
-    /// shows its last screen, nor go quiet while an old tab still runs.
-    #[farhelm_testtrace::test]
-    async fn an_old_terminal_notification_lasts_while_anything_old_runs() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let gate = state.path().join("agent-gate");
-        let pane = gated_agent(&sup, "fh-old-run", &gate).await;
-        install_durable_running_entry(
-            &sup,
-            "old-run",
-            Terminal::tmux("fh-old-run".into(), pane.clone()),
-        )
-        .await;
-        let mut cursor = None;
-        let (_stop_tx, mut stop) = oneshot::channel();
-
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(old_terminal_rows(&sup, "old-run").await, vec![(0, false)]);
-        let stored = sup
-            .store
-            .session_notification_records("old-run")
-            .await
-            .expect("read");
-        assert_eq!(
-            stored[0].notification.text,
-            crate::service::notifications::OLD_TERMINAL_TEXT
-        );
-        let seq = stored[0].notification.seq;
-        assert_eq!(
-            sup.published_notifications("old-run").await.len(),
-            1,
-            "the reply-facing cell carries it too"
-        );
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        let stored = sup
-            .store
-            .session_notification_records("old-run")
-            .await
-            .expect("read");
-        assert_eq!(
-            (stored.len(), stored[0].notification.seq),
-            (1, seq),
-            "a later pass neither adds nor reopens it"
-        );
-
-        // The agent ends (its pane stays, dead) while an old tab runs.
-        let tab = live_tab_in(&sup, "fh-old-run").await;
-        std::fs::write(&gate, "").expect("open the agent's gate");
-        wait_for_dead_pane(&sup, &pane).await;
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            old_terminal_rows(&sup, "old-run").await,
-            vec![(0, false)],
-            "an open old tab keeps it unresolved"
-        );
-
-        sup.tmux
-            .kill_window("fh-old-run", &tab)
-            .await
-            .expect("close the tab");
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            old_terminal_rows(&sup, "old-run").await,
-            vec![(0, true)],
-            "a dead agent pane alone is nothing old running"
-        );
-        assert!(
-            sup.published_notifications("old-run").await[0].resolved,
-            "the cell shows the resolution"
-        );
-    }
-
-    /// Spec (SPEC.md, "Status"): the old-terminal notification is one per
-    /// session, not per launch. With an unresolved one recorded at launch 0
-    /// and the session moved on to launch 1 (a Restart that put the agent
-    /// in a terminal host) while an old tab stays open, a pass records no
-    /// second one; closing the tab then resolves the launch-0 row.
-    ///
-    /// Why: every other kind is keyed by launch, so the store would happily
-    /// add a second row at the new launch; only the per-session precheck
-    /// and the resolver across launches give the user one warning that
-    /// ends when the tab does.
-    #[farhelm_testtrace::test]
-    async fn a_relaunch_with_an_old_tab_open_keeps_the_one_notification() {
-        let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        let pane = spawn_pane(&sup, "fh-relaunch", "sleep 600").await;
-        let first = install_durable_running_entry(
-            &sup,
-            "relaunch",
-            Terminal::tmux("fh-relaunch".into(), pane.clone()),
-        )
-        .await;
-        let tab = live_tab_in(&sup, "fh-relaunch").await;
-        let mut cursor = None;
-        let (_stop_tx, mut stop) = oneshot::channel();
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            old_terminal_rows(&sup, "relaunch").await,
-            vec![(0, false)],
-            "premise"
-        );
-
-        // Launch 1: the row moves on, and a new entry with no terminal of
-        // its own (a host this unit test cannot start) shares the session's
-        // cells, as a relaunch's does; the old agent pane is gone.
-        let claim = sup
-            .store
-            .begin_relaunch(
-                "relaunch",
-                crate::store::OfferBasis {
-                    captured_conversation: None,
-                    capture_ownership_version: 0,
-                },
-                false,
-            )
-            .await
-            .expect("open launch 1");
-        assert!(
-            matches!(claim, crate::store::RelaunchDecision::Claimed(_)),
-            "premise: {claim:?}"
-        );
-        let second = Arc::new(SessionEntry {
-            info: first.info.clone(),
-            terminal: None,
-            // A relaunch starts its run cells afresh.
-            run: entry_with(None, LastOutcome::Running).run,
-            session: first.session.clone(),
-            snapshot: first.snapshot.clone(),
-            canonical_cwd: first.canonical_cwd.clone(),
-            generation: 1,
-            scope: first.scope.clone(),
-        });
-        sup.sessions
-            .lock()
-            .await
-            .insert("relaunch".to_string(), second);
-        sup.tmux
-            .kill_window("fh-relaunch", &pane)
-            .await
-            .expect("end the old agent window");
-        assert!(
-            sup.tmux
-                .pane_states()
-                .await
-                .expect("probe")
-                .contains_key(&tab),
-            "premise: the old tab still runs"
-        );
-
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            old_terminal_rows(&sup, "relaunch").await,
-            vec![(0, false)],
-            "no second notification at launch 1"
-        );
-        sup.tmux
-            .kill_window("fh-relaunch", &tab)
-            .await
-            .expect("close the tab");
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            old_terminal_rows(&sup, "relaunch").await,
-            vec![(0, true)],
-            "resolved across launches"
-        );
-    }
-
-    /// Spec (SPEC.md, "Status"): no old-terminal notification is recorded or
-    /// resolved when the pass could not ask tmux.
-    ///
-    /// Why: a failed probe says nothing about what runs, so it must neither
-    /// invent a warning nor clear a real one.
-    #[farhelm_testtrace::test]
-    async fn no_old_terminal_notification_without_an_answer() {
-        let state = StateDir::new();
-        let failing: Arc<AtomicBool> = Arc::default();
-        let sup = {
-            let failing = Arc::clone(&failing);
-            supervisor_with(
-                &state,
-                SupervisorSeams {
-                    faults: crate::service::FaultHooks {
-                        sample_fault: Some(Arc::new(move |asked| {
-                            (matches!(asked, SampleRead::PaneStates)
-                                && failing.load(Ordering::SeqCst))
-                            .then(|| "injected probe failure".to_string())
-                        })),
-                        ..crate::service::FaultHooks::default()
-                    },
-                    ..SupervisorSeams::default()
-                },
-            )
-            .await
-        };
-        let pane = spawn_pane(&sup, "fh-probe", "sleep 600").await;
-        install_durable_running_entry(
-            &sup,
-            "probe",
-            Terminal::tmux("fh-probe".into(), pane.clone()),
-        )
-        .await;
-        let mut cursor = None;
-        let (_stop_tx, mut stop) = oneshot::channel();
-        failing.store(true, Ordering::SeqCst);
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            old_terminal_rows(&sup, "probe").await,
-            vec![],
-            "nothing recorded blind"
-        );
-        failing.store(false, Ordering::SeqCst);
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            old_terminal_rows(&sup, "probe").await,
-            vec![(0, false)],
-            "premise: recorded"
-        );
-        sup.tmux
-            .kill_window("fh-probe", &pane)
-            .await
-            .expect("end the agent");
-        failing.store(true, Ordering::SeqCst);
-        sample_pass(&sup, &mut cursor, SAMPLE_TAIL_BUDGET, &mut stop).await;
-        assert_eq!(
-            old_terminal_rows(&sup, "probe").await,
-            vec![(0, false)],
-            "nothing resolved blind"
-        );
-    }
 }

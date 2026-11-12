@@ -83,7 +83,7 @@ pub(crate) fn open_lock(cache: &Path) -> std::io::Result<PreparationLock> {
 
 /// Evict caches unused for 30 days without disturbing surviving launch shims.
 ///
-/// A supervisor restart does not stop the tmux panes preparing checkouts. A
+/// A supervisor restart does not stop the terminal hosts preparing checkouts. A
 /// held lock therefore skips both trash cleanup and eviction. Rename precedes
 /// recursive removal so interruption can leave only trash, never a live cache
 /// partially deleted. The next startup removes that trash under the same lock.

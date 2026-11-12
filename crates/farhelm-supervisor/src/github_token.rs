@@ -1,6 +1,6 @@
 //! GitHub tokens cross the terminal-host boundary only in its child's stdin
 //! specification. The supervisor reads the Farhelm-owned file at each spawn;
-//! nothing is cached in a launch record or passed through tmux's command line.
+//! nothing is cached in a launch record or passed on a command line.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};

@@ -16,7 +16,7 @@ use tokio::sync::{Notify, oneshot};
 use tracing::warn;
 
 /// Retried reports are linked back into place, producing another event. This
-/// floor prevents an unavailable store or tmux from creating a tight retry loop.
+/// floor prevents an unavailable store or terminal from creating a tight retry loop.
 const DRAIN_GAP: Duration = Duration::from_millis(100);
 
 /// Owns the cooperative stop for the report task and its backend.
@@ -306,7 +306,7 @@ mod tests {
     use std::path::Path;
 
     /// No timer or server is started here: only the watch may drain these
-    /// orphan directories. StateDir owns any private tmux cleanup on failure.
+    /// orphan directories.
     async fn supervisor(state: &StateDir, faults: FaultHooks) -> Arc<Supervisor> {
         Supervisor::new_with_seams(
             state.path(),

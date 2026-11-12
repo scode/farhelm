@@ -1597,7 +1597,7 @@ fn is_codex_composer_padding(line: &str) -> bool {
 /// idle frame this normalization exists to handle. An empty first draft row
 /// reads as the bare prompt because screen text drops trailing blank cells
 /// (Farhelm's screen-text format, `farhelm_terminal_emulator`'s `screen`
-/// module, which an old terminal's tmux capture follows too).
+/// module).
 fn is_codex_prompt_row(line: &str) -> bool {
     let Some(rest) = line.strip_prefix('›') else {
         return false;
@@ -2241,7 +2241,7 @@ fn fill_slots(argv: &mut [String], placeholder: &str, value: &str) {
 
 /// Substitute the launch's working directory into each supported whole-element
 /// marker. Codex project-trust markers use the target's canonical directory
-/// when available; the ordinary `{cwd}` marker keeps the path tmux receives.
+/// when available; the ordinary `{cwd}` marker keeps the path the terminal host receives.
 /// Meant for exactly one caller, `Supervisor::prepare_launch` — the
 /// single seam where an argv becomes a process for create, retry, and
 /// every restart alike — as the first of the two transformations that
@@ -2250,8 +2250,9 @@ fn fill_slots(argv: &mut [String], placeholder: &str, value: &str) {
 /// second, subtly different copy of this substitution for whichever path
 /// was missed.
 ///
-/// Caller precondition: `cwd` is the directory tmux is handed for this
-/// launch, so the wrapper and the pane end up agreeing on the same string,
+/// Caller precondition: `cwd` is the directory the terminal host is handed
+/// for this launch, so the wrapper and the terminal end up agreeing on the
+/// same string,
 /// and it has already passed `ensure_cwd_usable` (service/core.rs). That
 /// precondition is why the filled vector is deliberately NOT re-validated
 /// here: `ensure_cwd_usable`'s `is_absolute()` check rules out an empty or

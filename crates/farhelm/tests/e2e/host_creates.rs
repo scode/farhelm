@@ -226,13 +226,11 @@ pub(crate) async fn end_runtime(host: &HostTerminal, pid: u32) {
 ///
 /// Why: this is the switch's whole effect on a create (the plan's PR 16):
 /// the row's kind and its `pane` holding the socket's name are what a
-/// restarted supervisor will read the session by (D-14), a create that
-/// still made a tmux session would leave a husk Delete must find, and a
+/// restarted supervisor will read the session by (D-14), and a
 /// host that Stop's marker sweep could reach would take the final screen
 /// with it (D-17). Spec: a create of the fake agent returns; its row is a
 /// host row whose `pane` names the one socket in `<state>/hosts`, which the
-/// published runtime serves; the private tmux server has no session for
-/// it; the host's screen shows the agent's ready marker and the session
+/// published runtime serves; the host's screen shows the agent's ready marker and the session
 /// lists as live. After Stop, the agent's process is gone, the host's
 /// process still runs, the runtime reports the child's exit (not the
 /// host's end) with the marker still on screen, and the session lists as
@@ -253,15 +251,6 @@ async fn a_create_starts_its_agent_in_a_terminal_host() {
     assert_eq!(
         host.socket(),
         h.state.path().join("hosts").join(socket_name)
-    );
-    let tmux = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &["has-session", "-t", &format!("=fh-{}", session.id)],
-    )
-    .await;
-    assert!(
-        !tmux.status.success(),
-        "a host agent's create made no tmux session"
     );
     assert!(listed_info(&h, &session.id).await.status.is_live());
 
@@ -362,7 +351,7 @@ async fn a_replayed_keyed_create_names_the_host_agent_and_the_switch() {
 
 /// The host's own command line holds only its socket and its environment
 /// is empty, while its child, the agent, carries the session's markers and
-/// none of tmux's.
+/// no `TMUX`/`TMUX_PANE`.
 ///
 /// Why: the goal's "the child's environment never travels on the command
 /// line" and "markers stay off the host": a host lives for weeks with a
@@ -626,10 +615,10 @@ async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
 
 /// The agent in a host runs in its launch's scope, and the host in none.
 ///
-/// Why: the scope wrapper must stay exactly where a tmux pane's command has
-/// it, around the agent (Stop and Delete kill the scope), and a host must get
-/// no scope of its own: it lives in the supervisor's control group, as the
-/// tmux server does. Spec: with the real user manager (else `SKIPPED`), a
+/// Why: the scope wrapper must stay around the agent (Stop and Delete kill
+/// the scope), and a host must get no scope of its own: it lives in the
+/// supervisor's control group, so that Stop's kill of the scope leaves the
+/// host and its final screen. Spec: with the real user manager (else `SKIPPED`), a
 /// created agent's process is in the launch's scope unit and its host is
 /// not; Stop ends the agent and leaves the host running.
 #[farhelm_testtrace::test]
@@ -1015,7 +1004,7 @@ async fn a_create_that_loses_to_delete_ends_its_host() {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams {
             faults: FaultHooks {
                 create_crash: Some(seam),
@@ -1244,8 +1233,7 @@ async fn an_unusable_new_host_is_ended_and_the_create_rolled_back() {
 /// Why: removing the row is removing the last handle on whatever the
 /// launch started; a host that may still run (and that the verified signal
 /// refuses to touch, since its command line does not prove it is the host)
-/// must stay reachable, as a tmux session that exists despite a failure
-/// does. Spec: with a stand-in host program whose listener never answers
+/// must stay reachable. Spec: with a stand-in host program whose listener never answers
 /// and whose command line does not end with its socket, the create fails
 /// saying a terminal host may still be running at that socket and the
 /// session is kept as a launching record; the row exists as a launching
@@ -1594,7 +1582,7 @@ async fn deleting_a_session_fences_its_unbound_recorded_start() {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         interrupted_seams(fixture.path(), &gate, None),
     )
     .await
@@ -1682,7 +1670,7 @@ async fn a_retry_of_a_create_interrupted_in_tmux_is_refused() {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams {
             faults: FaultHooks {
                 create_crash: Some(crate::boot_id_durable_outcome::crash_at(
@@ -1820,7 +1808,7 @@ async fn a_launch_error_keeps_the_host_record_of_a_live_host() {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams {
             faults: FaultHooks {
                 create_crash: Some(crate::boot_id_durable_outcome::crash_at(
@@ -2083,7 +2071,7 @@ async fn ending_a_host_whose_runtime_is_encoding_falls_back_in_bounded_time() {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams {
             faults: FaultHooks {
                 create_crash: Some(seam),

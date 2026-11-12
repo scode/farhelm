@@ -36,7 +36,7 @@ const MUSE: PinCase = PinCase {
     notice_text: crate::service::notifications::MUSE_PIN_CORRECTED_TEXT,
 };
 
-/// Seed a historical plain-id capture in both representations without tmux.
+/// Seed a historical plain-id capture in both representations without a terminal.
 /// Its version-0 Resume offer is the upgrade contract: introducing a process pin
 /// must not withdraw a capture that already worked before the pin existed.
 async fn seed_pin_session(sup: &Arc<Supervisor>, id: &str, case: PinCase) {

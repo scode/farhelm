@@ -4,8 +4,9 @@
 //! terminals, and is the authority on its sessions. It has no UI and no
 //! knowledge of other hosts. Its protocol is reached over a unix socket,
 //! remotely via `farhelm internal stdio`
-//! through the user's ssh. The terminal substrate is a private headless
-//! tmux server (`tmux` module); the wire protocol is farhelm-proto
+//! through the user's ssh. Each terminal runs in its own terminal host
+//! process (`hosts` module); the `tmux` module keeps only the installation's
+//! tmux version policy and program choice. The wire protocol is farhelm-proto
 //! (`service` module); the launch path through the user's login shell and
 //! the exec shim lives in `launch`; SQLite-backed session metadata lives
 //! in `store`.
@@ -14,11 +15,11 @@
 //! with that connection; the helm restricts their use to Tensorlake hosts.
 //!
 //! State model: SQLite (`store` module) is the truth that a session
-//! exists and what its metadata is; tmux remains the truth for whether
-//! its terminal is currently alive. The store carries a third fact —
+//! exists and what its metadata is; the terminal host remains the truth
+//! for whether its terminal is currently alive. The store carries a third fact —
 //! the last outcome the supervisor WITNESSED, plus the boot id it last
 //! saw — which is what makes interrupted-vs-exited a classification
-//! rather than a guess once tmux is gone (PLAN_M3.md item 2, `service`
+//! rather than a guess once the terminal is gone (PLAN_M3.md item 2, `service`
 //! and `store` module docs). The per-session integration snapshot and
 //! conversation-identity capture live behind the `AgentKind` seam
 //! (`agent_kind` module, PLAN_M3.md items 7 and 8): which agent a session
@@ -34,8 +35,8 @@
 //! transfer itself — data channels, credit, stall detection, commit —
 //! belongs to `service` and the streaming write atomicity to `files`.
 //!
-//! Unix-only, unconditionally: the doorway is a unix socket and the
-//! substrate is tmux, so unix APIs are used without cfg gates — a
+//! Unix-only, unconditionally: the doorway is a unix socket and terminal
+//! hosts are unix processes holding ptys, so unix APIs are used without cfg gates — a
 //! non-unix port would be a redesign, not a compile flag. Differences
 //! BETWEEN unixes are confined to one place, the private `procs` module:
 //! Linux and macOS disagree only about how the process table is read, and
@@ -129,7 +130,7 @@ pub async fn ensure_private_dir(path: &std::path::Path) -> std::io::Result<()> {
 
 /// Default state directory: `~/.local/state/farhelm` (SPEC_impl.md's
 /// layout), honoring `XDG_STATE_HOME` when set. Everything the supervisor
-/// persists — tmux socket, launch specs, its own unix socket — lives
+/// persists — terminal hosts' sockets, launch specs, its own unix socket — lives
 /// under here.
 ///
 /// There is deliberately no current-directory fallback. Helm and

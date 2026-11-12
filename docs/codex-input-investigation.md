@@ -65,8 +65,8 @@ terminal reader awaits each send, the supervisor accepts frames under the curren
 input client sends hexadecimal bytes and waits for tmux's acknowledgement. The relevant code is
 [`terminal.js`](../crates/farhelm-ui/assets/terminal.js), [`terminal.rs`](../crates/farhelm-helm/src/terminal.rs),
 [`connection.rs`](../crates/farhelm-supervisor/src/service/connection.rs), and
-[`input.rs`](../crates/farhelm-supervisor/src/tmux/input.rs). This trace does not prove which bytes reached Codex during
-the reported incident.
+`crates/farhelm-supervisor/src/tmux/input.rs` (at the inspected commit; the supervisor's tmux driver has since been
+removed). This trace does not prove which bytes reached Codex during the reported incident.
 
 `sendData` sends only when its browser WebSocket is OPEN; it does not queue typing across a closed or connecting socket.
 That is a concrete loss window, but no evidence places the incident in it, and dropping an input chunk alone does not

@@ -34,9 +34,8 @@ Linux" below).
 - `brew install tmux`. Neither binary bundles tmux. Homebrew's (3.7c at the time of writing) is the recommended way to
   meet the version floor, and `farhelm-desktop` looks for a tmux in the Homebrew and MacPorts prefixes itself, since GUI
   apps do not see your shell's `PATH`; `FARHELM_TMUX` in its environment names one explicitly. Before starting its own
-  managed supervisor, `farhelm-desktop` checks the tmux it is about to hand that supervisor against the version floor
-  itself; without an acceptable one it refuses immediately with one plain message on its own stderr and quits, rather
-  than opening a window and letting the managed supervisor fail later — see the tmux NOTE below. Launched from a
+  managed supervisor, `farhelm-desktop` checks the tmux it finds against the version floor; without an acceptable one it
+  refuses immediately with one plain message on its own stderr and quits — see the tmux NOTE below. Launched from a
   terminal, that message is right there; launched from Finder or Spotlight, where there is no terminal, the same text
   also appears in a critical alert and lands in Console under the `farhelm-desktop` tag.
 - Start `farhelm-desktop` (double-click it in Finder, or run `~/.local/bin/farhelm-desktop` from a terminal). It starts
@@ -75,27 +74,12 @@ Every host runs one supervisor per user. The helm reaches them over SSH (no port
 network interface), and "add host" is discovery-first: if a supervisor is already running for your user, it is
 registered as-is and never restarted or replaced.
 
-NOTE on tmux: sessions live in a private tmux server, and Farhelm requires tmux 3.7c or newer, in tmux's own release
-spelling (`3.7c`, `3.8`; development builds such as `next-3.8` and distro-decorated versions are refused rather than
-guessed about) — deliberately newer than many distros ship (Ubuntu 24.04 has 3.4, 26.04 about 3.6, Debian 13 3.5a; some
-current Fedora releases do ship 3.7c). The floor is the exact version the crash-regression suite runs against, and it
-moves only when that suite moves with it. This is not version snobbery: Farhelm drives tmux's control mode,
-output-client teardown, and pane-death timing far harder than interactive use does, and older versions have crashed the
-server under it, taking every session on the host with them. Automatic setup checks the host's tmux and installs
-Farhelm's pinned static build when the host has nothing acceptable, and names whichever binary it accepted in the
-service it writes, so a stale private build cannot shadow it later; on Linux, Linuxbrew's tmux is the documented way to
-meet the floor without taking that build, and on macOS Homebrew's is the recommended one. A supervisor that finds an
-older tmux refuses to start and says which binary it checked, what version it found, and what the floor is. The same
-check covers a private tmux server that is already running for this state directory: a newer client does not silently
-adopt an older server, because the server is the part that holds sessions and the part that has crashed — the supervisor
-refuses, names both versions, and leaves the old server and its sessions alone for you to drain.
-
-If you want to run a different tmux anyway, the override is one knob honored by every launch path, the desktop app
-included: `farhelm supervisor run --tmux /path/to/tmux`, or `FARHELM_TMUX=/path/to/tmux` in the supervisor's environment
-(the flag wins when both are set). The chosen binary is version-checked like any other and refused by name if it is
-below the floor. Versions above the floor are accepted with a one-time warning that they are unaudited. Either way the
-override means you own the substrate: it is a way to run something newer or differently built, not a supported
-configuration.
+NOTE on tmux: sessions run in Farhelm's own terminal hosts, not in tmux; the supervisor runs no tmux, and at startup
+ends the private tmux server earlier releases ran sessions in. The installation still checks for a tmux at or above
+3.7c, in tmux's own release spelling (`3.7c`, `3.8`; development builds such as `next-3.8` and distro-decorated versions
+are refused rather than guessed about): automatic setup checks the host's tmux and installs Farhelm's pinned static
+build when the host has nothing acceptable, and the desktop app checks the tmux it finds before starting its managed
+supervisor. `FARHELM_TMUX=/path/to/tmux` (or `farhelm helm setup --tmux`) names the binary those checks use.
 
 ### Linux hosts
 
@@ -122,26 +106,23 @@ URL — a mirror, a staging server, a test fixture — on any build, including o
 is unchanged: the mirror's `SHA256SUMS` still has to carry a signature that farhelm's built-in key accepts, for this
 helm's own version, so a mirror can serve the bytes but cannot alter them. `--payload-dir` still wins if both are given.
 
-Hosts the automatic path does not support keep a manual fallback: run `farhelm supervisor run` in a terminal (with a
-tmux at or above the floor on `PATH`, or named with `--tmux`), or write a systemd user unit by hand. For the unit,
-`farhelm helm setup --dry-run` on that host prints both units Farhelm would install — take the
-`farhelm-supervisor.service` one and ignore the helm unit, which belongs on the helm's machine rather than a host. The
-templates behind them are in `crates/farhelm-helm/units/`. A supervisor set up either way is found by "add host" like
-any other.
+Hosts the automatic path does not support keep a manual fallback: run `farhelm supervisor run` in a terminal, or write a
+systemd user unit by hand. For the unit, `farhelm helm setup --dry-run` on that host prints both units Farhelm would
+install — take the `farhelm-supervisor.service` one and ignore the helm unit, which belongs on the helm's machine rather
+than a host. The templates behind them are in `crates/farhelm-helm/units/`. A supervisor set up either way is found by
+"add host" like any other.
 
 ### macOS hosts
 
 There is no system integration on the Mac yet: the supervisor runs while something runs it. On the machine where
 `farhelm-desktop` is your helm, it already manages one. To make some other Mac a host for a helm running elsewhere,
-`brew install tmux` there, install farhelm with the curl command above, and start the supervisor by hand:
+install farhelm there with the curl command above, and start the supervisor by hand:
 
 ```
 ~/.local/bin/farhelm supervisor run
 ```
 
-If `~/.local/bin` is not on that shell's `PATH`, use the full path, or name the tmux explicitly:
-`~/.local/bin/farhelm supervisor run --tmux "$(brew --prefix)/bin/tmux"` (the leading path locates farhelm; `--tmux`
-separately locates tmux — the two are independent).
+If `~/.local/bin` is not on that shell's `PATH`, use the full path.
 
 Then add the Mac from the hosts panel: enter its SSH destination, and put farhelm's path in the "remote farhelm
 (optional)" field — the discovery probe runs `farhelm` over a fresh SSH login, whose `PATH` may not include
@@ -150,8 +131,8 @@ unreachable. NOTE: this field is shell-quoted before it reaches the remote login
 literal character rather than expanded — `~/.local/bin/farhelm` will NOT work here. Get the real path instead, e.g. by
 running `echo ~/.local/bin/farhelm` on that Mac (or `ssh <destination> 'echo ~/.local/bin/farhelm'` from wherever you
 are), and paste the absolute result (`/Users/<name>/.local/bin/farhelm`). Discovery then registers it — automatic setup
-is not offered for Macs. Stopping the supervisor does not stop its sessions: tmux keeps them running and they reattach
-when the supervisor returns; only a reboot takes them down.
+is not offered for Macs. Stopping the supervisor does not stop its sessions: their terminal hosts keep them running and
+they reattach when the supervisor returns; only a reboot takes them down.
 
 NOTE: do not start `farhelm-desktop` itself on a Mac you mean to drive from another helm — the app has no helmless mode,
 so launching it starts a second helm, and running more than one helm is unsupported.

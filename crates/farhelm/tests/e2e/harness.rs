@@ -16,8 +16,7 @@
 //! chase a definition into `session_lifecycle` to understand a harness
 //! function's own behavior. Narrowly shared helpers stay section-owned:
 //! a module that grew a helper another section later needed exports it
-//! directly (`terminal_backpressure::drain_for` and friends), and the
-//! consumer imports it by name from its owner.
+//! directly, and the consumer imports it by name from its owner.
 //!
 //! Re-exports below are `pub(crate) use` rather than plain `use` so a
 //! sibling module can pull the whole set into scope with a single
@@ -237,9 +236,7 @@ fn is_grid_channel(client: &SupervisorClient, channel: u32) -> bool {
 /// The `*_live` methods make that ordering part of setup and return
 /// `(channel, replay_bytes, post_marker_stream)`. `replay_bytes` contains
 /// every data byte before the initial marker; `post_marker_stream` has not
-/// been read past it. A forced tmux pause can replay again later without a
-/// second marker, so callers must not treat the returned stream as bytes that
-/// were necessarily produced after the attach.
+/// been read past it.
 ///
 /// The `*_at_boundary` methods are deliberately raw. They return the original
 /// production result without reading its receiver, for tests whose premise is
@@ -523,27 +520,6 @@ pub(crate) fn fixtures_bin() -> &'static str {
     })
 }
 
-/// Run one tmux command against a private socket, asynchronously.
-///
-/// Async (tokio Command) rather than `std::process` because `#[tokio::test]`
-/// runs a current-thread runtime: a blocking child-process wait in a test
-/// body stalls the in-process supervisor and forwarder tasks on that same
-/// runtime, distorting exactly the concurrent behavior under test.
-///
-/// `-u`, as the supervisor's own driver passes it: without a UTF-8 locale
-/// tmux would turn separators and non-ASCII characters in format output
-/// into `_` (`TmuxDriver::command` in farhelm-supervisor says more).
-pub(crate) async fn tmux_query(sock: &std::path::Path, args: &[&str]) -> std::process::Output {
-    tokio::process::Command::new("tmux")
-        .arg("-u")
-        .arg("-S")
-        .arg(sock)
-        .args(args)
-        .output()
-        .await
-        .expect("tmux query")
-}
-
 /// Run a readiness command without blocking the test runtime or abandoning its child.
 ///
 /// These tests use the real monotonic clock. Passing the absolute deadline into
@@ -578,75 +554,6 @@ async fn an_expired_readiness_command_never_starts_its_child() {
         "expired probe must return its deadline outcome"
     );
     assert!(!marker.exists(), "expired probe must not start its child");
-}
-
-/// Query a small tmux readiness observation under the caller's existing budget.
-///
-/// Use this for predicates such as pane death. The bounded runner rejects
-/// incomplete or capped output, so a partial reply cannot establish readiness.
-/// An expired pre-spawn budget returns `None` for the caller's own diagnostics.
-pub(crate) async fn tmux_query_before_deadline(
-    sock: &std::path::Path,
-    args: &[&str],
-    deadline: tokio::time::Instant,
-) -> Option<std::process::Output> {
-    let mut command = std::process::Command::new("tmux");
-    command.arg("-S").arg(sock).args(args);
-    command_output_before_deadline(command, deadline).await
-}
-
-/// Kill the harness's tmux server and wait until it has genuinely died.
-///
-/// `kill-server` returns before the server finishes tearing down; any
-/// tmux command racing that teardown (a fresh `Supervisor` adopting the
-/// socket, an auto-started server from `new-session`) can connect
-/// to the dying server and fail with "server exited unexpectedly" — a
-/// flake observed on loaded CI runners, never a product bug. Every test
-/// that kills the server must go through this helper rather than a bare
-/// `kill-server`.
-pub(crate) async fn kill_tmux_server_and_wait(sock: &std::path::Path) {
-    let killed = tmux_query(sock, &["kill-server"]).await;
-    assert!(
-        killed.status.success(),
-        "test setup: tmux kill-server must succeed, got: {}",
-        String::from_utf8_lossy(&killed.stderr)
-    );
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        let probe = tmux_query(sock, &["list-sessions"]).await;
-        if !probe.status.success()
-            && String::from_utf8_lossy(&probe.stderr).contains("no server running")
-        {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "tmux server never finished dying after kill-server"
-        );
-        // sleep-ok: kill-server returns before teardown finishes; retry the private server's disappearance probe until its deadline.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-}
-
-/// The pane id (`%N`) tmux currently reports for `tmux_name`'s session —
-/// used to independently confirm a test's own precondition about pane-id
-/// reuse, rather than assuming it from the tmux server's fresh-start
-/// behavior alone.
-pub(crate) async fn pane_id_of(sock: &std::path::Path, tmux_name: &str) -> String {
-    let out = tmux_query(
-        sock,
-        &["display-message", "-p", "-t", tmux_name, "#{pane_id}"],
-    )
-    .await;
-    assert!(
-        out.status.success(),
-        "test setup: querying the pane id for {tmux_name} must succeed, got: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout)
-        .expect("pane id is UTF-8")
-        .trim()
-        .to_string()
 }
 
 /// Wait until a supervisor on `state_dir` can be DIALLED, for tests that
@@ -1239,45 +1146,43 @@ pub(crate) async fn is_host_row(state_dir: &std::path::Path, session_id: &str) -
         == farhelm_supervisor::store::TerminalKind::Host
 }
 
-/// The runtime `sup` publishes for `session_id`'s agent when its row is a
-/// host row, `None` for an old terminal's row; a host row without a
-/// published runtime (a reload that has not adopted it, an entry left
-/// without a terminal) fails the test by name.
-pub(crate) async fn row_agent_host(
+/// The runtime `sup` publishes for `session_id`'s agent terminal host.
+///
+/// Every session a supervisor runs has its agent in a terminal host, so a
+/// row that says otherwise (an old-kind row, which only the startup tests
+/// of ending old terminals write) or a host row without a published runtime
+/// (a reload that has not adopted it, an entry left without a terminal)
+/// fails the test by name rather than being read some other way.
+pub(crate) async fn agent_host(
     sup: &Supervisor,
     state_dir: &std::path::Path,
     session_id: &str,
-) -> Option<farhelm_supervisor::hosts::HostTerminal> {
-    if !is_host_row(state_dir, session_id).await {
-        return None;
-    }
-    Some(
-        sup.agent_host_for_test(session_id)
-            .await
-            .unwrap_or_else(|| {
-                panic!("session {session_id}'s row is a host row, but no host runtime is published")
-            }),
-    )
+) -> farhelm_supervisor::hosts::HostTerminal {
+    assert!(
+        is_host_row(state_dir, session_id).await,
+        "session {session_id}'s row is not a host row"
+    );
+    sup.agent_host_for_test(session_id)
+        .await
+        .unwrap_or_else(|| {
+            panic!("session {session_id}'s row is a host row, but no host runtime is published")
+        })
 }
 
 /// Wait until `session_id`'s agent on `sup` (whose state directory is
-/// `state_dir`) has printed [`AGENT_READY_MARKER`], failing the test by name
-/// if it never does or its terminal dies first: in its terminal host when
-/// the session's agent runs in one ([`wait_for_host_agent_ready`]), else in
-/// its tmux pane ([`wait_for_tmux_agent_ready`]).
+/// `state_dir`) has printed [`AGENT_READY_MARKER`] in its terminal host,
+/// failing the test by name if it never does or its terminal dies first
+/// ([`wait_for_host_agent_ready`]).
 ///
-/// The kind is read from the session's row ([`row_agent_host`]); a create's
-/// reply is enough, since a create into a host returns once the host is
-/// adopted.
+/// A create's reply is enough to call this: a create into a host returns
+/// once the host is adopted ([`agent_host`]).
 pub(crate) async fn wait_for_agent_ready_on(
     sup: &Supervisor,
     state_dir: &std::path::Path,
     session_id: &str,
 ) {
-    match row_agent_host(sup, state_dir, session_id).await {
-        Some(host) => wait_for_host_agent_ready(&host, session_id).await,
-        None => wait_for_tmux_agent_ready(&state_dir.join("tmux.sock"), session_id).await,
-    }
+    let host = agent_host(sup, state_dir, session_id).await;
+    wait_for_host_agent_ready(&host, session_id).await;
 }
 
 /// What the fake agent prints when it echoes `text` back, as `stream`'s
@@ -1294,96 +1199,50 @@ pub(crate) fn agent_echo(stream: &TermStream, text: &str) -> String {
     }
 }
 
-/// The pid of the process `session_id`'s agent terminal runs, read without a
-/// listing: the host's child for an agent in a terminal host, the pane's
-/// process for a tmux one.
+/// The pid of the process `session_id`'s agent terminal runs (its host's
+/// child), read without a listing.
 pub(crate) async fn agent_pid(h: &Harness, session_id: &str) -> u32 {
-    if let Some(host) = row_agent_host(&h.sup, h.state.path(), session_id).await {
-        return host.status().child_pid;
-    }
-    let out = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("fh-{session_id}"),
-            "#{pane_pid}",
-        ],
-    )
-    .await;
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse()
-        .expect("a live pane must report a pid")
+    agent_host(&h.sup, h.state.path(), session_id)
+        .await
+        .status()
+        .child_pid
 }
 
 /// Whether `session_id`'s agent has exited right now, read without a
-/// listing: the host runtime's liveness for an agent in a terminal host,
-/// tmux's `pane_dead` for a tmux one. One observation; callers poll.
+/// listing: the host runtime's liveness. One observation; callers poll.
 pub(crate) async fn agent_has_exited(h: &Harness, session_id: &str) -> bool {
-    if let Some(host) = row_agent_host(&h.sup, h.state.path(), session_id).await {
-        return matches!(
-            host.liveness(),
-            farhelm_supervisor::hosts::Liveness::Exited { .. }
-        );
-    }
-    let out = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("fh-{session_id}"),
-            "#{pane_dead}",
-        ],
+    matches!(
+        agent_host(&h.sup, h.state.path(), session_id)
+            .await
+            .liveness(),
+        farhelm_supervisor::hosts::Liveness::Exited { .. }
     )
-    .await;
-    String::from_utf8_lossy(&out.stdout).trim() == "1"
 }
 
 /// The exit code `session_id`'s exited agent left in its terminal, read
-/// without a listing: the host runtime's record of the child's exit, or
-/// tmux's `pane_dead_status` (which tmux 3.4 can lose under load, see
-/// [`tmux_records_exit_codes_reliably`]). `None` while it runs, or for a
-/// death by signal.
+/// without a listing: the host runtime's record of the child's exit. `None`
+/// while it runs, or for a death by signal.
 pub(crate) async fn agent_exit_code(h: &Harness, session_id: &str) -> Option<i32> {
-    if let Some(host) = row_agent_host(&h.sup, h.state.path(), session_id).await {
-        return host.exit_code();
-    }
-    let out = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("fh-{session_id}"),
-            "#{pane_dead_status}",
-        ],
-    )
-    .await;
-    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    agent_host(&h.sup, h.state.path(), session_id)
+        .await
+        .exit_code()
 }
 
 /// What names the terminal `session_id`'s agent runs in, without a listing:
-/// its terminal host's socket, or its tmux pane's id. A test compares two
-/// readings to show the agent was left in the terminal it had.
+/// its terminal host's socket. A test compares two readings to show the
+/// agent was left in the terminal it had.
 pub(crate) async fn agent_terminal_identity(h: &Harness, session_id: &str) -> String {
-    if let Some(host) = row_agent_host(&h.sup, h.state.path(), session_id).await {
-        return host.socket().display().to_string();
-    }
-    pane_id_of(
-        &h.state.path().join("tmux.sock"),
-        &format!("fh-{session_id}"),
-    )
-    .await
+    agent_host(&h.sup, h.state.path(), session_id)
+        .await
+        .socket()
+        .display()
+        .to_string()
 }
 
 /// Wait until `session_id`'s agent on `sup` has exited, without a listing
 /// (which is how a supervisor witnesses an exit, and which some tests must
 /// not trigger before the action under test): the host runtime's own
-/// liveness for an agent in a terminal host, tmux's pane state otherwise
-/// (`boot_id_durable_outcome::wait_for_dead_pane`).
+/// liveness.
 ///
 /// The host runtime learns of the exit from the host's exit record, which
 /// is the host's own observation, not the supervisor's reconciliation: the
@@ -1393,14 +1252,7 @@ pub(crate) async fn wait_for_dead_agent(
     state_dir: &std::path::Path,
     session_id: &str,
 ) {
-    let Some(host) = row_agent_host(sup, state_dir, session_id).await else {
-        crate::boot_id_durable_outcome::wait_for_dead_pane(
-            &state_dir.join("tmux.sock"),
-            &format!("fh-{session_id}"),
-        )
-        .await;
-        return;
-    };
+    let host = agent_host(sup, state_dir, session_id).await;
     let mut status = host.subscribe();
     let exited = tokio::time::timeout(Duration::from_secs(30), async {
         while !matches!(
@@ -1426,28 +1278,19 @@ pub(crate) async fn wait_for_dead_agent(
 }
 
 /// [`wait_for_agent_ready_on`] for a supervisor running as its own process
-/// (the real-stack fixtures), on `state_dir`: an agent in a terminal host is
-/// read through a viewer attached over the supervisor's socket, and a tmux
-/// agent from its pane ([`wait_for_tmux_agent_ready`]).
+/// (the real-stack fixtures), on `state_dir`: the agent's terminal host is
+/// read through a viewer attached over the supervisor's socket.
 ///
 /// The viewer attaches only if no other client holds the session (it must
 /// never take a test's own attachment over) and at 80x24, which resizes the
 /// agent's terminal to that size, as any viewer's attach does; it detaches
-/// once it has seen the marker. The tmux path only reads the pane. A host
-/// cannot be read directly: connecting to it would take it over from the
+/// once it has seen the marker. A host cannot be read directly: connecting to it would take it over from the
 /// supervisor.
 pub(crate) async fn wait_for_agent_ready_at(state_dir: &std::path::Path, session_id: &str) {
-    let row = SessionStore::open(&state_dir.join("supervisor.db"), false)
-        .await
-        .expect("open the store")
-        .session(session_id)
-        .await
-        .expect("read the row")
-        .expect("the row exists");
-    if row.terminal_kind != farhelm_supervisor::store::TerminalKind::Host {
-        wait_for_tmux_agent_ready(&state_dir.join("tmux.sock"), session_id).await;
-        return;
-    }
+    assert!(
+        is_host_row(state_dir, session_id).await,
+        "session {session_id}'s row is not a host row"
+    );
     let transport = farhelm_supervisor::service::connect(state_dir)
         .await
         .expect("dial the supervisor for a readiness viewer");
@@ -1474,40 +1317,15 @@ pub(crate) async fn wait_for_agent_ready_at(state_dir: &std::path::Path, session
 /// a supervisor running as its own process on `state_dir` shows it: for an
 /// agent in a terminal host, the catch-up of a viewer attached over the
 /// supervisor's socket (each row once, up to `ReplayComplete`, see
-/// [`grid_text`]); for a tmux agent, `capture-pane` of its whole history.
-/// Normalized ([`normalize_pane_text`]).
+/// [`grid_text`]). Normalized ([`normalize_pane_text`]).
 ///
 /// The viewer attaches only if no other client holds the session, at
-/// `WIDE_COLS`x`ROWS` (so, unlike `capture-pane`, it resizes the terminal),
-/// and detaches at once.
+/// `WIDE_COLS`x`ROWS` (so it resizes the terminal), and detaches at once.
 pub(crate) async fn terminal_text_at(state_dir: &std::path::Path, session_id: &str) -> String {
-    let row = SessionStore::open(&state_dir.join("supervisor.db"), false)
-        .await
-        .expect("open the store")
-        .session(session_id)
-        .await
-        .expect("read the row")
-        .expect("the row exists");
-    if row.terminal_kind != farhelm_supervisor::store::TerminalKind::Host {
-        let output = tmux_query(
-            &state_dir.join("tmux.sock"),
-            &[
-                "capture-pane",
-                "-p",
-                "-S",
-                "-",
-                "-t",
-                &format!("fh-{session_id}"),
-            ],
-        )
-        .await;
-        assert!(
-            output.status.success(),
-            "capture session {session_id}'s pane: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return normalize_pane_text(&output.stdout);
-    }
+    assert!(
+        is_host_row(state_dir, session_id).await,
+        "session {session_id}'s row is not a host row"
+    );
     let transport = farhelm_supervisor::service::connect(state_dir)
         .await
         .expect("dial the supervisor for a reading viewer");
@@ -1531,16 +1349,35 @@ pub(crate) async fn terminal_text_at(state_dir: &std::path::Path, session_id: &s
     normalize_pane_text(&seen)
 }
 
-/// [`wait_for_tmux_agent_ready`]'s barrier for an agent in a terminal host:
-/// the marker on the supervisor's own screen of the host (its emulator, read
-/// without a second connection that would take the host over).
+/// Wait until `session_id`'s agent has actually STARTED — has printed
+/// [`AGENT_READY_MARKER`] on the supervisor's own screen of its terminal
+/// host (the emulator, read without a second connection that would take the
+/// host over) — failing the test by name, with the screen as the child left
+/// it, if it never does or the host's child dies first.
+///
+/// # Why a post-exec marker and not a live terminal
+///
+/// A launch is a chain: the host runs a login shell, the shell runs the
+/// transient cgroup scope wrapper (`systemd-run --user --scope`, wherever a
+/// systemd user manager exists), the wrapper `exec`s farhelm's launch shim,
+/// and the shim `exec`s the agent. Every link before the last one holds a
+/// LIVE terminal, so "the terminal exists" and even "the session lists as
+/// live" are satisfied by a launch that is about to die without ever having
+/// run an agent. Only a post-exec write proves the chain completed. On
+/// 2026-08-18 a stop test failed on its `Exited` assertion because its
+/// session's launch had died before the shim, so the stop recorded a launch
+/// failure instead; this barrier turns that exposure into a setup failure
+/// that names what actually went wrong.
+///
+/// # Reading the failure
 ///
 /// Waits on the runtime's status, whose revision moves with every change of
-/// the screen, and fails at once when the host's child has exited or the
-/// host is gone or unusable, with the screen as the child left it: the same
-/// "dead fails fast, slow waits out the budget" reading as the tmux barrier.
-/// The marker is searched in the visible screen only, which a fresh fake
-/// agent's few startup lines never leave.
+/// the screen. A host whose child has exited, or that is gone or unusable,
+/// fails at once (the screen is whatever the chain left on the pty, which is
+/// diagnostics, not attribution); a running one with no marker at the
+/// deadline is a launch that was merely slow. The marker is searched in the
+/// visible screen only, which a fresh fake agent's few startup lines never
+/// leave, so this is for a FRESH session straight after its create.
 pub(crate) async fn wait_for_host_agent_ready(
     host: &farhelm_supervisor::hosts::HostTerminal,
     session_id: &str,
@@ -1569,139 +1406,6 @@ pub(crate) async fn wait_for_host_agent_ready(
         // only re-checks the deadline while nothing changes.
         let _ = tokio::time::timeout_at(deadline, status.changed()).await;
     }
-}
-
-/// Wait until `session_id`'s agent has actually STARTED — i.e. has printed
-/// [`AGENT_READY_MARKER`] into its pane on the private server at `sock` —
-/// failing the test by name, with the pane's own last words, if it never
-/// does or if the pane dies first. For an old terminal; see
-/// [`wait_for_agent_ready`] for either kind.
-///
-/// # Why a post-exec marker and not a live pane
-///
-/// A launch is a chain: tmux runs a login shell, the shell runs the
-/// transient cgroup scope wrapper (`systemd-run --user --scope`, wherever
-/// a systemd user manager exists), the wrapper `exec`s farhelm's launch
-/// shim, and the shim `exec`s the agent. Every link before the last one
-/// holds a LIVE pane, so "the pane exists" and even "the session lists as
-/// live" are satisfied by a launch that is about to die without ever
-/// having run an agent. Only a post-exec write proves the chain completed.
-///
-/// # The bug history this exists for
-///
-/// On 2026-08-18 a full-suite run at libtest's default thread count failed
-/// `boot_id_durable_outcome::a_list_polling_through_a_stop_never_erases_the_annotation`
-/// on its `Exited` assertion, having gotten `Error { "the agent was never
-/// started: the launch never reached farhelm's exec shim …" }` — the
-/// supervisor's own never-started classifier
-/// (`service::launch_artifacts::wrapper_failure_detail`). The session's
-/// launch had died somewhere before the shim, so the stop under test
-/// recorded a launch failure instead of the annotated exit, and the
-/// assertion reported the WRONG thing as broken. Every `basic_session`
-/// caller shares that exposure; this barrier converts it from a corrupted
-/// assertion into a setup failure that names what actually went wrong.
-///
-/// # Contract
-///
-/// For a FRESH session — generation zero, no tabs yet, a quiet fixture.
-/// The bare `fh-<id>` target resolves to the session's current pane, which
-/// is the agent's only until a tab exists; the marker is searched in the
-/// last 200 lines of history, which a noisy fixture could push it past;
-/// and a retained marker from an earlier generation would satisfy a
-/// relaunch falsely. Every caller today runs straight after `create`,
-/// where all three hold. A caller that does not must not use this.
-///
-/// # Reading the failure
-///
-/// - a DEAD pane fails at once, and the captured text is what the chain
-///   left on the pty — the scope wrapper's or the login shell's stderr when
-///   the launch died before the shim, the agent's own output when it died
-///   during its setup, or tmux's bare "Pane is dead" banner when nothing
-///   was printed at all. The text is diagnostics, not attribution: it does
-///   not say which link failed;
-/// - a LIVE pane with no marker at the deadline is a launch that was
-///   merely slow.
-///
-/// Every tmux call is bounded by the same deadline, because
-/// `Command::output` has no timeout of its own and a tmux that stops
-/// answering must surface as this setup failure rather than as a hung
-/// test. Asks tmux directly rather than polling `list_sessions`, and that
-/// is load-bearing for at least one caller: a list is how a supervisor
-/// WITNESSES an exit, and
-/// `same_boot_classification_is_per_session_and_never_interrupted` depends
-/// on no list having happened before its reload.
-pub(crate) async fn wait_for_tmux_agent_ready(sock: &std::path::Path, session_id: &str) {
-    // No `=` exact-match prefix, unlike the `kill-session` targets
-    // elsewhere in this suite: that prefix is a target-SESSION spelling,
-    // and a pane target wearing it is refused outright ("can't find pane:
-    // =fh-…") while `display-message` quietly expands every format to the
-    // empty string — a failure mode that reads exactly like "the pane is
-    // alive but silent", which is the one thing this helper must never
-    // confuse. Bare `fh-<uuid>` is unambiguous anyway.
-    let target = format!("fh-{session_id}");
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(AGENT_READY_SECS);
-    let mut last_text = String::new();
-    loop {
-        // Scrollback as well as the visible grid: a dead pane's grid is
-        // replaced by tmux's own "Pane is dead" banner, so the text worth
-        // reporting only lives in history.
-        let capture = tokio::time::timeout_at(
-            deadline,
-            tmux_query(sock, &["capture-pane", "-p", "-t", &target, "-S", "-200"]),
-        )
-        .await;
-        let Ok(out) = capture else {
-            panic!(
-                "test setup: tmux stopped answering while waiting for session {session_id}'s \
-                 agent to print {AGENT_READY_MARKER:?}; last pane text:\n{last_text}"
-            );
-        };
-        last_text = String::from_utf8_lossy(&out.stdout).into_owned();
-        if last_text.contains(AGENT_READY_MARKER) {
-            return;
-        }
-        let dead = pane_format(sock, &target, "#{pane_dead}", deadline).await;
-        let expired = tokio::time::Instant::now() >= deadline;
-        if dead.as_deref() == Some("1") || expired {
-            let status = pane_format(sock, &target, "#{pane_dead_status}", deadline).await;
-            panic!(
-                "test setup: session {session_id}'s agent never printed \
-                 {AGENT_READY_MARKER:?} (pane_dead={dead:?}, pane_dead_status={status:?}, \
-                 deadline expired={expired}), so this test's subject never started. A dead \
-                 pane means the launch died before printing readiness — before farhelm's \
-                 exec shim, or inside the agent's own setup — and the text below is whatever \
-                it left on the pty; a live pane means the launch was merely slow. Pane \
-                text:\n{last_text}"
-            );
-        }
-        // sleep-ok: wait for the agent's own readiness marker, checking pane liveness and bounded text again on each poll.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-/// One `display-message` format string evaluated against `target`, as a
-/// trimmed string, or `None` when tmux refused to answer (the pane, its
-/// window, or the whole server is gone) or did not answer by `deadline`.
-///
-/// Diagnostics only — every caller is already on a failure path, so a tmux
-/// that cannot answer must not itself panic and replace the report with a
-/// less informative one. The deadline is the caller's own, so a stuck
-/// tmux cannot extend the wait it already lost.
-async fn pane_format(
-    sock: &std::path::Path,
-    target: &str,
-    format: &str,
-    deadline: tokio::time::Instant,
-) -> Option<String> {
-    let out = tokio::time::timeout_at(
-        deadline,
-        tmux_query(sock, &["display-message", "-p", "-t", target, format]),
-    )
-    .await
-    .ok()?;
-    out.status
-        .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// Create a basic fake-agent session and observe its post-exec ready marker.
@@ -1824,11 +1528,11 @@ pub(crate) async fn resumable_basic_session(
 /// into running/waiting/idle, and an equality here would silently start
 /// treating a merely-idle agent as settled the moment the sampler lands.
 ///
-/// Pane liveness is computed fresh from tmux at LIST time, never pushed
-/// (`service.rs`'s `ListSessions` handler) — so observing a transition
-/// (an agent exiting on its own, a stop's kill sweep completing) needs a
-/// bounded poll rather than a single read racing tmux's own
-/// `pane_dead`/`pane_dead_status` bookkeeping.
+/// Liveness is computed fresh from the terminal host at LIST time, never
+/// pushed (`service.rs`'s `ListSessions` handler) — so observing a
+/// transition (an agent exiting on its own, a stop's kill sweep completing)
+/// needs a bounded poll rather than a single read racing the host's exit
+/// record.
 pub(crate) async fn wait_for_non_live_status(
     client: &SupervisorClient,
     session_id: &str,
@@ -1881,26 +1585,12 @@ pub(crate) async fn wait_for_reconciled_listing(
 /// Poll `list_sessions` until one whole reply satisfies `settled`, and
 /// return THAT reply's sessions.
 ///
-/// Two separate reasons a single list is not enough, and this helper
-/// answers both at once.
-///
-/// The first is the one [`wait_for_non_live_status`] documents: status is
-/// computed fresh from tmux at LIST time rather than pushed, so any
-/// transition in pane liveness is observable by polling for it. Launch errors,
-/// durable outcomes and report-driven state instead require explicit
-/// reconciliation in fixtures without a running supervisor timer.
-///
-/// The second is that one list can be WRONG about a session that has not
-/// transitioned at all. `pane_states` tolerates three tmux diagnostics by
-/// degrading to an empty pane map (see `tmux.rs`'s `pane_states` and
-/// `is_definitively_empty`), and an entry whose pane is missing from that
-/// map honestly reports `Exited { exit_code: None }`. A loaded machine
-/// that catches a list at such a moment turns a genuinely alive session
-/// into an exited one, so a single-shot "assert it is live" fails on a
-/// diagnostic the product is deliberately tolerant of. Waiting is not
-/// weaker than asserting: a session that has really exited never becomes
-/// live again, so the wait still fails — it just gets a bounded number of
-/// chances to observe the truth first.
+/// A single list is not enough for the reason [`wait_for_non_live_status`]
+/// documents: status is computed fresh from the terminal host at LIST time
+/// rather than pushed, so a transition in liveness is observable only by
+/// polling for it. Launch errors, durable outcomes and report-driven state
+/// instead require explicit reconciliation in fixtures without a running
+/// supervisor timer.
 ///
 /// Returning the whole listing, rather than only the entry that satisfied
 /// the predicate, is what lets a caller assert about SEVERAL rows of one
@@ -1986,9 +1676,9 @@ where
 /// waiting rather than reading once is the right shape at all; reach for
 /// it directly when the assertion spans more than one row of the reply.
 ///
-/// A restart is the motivating case: its reply says the pane exists, not
-/// that the agent inside it has execed yet, so "the relaunch is running"
-/// is only ever observable by asking tmux again.
+/// A restart is the motivating case: its reply says the new terminal
+/// exists, not that the agent inside it has execed yet, so "the relaunch is
+/// running" is only ever observable by asking again.
 pub(crate) async fn wait_for_live_status(
     client: &SupervisorClient,
     session_id: &str,
@@ -2013,13 +1703,14 @@ pub(crate) async fn wait_for_live_status(
 
 /// Wait until `session_id`'s agent terminal on `sup` (state directory
 /// `state_dir`) is live, without consulting the sampler-owned status
-/// classification: the host runtime running a child for an agent in a
-/// terminal host, else a live tmux pane ([`wait_for_live_pane`]).
+/// classification: the host runtime running a child.
 ///
-/// For in-process restart tests, whose replacement supervisor runs no
-/// ticker (see [`wait_for_live_pane`]). A host row's runtime may be
-/// published only once reload has adopted the host, so the wait covers that
-/// too.
+/// For in-process restart tests, which connect directly to
+/// `handle_connection` and so run no `Supervisor::serve` and no activity
+/// ticker to clear a reloaded entry's deliberate provisional `Unknown`
+/// status; a live child is the exact fact those scenarios require. A host
+/// row's runtime may be published only once reload has adopted the host, so
+/// the wait covers that too.
 pub(crate) async fn wait_for_live_agent(
     sup: &Supervisor,
     state_dir: &std::path::Path,
@@ -2027,22 +1718,10 @@ pub(crate) async fn wait_for_live_agent(
     secs: u64,
 ) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-    let row = SessionStore::open(&state_dir.join("supervisor.db"), false)
-        .await
-        .expect("open the store")
-        .session(session_id)
-        .await
-        .expect("read the row")
-        .expect("the row exists");
-    if row.terminal_kind != farhelm_supervisor::store::TerminalKind::Host {
-        wait_for_live_pane(
-            &state_dir.join("tmux.sock"),
-            &format!("fh-{session_id}"),
-            secs,
-        )
-        .await;
-        return;
-    }
+    assert!(
+        is_host_row(state_dir, session_id).await,
+        "session {session_id}'s row is not a host row"
+    );
     loop {
         if let Some(host) = sup.agent_host_for_test(session_id).await
             && matches!(
@@ -2061,94 +1740,19 @@ pub(crate) async fn wait_for_live_agent(
     }
 }
 
-/// Wait until a reloaded session's tmux pane is live without consulting the
-/// sampler-owned status classification.
-///
-/// In-process restart tests connect directly to `handle_connection`, so they
-/// do not run `Supervisor::serve` and therefore have no activity ticker to
-/// clear a reloaded entry's deliberate provisional `Unknown` status. These
-/// tests still need a readiness barrier before asserting reboot or retry
-/// behavior; tmux liveness is the exact fact those scenarios require.
-pub(crate) async fn wait_for_live_pane(sock: &std::path::Path, tmux_name: &str, secs: u64) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
-    let target = format!("={tmux_name}");
-    loop {
-        let out = tmux_query(sock, &["list-panes", "-t", &target, "-F", "#{pane_dead}"]).await;
-        if out.status.success()
-            && String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .any(|line| line.trim() == "0")
-        {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "session {tmux_name} did not expose a live tmux pane within {secs}s"
-        );
-        // sleep-ok: tmux reports pane death asynchronously; poll until its live state is observable.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-/// Whether this host's tmux reliably records a dead pane's exit status.
-///
-/// tmux 3.4 (Ubuntu 24.04's package, so CI's) can PERMANENTLY report a
-/// dead pane with an empty `#{pane_dead_status}` under parallel load —
-/// measured directly against raw tmux, no farhelm involved: 40 concurrent
-/// one-pane servers whose pane runs `sh -c 'sleep 0.3; exit 0'` left 6
-/// panes dead with no status on 3.4, and 0 on 3.7b. The supervisor
-/// already reports that honestly as `Exited { exit_code: None }`
-/// (SPEC.md: exit code "when known"), so this is a fact about what the
-/// exit-code-precision tests may assert per tmux version, not a product
-/// gap to code around.
-pub(crate) fn tmux_records_exit_codes_reliably() -> bool {
-    let out = std::process::Command::new("tmux")
-        .arg("-V")
-        .output()
-        .expect("running tmux -V");
-    let v = String::from_utf8_lossy(&out.stdout);
-    // "tmux 3.4" / "tmux 3.7b" — compare (major, minor) numerically;
-    // trailing letters do not matter at this boundary.
-    let nums: Vec<u32> = v
-        .split_whitespace()
-        .nth(1)
-        .unwrap_or("0.0")
-        .split('.')
-        .map(|part| {
-            part.chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-                .parse()
-                .unwrap_or(0)
-        })
-        .collect();
-    (
-        nums.first().copied().unwrap_or(0),
-        nums.get(1).copied().unwrap_or(0),
-    ) > (3, 4)
-}
-
 /// Poll `list_sessions` until `session_id` reports `Exited` with the
-/// expected code — or, on a tmux that loses exit codes under load
-/// ([`tmux_records_exit_codes_reliably`]), with no code at all.
+/// expected code.
 ///
-/// Two separate races justify the polling shape. First, tmux records
-/// `pane_dead` and `pane_dead_status` in separate steps, so a poll can
-/// land in the window where the pane is dead but its code is not yet
-/// recorded — the list honestly reports `Exited { exit_code: None }` for
-/// that instant, and asserting on the FIRST non-alive observation fails
-/// on a loaded machine (this bit CI while every local run passed).
-/// Second, tmux 3.4 can lose the code PERMANENTLY, so on such hosts an
-/// `Exited { exit_code: None }` that persists to the deadline counts as
-/// the accepted outcome rather than a failure — the precision assertion
-/// only binds where tmux itself is trustworthy.
+/// Polled because status is computed at list time from the host runtime,
+/// which learns of the exit from the host's exit record asynchronously; a
+/// codeless `Exited` seen on the way is tolerated, any other code fails at
+/// once.
 pub(crate) async fn wait_for_exit_code(
     client: &SupervisorClient,
     session_id: &str,
     expected: i32,
     secs: u64,
 ) -> SessionInfo {
-    let tmux_reliable = tmux_records_exit_codes_reliably();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(secs);
     let mut last_seen: Option<SessionInfo> = None;
     loop {
@@ -2173,20 +1777,12 @@ pub(crate) async fn wait_for_exit_code(
             last_seen = Some(found.clone());
         }
         if tokio::time::Instant::now() >= deadline {
-            if !tmux_reliable
-                && let Some(found) = &last_seen
-                && found.status == (SessionStatus::Exited { exit_code: None })
-            {
-                // This tmux is known to lose codes; a persistent None is
-                // the documented accepted outcome, not a failure.
-                return found.clone();
-            }
             panic!(
                 "session {session_id} never reached Exited {{ Some({expected}) }} within \
                  {secs}s (last observed: {last_seen:?})"
             );
         }
-        // sleep-ok: retain the exit-status observation window, including the known tmux missing-code case decided only at its deadline.
+        // sleep-ok: the listing reads the host runtime's exit record, which arrives asynchronously; poll until it carries the code.
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -2211,27 +1807,12 @@ pub(crate) async fn supervisor_on(state_dir: &std::path::Path) -> anyhow::Result
     .await
 }
 
-/// [`supervisor_on`] with `timeouts`.
-pub(crate) async fn suite_supervisor_with_timeouts(
-    state_dir: &std::path::Path,
-    timeouts: SupervisorTimeouts,
-) -> anyhow::Result<Arc<Supervisor>> {
-    Supervisor::new_with_seams(
-        state_dir,
-        farhelm_bin().into(),
-        timeouts,
-        SupervisorSeams::default(),
-    )
-    .await
-}
-
 /// End every terminal on `state_dir` the way a reboot does, while leaving
 /// the state directory (database, launch records, reports) alone: every
-/// terminal host whose socket is in it, and the private tmux server if one
-/// runs.
+/// terminal host whose socket is in it.
 ///
 /// How the suite simulates a reboot, or a terminal lost underneath the
-/// supervisor, for either kind of terminal. A host is ended through its own
+/// supervisor. A host is ended through its own
 /// protocol, which takes it over from a supervisor runtime still connected
 /// to it; that runtime then reads it as gone, as it would after a reboot.
 /// Fails the test unless every host was confirmed ended.
@@ -2242,27 +1823,12 @@ pub(crate) async fn end_all_terminals(state_dir: &std::path::Path) {
         "test setup: the state directory's terminal hosts must all end: {:?}",
         report.lines()
     );
-    let sock = state_dir.join("tmux.sock");
-    if sock.exists() {
-        let probe = tmux_query(&sock, &["list-sessions"]).await;
-        if !String::from_utf8_lossy(&probe.stderr).contains("no server running") {
-            kill_tmux_server_and_wait(&sock).await;
-        }
-    }
 }
 
-/// `session_id`'s recorded agent terminal, as its row names it: a
-/// terminal host's socket, or a tmux session. Read once, so a test can ask
-/// whether the terminal still exists after Delete has removed the row.
-pub(crate) enum RecordedTerminal {
-    /// A terminal host serving this socket.
-    Host(std::path::PathBuf),
-    /// The tmux session `fh-<id>` on this private server's socket.
-    Tmux {
-        sock: std::path::PathBuf,
-        name: String,
-    },
-}
+/// `session_id`'s recorded agent terminal, as its row names it: the socket
+/// of its terminal host. Read once, so a test can ask whether the terminal
+/// still exists after Delete has removed the row.
+pub(crate) struct RecordedTerminal(std::path::PathBuf);
 
 impl RecordedTerminal {
     /// Read `session_id`'s row on `state_dir` for its terminal.
@@ -2274,42 +1840,32 @@ impl RecordedTerminal {
             .await
             .expect("read the row")
             .expect("the row exists");
-        if row.terminal_kind == farhelm_supervisor::store::TerminalKind::Host {
-            return RecordedTerminal::Host(
-                farhelm_supervisor::hosts::hosts_dir(state_dir).join(&row.terminal_address),
-            );
-        }
-        RecordedTerminal::Tmux {
-            sock: state_dir.join("tmux.sock"),
-            name: format!("fh-{session_id}"),
-        }
+        assert_eq!(
+            row.terminal_kind,
+            farhelm_supervisor::store::TerminalKind::Host,
+            "session {session_id}'s row is not a host row"
+        );
+        RecordedTerminal(
+            farhelm_supervisor::hosts::hosts_dir(state_dir).join(&row.terminal_address),
+        )
     }
 
     /// Whether the terminal still exists, read without connecting to it (a
     /// connection would take a host over): a process serving the host's
-    /// socket, or the tmux session.
+    /// socket.
     pub(crate) async fn exists(&self) -> bool {
-        match self {
-            RecordedTerminal::Host(socket) => {
-                // An unbound host row names no socket, and its path is then
-                // the socket directory itself, which serves nothing.
-                assert_ne!(
-                    socket.file_name(),
-                    Some(std::ffi::OsStr::new(
-                        farhelm_supervisor::hosts::HOSTS_DIR_NAME
-                    )),
-                    "the host row names no socket: {}",
-                    socket.display()
-                );
-                crate::host_terminals::host_process(socket).is_some()
-            }
-            RecordedTerminal::Tmux { sock, name } => {
-                tmux_query(sock, &["has-session", "-t", &format!("={name}")])
-                    .await
-                    .status
-                    .success()
-            }
-        }
+        let socket = &self.0;
+        // An unbound host row names no socket, and its path is then the
+        // socket directory itself, which serves nothing.
+        assert_ne!(
+            socket.file_name(),
+            Some(std::ffi::OsStr::new(
+                farhelm_supervisor::hosts::HOSTS_DIR_NAME
+            )),
+            "the host row names no socket: {}",
+            socket.display()
+        );
+        crate::host_terminals::host_process(socket).is_some()
     }
 }
 
@@ -2345,19 +1901,17 @@ pub(crate) async fn wait_until_host_seen_gone(sup: &Supervisor, session_id: &str
 }
 
 /// End `session_id`'s agent terminal underneath the supervisor, the way
-/// something outside Farhelm could (a crash, a person): its terminal host
-/// through the host's own protocol when its row is a host row, its tmux
-/// session otherwise. The session's row and files stay; what the
+/// something outside Farhelm could (a crash, a person): its terminal host,
+/// through the host's own protocol. The session's row and files stay; what the
 /// supervisor makes of the missing terminal is the test's subject.
 ///
-/// `seen_by` is the supervisor still running on `state_dir`, if any: for a
-/// host, this returns only once that supervisor's runtime for the agent
-/// reads the host as gone (or unusable), or is no longer published. A host
-/// ended through its own protocol is taken over, and the runtime learns of
-/// it only when its own connection fails and a reconnect finds nothing,
-/// asynchronously; tmux's `kill-session` is seen by the very next probe,
-/// and a test that reconciles, lists or deletes right after must see the
-/// same on either kind.
+/// `seen_by` is the supervisor still running on `state_dir`, if any: this
+/// returns only once that supervisor's runtime for the agent reads the host
+/// as gone (or unusable), or is no longer published. A host ended through
+/// its own protocol is taken over, and the runtime learns of it only when
+/// its own connection fails and a reconnect finds nothing, asynchronously,
+/// while a test that reconciles, lists or deletes right after must see the
+/// terminal gone.
 pub(crate) async fn end_agent_terminal(
     seen_by: Option<&Supervisor>,
     state_dir: &std::path::Path,
@@ -2370,32 +1924,24 @@ pub(crate) async fn end_agent_terminal(
         .await
         .expect("read the row")
         .expect("the row exists");
-    if row.terminal_kind == farhelm_supervisor::store::TerminalKind::Host {
-        let socket = farhelm_supervisor::hosts::hosts_dir(state_dir).join(&row.terminal_address);
-        let outcome = farhelm_supervisor::hosts::end_host_at(
-            &socket,
-            farhelm_supervisor::hosts::StopLimits::default(),
-        )
-        .await;
-        assert!(
-            matches!(outcome, farhelm_supervisor::hosts::HostOutcome::Stopped(_)),
-            "test setup: ending session {session_id}'s terminal host must succeed: {outcome:?}"
-        );
-        if let Some(sup) = seen_by {
-            wait_until_host_seen_gone(sup, session_id).await;
-        }
-        return;
-    }
-    let out = tmux_query(
-        &state_dir.join("tmux.sock"),
-        &["kill-session", "-t", &format!("=fh-{session_id}")],
+    assert_eq!(
+        row.terminal_kind,
+        farhelm_supervisor::store::TerminalKind::Host,
+        "session {session_id}'s row is not a host row"
+    );
+    let socket = farhelm_supervisor::hosts::hosts_dir(state_dir).join(&row.terminal_address);
+    let outcome = farhelm_supervisor::hosts::end_host_at(
+        &socket,
+        farhelm_supervisor::hosts::StopLimits::default(),
     )
     .await;
     assert!(
-        out.status.success(),
-        "test setup: killing session {session_id}'s tmux session must succeed: {}",
-        String::from_utf8_lossy(&out.stderr)
+        matches!(outcome, farhelm_supervisor::hosts::HostOutcome::Stopped(_)),
+        "test setup: ending session {session_id}'s terminal host must succeed: {outcome:?}"
     );
+    if let Some(sup) = seen_by {
+        wait_until_host_seen_gone(sup, session_id).await;
+    }
 }
 
 /// Like [`harness`], but with the supervisor's gone-not-slow timeouts
@@ -2411,115 +1957,14 @@ pub(crate) async fn harness_with_timeouts(timeouts: SupervisorTimeouts) -> Harne
     harness_with_seams(timeouts, SupervisorSeams::default()).await
 }
 
-/// Floor for the supervisor's tmux control-exchange budget
-/// (`SupervisorTimeouts::tmux_exchange`) under every harness in this suite.
-///
-/// Production keeps `CONTROL_EXCHANGE_TIMEOUT` at 10s deliberately: it
-/// bounds how long a wedged tmux can hold the supervisor-wide attachments
-/// mutex, and that bound has to stay tight for a real deployment.
-///
-/// The 30s floor here is this repo's leading HYPOTHESIS for a class of
-/// one-off CI failures, not a proven diagnosis — PLAN.md's M6.5 entry
-/// records six distinct e2e tests each failing exactly once on a loaded
-/// runner over one day, every one passing on rerun and in isolation, with
-/// panic messages that line-map to these two control-mode budgets
-/// expiring. That pattern is consistent with a busy-but-healthy tmux
-/// occasionally taking longer than 10s/2s to answer and being read as
-/// wedged, but nobody has reproduced the flake on demand to confirm it.
-/// Loosening the budget here costs nothing if the hypothesis is wrong
-/// (these tests do not otherwise depend on tmux answering slowly) and
-/// removes a plausible cause if it is right, which is why it is worth
-/// doing before the mechanism is settled.
-const SUITE_TMUX_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Floor for `SupervisorTimeouts::tmux_pane_list`; see
-/// [`SUITE_TMUX_EXCHANGE_TIMEOUT`] for why this suite floors either budget
-/// at all.
-///
-/// 10s, not some fraction of the 30s exchange floor: production's 2s and
-/// 10s are not related by a ratio worth preserving (2:10 is a different
-/// proportion from any floor pairing that also stays comfortably above
-/// what a loaded runner needs), so there is no proportion here to keep.
-/// The number is simply "generous enough for a busy pane-list call to
-/// finish" — the same reasoning as the exchange floor's 30s, picked
-/// independently. What IS preserved from production, deliberately, is the
-/// STRUCTURAL relationship: this floor stays well below the exchange
-/// floor (10s < 30s), so a slow pane listing still cannot eat the budget
-/// the replay and cutover need afterward — see `PANE_LIST_TIMEOUT`'s own
-/// docs for why that separation exists at all.
-const SUITE_TMUX_PANE_LIST_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Floor for `SupervisorTimeouts::sink_ready`; see
-/// [`SUITE_TMUX_EXCHANGE_TIMEOUT`] for why this suite floors budgets at
-/// all.
-///
-/// Production's 15s already comfortably exceeds a handful of sink respawn
-/// retries (`SINK_RETRY_BASE` doubling up to `SINK_RETRY_MAX`), but a
-/// sink's respawn attempt itself opens a fresh control-mode client through
-/// [`SUITE_TMUX_EXCHANGE_TIMEOUT`]'s own budget — now 30s in this suite,
-/// double the unfloored sink-ready wait. Left at 15s, a legitimately
-/// answering-but-slow tmux could have its sink respawn attempt still
-/// in flight when this budget gave up on it, failing the attach for the
-/// same loaded-CI reason the tmux floors above exist to remove. 40s
-/// clears one respawn attempt at the new exchange floor with room to
-/// spare.
-const SUITE_SINK_READY_TIMEOUT: Duration = Duration::from_secs(40);
-
-/// `SupervisorTimeouts::default()` with this suite's loaded-CI floors
-/// already applied to the three tmux-facing fields above.
-///
-/// For the handful of e2e sites that construct a `Supervisor` directly —
-/// bypassing [`harness_with_seams`] entirely, typically to hold a
-/// `Harness`'s pieces across a restart — but still go on to do real tmux
-/// work (an attach, a stop that reaches the sink or the scope manager)
-/// through the fresh supervisor. Prefer `harness()` /
-/// `harness_with_seams()` whenever a `Harness` will do; reach for this only
-/// where the test's own shape requires calling `Supervisor::new_with_exe`
-/// or `Supervisor::new_with_seams` by hand. A caller that also wants to
-/// override one of the OTHER fields (`stall_detach`, say) does so with
-/// `SupervisorTimeouts { stall_detach: X, ..suite_timeouts() }`, the same
-/// `..Default::default()` shape used everywhere else in this suite.
-pub(crate) fn suite_timeouts() -> SupervisorTimeouts {
-    floor_suite_timeouts(SupervisorTimeouts::default())
-}
-
-/// Raise `timeouts`' three tmux-facing fields to at least this suite's
-/// floors, leaving every other field and any caller value ABOVE the floor
-/// untouched.
-///
-/// A floor, not an assignment: an earlier version of
-/// [`harness_with_seams`] unconditionally overwrote the two tmux budget
-/// fields (`sink_ready` arrived floored from the start), which
-/// would have silently shortened a larger value a future test supplied on
-/// purpose (say, a test that deliberately wants an even slower simulated
-/// tmux). `Duration::max` is what makes this a floor in both directions —
-/// it raises a default or a too-small caller value up to the suite
-/// minimum, and it leaves anything already at or above that minimum alone.
-fn floor_suite_timeouts(mut timeouts: SupervisorTimeouts) -> SupervisorTimeouts {
-    timeouts.tmux_exchange = timeouts.tmux_exchange.max(SUITE_TMUX_EXCHANGE_TIMEOUT);
-    timeouts.tmux_pane_list = timeouts.tmux_pane_list.max(SUITE_TMUX_PANE_LIST_TIMEOUT);
-    timeouts.sink_ready = timeouts.sink_ready.max(SUITE_SINK_READY_TIMEOUT);
-    timeouts
-}
-
 /// Like [`harness_with_timeouts`], but with the supervisor's injection
 /// points supplied too. Tests use these seams to control lifecycle boundaries
 /// and injected failures without altering the test runner's environment.
-///
-/// Every entry point above funnels through here, which is where the tmux
-/// control-mode budgets are floored (see [`floor_suite_timeouts`]) —
-/// unconditionally applied regardless of what `timeouts` carries for its
-/// OTHER fields. A per-test override would have to be repeated at every
-/// one of this suite's call sites (most of which only care about
-/// `stall_detach` or an upload timeout and reach the tmux fields only
-/// through `..Default::default()`), and a single missed site would
-/// silently reintroduce the loaded-CI flake hypothesis this exists to
-/// close off.
+/// Every entry point above funnels through here.
 pub(crate) async fn harness_with_seams(
     timeouts: SupervisorTimeouts,
     seams: SupervisorSeams,
 ) -> Harness {
-    let timeouts = floor_suite_timeouts(timeouts);
     let slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let sup = Supervisor::new_with_seams(state.path(), farhelm_bin().into(), timeouts, seams)
@@ -2612,6 +2057,38 @@ pub(crate) async fn wait_until<S: TermSource>(
     }
 }
 
+/// Drain an attachment into `seen` for `window`, returning any detach
+/// reason that arrived.
+///
+/// Distinct from [`wait_for`] because its callers need to observe the
+/// ABSENCE of something or to keep reading through a period with no
+/// particular marker due — neither of which a needle-driven wait can
+/// express.
+pub(crate) async fn drain_for(
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    window: Duration,
+) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + window;
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        match tokio::time::timeout(remaining, rx.recv()).await {
+            Ok(Some(TermEvent::Data(bytes))) => seen.extend_from_slice(&bytes),
+            // The replay-complete marker (PLAN_M5.md item 4) is
+            // presentation metadata no caller of this drain asserts on;
+            // the catch-up boundary has its own coverage, helm-side, in
+            // farhelm-helm's client.rs/lib.rs.
+            Ok(Some(TermEvent::ReplayComplete)) => {}
+            Ok(Some(TermEvent::Detached(detach))) => return Some(detach.reason),
+            Ok(None) => return Some("closed".to_string()),
+            Err(_) => return None,
+        }
+    }
+}
+
 /// Drain terminal events until `needle` has appeared in the accumulated
 /// output, failing the test after `secs`. Everything received is
 /// appended to `seen`, so callers can make further assertions on the
@@ -2685,11 +2162,8 @@ const REPLAY_COMPLETE_RULE: &str = "this must be the first wait on a fresh attac
 /// This must be the FIRST wait on a fresh attachment: `wait_for` and
 /// `wait_for_after` swallow `ReplayComplete`, so calling this helper after
 /// either one can only time out. It bounds this attachment's initial
-/// catch-up and nothing later; a forced tmux pause can replay history into an
-/// already-live attachment without another marker, so the three
-/// `a_forced_tmux_pause_*` tests find that replay through its `ESC c` reset
-/// instead. The supervisor emits this marker even when the pane has no
-/// history, so a fresh attachment always has a boundary to receive.
+/// catch-up and nothing later. The supervisor emits this marker even when
+/// the terminal has no history, so a fresh attachment always has a boundary to receive.
 pub(crate) async fn wait_for_replay_complete(
     rx: &mut TermStream,
     seen: &mut Vec<u8>,
@@ -2753,8 +2227,7 @@ async fn wait_for_replay_complete_inner<S: TermSource>(
 /// What it does NOT do: it does not touch invalid bytes, because they are
 /// already gone by the time text exists (that is what the live boundary from
 /// [`wait_for_replay_complete`] is for), and it does not parse string-type
-/// sequences such as OSC, because tmux does not emit them around a pane
-/// redraw and guessing at their terminators would risk swallowing real
+/// sequences such as OSC, because a redraw does not emit them and guessing at their terminators would risk swallowing real
 /// output.
 pub(crate) fn normalize_pane_text(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes);
@@ -3484,7 +2957,7 @@ mod tests {
     }
 
     /// Turn a finite response script into the request closure the polling
-    /// core accepts, without involving a tmux-backed `SupervisorClient`.
+    /// core accepts, without involving a real `SupervisorClient`.
     fn scripted_listing_request(
         mut script: VecDeque<ScriptedListingReply>,
     ) -> impl FnMut() -> Pin<

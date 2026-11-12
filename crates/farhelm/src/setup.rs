@@ -1514,8 +1514,9 @@ enum TmuxDecision {
     Refused(String),
 }
 
-/// Pick a tmux the way the supervisor does — `--tmux`, then
-/// `FARHELM_TMUX`, then `PATH` — and hold it to the same floor.
+/// Pick a tmux by the installation's rule (`resolve_tmux_program`): this
+/// command's `--tmux`, then `FARHELM_TMUX`, then `PATH` — and hold it to
+/// the installation's floor.
 ///
 /// Setup NEVER installs tmux. That is a deliberate boundary: this command
 /// manages systemd units on a machine the operator administers, and a CLI

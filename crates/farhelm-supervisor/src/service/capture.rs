@@ -167,7 +167,7 @@ impl Supervisor {
 }
 
 /// Start the launch's diagnostic clock on the first submitted line delivered
-/// to its agent pane outside a recognized dialog.
+/// to its agent terminal outside a recognized dialog.
 ///
 /// A launch can sit idle indefinitely before Codex has a prompt to report, so
 /// launch time is not a useful anchor, and neither is any input at all: the
@@ -175,16 +175,13 @@ impl Supervisor {
 /// position, colour queries, focus reports) without the user typing anything,
 /// and a clock started by those used to fire for an agent nobody had prompted.
 /// The caller therefore calls this only for delivered input containing a
-/// carriage return ([`submits_a_line`]). In a new terminal the query answers
-/// never reach that check (the supervisor's own emulator writes them to the
-/// terminal host, apart from viewer input), and the focus reports the
-/// supervisor encodes from the page's focus messages, `CSI I` and `CSI O`,
-/// carry no carriage return. In an old terminal all of them come from the
-/// browser's xterm.js and arrive as viewer input, and none of them carries a
-/// carriage return (checked against the vendored xterm.js: CSI and DCS
-/// replies, and OSC answers terminated by ST). That firing is now a
-/// user-facing notification, so it must be true (SPEC.md, Status). The whole
-/// frame must have been confirmed delivered to the pane.
+/// carriage return ([`submits_a_line`]). The query answers never reach that
+/// check (the supervisor's own emulator writes them to the terminal host,
+/// apart from viewer input), and the focus reports the supervisor encodes
+/// from the page's focus messages, `CSI I` and `CSI O`, carry no carriage
+/// return. That firing is a user-facing notification, so it must be true
+/// (SPEC.md, Status). The whole frame must have been accepted for the
+/// terminal (`grid_stream::HostAttach::send_input`).
 /// `before_input` must be the latest reading taken before delivery:
 /// answering a dialog can dismiss it before the send completes, but that Enter
 /// gave the agent no prompt to report. An outdated waiting reading can defer
@@ -202,8 +199,8 @@ pub(crate) fn note_first_input(entry: &SessionEntry, before_input: ScreenState) 
         .get_or_insert_with(Instant::now);
 }
 
-/// Whether one input frame to the agent pane submits a line: whether it holds
-/// an Enter that is not part of something else.
+/// Whether one input frame to the agent terminal submits a line: whether it
+/// holds an Enter that is not part of something else.
 ///
 /// Such a frame can start the silent-hook clock ([`note_first_input`]),
 /// because an agent has nothing to report before the user submits something,
@@ -214,16 +211,15 @@ pub(crate) fn note_first_input(entry: &SessionEntry, before_input: ScreenState) 
 ///   precisely so the agent inserts a newline instead of submitting
 ///   (`shift-enter-key.js`);
 /// - inside a bracketed paste (`ESC [200~` .. `ESC [201~`) in the same frame:
-///   an old terminal's xterm.js sends the markers and turns a pasted newline
-///   into a carriage return inside them, and an agent with bracketed paste
-///   enabled keeps the paste in its composer unsubmitted. This marker scan
-///   serves old terminals: a new terminal's bracketed paste never reaches
-///   it, since its caller judges a bracketed paste as submitting nothing
-///   without scanning it (`grid_stream.rs`, `collect_paste`).
+///   an agent with bracketed paste enabled keeps the paste in its composer
+///   unsubmitted. The scan dates from the old tmux terminals, whose browser
+///   xterm.js sent the markers as viewer input. The grid sender judges a
+///   bracketed paste as submitting nothing without scanning it
+///   (`grid_stream.rs`, `collect_paste`), so markers reach this scan only
+///   inside other bytes.
 ///
-/// The terminal's automatic replies to the agent's own queries carry no
-/// carriage return, and in a new terminal the query answers are not viewer
-/// input at all ([`note_first_input`]). This only classifies bytes:
+/// The terminal's automatic replies to the agent's own queries are not
+/// viewer input at all ([`note_first_input`]). This only classifies bytes:
 /// [`note_first_input`] separately excludes an Enter while the latest
 /// pre-delivery screen reading shows a dialog. A paste large enough to be
 /// split across frames still has its middle frames judged without their
@@ -636,11 +632,7 @@ mod tests {
             .get("silent")
             .cloned()
             .expect("entry");
-        let info = super::super::status::entry_info(
-            &entry,
-            &std::collections::HashMap::new(),
-            &Default::default(),
-        );
+        let info = super::super::status::entry_info(&entry);
         assert_eq!(
             info.notifications, silent,
             "replies carry the recorded notification"

@@ -1622,16 +1622,7 @@ async fn the_childs_exit_ends_its_root_and_is_announced() {
             exit: ChildExit::Code(3)
         }
     );
-    match terminal.probe().unwrap() {
-        TerminalProbe::Owned(process) => assert_eq!(
-            process,
-            TerminalProcess {
-                pid: None,
-                dead: true
-            }
-        ),
-        other => panic!("expected an owned dead pane, got {other:?}"),
-    }
+    assert_eq!(terminal.probe().unwrap(), TerminalProbe::Dead);
     assert_eq!(
         terminal.evidence(),
         HostEvidence::Owned {
@@ -1695,13 +1686,7 @@ async fn an_exit_from_info_is_announced_only_with_its_record() {
     let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &reaped, options).await;
     assert_eq!(terminal.liveness(), Liveness::Running { child: None });
     assert_eq!(terminal.child_root(), None);
-    assert_eq!(
-        terminal.probe().unwrap(),
-        TerminalProbe::Owned(TerminalProcess {
-            pid: None,
-            dead: true
-        })
-    );
+    assert_eq!(terminal.probe().unwrap(), TerminalProbe::Dead);
     assert_eq!(
         terminal.evidence(),
         HostEvidence::Owned {
@@ -1783,12 +1768,12 @@ async fn a_reconnect_finding_the_child_reaped_withdraws_only_the_root() {
     assert!(terminal.screen_tail(4096).contains("bye"));
 }
 
-/// The adapters give, for each liveness, what a tmux pane in the matching
-/// state gives, and a pinned child counts as running only while its
-/// process still has its start identity.
+/// The adapters give, for each liveness, the answer the lifecycle verbs
+/// expect, and a pinned child counts as running only while its process
+/// still has its start identity.
 ///
-/// Why: the verbs and the status code decide on those answers for tmux
-/// panes, and reuse them for host terminals; a wrong mapping would let Stop
+/// Why: the verbs and the status code decide on those answers; a wrong
+/// mapping would let Stop
 /// signal a reaped pid, or read an unavailable host as exited. Spec: the
 /// table below, row by row: a running child pinned to this process is a
 /// live root; one pinned to this pid with another start identity (a pid
@@ -1830,7 +1815,7 @@ fn the_adapters_map_each_liveness_like_a_pane() {
         pid: own.pid,
         start: Some(own.start),
     });
-    let owned = |pid, dead| Some(TerminalProbe::Owned(TerminalProcess { pid, dead }));
+
     let alive = HostEvidence::Owned {
         dead: false,
         exit_code: None,
@@ -1843,7 +1828,7 @@ fn the_adapters_map_each_liveness_like_a_pane() {
         (
             Liveness::Running { child: Some(root) },
             Some(root),
-            owned(Some(own.pid), false),
+            Some(TerminalProbe::Running(own.pid)),
             alive,
             None,
             anchor,
@@ -1853,7 +1838,7 @@ fn the_adapters_map_each_liveness_like_a_pane() {
                 child: Some(reused),
             },
             None,
-            owned(None, true),
+            Some(TerminalProbe::Dead),
             alive,
             None,
             anchor,
@@ -1861,7 +1846,7 @@ fn the_adapters_map_each_liveness_like_a_pane() {
         (
             Liveness::Running { child: None },
             None,
-            owned(None, true),
+            Some(TerminalProbe::Dead),
             alive,
             None,
             anchor,
@@ -1871,7 +1856,7 @@ fn the_adapters_map_each_liveness_like_a_pane() {
                 exit: ChildExit::Code(0),
             },
             None,
-            owned(None, true),
+            Some(TerminalProbe::Dead),
             HostEvidence::Owned {
                 dead: true,
                 exit_code: Some(0),
@@ -1884,7 +1869,7 @@ fn the_adapters_map_each_liveness_like_a_pane() {
                 exit: ChildExit::Signal(9),
             },
             None,
-            owned(None, true),
+            Some(TerminalProbe::Dead),
             HostEvidence::Owned {
                 dead: true,
                 exit_code: None,

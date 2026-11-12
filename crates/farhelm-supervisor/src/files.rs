@@ -38,10 +38,10 @@
 //!
 //! **Best-effort atomic** ([`overwrite_private_file_sync`]). Write a fresh 0600
 //! temp file, `fsync` it, `rename` it over the destination; no fsync of
-//! the parent directory. Two file classes: the generated tmux config
-//! (`tmux.rs`'s `TmuxDriver::prepare_server_start`), and the Running record
-//! (`crate::app_bundle::publish_running_record`). Losing a Running-record
-//! update to a power loss is acceptable for the same reason: the supervisor
+//! the parent directory. One file class: the Running record
+//! (`crate::app_bundle::publish_running_record`; earlier releases also
+//! wrote their private tmux server's config this way). Losing a
+//! Running-record update to a power loss is acceptable: the supervisor
 //! that wrote it died with the machine, and the next one to serve rewrites
 //! it before any session can reach it. "Losable, never torn": the
 //! file fsync means a torn/truncated INODE can never survive a power loss
@@ -50,11 +50,11 @@
 //! the missing DIRECTORY fsync means the whole update — the directory
 //! entry now pointing at the new inode — can still be lost outright,
 //! reverting the destination to whatever it pointed at before. That is an
-//! acceptable loss for this file class: a lost tmux-config update is
-//! rebuilt from `TmuxDriver::config_body` on the very next
-//! `prepare_server_start` call regardless. Paying for a directory fsync on every
-//! server start to protect trivially regenerable state would be spending
-//! durability budget where nothing durability-sensitive is at stake.
+//! acceptable loss for this file class: a lost Running-record update is
+//! rewritten by the next supervisor start regardless. Paying for a
+//! directory fsync on every start to protect trivially regenerable state
+//! would be spending durability budget where nothing durability-sensitive
+//! is at stake.
 //!
 //! **Atomic-publication-before-launch** ([`write_private_file`]). Per-
 //! launch spec files (`launch/<id>.json`, `crate::launch::LaunchSpec`)
@@ -62,11 +62,11 @@
 //! having the shortest life of anything here: PLAN_M3.md item 5 calls
 //! this out explicitly, because the shim learns the sentinel's OWN path
 //! from the spec (`crate::launch::status_path_for_spec`) — a torn or
-//! missing spec is not "regenerate and move on" the way a lost tmux
-//! config is, it silently converts a would-be **error** classification
+//! missing spec is not "regenerate and move on" the way a lost Running
+//! record is, it silently converts a would-be **error** classification
 //! into a plain, wrong **exited**. No fsync at all (a supervisor crash
-//! between publishing the spec and launching the tmux window that reads
-//! it means the window was never created, so nothing will ever read a
+//! between publishing the spec and launching the terminal that reads
+//! it means the terminal was never created, so nothing will ever read a
 //! torn spec regardless of what made it to disk), but the destination
 //! must NEVER show a partial file: publication happens by writing a temp
 //! file then hard-`link`-ing it into place, which — unlike `rename` —
@@ -159,7 +159,7 @@
 //! naming convention — `.<destination-file-name>.tmp-<uuid>` — so a
 //! single backstop-sweep pattern ([`is_staged_temp_name`]) covers every
 //! tier: `service.rs`'s narrowed launch-dir sweep and its
-//! tmux-config-temp sweep both key off it. `crate::attachments`
+//! Running-record temp sweep both key off it. `crate::attachments`
 //! deliberately does NOT: its directories hold
 //! user-chosen filenames, so it separates staging from publication
 //! positionally instead (see [`StagedStream::create`]) and sweeps a
@@ -498,9 +498,8 @@ pub fn write_private_file_sync(path: &Path, bytes: &[u8], seam: &dyn FaultSeam) 
 /// constructed INSIDE the closure so only that trivially-`Send`
 /// zero-sized type, not a `dyn FaultSeam`, crosses the thread boundary
 /// (see [`FaultSeam`]'s own docs on why it need not be `Send + Sync`).
-/// The best-effort tier has no async twin: the tmux config (`tmux.rs`)
-/// writes from a synchronous context, and the Running record
-/// (`crate::app_bundle`) wraps it in `spawn_blocking` itself.
+/// The best-effort tier has no async twin: its one writer, the Running
+/// record (`crate::app_bundle`), wraps it in `spawn_blocking` itself.
 pub async fn write_private_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let path = path.to_path_buf();
     let bytes = bytes.to_vec();

@@ -7,75 +7,36 @@ fix would cost more than the bug does. An entry moves out of this file only if t
 
 ## Abrupt supervisor death can crash the private tmux server, killing every session
 
-If the supervisor dies without running any cleanup — SIGKILL, OOM kill, a segfault — while its tmux control clients
-still have queued output, the private tmux server itself sometimes aborts. When that happens every session on that
-server dies with it: agent processes, tabs, scrollback, all of it. Farhelm's durable state survives (the sessions are
-rediscovered as exited on the next supervisor start), but the running work in those sessions is gone.
+This applied while the supervisor ran its terminals in a private tmux server. It runs none any more (old terminals are
+ended at its start), so a supervisor death can no longer take sessions with it this way. The entry stays because the
+installation's tmux version floor cites it (`crates/farhelm-supervisor/src/tmux.rs`).
 
-Here's the TLDR of the mechanics. The kernel closes a dead process's file descriptors, so the server sees EOF and EPIPE
-on the dead supervisor's control-client pipes, some of which still carry queued pane output. tmux accounts that queued
+If the supervisor died without running any cleanup — SIGKILL, OOM kill, a segfault — while its tmux control clients
+still had queued output, the private tmux server itself sometimes aborted. When that happened every session on that
+server died with it: agent processes, tabs, scrollback, all of it. Farhelm's durable state survived (the sessions were
+rediscovered as exited on the next supervisor start), but the running work in those sessions was gone.
+
+Here's the TLDR of the mechanics. The kernel closes a dead process's file descriptors, so the server saw EOF and EPIPE
+on the dead supervisor's control-client pipes, some of which still carried queued pane output. tmux accounts that queued
 output in blocks, and the teardown that follows can race the accounting into a state where a buffer holds fewer bytes
 than its own bookkeeping claims. tmux's codebase uses `fatal()` the way other projects use assertions: on an internal
-invariant violation it aborts the whole server rather than continue with state it no longer trusts. That fail-fast
-stance is defensible — limping on with a corrupted output queue could interleave garbage into every session — but
-reaching the corrupted state at all is the actual bug, and it is tmux's, not ours. A server should treat "a client died
-mid-block" as routine.
+invariant violation it aborts the whole server rather than continue with state it no longer trusts. Reaching the
+corrupted state at all is tmux's bug, not ours; a server should treat "a client died mid-block" as routine.
 
-What we have observed and how sure we are of it: 5 aborts in roughly 5,000 supervisor-SIGKILL iterations on a saturated
+What we observed and how sure we were of it: 5 aborts in roughly 5,000 supervisor-SIGKILL iterations on a saturated
 4-core box running distro tmux 3.6 (2026-08-18), each leaving "no server running" behind with no farhelm-side error. The
-identification with tmux's `fatal: not enough data` abort — the same class our pinned-3.7b regression suite exists for,
-where it is triggered by unsafe live teardown of an output-bearing control client — is inferred from the matching
-trigger shape, not captured directly: the dying server's stderr was not being recorded. We have not established whether
-tmux 3.7b's teardown fixes cover this post-mortem path, nor which distro versions are affected beyond 3.6. This is also
-not the first sighting: the archived M6.5 flake ledger (under lore/) independently confirmed the private tmux server
-dying under load — "%exit server exited unexpectedly", both probes reporting no server — before the trigger was
+identification with tmux's `fatal: not enough data` abort — the same class the pinned-3.7b regression suite existed for,
+where it was triggered by unsafe live teardown of an output-bearing control client — was inferred from the matching
+trigger shape, not captured directly: the dying server's stderr was not being recorded. It was never established whether
+tmux 3.7b's teardown fixes cover this post-mortem path, nor which distro versions are affected beyond 3.6. The archived
+M6.5 flake ledger (under lore/) had independently seen the private tmux server die under load before the trigger was
 understood.
 
-Why we are not fixing it: there is nothing to fix on our side of the line. Farhelm's own teardown paths already disable
-output through an acknowledged boundary before closing any control client, precisely to avoid this abort — but that
-discipline is code the supervisor runs, and a SIGKILLed supervisor runs nothing. No handler survives SIGKILL. A planned
-stop is not in this entry: SIGTERM and SIGINT (what `systemctl stop`/`restart`, an upgrade, or Ctrl-C send, and with the
-units' `KillMode=process` they reach only the supervisor), SIGHUP (a hand-started supervisor's terminal closing or its
-ssh connection dropping, or the terminal that launched the desktop app closing), and the desktop app's closing tether
-all run the same orderly output shutdown before the process exits (`farhelm_supervisor::service::run`). The tmux control
-clients run in process groups of their own, so a hangup or Ctrl-C sent to the supervisor's terminal never reaches them
-directly; the supervisor handles it and closes the output-bearing ones in order. So only a death that runs no code is
-left here. The only code that could make post-mortem teardown safe is tmux's. What farhelm does do is clean up the
-non-crash aftermath: when the server survives an abrupt supervisor death, the next supervisor start reaps any control
-clients the dead one left wedged (see `reap_stale_control_clients` in the supervisor's tmux driver for why they can
-wedge forever).
-
-If you hit this, the signature is: all sessions gone at once, `no server running on <state-dir>/tmux.sock`, and a
-supervisor that restarts cleanly into an empty server with your sessions listed as exited. Reporting it upstream to tmux
-would need the crash site pinned first — running the server with `-vv` logging under the same kill-under-load recipe
-would capture the fatal message and call site.
-
-## A terminal left open for days without typing makes the tmux server grow
-
-If a terminal (a session's agent terminal or one of its tabs) stays open for a long time without anyone typing into it,
-the private tmux server on that host slowly uses more memory. Right after the first keystroke that follows the quiet
-stretch, typing in every terminal on that host can pause for a moment while the supervisor catches up. In practice
-nothing is lost; typing, or closing and reopening the terminal, resets it.
-
-Here's the TLDR of the mechanics. Every open terminal has a separate tmux connection that only carries keystrokes, and
-the supervisor reads from that connection only while it waits for tmux to confirm a keystroke. That connection is set up
-to receive no pane output, but tmux still sends it notifications about the whole server: another terminal attaching or
-detaching, a session being created or removed, a window being renamed or resized. While nobody types, nothing reads
-them. Once the connection's pipe is full (64 KiB), tmux keeps queueing the rest in its own memory, with no limit. The
-next keystroke itself reaches the agent at once, but the supervisor then reads through the whole backlog to find tmux's
-confirmation, and it does that while holding the lock every terminal on that host shares. A backlog too large to read
-within the supervisor's 10-second budget for one keystroke would fail that keystroke and close the terminal, though the
-measured growth makes that implausible.
-
-How sure we are: the mechanism is confirmed by reading the code (`crates/farhelm-supervisor/src/tmux/input.rs`). The
-numbers are from the code review that found it and were not reproduced in triage: about 5 KB of backlog per 20 rounds of
-ordinary churn, and one unread connection plus 80,000 rename notifications taking the tmux server from 1.7 MB to 8.2 MB
-on tmux 3.7c, against 3.4 MB for the same load with no such connection, which is tens of bytes per notification.
-
-Why we are not fixing it: in practice it stays small. Only a terminal that is open and untouched for a long time
-accumulates anything, any keystroke drains it, and reopening the terminal replaces the connection. The fix would be a
-background reader that drains the connection continuously and hands keystroke confirmations to the sender over a
-channel, which turns a deliberately simple, synchronous part of the keystroke path into a concurrent one.
+Why it was not fixed: there was nothing to fix on our side of the line. Farhelm's own teardown paths disabled output
+through an acknowledged boundary before closing any control client, precisely to avoid this abort, but a SIGKILLed
+supervisor runs nothing. A planned stop (SIGTERM, SIGINT, SIGHUP, or the desktop app's closing tether) ran that orderly
+shutdown, so only a death that runs no code was left, and the only code that could have made post-mortem teardown safe
+was tmux's.
 
 ## A host install or update can hang until the helm restarts if a local ssh helper keeps its output open
 

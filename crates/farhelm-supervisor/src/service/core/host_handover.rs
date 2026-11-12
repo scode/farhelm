@@ -68,17 +68,16 @@
 //! list of hosts: a restarted supervisor finds them by scanning its socket
 //! directory (`crate::hosts::registry`) and matches them to rows here, in
 //! [`attribute_host_rows`], the one place a supervisor learns which host
-//! belongs to which session. Host rows never go through tmux's pane lookup:
-//! their `terminal_address` column holds a socket name (the plan's D-14), which
-//! no tmux lookup may read as a pane, and "no such pane" would record a running
-//! agent as exited.
+//! belongs to which session. A host row's `terminal_address` column holds a
+//! socket name (the plan's D-14); an old-kind row's holds a tmux pane id,
+//! which nothing reads as a socket (`super::old_terminals`).
 //!
 //! What identifies a row's host, in order:
 //!
 //! - **The tag.** A live host whose tag names the row's session and launch
 //!   generation is the row's, whatever its socket is called. This is how a
 //!   launch that never reached its confirmation (an empty `terminal_address`)
-//!   is found again, as tmux's agent-window marker finds an unconfirmed pane.
+//!   is found again.
 //! - **The socket the row names**: its `terminal_address` once the launch was
 //!   confirmed, else the socket the launch record of the row's own generation
 //!   names (`<state>/launch/<id>.<gen>.host`, `host_launch`'s "The launch
@@ -244,7 +243,6 @@ use crate::hosts::{
     WhyUnavailable,
 };
 use crate::launch::LaunchArtifacts;
-use crate::service::terminals::Terminal;
 use crate::store::{LastOutcome, SessionStore, StoredSession, TerminalKind, Transition};
 
 // ---- Stopping ------------------------------------------------------------------------
@@ -310,7 +308,6 @@ impl Supervisor {
         self.stopping
             .store(true, std::sync::atomic::Ordering::SeqCst);
         self.readoption_wake.notify_one();
-        self.stop_began.notify_waiters();
         // Without the map nothing here can be reached: other holders of a
         // runtime's handle exist (a pending hold, an attachment, a create in
         // flight), but nothing else lists them. The stop's final close tries
@@ -456,19 +453,19 @@ impl Supervisor {
     /// placeholder takes its place, which records nothing; the create's
     /// durable evidence (its row, its launch record) stays for the next
     /// supervisor, whose reload adopts the host by its tag.
-    pub(crate) fn publishable(&self, terminal: Option<Terminal>) -> Option<Terminal> {
+    pub(crate) fn publishable(&self, terminal: Option<HostTerminal>) -> Option<HostTerminal> {
         match terminal {
-            Some(Terminal::Host(host)) if self.hosts_stopping() && !host.is_placeholder() => {
+            Some(host) if self.hosts_stopping() && !host.is_placeholder() => {
                 host.abort();
                 info!(socket = %host.socket().display(),
                     "the supervisor is stopping; leaving a new terminal host to the next one");
-                Some(Terminal::Host(HostTerminal::unavailable(
+                Some(HostTerminal::unavailable(
                     host.socket(),
                     Unavailability::Unidentified(
                         "the supervisor was stopping when it was published".into(),
                     ),
                     None,
-                )))
+                ))
             }
             other => other,
         }
@@ -529,8 +526,8 @@ fn gather_host_terminals(
     let mut all: Vec<HostTerminal> = Vec::new();
     for entry in sessions.values() {
         match &entry.terminal {
-            Some(Terminal::Host(host)) if !all.contains(host) => all.push(host.clone()),
-            Some(Terminal::Host(_) | Terminal::Tmux(_)) | None => {}
+            Some(host) if !all.contains(host) => all.push(host.clone()),
+            Some(_) | None => {}
         }
     }
     for host in super::host_tabs::tab_runtimes(sessions.values()) {
@@ -1449,7 +1446,7 @@ impl Supervisor {
                 generation: entry.generation,
             };
             current.insert(agent.clone());
-            if let Some(Terminal::Host(host)) = &entry.terminal
+            if let Some(host) = &entry.terminal
                 && host.liveness().may_readopt()
             {
                 unavailable.push((agent, host.clone()));
@@ -1569,7 +1566,7 @@ impl Supervisor {
         !self.hosts_stopping()
             && sessions.get(id).is_some_and(|entry| {
                 entry.generation == generation
-                    && matches!(&entry.terminal, Some(Terminal::Host(host)) if host == old)
+                    && matches!(&entry.terminal, Some(host) if host == old)
             })
     }
 
@@ -1674,11 +1671,11 @@ impl Supervisor {
             let current = sessions.get(id).cloned().filter(|current| {
                 !self.hosts_stopping()
                     && current.generation == generation
-                    && matches!(&current.terminal, Some(Terminal::Host(host)) if host == old)
+                    && matches!(&current.terminal, Some(host) if host == old)
             });
             current.map(|current| {
                 let terminal = match &outcome {
-                    RowHost::Adopted(host) => Some(Terminal::Host(host.clone())),
+                    RowHost::Adopted(host) => Some(host.clone()),
                     RowHost::Unavailable(host) => {
                         // A failed reconnect disproves neither pinned process.
                         let host = match host.liveness() {
@@ -1687,7 +1684,7 @@ impl Supervisor {
                             }
                             _ => host.clone(),
                         };
-                        Some(Terminal::Host(host))
+                        Some(host)
                     }
                     RowHost::Absent => None,
                 };
@@ -1729,7 +1726,7 @@ impl Supervisor {
                         LastOutcome::Launching | LastOutcome::StopRequested
                     )
                 {
-                    let address = Terminal::Host(host.clone()).recorded_address().to_string();
+                    let address = host.recorded_address().to_string();
                     if let Err(error) = self
                         .record(id, &replacement, Transition::ConfirmRunning { address })
                         .await

@@ -246,8 +246,8 @@ pub(crate) const SAMPLE_TAIL_BYTES: usize = 4096;
 /// Deliberately smaller than the wire `SessionStatus`: a screen is
 /// evidence about what a live agent is doing, never about whether its
 /// process exists. Exits, launch errors, and interrupted sessions come
-/// from the lifecycle record and tmux's liveness verdict in
-/// `service::status`, which consults a reading only for a live pane.
+/// from the lifecycle record and the terminal host's liveness verdict in
+/// `service::status`, which consults a reading only for a live terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScreenState {
     /// The agent is producing output or showing that it is busy.
@@ -335,8 +335,8 @@ pub(crate) trait ScreenReader: Sync {
     fn claude_trust_prompt(&self, _text: &str) -> bool {
         false
     }
-    /// Whether the sampler should fetch the pane title for this reader. A
-    /// separate tmux call per sample, so only readers that use it ask.
+    /// Whether the sampler should fetch the terminal title for this reader.
+    /// A separate read per sample, so only readers that use it ask.
     fn wants_title(&self) -> bool {
         false
     }
@@ -539,9 +539,9 @@ const CLAUDE_FOOTER_LINES: usize = 2;
 /// background-wait announcement) may sit.
 /// Claude puts notices (a connector warning, a tip, and, where Claude is
 /// told it runs in tmux, a hint about scrolling in tmux) between the two;
-/// six covers every observed arrangement. Claude is told so in an old
-/// terminal, and in a new one started by an earlier release until it is
-/// restarted. Blank lines are omitted,
+/// six covers every observed arrangement. Claude was told so in the old
+/// tmux terminals, and still is in a terminal host an earlier release
+/// started, until it is restarted. Blank lines are omitted,
 /// so an idle screen can also put the end of its transcript in this window.
 const CLAUDE_SPINNER_LINES_ABOVE_BOX: usize = 6;
 

@@ -54,10 +54,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`image-inspection-inherits-keep-id-account.md`](image-inspection-inherits-keep-id-account.md) — An ambient Podman
   keep-id setting can make account inspection reject an image whose ordinary keeper account is valid.
 
-- [`dead-pane-pid-check-drops-first-conversation-report.md`](dead-pane-pid-check-drops-first-conversation-report.md) —
-  If the first conversation report arrives after the agent exits on tmux 3.8, Farhelm can permanently lose ordinary
-  Restart for that session.
-
 - [`late-bound-agent-host-misses-adoption.md`](late-bound-agent-host-misses-adoption.md) — If an interrupted terminal
   starts only after its replacement supervisor finishes both startup scans, the agent can keep running while Farhelm
   cannot open its terminal. Another supervisor restart is needed to find it.
@@ -74,9 +70,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   discard a previously identified foreground child after its terminal host disappears. A complete production sequence
   leaving that program running after removal remains unverified after investigation.
 
-- [`missing-agent-terminal-blocks-surviving-tmux-tabs.md`](missing-agent-terminal-blocks-surviving-tmux-tabs.md) — After
-  the agent terminal disappears, surviving older shell tabs can remain listed while opening or closing them is refused.
-
 - [`orphan-cleanup-overlay-forgets-failed-discovery.md`](orphan-cleanup-overlay-forgets-failed-discovery.md) — When
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.
@@ -88,10 +81,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`settings-save-races-final-replacement.md`](settings-save-races-final-replacement.md) — Credential delivery can
   silently overwrite an agent settings save made after its final digest check and before replacement. The new comparison
   protects earlier edits but leaves this narrower window.
-
-- [`delete-lost-tab-markers-skip-sweep.md`](delete-lost-tab-markers-skip-sweep.md) — If an old terminal server
-  disappears during Delete's tab discovery, Delete can succeed and remove the session while background jobs from an old
-  unscoped tab keep running.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -1021,10 +1010,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   supervisor and terminal-host fixtures can leave owned processes running before cleanup ownership is armed. Additional
   reviewed scope: A failed regression setup can leave its stand-in shell running after the test exits.
 
-- [`replacement-cleanup-missing-pane-root-source-gap.md`](replacement-cleanup-missing-pane-root-source-gap.md) — Failed
-  replacement cleanup without a pane root has a conditional orphaning concern, but a supported uncovered producer
-  remains missing.
-
 - [`bash-source-admission-retains-literal-splitter.md`](bash-source-admission-retains-literal-splitter.md) — Some valid
   Bash command source is refused despite the product's Bash-source promise.
 
@@ -1087,10 +1072,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   comment says saving requires the first reply, although the current integration can persist a newly created
   conversation earlier.
 
-- [`failed-screen-capture-can-forget-working-state.md`](failed-screen-capture-can-forget-working-state.md) — Capture
-  failure can fall back to Idle after repeated unchanged screens; an ordinary busy Muse sequence causing an unaccepted
-  Restart remains unestablished.
-
 - [`automatic-update-mutates-unadopted-skewed-installation.md`](automatic-update-mutates-unadopted-skewed-installation.md)
   — Automatic Update can change a replacement installation at the saved SSH destination before discovering its new
   identity and refusing attachment.
@@ -1147,10 +1128,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   replacement host can be ended; failed cleanup of processes the replacement started is another ambiguous path, leaving
   no displayed terminal.
 
-- [`migrated-session-tab-kind-contract-conflict.md`](migrated-session-tab-kind-contract-conflict.md) — The authoritative
-  implementation specification contradicts itself about preserving an existing session's old terminal tabs when its
-  agent moves into a terminal host.
-
 - [`stderr-readiness-lacks-live-holder-premise.md`](stderr-readiness-lacks-live-holder-premise.md) — The regression
   intended to keep terminal opens from waiting on unrelated stderr holders can report success without its held-open-pipe
   premise.
@@ -1198,16 +1175,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`unavailable-host-recipe-misses-fourth-disconnect.md`](unavailable-host-recipe-misses-fourth-disconnect.md) — The
   maintained follow-up asks for three disconnects, but a healthy test host reconnects after all three. A test following
   that recipe can fail before reaching the intended unavailable state.
-
-- [`malformed-pane-fixtures-mask-intended-validators.md`](malformed-pane-fixtures-mask-intended-validators.md) — The
-  malformed-pane regression can pass even if earlier validation regresses, reducing confidence in the pane-fact parser.
-
-- [`tmux-history-seed-loses-redefined-palette.md`](tmux-history-seed-loses-redefined-palette.md) — Restarting an old
-  tmux session into a terminal host changes retained scrollback colors when the old program redefined palette entries.
-
-- [`tmux-capture-capacity-exceeds-memory-estimate.md`](tmux-capture-capacity-exceeds-memory-estimate.md) — Restart
-  migration of dense styled history can retain a capture allocation near 128 MiB despite the documented roughly 64 MiB
-  capture peak, adding avoidable supervisor memory pressure while history is encoded.
 
 - [`repeated-resizes-clear-missing-history-notice.md`](repeated-resizes-clear-missing-history-notice.md) — After
   restoring a checkpoint that omitted old scrollback, repeated taller/shorter resizes can remove the missing-output
@@ -1908,10 +1875,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   its launch environment after a Farhelm update, while a new query after adoption receives the current emulator's
   version. The established consequence is documentation ambiguity only; no application failure is assumed.
 
-- [`host-tab-management-tmux-dependency.md`](host-tab-management-tmux-dependency.md) — Keeping one old session on a host
-  can make Restart or Delete of a completely new session fail when the old terminal server cannot answer, even though
-  the new session has no old tabs.
-
 - [`capture-failed-stop-erases-recovery.md`](capture-failed-stop-erases-recovery.md) — When the real-agent
   inspection/capture tool cannot confirm its terminal host stopped, it hides that failure and still removes the run
   directory needed to retry the supported stop command. Continued agent execution after the deletion has not been
@@ -1952,51 +1915,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   can make its terminal detach with an input-failure notice instead of the Delete's notice or its cleanup-failure
   explanation. The landed notice fix misses the reader's direct failure path.
 
-- [`version-probe-latches-gone-unusable.md`](version-probe-latches-gone-unusable.md) — If the old terminal server
-  disappears after the supervisor's initial socket check but before its server-version query, Farhelm can refuse Restart
-  and Delete of its old sessions for the rest of that supervisor run. The error says a running unusable server holds
-  them even though tmux already reported that no server exists. Restarting the supervisor is needed to clear this false
-  refusal.
-
-- [`tmux-negative-result-observation.md`](tmux-negative-result-observation.md) — After the old terminal server
-  disappears, some capture and cleanup paths continue issuing tmux commands despite receiving a definitive absence
-  reply. The extra work is finite; no indefinite churn or loss of user work is established. The sixteen-sample bound
-  applies to the sampler alone, not every cleanup roster.
-
-- [`tmux-refusal-broken-rustdoc-link.md`](tmux-refusal-broken-rustdoc-link.md) — An internal rustdoc link names a method
-  the driver does not have. The refusal behavior and surrounding explanation remain accurate; no product consequence is
-  established.
-
-- [`tmux-exit-empty-spec-citation.md`](tmux-exit-empty-spec-citation.md) — The new configuration explanation directs
-  maintainers to a specification section in the wrong document. Its description of when the private server ends is
-  accurate; the error is its source citation.
-
 - [`agent-screen-refusal-missing-path.md`](agent-screen-refusal-missing-path.md) — If a capture working directory
   contains bytes that are not UTF-8, the new backend refuses it without displaying the path it refused.
-
-- [`old-terminal-query-answer-doc.md`](old-terminal-query-answer-doc.md) — A new maintenance comment attributes all
-  automatic old-terminal replies to the browser, although ordinary device and cursor queries are answered inside tmux
-  and removed before reaching it. This misstates the warning's input path; no changed execution or user-visible
-  malfunction is claimed.
-
-- [`attach-autostarts-empty-tmux.md`](attach-autostarts-empty-tmux.md) — After upgrading a host with old terminals, an
-  attachment that races the old terminal server going away can start a new empty tmux server. Farhelm then stops
-  querying it but leaves that unnecessary process running, contrary to the promise that tmux ends with the last old
-  terminal. No agent or user-work loss is claimed.
-
-- [`tmux-empty-error-doc.md`](tmux-empty-error-doc.md) — No current user-visible failure is established. The code's
-  explanation of how stopped old terminals are detected contradicts its new behavior, making future lifecycle changes
-  easier to get wrong.
-
-- [`tmux-no-spawn-test-retired-query-doc.md`](tmux-no-spawn-test-retired-query-doc.md) — The no-spawn test says it
-  checks a version-query refusal, but that operation was already removed when the test was added. Correct the
-  description so readers can tell what the test actually covers. No product behavior or safety defect is attributed to
-  this wording.
-
-- [`tmux-presence-false-doc.md`](tmux-presence-false-doc.md) — The new internal API documentation says a false
-  query-gate answer proves an old session does not exist. It also returns false when a server is unusable and its agents
-  may still run. Future maintainers are given an incorrect contract; no additional shipped process-loss route is
-  attributed to the prose.
 
 - [`notification-cleanup-row-premise.md`](notification-cleanup-row-premise.md) — The new upgrade test's cleanup
   assertion does not prove that deleting a session removes its retained notification. Another test independently checks

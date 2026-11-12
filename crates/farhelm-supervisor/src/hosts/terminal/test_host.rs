@@ -152,6 +152,28 @@ impl TestHost {
         waited.is_ok() && self.received() == expected
     }
 
+    /// Wait, at most `within`, until the bytes the host has acknowledged
+    /// contain `needle`; says whether they do. The same oracle as
+    /// [`Self::received_becomes`], for a caller that knows only part of
+    /// what was typed (a marker among a session's other input).
+    pub(crate) async fn received_contains(&self, needle: &[u8], within: Duration) -> bool {
+        let contains = |host: &Self| {
+            host.received()
+                .windows(needle.len().max(1))
+                .any(|window| window == needle)
+        };
+        let mut len = self.received_len.clone();
+        let waited = tokio::time::timeout(within, async {
+            while !contains(self) {
+                if len.changed().await.is_err() {
+                    return;
+                }
+            }
+        })
+        .await;
+        waited.is_ok() && contains(self)
+    }
+
     /// Have the child print `data`, in records no longer than a host's
     /// (`MAX_OUTPUT_CHUNK`).
     pub(crate) fn output(&self, data: &[u8]) {

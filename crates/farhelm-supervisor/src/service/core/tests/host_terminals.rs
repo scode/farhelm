@@ -30,39 +30,32 @@ const WAIT: Duration = Duration::from_secs(10);
 /// A session entry `s1` whose agent terminal is a fresh test host, running.
 async fn host_entry() -> (Arc<SessionEntry>, HostTerminal, TestHost) {
     let (host, test_host) = adopt_test_host(None).await;
-    let entry = Arc::new(entry_with(
-        Some(Terminal::Host(host.clone())),
-        LastOutcome::Running,
-    ));
+    let entry = Arc::new(entry_with(Some(host.clone()), LastOutcome::Running));
     (entry, host, test_host)
 }
 
-/// After migration, a host can still have old tmux tabs whose jobs outlive
-/// their server. Its current host tag cannot establish that old inventory.
-/// A fresh host's zero generation is the existing evidence that it never
-/// migrated, so only that case can treat an absent tmux session as complete.
+/// A host of a later launch may belong to a session that ran in an old tmux
+/// terminal before an earlier release's Restart moved it into a host, and the old tabs of such
+/// a session can leave jobs that outlive their server. Its current host tag
+/// cannot establish that old inventory. A fresh host's zero generation is
+/// the existing evidence that it never migrated, so only that case can treat
+/// its tab inventory as complete.
 #[farhelm_testtrace::test]
-async fn a_later_host_generation_without_tmux_keeps_tab_discovery_incomplete() {
+async fn a_later_host_generation_keeps_tab_discovery_incomplete() {
     let state = StateDir::new();
     let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
         .await
         .expect("supervisor");
     let (host, _test_host) = adopt_test_host(None).await;
     for generation in [0, 1, 3] {
-        let mut entry = entry_with(Some(Terminal::Host(host.clone())), LastOutcome::Running);
+        let mut entry = entry_with(Some(host.clone()), LastOutcome::Running);
         entry.generation = generation;
-        let (tabs, complete) = sup
-            .session_tabs_including_dead(&entry)
-            .await
-            .expect("tab discovery");
-        assert!(
-            tabs.is_empty(),
-            "fixture has no old tmux session or host tabs"
-        );
+        let (tabs, complete) = sup.session_tabs_including_dead(&entry);
+        assert!(tabs.is_empty(), "fixture has no tabs");
         assert_eq!(
             complete,
             generation == 0,
-            "generation {generation} has no historical tmux evidence"
+            "generation {generation} may have had old tabs nothing lists"
         );
     }
 }
@@ -144,15 +137,13 @@ async fn a_host_terminals_status_follows_its_runtime_and_records_the_exit_code()
         .await
         .expect("supervisor");
     let (entry, host, test_host) = host_entry().await;
-    let no_panes = HashMap::new();
-    let known = crate::service::status::KnownTmuxNames::default();
 
-    let (status, _) = session_status(&entry, &no_panes, &known);
+    let (status, _) = session_status(&entry);
     assert!(
         status.is_live(),
         "a running child lists as live: {status:?}"
     );
-    let observed = crate::service::status::observe_entry(&sup, &entry, &no_panes, &known)
+    let observed = crate::service::status::observe_entry(&sup, &entry)
         .await
         .expect("observe");
     assert_eq!(observed.transition, None, "nothing to record while it runs");
@@ -164,10 +155,10 @@ async fn a_host_terminals_status_follows_its_runtime_and_records_the_exit_code()
     })
     .await;
     assert_eq!(
-        session_status(&entry, &no_panes, &known).0,
+        session_status(&entry).0,
         SessionStatus::Exited { exit_code: Some(7) }
     );
-    let observed = crate::service::status::observe_entry(&sup, &entry, &no_panes, &known)
+    let observed = crate::service::status::observe_entry(&sup, &entry)
         .await
         .expect("observe");
     assert_eq!(
@@ -181,14 +172,11 @@ async fn a_host_terminals_status_follows_its_runtime_and_records_the_exit_code()
 }
 
 /// A host launch that never reached the agent is classified as never
-/// started, quoting the final screen from the emulator, with no tmux
-/// banner.
+/// started, quoting the final screen from the emulator.
 ///
 /// Why: the never-started classification needs a terminal that exists and
 /// is dead, which a host reports from its exit record; and the excerpt is
-/// what tells the user why (a startup file that exits the shell). A host
-/// has no "Pane is dead" line, so nothing in the excerpt may come from
-/// tmux. Spec: with the launch's spec still unconsumed and the child
+/// what tells the user why (a startup file that exits the shell). Spec: with the launch's spec still unconsumed and the child
 /// having printed a complaint and exited 1, the observation reports the
 /// login shell's failure with exit code 1 and the complaint as the last
 /// terminal output, and records it as an error.
@@ -211,14 +199,9 @@ async fn a_never_started_host_launch_quotes_the_emulators_screen() {
         matches!(host.liveness(), Liveness::Exited { .. })
     })
     .await;
-    let observed = crate::service::status::observe_entry(
-        &sup,
-        &entry,
-        &HashMap::new(),
-        &crate::service::status::KnownTmuxNames::default(),
-    )
-    .await
-    .expect("observe");
+    let observed = crate::service::status::observe_entry(&sup, &entry)
+        .await
+        .expect("observe");
     let detail = observed.sentinel.expect("a never-started classification");
     assert!(
         detail.contains("your login shell exited (code 1)"),
@@ -256,7 +239,7 @@ async fn an_unreadable_host_records_nothing_and_its_verbs_refuse() {
         .await
         .expect("supervisor");
     let (host, test_host) = adopt_test_host(None).await;
-    let mut entry = entry_with(Some(Terminal::Host(host.clone())), LastOutcome::Running);
+    let mut entry = entry_with(Some(host.clone()), LastOutcome::Running);
     entry.snapshot.kind = AgentKind::Claude;
     entry.info.agent_kind = AgentKind::Claude;
     let entry = Arc::new(entry);
@@ -272,35 +255,26 @@ async fn an_unreadable_host_records_nothing_and_its_verbs_refuse() {
     std::fs::create_dir_all(sentinel.parent().unwrap()).expect("launch dir");
     std::fs::write(&sentinel, "exec failed: no such file").expect("a current sentinel");
     let terminal = entry.terminal.as_ref().unwrap();
-    let crate::terminal_process::TerminalProbe::Owned(live) =
-        terminal.probe_process(&sup).await.unwrap()
-    else {
-        panic!("premise: the child is owned and live");
+    let crate::terminal_process::TerminalProbe::Running(live) = terminal.probe().unwrap() else {
+        panic!("premise: the child runs");
     };
-    assert!(!live.dead, "premise: the child runs");
 
     test_host.become_unreadable();
     wait_for(&host, "the host becoming unreadable", |host| {
         matches!(host.liveness(), Liveness::Unavailable { .. })
     })
     .await;
-
-    let no_panes = HashMap::new();
-    let known = crate::service::status::KnownTmuxNames::default();
-    assert_eq!(
-        session_status(&entry, &no_panes, &known).0,
-        SessionStatus::Unknown
-    );
+    assert_eq!(session_status(&entry).0, SessionStatus::Unknown);
     assert!(
-        terminal.live_root(&live).is_err(),
+        terminal.sweep_root(live).is_err(),
         "a root the earlier probe authorized cannot be taken from an unreadable host"
     );
-    let observed = crate::service::status::observe_entry(&sup, &entry, &no_panes, &known)
+    let observed = crate::service::status::observe_entry(&sup, &entry)
         .await
         .expect("observe");
     assert_eq!(observed.transition, None, "not even the sentinel");
     assert_eq!(observed.sentinel, None);
-    assert!(terminal.probe_process(&sup).await.is_err());
+    assert!(terminal.probe().is_err());
     for guard in [
         farhelm_proto::DeleteGuard::AgentEnded,
         farhelm_proto::DeleteGuard::NothingAlive,
@@ -323,7 +297,7 @@ async fn an_unreadable_host_records_nothing_and_its_verbs_refuse() {
 
 /// A nothing-alive approval must not end a tab that becomes unreadable
 /// during the guard. Force the running-to-unavailable transition after
-/// the initial uncertainty check, where a tmux query can yield, and require
+/// the initial uncertainty check, between it and the tab count, and require
 /// a refusal rather than treating the now-uncountable tab as absent.
 #[farhelm_testtrace::test]
 async fn delete_refuses_a_tab_that_becomes_unreadable_between_its_checks() {
@@ -384,9 +358,8 @@ async fn delete_refuses_a_tab_that_becomes_unreadable_between_its_checks() {
 /// A host agent's exit is recorded as soon as its runtime announces it,
 /// without waiting for a tick.
 ///
-/// Why: tmux's `pane-died` hook wakes the ticker for a pane; a host has no
-/// hook, and without the liveness notifier's wake a host agent's exit
-/// would wait for the next tick. Spec: with the tick interval far beyond
+/// Why: without the liveness notifier's wake a host agent's exit would
+/// wait for the next tick. Spec: with the tick interval far beyond
 /// the wait, a running session whose host reports exit status 5 has
 /// `Exited` with code 5 in its durable row well before any tick.
 #[farhelm_testtrace::test]
@@ -408,10 +381,7 @@ async fn the_ticker_records_a_host_agents_exit_on_its_announcement() {
         .insert_session(host_row("s1", test_host.socket()), None)
         .await
         .expect("insert the row the ticker must update");
-    let entry = Arc::new(entry_with(
-        Some(Terminal::Host(host.clone())),
-        LastOutcome::Running,
-    ));
+    let entry = Arc::new(entry_with(Some(host.clone()), LastOutcome::Running));
     sup.sessions
         .lock()
         .await
@@ -448,11 +418,11 @@ async fn the_ticker_records_a_host_agents_exit_on_its_announcement() {
 /// Why: the anchor is what ties a report to this launch; without it every
 /// report from a host agent is refused, the conversation identity is never
 /// captured, and Restart cannot offer resume (the inventory's top risk 10).
-/// The row's `pane` holds the host's socket name, which must never be read
-/// as a tmux pane. Spec: for a host row of generation 0 whose entry holds
-/// that host, the anchor is the host's child with its start identity; with no entry, or an entry of another generation, the
-/// anchor is a transient `Internal`; with an entry of the row's generation
-/// holding a tmux terminal, a `Conflict`.
+/// Spec: for a host row of generation 0 whose entry holds that host, the
+/// anchor is the host's child with its start identity; with no entry, or an
+/// entry of another generation, the anchor is a transient `Internal`; for a
+/// row of the old kind, whose tmux terminal this release ended at startup,
+/// a definitive `Conflict`.
 #[farhelm_testtrace::test]
 async fn a_host_agents_hook_anchor_is_its_child() {
     let state = StateDir::new();
@@ -491,18 +461,15 @@ async fn a_host_agents_hook_anchor_is_its_child() {
         .expect_err("another generation's entry");
     assert_eq!(other.kind, ErrorKind::Internal, "{}", other.message);
 
-    sup.sessions.lock().await.insert(
-        "s1".to_string(),
-        Arc::new(entry_with(
-            Some(Terminal::tmux("fh-s1".into(), "%0".into())),
-            LastOutcome::Running,
-        )),
-    );
-    let mismatch = sup
-        .owned_terminal_anchor(&row)
+    let old_kind = StoredSession {
+        terminal_kind: crate::store::TerminalKind::Tmux,
+        ..row.clone()
+    };
+    let ended = sup
+        .owned_terminal_anchor(&old_kind)
         .await
-        .expect_err("a tmux entry for a host row");
-    assert_eq!(mismatch.kind, ErrorKind::Conflict, "{}", mismatch.message);
+        .expect_err("a row of the old kind");
+    assert_eq!(ended.kind, ErrorKind::Conflict, "{}", ended.message);
 }
 
 /// An orderly stop waits for a new host-backed session to hold its version,
@@ -531,19 +498,19 @@ async fn the_hold_wait_waits_for_a_host_agents_child() {
     std::fs::create_dir_all(spec.parent().unwrap()).expect("launch dir");
     let short = Duration::from_millis(300);
 
-    sup.track_pending_hold(&spec, Terminal::Host(host.clone()));
+    sup.track_pending_hold(&spec, host.clone());
     assert!(
         !sup.wait_for_pending_holds(short).await,
         "no mark yet: the wait runs out"
     );
     std::fs::write(&held, format!("{}\n", child + 1)).expect("a stale mark");
-    sup.track_pending_hold(&spec, Terminal::Host(host.clone()));
+    sup.track_pending_hold(&spec, host.clone());
     assert!(
         !sup.wait_for_pending_holds(short).await,
         "a mark naming another process does not count"
     );
     std::fs::write(&held, format!("{child}\n")).expect("the child's mark");
-    sup.track_pending_hold(&spec, Terminal::Host(host.clone()));
+    sup.track_pending_hold(&spec, host.clone());
     assert!(
         sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
         "the child's own mark settles it"
@@ -552,7 +519,7 @@ async fn the_hold_wait_waits_for_a_host_agents_child() {
     std::fs::remove_file(&held).expect("clear the mark");
     test_host.exit(0);
     wait_for(&host, "the exit", |host| host.child_root().is_none()).await;
-    sup.track_pending_hold(&spec, Terminal::Host(host.clone()));
+    sup.track_pending_hold(&spec, host.clone());
     assert!(
         sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
         "an exited child needs no wait"
@@ -564,7 +531,7 @@ async fn the_hold_wait_waits_for_a_host_agents_child() {
 ///
 /// Why: without paste mode the program would read the prompt's newlines as
 /// submits; and the program reads its own terminal modes from the
-/// supervisor's emulator now, not from tmux. Spec: with paste mode off, the
+/// supervisor's emulator. Spec: with paste mode off, the
 /// prompt is refused and nothing reaches the host; once the program has
 /// turned paste mode on, the host receives exactly the opening marker, the
 /// prompt, the closing marker and Claude's submit key, in that order, for a
@@ -577,7 +544,7 @@ async fn a_prompt_to_a_host_agent_is_gated_on_its_paste_mode() {
         .await
         .expect("supervisor");
     let (host, test_host) = adopt_test_host(None).await;
-    let mut entry = entry_with(Some(Terminal::Host(host.clone())), LastOutcome::Running);
+    let mut entry = entry_with(Some(host.clone()), LastOutcome::Running);
     entry.snapshot.kind = AgentKind::Claude;
     entry.info.agent_kind = AgentKind::Claude;
     entry.run.activity.lock().unwrap().reading.state =
@@ -733,14 +700,9 @@ async fn a_stop_before_the_exit_record_records_no_launch_failure() {
         matches!(host.liveness(), Liveness::Exited { .. })
     })
     .await;
-    let observed = crate::service::status::observe_entry(
-        &sup,
-        &entry,
-        &HashMap::new(),
-        &crate::service::status::KnownTmuxNames::default(),
-    )
-    .await
-    .expect("observe");
+    let observed = crate::service::status::observe_entry(&sup, &entry)
+        .await
+        .expect("observe");
     let transition = observed.transition.expect("the launch failure");
     sup.record("s1", &entry, transition)
         .await
@@ -822,7 +784,7 @@ async fn pending_once<F: std::future::Future + Unpin>(future: &mut F) -> bool {
 /// has arrived, and a wait for it waits until then.
 ///
 /// Why: Stop classifies a launch that never started only from a terminal
-/// holding its final state (`Terminal::holds_final_state`); a host's probe
+/// holding its final state (`HostTerminal::holds_final_state`); a host's probe
 /// says dead as soon as the child is gone, before the output it left and
 /// its exit code have arrived. Spec: with the child killed and nothing
 /// reported, the probe says dead; a short wait ends without the final
@@ -833,11 +795,11 @@ async fn pending_once<F: std::future::Future + Unpin>(future: &mut F) -> bool {
 async fn a_host_terminal_holds_its_final_state_only_once_its_exit_record_arrives() {
     let (host, test_host) = adopt_test_host(None).await;
     test_host.kill_child();
-    let terminal = Terminal::Host(host.clone());
+    let terminal = host.clone();
     assert!(
         matches!(
             host.probe(),
-            Ok(crate::terminal_process::TerminalProbe::Owned(process)) if process.dead
+            Ok(crate::terminal_process::TerminalProbe::Dead)
         ),
         "premise: the probe says dead"
     );
@@ -923,13 +885,14 @@ async fn a_stop_before_the_exit_record_still_records_the_shims_report() {
 ///
 /// Why: a relaunch keeps the row's kind, and a host row with no terminal
 /// (its host was found gone, or a create was kept as a launching record)
-/// relaunched in tmux would leave a host row whose `pane` holds a tmux pane
-/// id, which every later reader looks for as a host's socket. Spec: with a
+/// must come back from a failed relaunch as the host row it was, its
+/// address still read as a host's socket (earlier releases could also
+/// relaunch in tmux, which would have left a pane id there). Spec: with a
 /// resumable session's row turned into a host row naming socket `ABCDEFGH`
 /// and its entry holding no terminal (the host its create started ended,
 /// no socket left), under a supervisor whose host starts
 /// are refused from then on, a consented Restart fails starting the
-/// session's terminal host (not tmux) definitively: the row is still a host
+/// session's terminal host definitively: the row is still a host
 /// row with `pane` `ABCDEFGH` and its earlier outcome, at the next
 /// generation, and the failed launch left no launch spec or host record
 /// behind.
@@ -953,7 +916,7 @@ async fn a_terminal_less_host_row_restarts_in_a_host_never_in_tmux() {
     let id = created.id.clone();
     // End the host the create started, so that the session really has no
     // terminal, rather than a live host of its own beside the Restart.
-    let Some(Terminal::Host(created_host)) = sup
+    let Some(created_host) = sup
         .sessions
         .lock()
         .await
@@ -1048,10 +1011,7 @@ async fn a_retry_finds_the_sessions_own_published_host() {
         .expect("the launching row and its reservation");
     sup.sessions.lock().await.insert(
         "s1".to_string(),
-        Arc::new(entry_with(
-            Some(Terminal::Host(host.clone())),
-            LastOutcome::Launching,
-        )),
+        Arc::new(entry_with(Some(host.clone()), LastOutcome::Launching)),
     );
 
     let replayed = sup
@@ -1067,7 +1027,7 @@ async fn a_retry_finds_the_sessions_own_published_host() {
         .expect("the reservation");
     assert_eq!(reservation.outcome, ReservationOutcome::Created);
     let entry = sup.sessions.lock().await.get("s1").cloned().expect("entry");
-    assert_eq!(entry.terminal, Some(Terminal::Host(host)));
+    assert_eq!(entry.terminal, Some(host));
     assert_eq!(test_host.received(), b"");
 }
 
@@ -1356,7 +1316,7 @@ async fn a_record_naming_another_sessions_host_refuses_and_touches_nothing() {
 async fn deleting_a_sessions_hosts_gives_up_at_its_deadline_and_keeps_the_session() {
     let state = StateDir::new();
     let mut seams = SupervisorSeams::default();
-    let held: SinkReservationGate = Arc::new(|| Box::pin(std::future::pending()));
+    let held: BoundaryGate = Arc::new(|| Box::pin(std::future::pending()));
     seams.faults.delete_host_end_gate = Some(held);
     let sup = Supervisor::new_with_seams(
         state.path(),
@@ -1421,7 +1381,7 @@ async fn deleting_a_sessions_hosts_gives_up_at_its_deadline_and_keeps_the_sessio
 async fn delete_leaves_the_record_of_the_runtimes_host_to_the_runtime() {
     let state = StateDir::new();
     let mut seams = SupervisorSeams::default();
-    let held: SinkReservationGate = Arc::new(|| Box::pin(std::future::pending()));
+    let held: BoundaryGate = Arc::new(|| Box::pin(std::future::pending()));
     seams.faults.delete_host_end_gate = Some(held);
     let sup = Supervisor::new_with_seams(
         state.path(),
@@ -1442,7 +1402,7 @@ async fn delete_leaves_the_record_of_the_runtimes_host_to_the_runtime() {
         .expect("insert the session's row");
     sup.sessions.lock().await.insert(
         "s1".to_string(),
-        Arc::new(entry_with(Some(Terminal::Host(host)), LastOutcome::Running)),
+        Arc::new(entry_with(Some(host), LastOutcome::Running)),
     );
     record_s1(&state, &socket);
     assert_eq!(
@@ -1530,7 +1490,7 @@ async fn a_prompt_waits_for_a_recovered_host_terminal_to_catch_up() {
     let mut journaled = paste_on.to_vec();
     journaled.extend_from_slice(b"output from before the restart\r\n");
     let (host, test_host) = adopt_test_host_recovering(None, journaled.clone()).await;
-    let mut entry = entry_with(Some(Terminal::Host(host.clone())), LastOutcome::Running);
+    let mut entry = entry_with(Some(host.clone()), LastOutcome::Running);
     entry.snapshot.kind = AgentKind::Claude;
     entry.info.agent_kind = AgentKind::Claude;
     entry.run.activity.lock().unwrap().reading.state =
@@ -1577,7 +1537,7 @@ async fn a_prompt_waits_for_a_recovered_host_terminal_to_catch_up() {
 
 /// `entry` with its agent terminal replaced by `terminal`, everything else
 /// shared.
-fn with_terminal(entry: &SessionEntry, terminal: Option<Terminal>) -> SessionEntry {
+fn with_terminal(entry: &SessionEntry, terminal: Option<HostTerminal>) -> SessionEntry {
     SessionEntry {
         info: entry.info.clone(),
         terminal,
@@ -1591,14 +1551,11 @@ fn with_terminal(entry: &SessionEntry, terminal: Option<Terminal>) -> SessionEnt
 }
 
 /// The spare-checkout claims at startup protect a host session's clone
-/// while its launch's host may still run, read from the host itself and
-/// never from tmux.
+/// while its launch's host may still run, read from the host itself.
 ///
 /// Why: the inventory's top risk 3. A clone claim that reads as abandoned
 /// is reclaimed by the repository-cache sweep at startup, deleting a
-/// checkout an agent is still filling; a host row's `pane` names a socket,
-/// which tmux's pane lookup reads as a pane that does not exist, so every
-/// host session would read as abandoned. Spec: for a session whose clone is
+/// checkout an agent is still filling. Spec: for a session whose clone is
 /// in progress and whose row is a host row naming its host's socket, the
 /// claim is protected while its runtime runs and while its runtime cannot
 /// read the host (unavailable is never gone); for the same session with no
@@ -1642,7 +1599,7 @@ async fn spare_claims_read_a_host_rows_own_host() {
     )
     .unwrap();
     let claim = (origin.id.clone(), generation);
-    let protected = || async { sup.spare_claims_from_panes(&HashMap::new()).await.protected };
+    let protected = || async { sup.spare_claims_at_startup().await.protected };
 
     // The runtime of a host that runs: live, protected.
     let (_, test_host) = adopt_test_host(None).await;
@@ -1687,7 +1644,7 @@ async fn spare_claims_read_a_host_rows_own_host() {
     // A runtime that cannot read its host: unavailable, never gone.
     sup.sessions.lock().await.insert(
         origin.id.clone(),
-        Arc::new(with_terminal(&entry, Some(Terminal::Host(host.clone())))),
+        Arc::new(with_terminal(&entry, Some(host.clone()))),
     );
     test_host.become_unreadable();
     wait_for(&host, "the host becoming unreadable", |host| {
@@ -1703,7 +1660,7 @@ async fn spare_claims_read_a_host_rows_own_host() {
     let (exited, exiting_host) = adopt_test_host(None).await;
     sup.sessions.lock().await.insert(
         origin.id.clone(),
-        Arc::new(with_terminal(&entry, Some(Terminal::Host(exited.clone())))),
+        Arc::new(with_terminal(&entry, Some(exited.clone()))),
     );
     exiting_host.exit(0);
     wait_for(&exited, "the child's exit", |host| {
@@ -1788,7 +1745,7 @@ async fn a_stop_request_survives_a_restart_whose_replay_has_not_reached_the_exit
         .await
         .expect("reload");
     let entry = sessions.remove("s1").expect("the session");
-    let Some(Terminal::Host(host)) = entry.terminal.clone() else {
+    let Some(host) = entry.terminal.clone() else {
         panic!("the session's terminal is its host: {:?}", entry.terminal);
     };
     assert_eq!(host.liveness(), Liveness::Running { child: None });
@@ -1846,7 +1803,7 @@ async fn a_stop_request_over_a_live_host_child_is_cleared_by_reload() {
         .expect("reload");
     let entry = sessions.remove("s1").expect("the session");
     assert!(
-        matches!(entry.terminal, Some(Terminal::Host(_))),
+        entry.terminal.is_some(),
         "the session's terminal is its host: {:?}",
         entry.terminal
     );
@@ -1902,7 +1859,7 @@ async fn an_unreadable_launch_record_leaves_its_session_unavailable() {
         .await
         .expect("reload");
     let entry = sessions.remove("s1").expect("the session");
-    let Some(Terminal::Host(host)) = entry.terminal.clone() else {
+    let Some(host) = entry.terminal.clone() else {
         panic!("the session holds a host terminal: {:?}", entry.terminal);
     };
     assert!(
@@ -1919,12 +1876,7 @@ async fn an_unreadable_launch_record_leaves_its_session_unavailable() {
         sup.store.session("s1").await.unwrap().unwrap().outcome,
         LastOutcome::Launching
     );
-    let no_panes = HashMap::new();
-    let known = crate::service::status::KnownTmuxNames::default();
-    assert_eq!(
-        session_status(&entry, &no_panes, &known).0,
-        SessionStatus::Unknown
-    );
+    assert_eq!(session_status(&entry).0, SessionStatus::Unknown);
     assert!(artifacts.status().exists(), "the sentinel is left alone");
     assert!(artifacts.host().exists(), "the launch record is left alone");
     end_discoverable(stranger);
@@ -1987,10 +1939,7 @@ async fn an_orderly_stop_admits_largest_tails_first_with_one_slot() {
         .await;
         sup.sessions.lock().await.insert(
             id.to_string(),
-            Arc::new(entry_with(
-                Some(Terminal::Host(host.clone())),
-                LastOutcome::Running,
-            )),
+            Arc::new(entry_with(Some(host.clone()), LastOutcome::Running)),
         );
         fixtures.insert(id.to_string(), (host, test_host, gate));
     }
@@ -2094,10 +2043,7 @@ fn an_orderly_stop_ends_its_encodes_before_its_runtime_drops() {
         .await;
         sup.sessions.lock().await.insert(
             "s1".to_string(),
-            Arc::new(entry_with(
-                Some(Terminal::Host(host.clone())),
-                LastOutcome::Running,
-            )),
+            Arc::new(entry_with(Some(host.clone()), LastOutcome::Running)),
         );
         let started = std::time::Instant::now();
         let current = sup.checkpoint_hosts_for_exit(budget).await;
@@ -2140,16 +2086,13 @@ async fn placeholder_session(sup: &Supervisor, test_host: &TestHost, name: &str)
     sup.store.insert_session(row, None).await.expect("the row");
     sup.sessions.lock().await.insert(
         "s1".to_string(),
-        Arc::new(entry_with(
-            Some(Terminal::Host(placeholder.clone())),
-            LastOutcome::Running,
-        )),
+        Arc::new(entry_with(Some(placeholder.clone()), LastOutcome::Running)),
     );
     placeholder
 }
 
 /// The terminal session `s1`'s entry holds.
-async fn s1_terminal(sup: &Supervisor) -> Option<Terminal> {
+async fn s1_terminal(sup: &Supervisor) -> Option<HostTerminal> {
     sup.sessions
         .lock()
         .await
@@ -2201,24 +2144,18 @@ async fn a_readoption_that_loses_its_fence_installs_nothing() {
         HostTerminal::unavailable(test_host.socket(), crate::hosts::Unavailability::Busy, None);
     sup.sessions.lock().await.insert(
         "s1".to_string(),
-        Arc::new(entry_with(
-            Some(Terminal::Host(other.clone())),
-            LastOutcome::Running,
-        )),
+        Arc::new(entry_with(Some(other.clone()), LastOutcome::Running)),
     );
     assert!(
         !sup.install_readopted("s1", 0, &placeholder, outcome).await,
         "a changed entry refuses the swap"
     );
-    assert_eq!(s1_terminal(&sup).await, Some(Terminal::Host(other)));
+    assert_eq!(s1_terminal(&sup).await, Some(other));
     wait_until_ended(&adopted).await;
 
     sup.sessions.lock().await.insert(
         "s1".to_string(),
-        Arc::new(entry_with(
-            Some(Terminal::Host(placeholder.clone())),
-            LastOutcome::Running,
-        )),
+        Arc::new(entry_with(Some(placeholder.clone()), LastOutcome::Running)),
     );
     let outcome = sup.probe_placeholder("s1", 0, &placeholder).await;
     let RowHost::Adopted(adopted) = &outcome else {
@@ -2230,10 +2167,7 @@ async fn a_readoption_that_loses_its_fence_installs_nothing() {
         !sup.install_readopted("s1", 0, &placeholder, outcome).await,
         "a stop that has begun refuses the swap"
     );
-    assert_eq!(
-        s1_terminal(&sup).await,
-        Some(Terminal::Host(placeholder.clone()))
-    );
+    assert_eq!(s1_terminal(&sup).await, Some(placeholder.clone()));
     wait_until_ended(&adopted).await;
     let mut schedule = super::super::host_handover::ReadoptSchedule::default();
     assert_eq!(sup.readopt_pass(&mut schedule).await, None);
@@ -2291,7 +2225,7 @@ async fn readoption_backs_off_without_spinning() {
     );
     assert_eq!(sup.readopt_pass(&mut schedule).await, Some(second));
     assert_eq!(schedule.attempts("s1", 0), Some(1), "no spin");
-    assert_eq!(s1_terminal(&sup).await, Some(Terminal::Host(placeholder)));
+    assert_eq!(s1_terminal(&sup).await, Some(placeholder));
     end_discoverable(test_host);
 }
 
@@ -2331,7 +2265,7 @@ async fn delete_roots_children_after_failed_agent_and_tab_reconnects() {
         };
         assert!(!recovered);
         assert!(if agent {
-            matches!(s1_terminal(&sup).await, Some(Terminal::Host(host)) if host.is_placeholder())
+            matches!(s1_terminal(&sup).await, Some(host) if host.is_placeholder())
         } else {
             readoption_tab(&sup).await.host.is_placeholder()
         });
@@ -2365,10 +2299,7 @@ async fn readoption_runtime(sup: &Supervisor, state: &StateDir) -> (HostTerminal
         .expect("row");
     sup.sessions.lock().await.insert(
         "s1".into(),
-        Arc::new(entry_with(
-            Some(Terminal::Host(host.clone())),
-            LastOutcome::Running,
-        )),
+        Arc::new(entry_with(Some(host.clone()), LastOutcome::Running)),
     );
     assert!(matches!(
         host.liveness(),
@@ -2439,7 +2370,7 @@ async fn readoption_keeps_attempts_and_waits_out_each_unstable_episode() {
     assert_eq!(schedule.attempts("s1", 0), Some(0));
     schedule.make_due("s1", 0);
     sup.readopt_pass(&mut schedule).await;
-    let Some(Terminal::Host(recovered)) = s1_terminal(&sup).await else {
+    let Some(recovered) = s1_terminal(&sup).await else {
         panic!("recovered host")
     };
     assert_ne!(recovered, old);
@@ -2536,7 +2467,7 @@ async fn readoption_recovers_a_midlife_timeout_on_the_liveness_wake() {
     test_host.set_answering(true);
     let deadline = tokio::time::Instant::now() + WAIT;
     let recovered = loop {
-        if let Some(Terminal::Host(host)) = s1_terminal(&sup).await
+        if let Some(host) = s1_terminal(&sup).await
             && host != old
             && matches!(host.liveness(), Liveness::Running { child: Some(_) })
         {
@@ -2553,11 +2484,7 @@ async fn readoption_recovers_a_midlife_timeout_on_the_liveness_wake() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     };
     let entry = sup.sessions.lock().await.get("s1").unwrap().clone();
-    assert!(
-        session_status(&entry, &HashMap::new(), &Default::default())
-            .0
-            .is_live()
-    );
+    assert!(session_status(&entry).0.is_live());
     let mut viewer = GridPeer::connect(&sup).await;
     assert!(matches!(
         viewer.attach(1, 1, "recovered-viewer", true).await,
@@ -2608,7 +2535,7 @@ async fn readoption_leaves_a_nonpassing_midlife_reason_alone() {
     let connections = test_host.connections();
     let mut schedule = super::super::host_handover::ReadoptSchedule::default();
     assert_eq!(sup.readopt_pass(&mut schedule).await, None);
-    assert_eq!(s1_terminal(&sup).await, Some(Terminal::Host(old)));
+    assert_eq!(s1_terminal(&sup).await, Some(old));
     assert_eq!(test_host.connections(), connections);
     assert!(
         runs(test_host.child_pid()),
@@ -2643,7 +2570,7 @@ async fn readoption_replays_an_exited_runtime_without_recording_twice() {
     ));
     readoption_make_unstable(&old, &test_host).await;
     assert!(sup.readopt_one("s1", 0, &old).await);
-    let Some(Terminal::Host(recovered)) = s1_terminal(&sup).await else {
+    let Some(recovered) = s1_terminal(&sup).await else {
         panic!("recovered host")
     };
     // The stand-in streams its durable exit record on this cue, as a real
@@ -2654,10 +2581,9 @@ async fn readoption_replays_an_exited_runtime_without_recording_twice() {
     })
     .await;
     let entry = sup.sessions.lock().await.get("s1").unwrap().clone();
-    let observed =
-        crate::service::status::observe_entry(&sup, &entry, &HashMap::new(), &Default::default())
-            .await
-            .expect("observe");
+    let observed = crate::service::status::observe_entry(&sup, &entry)
+        .await
+        .expect("observe");
     assert_eq!(observed.transition, None);
     assert_eq!(
         sup.store.session("s1").await.unwrap().unwrap().outcome,
@@ -2684,7 +2610,7 @@ async fn readoption_of_a_midlife_runtime_cannot_install_after_a_stop() {
     let adopted = adopted.clone();
     sup.checkpoint_hosts_for_exit(Duration::from_secs(2)).await;
     assert!(!sup.install_readopted("s1", 0, &old, outcome).await);
-    assert_eq!(s1_terminal(&sup).await, Some(Terminal::Host(old)));
+    assert_eq!(s1_terminal(&sup).await, Some(old));
     wait_until_ended(&adopted).await;
     assert!(
         runs(test_host.child_pid()),
@@ -3239,10 +3165,7 @@ async fn delete_settles_the_record_of_a_startup_placeholders_socket() {
         .expect("insert the session's row");
     sup.sessions.lock().await.insert(
         "s1".to_string(),
-        Arc::new(entry_with(
-            Some(Terminal::Host(placeholder)),
-            LastOutcome::Running,
-        )),
+        Arc::new(entry_with(Some(placeholder), LastOutcome::Running)),
     );
     let starter = OwnedChild(
         std::process::Command::new("sleep")
@@ -3541,10 +3464,7 @@ async fn a_grid_attach_to_a_placeholder_is_refused_until_a_runtime_replaces_it()
     assert!(placeholder.is_placeholder(), "premise: a placeholder");
     sup.sessions.lock().await.insert(
         "s1".to_string(),
-        Arc::new(entry_with(
-            Some(Terminal::Host(placeholder)),
-            LastOutcome::Running,
-        )),
+        Arc::new(entry_with(Some(placeholder), LastOutcome::Running)),
     );
     let mut viewer = GridPeer::connect(&sup).await;
     let refused = viewer.attach(1, 1, "b", true).await;
@@ -3569,7 +3489,7 @@ async fn a_grid_attach_to_a_placeholder_is_refused_until_a_runtime_replaces_it()
 
     sup.sessions.lock().await.insert(
         "s1".to_string(),
-        Arc::new(entry_with(Some(Terminal::Host(host)), LastOutcome::Running)),
+        Arc::new(entry_with(Some(host), LastOutcome::Running)),
     );
     let attached = viewer.attach(2, 1, "b", true).await;
     assert!(
@@ -3740,10 +3660,7 @@ async fn delete_never_signals_an_unrecorded_placeholders_unreadable_socket() {
         .expect("insert the session's row");
     sup.sessions.lock().await.insert(
         "s1".to_string(),
-        Arc::new(entry_with(
-            Some(Terminal::Host(placeholder)),
-            LastOutcome::Running,
-        )),
+        Arc::new(entry_with(Some(placeholder), LastOutcome::Running)),
     );
 
     let refused = refusal(
@@ -4174,7 +4091,7 @@ async fn host_session_with(
         .set_terminal_for_test(
             &id,
             crate::store::TerminalKind::Host,
-            Terminal::Host(old.clone()).recorded_address(),
+            old.clone().recorded_address(),
         )
         .await
         .expect("make the row a host row");
@@ -4184,7 +4101,7 @@ async fn host_session_with(
         sessions.insert(
             id.clone(),
             Arc::new(SessionEntry {
-                terminal: Some(Terminal::Host(old.clone())),
+                terminal: Some(old.clone()),
                 info: entry.info.clone(),
                 run: entry.run.clone(),
                 session: entry.session.clone(),
@@ -4198,7 +4115,7 @@ async fn host_session_with(
     };
     // The host the create started is off the entry now; end it, so the
     // only host the session has is the stand-in.
-    let Some(Terminal::Host(created_host)) = created_host else {
+    let Some(created_host) = created_host else {
         panic!("premise: the create started its agent in a host");
     };
     let ended = created_host.shutdown().await;
@@ -4363,7 +4280,7 @@ async fn a_failed_host_restart_after_a_stop_began_restores_a_placeholder() {
         .cloned()
         .expect("the entry");
     match &entry.terminal {
-        Some(Terminal::Host(host)) => assert!(host.is_placeholder(), "a placeholder"),
+        Some(host) => assert!(host.is_placeholder(), "a placeholder"),
         other => panic!("not a host placeholder: {other:?}"),
     }
     let mut status = old.subscribe();
@@ -4439,7 +4356,7 @@ async fn host_agent_with_an_earlier_start(
         .set_terminal_for_test(
             &id,
             crate::store::TerminalKind::Host,
-            Terminal::Host(current.clone()).recorded_address(),
+            current.clone().recorded_address(),
         )
         .await
         .expect("make the row a host row");
@@ -4447,7 +4364,7 @@ async fn host_agent_with_an_earlier_start(
         let mut sessions = sup.sessions.lock().await;
         let entry = sessions.get(&id).cloned().expect("the created session");
         let installed = Arc::new(SessionEntry {
-            terminal: Some(Terminal::Host(current.clone())),
+            terminal: Some(current.clone()),
             info: entry.info.clone(),
             run: entry.run.clone(),
             session: entry.session.clone(),
@@ -4682,10 +4599,7 @@ async fn an_orderly_stop_skips_small_tails_before_waiting_for_a_slot() {
         assert_eq!(host.status().checkpoint, None);
         sup.sessions.lock().await.insert(
             id.to_string(),
-            Arc::new(entry_with(
-                Some(Terminal::Host(host.clone())),
-                LastOutcome::Running,
-            )),
+            Arc::new(entry_with(Some(host.clone()), LastOutcome::Running)),
         );
         hosts.push(host);
         peers.push(peer);

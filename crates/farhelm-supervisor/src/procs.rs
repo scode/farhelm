@@ -382,14 +382,12 @@ fn link_argv_bytes(link: &ChainLink) -> usize {
 }
 
 /// Where an attribution chain must end: the root process of the session's
-/// own terminal (a tmux pane's process, or a terminal host's child).
+/// own terminal (its terminal host's child).
 ///
 /// `start` is the root process's kernel start token while it is alive, and
-/// `None` once it has exited but the terminal is still there (tmux's
-/// `remain-on-exit`, or a host whose child exited before its runtime pinned
-/// it): a dead process has no start token left to read, so only its pid can
-/// be compared. On tmux 3.8, which no longer reports a dead pane's pid, there
-/// is no anchor at all once the process has exited. Every launch runs a new
+/// `None` once it has exited but the terminal is still there (a host whose
+/// child exited before its runtime pinned it): a dead process has no start
+/// token left to read, so only its pid can be compared. Every launch runs a new
 /// root process, which is what ties a chain to the launch it was collected
 /// under.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,7 +427,7 @@ pub(crate) struct Ancestry {
 /// be live, readable, and still carry the start token the caller observed.
 ///
 /// Collection reads every ancestor up to where it stops, including ones far
-/// above any pane (the tmux server, the service manager). Those reads cost a
+/// above the session's terminal (its terminal host, the service manager). Those reads cost a
 /// handful of `/proc` reads per hook; argv is read from each, and a process
 /// whose memory map is wedged could slow that read, which is accepted as
 /// the price of not needing to know the pane.
@@ -2489,9 +2487,11 @@ mod tests {
     }
 
     /// A synthetic five-link ancestry, each link the child of the next:
-    /// reporter 12, trampoline 11, runtime 10 as the pane process, then the
-    /// tmux server 9 and its parent 8 above the pane, which collection
-    /// gathers because it cannot know where the pane is.
+    /// reporter 12, trampoline 11, runtime 10 as the terminal's root
+    /// process, then the process running the terminal (9, a tmux server
+    /// here, as in earlier releases; the shape is the same for a terminal
+    /// host) and its parent 8 above it, which collection gathers because it
+    /// cannot know where the terminal's root is.
     fn ancestry_above_a_pane() -> Vec<ChainLink> {
         let mut chain = vec![
             corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
@@ -2596,8 +2596,8 @@ mod tests {
     /// evidence below it does, and so does one link over the per-process
     /// budget.
     ///
-    /// Why: collection gathers ancestors above the pane (the tmux server,
-    /// the service manager) whose command lines say nothing about the
+    /// Why: collection gathers ancestors above the terminal's root (the
+    /// process running the terminal, the service manager) whose command lines say nothing about the
     /// report. Counting them would let an unrelated long command line
     /// refuse a valid report, and not counting the reporter's side would
     /// let a denial-of-observation through.

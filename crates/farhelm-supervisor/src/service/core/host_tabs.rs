@@ -1,11 +1,7 @@
-//! Terminal tabs that run in terminal hosts (the plan's PR 18): opening one,
-//! the tab strip and lookup, closing one, the automatic reap of one whose
-//! shell exited, and finding them again after a supervisor restart.
-//!
-//! Every new tab is a host of its own, whatever its session's agent runs
-//! in: a tmux agent's session then holds its old tmux tabs and new host
-//! tabs side by side (a mixed session), and a host agent's session holds
-//! only host tabs. A tab never changes kind while it lives.
+//! Terminal tabs, each of which runs in a terminal host of its own (the
+//! plan's PR 18): opening one, the tab strip and lookup, closing one, the
+//! automatic reap of one whose shell exited, and finding them again after a
+//! supervisor restart.
 //!
 //! ## What a host tab is
 //!
@@ -39,8 +35,8 @@
 //!
 //! [`Supervisor::open_host_tab`], under the session's lifecycle claim on a
 //! supervisor-owned task (`Supervisor::open_tab` decides the gate): the host
-//! starts at the size of the agent's terminal (its tmux window, or its
-//! host's emulator), so the first attach repaints nothing; the open then
+//! starts at the size of the agent's terminal (its host's emulator), so the
+//! first attach repaints nothing; the open then
 //! waits up to `TAB_LAUNCH_SETTLE` for the shell to die, from the runtime's
 //! view of the child, and a shell dead by then is a refused open whose detail is
 //! the emulator's screen once the host's exit record has been processed (its
@@ -54,12 +50,12 @@
 //!
 //! ## Closing and reaping
 //!
-//! [`Supervisor::close_host_tab_under_claim`] is the tmux close's counterpart: a
-//! tab in a host is never the agent (the cell holds only hosts tagged as
+//! [`Supervisor::close_host_tab_under_claim`] closes one: a tab is never the
+//! agent (the cell holds only hosts tagged as
 //! tabs, and the agent's own runtime is checked against it), an automatic
 //! close goes ahead only while the runtime says the child exited, the
 //! scope comes from the tag, the sweep is rooted at the child only while it
-//! still runs (`Terminal::live_root`), and then the host is ended and its
+//! still runs (`HostTerminal::sweep_root`), and then the host is ended and its
 //! record removed. A runtime that judged its host gone (from the socket
 //! alone) has the process it adopted confirmed gone before the tab is
 //! forgotten. A close that cannot confirm the end keeps the tab and its
@@ -123,8 +119,8 @@ use crate::hosts::{
     HostTag, HostTerminal, HostTerminalOptions, LiveHost, Liveness, NamedHost, ScanOptions,
     SpawnError, Unavailability,
 };
-use crate::service::terminals::{TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP, Terminal};
-use crate::terminal_process::{TabScope, TerminalProbe};
+use crate::service::terminals::{TAB_LAUNCH_SETTLE, TAB_LAUNCH_SETTLE_STEP};
+use crate::terminal_process::TerminalProbe;
 
 // ---- The session's host tabs -----------------------------------------------------
 
@@ -169,19 +165,18 @@ pub(crate) struct HostTab {
 }
 
 impl HostTab {
-    /// The reply's description of this tab: [`Terminal::tab_info`] for its
+    /// The reply's description of this tab: [`HostTerminal::tab_info`] for its
     /// host, so the tab reports itself as a terminal host's (the client's
     /// migration band and terminal kinds read that) without spelling the kind
     /// out here.
     pub(crate) fn tab_info(&self) -> TabInfo {
-        Terminal::Host(self.host.clone()).tab_info(self.tab_id.clone())
+        self.host.tab_info(self.tab_id.clone())
     }
 
     /// Whether the tab is over: its shell exited (its runtime processed the
     /// host's exit record, so the final screen is in), or its host ended
     /// under it (killed, say), which leaves nothing to show. The state in
-    /// which the tab strip and lookup hide it, as a dead tmux window is
-    /// hidden, and the reap closes it, which for a host that is already gone
+    /// which the tab strip and lookup hide it, and the reap closes it, which for a host that is already gone
     /// only removes what is left (its record, its socket file). A
     /// placeholder never says so: its host may run.
     pub(crate) fn finished(&self) -> bool {
@@ -249,15 +244,6 @@ impl HostTab {
         }
         self
     }
-
-    /// The scope answer `Supervisor::reap_tab_tree` takes, from the tag.
-    fn tab_scope(&self) -> TabScope {
-        if self.scoped {
-            TabScope::Scoped
-        } else {
-            TabScope::Unscoped
-        }
-    }
 }
 
 /// A session's host tabs (`SessionCells::host_tabs`): a leaf mutex, held
@@ -277,9 +263,9 @@ pub(crate) fn host_tabs_of(cell: &HostTabs) -> Vec<HostTab> {
     tabs
 }
 
-/// The host tabs of a session as its tab strip lists them, in creation
-/// order, after its tmux tabs: finished ones ([`HostTab::finished`]) left
-/// out unless `include_exited` (the teardown's spelling, as for tmux tabs).
+/// The tabs of a session as its tab strip lists them, in creation order:
+/// finished ones ([`HostTab::finished`]) left out unless `include_exited`
+/// (the teardown's spelling).
 /// A placeholder is listed: its host may run, and its tab is the session's
 /// until a close or Delete says otherwise.
 pub(crate) fn listed_host_tabs(cell: &HostTabs, include_exited: bool) -> Vec<TabInfo> {
@@ -411,7 +397,7 @@ impl Supervisor {
         &self,
         entry: &SessionEntry,
         session_token: &str,
-        agent: &Terminal,
+        agent: &HostTerminal,
         cwd: &str,
     ) -> Result<TabInfo, RequestError> {
         let session_id = entry.info.id.as_str();
@@ -420,10 +406,7 @@ impl Supervisor {
         let scoped = !scope_prefix.is_empty();
         let env = self.tab_environment(session_id, session_token, &tab_id);
         let (argv, shell) = self.tab_command(cwd, scope_prefix).await;
-        let size = self
-            .agent_terminal_size(session_id, agent)
-            .await
-            .unwrap_or(DEFAULT_TAB_SIZE);
+        let size = Self::agent_terminal_size(agent).unwrap_or(DEFAULT_TAB_SIZE);
         let record = crate::launch::tab_host_record_path(&self.state_dir, session_id, &tab_id);
         let tag = HostTag {
             session_id: session_id.to_string(),
@@ -433,11 +416,6 @@ impl Supervisor {
                 scoped,
             },
         };
-        let scope = if scoped {
-            TabScope::Scoped
-        } else {
-            TabScope::Unscoped
-        };
         let StartedTab { host, spawning } = match self
             .start_tab_host(&record, argv, &env, cwd, size, &tag, &shell)
             .await
@@ -445,7 +423,7 @@ impl Supervisor {
             Ok(started) => started,
             Err(TabStartFailure::Unwind { error, left }) => {
                 return Err(self
-                    .unwind_unstarted_tab(session_id, &tab_id, scope, &record, left, error)
+                    .unwind_unstarted_tab(session_id, &tab_id, scoped, &record, left, error)
                     .await);
             }
             #[cfg(any(test, feature = "test-seams"))]
@@ -497,7 +475,8 @@ impl Supervisor {
             Ok(false) => {
                 // The screen is final only once the host's exit record, sent
                 // after the child's drained output, has been processed.
-                let detail = if Terminal::Host(tab.host.clone())
+                let detail = if tab
+                    .host
                     .holds_final_state(super::super::handlers::HOST_EXIT_RECORD_WAIT)
                     .await
                 {
@@ -543,12 +522,12 @@ impl Supervisor {
         // whose record the next supervisor adopts the host by.
         {
             let _sessions = self.sessions.lock().await;
-            let published = match self.publishable(Some(Terminal::Host(tab.host.clone()))) {
-                Some(Terminal::Host(host)) => HostTab {
+            let published = match self.publishable(Some(tab.host.clone())) {
+                Some(host) => HostTab {
                     host,
                     ..tab.clone()
                 },
-                Some(Terminal::Tmux(_)) | None => tab.clone(),
+                None => tab.clone(),
             };
             entry
                 .session
@@ -567,25 +546,12 @@ impl Supervisor {
     }
 
     /// The size of the agent's terminal, for a new tab to start at: its
-    /// tmux window's, or its host's emulator's. `None` when it cannot be
-    /// read, which costs only a resize at the tab's first attach.
-    async fn agent_terminal_size(&self, session_id: &str, agent: &Terminal) -> Option<Size> {
-        match agent {
-            Terminal::Tmux(tmux) => {
-                match self.tmux.window_size(&tmux.tmux_name, &tmux.pane).await {
-                    Ok(size) => size.map(|(cols, rows)| Size { cols, rows }),
-                    Err(error) => {
-                        debug!(session = %session_id, error = %format!("{error:#}"),
-                        "could not read the agent window's size; the first attach will resize \
-                         the tab");
-                        None
-                    }
-                }
-            }
-            Terminal::Host(host) => match host.liveness() {
-                Liveness::Running { .. } | Liveness::Exited { .. } => Some(host.size()),
-                Liveness::Gone | Liveness::Unavailable { .. } => None,
-            },
+    /// host's emulator's. `None` when it cannot be read, which costs only a
+    /// resize at the tab's first attach.
+    fn agent_terminal_size(agent: &HostTerminal) -> Option<Size> {
+        match agent.liveness() {
+            Liveness::Running { .. } | Liveness::Exited { .. } => Some(agent.size()),
+            Liveness::Gone | Liveness::Unavailable { .. } => None,
         }
     }
 
@@ -745,17 +711,14 @@ impl Supervisor {
     /// Reads the runtime's probe, which says dead as soon as the pinned
     /// child is no longer running (before the host's exit record arrives),
     /// so the settle ends on the death itself. A host that ended or cannot
-    /// be read is an error, which refuses the open like a failed tmux query.
+    /// be read is an error, which refuses the open.
     async fn settled_host_tab(&self, host: &HostTerminal) -> anyhow::Result<bool> {
         let deadline = tokio::time::Instant::now() + TAB_LAUNCH_SETTLE;
         loop {
             match host.probe()? {
-                TerminalProbe::Owned(process) if process.dead => return Ok(false),
-                TerminalProbe::Owned(_) => {}
+                TerminalProbe::Dead => return Ok(false),
+                TerminalProbe::Running(_) => {}
                 TerminalProbe::Gone => anyhow::bail!("the tab's terminal host ended"),
-                TerminalProbe::ForeignOwner { owner } => {
-                    anyhow::bail!(Terminal::Host(host.clone()).unknown_owner_refusal(&owner))
-                }
             }
             if tokio::time::Instant::now() >= deadline {
                 return Ok(true);
@@ -782,7 +745,7 @@ impl Supervisor {
         &self,
         session_id: &str,
         tab_id: &str,
-        scope: TabScope,
+        scoped: bool,
         record: &Path,
         left: HostLeft,
         error: anyhow::Error,
@@ -792,7 +755,7 @@ impl Supervisor {
             HostLeft::MayRemain { socket } => self.end_launch_host(None, &socket, session_id).await,
         };
         let swept = self
-            .reap_tab_processes(session_id, tab_id, scope, None)
+            .reap_tab_processes(session_id, tab_id, scoped, None)
             .await;
         let mut left_behind: Vec<String> = Vec::new();
         match ended {
@@ -848,9 +811,9 @@ impl Supervisor {
         if let Err(error) = self
             .reap_tab_tree(
                 session_id,
-                &Terminal::Host(tab.host.clone()),
+                &tab.host,
                 &tab.tab_id,
-                tab.tab_scope(),
+                tab.scoped,
                 TabReapAnchor::PaneIfLive,
             )
             .await
@@ -867,7 +830,7 @@ impl Supervisor {
         // What outlived the host's hangup, by the tab's marker and scope, as
         // a close's second pass does.
         if let Err(error) = self
-            .reap_tab_processes(session_id, &tab.tab_id, tab.tab_scope(), None)
+            .reap_tab_processes(session_id, &tab.tab_id, tab.scoped, None)
             .await
         {
             left_behind.push(format!("its processes ({error:#})"));
@@ -893,9 +856,9 @@ impl Supervisor {
     }
 }
 
-/// The longest refusal detail quoted from a dead tab's screen, as for a
-/// tmux tab's last words: far below a replay's cap, since it ends up inside
-/// a protocol error message.
+/// The longest refusal detail quoted from a dead tab's screen (its last
+/// words): far below a replay's cap, since it ends up inside a protocol
+/// error message.
 const MAX_LAST_WORDS: usize = 4 * 1024;
 
 /// Remove a tab host's launch record, once its host is confirmed ended (or
@@ -919,8 +882,7 @@ impl Supervisor {
     /// mutation (`Supervisor::close_tab_under_claim`, whose `only_if_dead`
     /// marks the ticker's reap).
     ///
-    /// The tmux close's steps, each from the host's side (module docs,
-    /// "Closing and reaping"):
+    /// The close's steps (module docs, "Closing and reaping"):
     ///
     /// - **Never the agent.** The cell holds only hosts whose tag names a
     ///   tab of this session (the open wrote it; a reload checked it), and
@@ -934,14 +896,14 @@ impl Supervisor {
     ///   tab's scope as its tag records it, then the host is ended (its
     ///   `Shutdown`, else the verified signal to the process its runtime
     ///   adopted), then a marker-only sweep catches what outlived the
-    ///   hangup, as the tmux close's second pass after `kill-window` does.
+    ///   hangup.
     /// - **The record** goes once the host is confirmed ended, and so does
     ///   the tab from the session's cell; a host judged gone from its socket
     ///   alone is confirmed by its adopted process first. A host not
     ///   confirmed ended keeps both, and the tab is marked
     ///   ([`HostTab::end_failed`]) so that the reap closes it again.
-    /// - **The attachment** is detached unconditionally, as for a tmux tab,
-    ///   but before the host is ended rather than after (see the body).
+    /// - **The attachment** is detached unconditionally, before the host is
+    ///   ended (see the body).
     pub(super) async fn close_host_tab_under_claim(
         self: &Arc<Self>,
         _lifecycle: &KeyedGuard,
@@ -957,13 +919,13 @@ impl Supervisor {
             return Err(not_found("the terminal tab was closed meanwhile"));
         };
         match &entry.terminal {
-            Some(Terminal::Host(agent)) if *agent == tab.host => {
+            Some(agent) if *agent == tab.host => {
                 return Err(not_found(&format!(
                     "terminal tab {} is the session's agent terminal",
                     truncate_for_error(tab_id)
                 )));
             }
-            Some(Terminal::Host(_) | Terminal::Tmux(_)) | None => {}
+            Some(_) | None => {}
         }
         // A runtime stopped by an earlier close that could not confirm the
         // end can read as anything; that close is what is being finished.
@@ -1013,7 +975,7 @@ impl Supervisor {
         info!(session = %session_id, tab = %tab_id, socket = %tab.host.socket().display(),
             reason = if only_if_dead { "shell_exited" } else { "user_close" },
             "closing terminal tab");
-        let terminal = Terminal::Host(tab.host.clone());
+        let terminal = tab.host.clone();
         // A close finishing an earlier one that could not confirm the end
         // takes no root: that close reaped the tree from the live child
         // already, and the runtime it stopped says nothing current about it.
@@ -1022,7 +984,7 @@ impl Supervisor {
         } else {
             TabReapAnchor::PaneIfLive
         };
-        self.reap_tab_tree(session_id, &terminal, tab_id, tab.tab_scope(), anchor)
+        self.reap_tab_tree(session_id, &terminal, tab_id, tab.scoped, anchor)
             .await
             .map_err(|e| {
                 RequestError::new(
@@ -1030,12 +992,11 @@ impl Supervisor {
                     format!("closing terminal tab {}: {e:#}", truncate_for_error(tab_id)),
                 )
             })?;
-        // The attachment goes before the host, unlike a tmux tab's after its
-        // window: a grid stream watches its host, and would end on its own
+        // The attachment goes before the host: a grid stream watches its host, and would end on its own
         // with "terminal ended" the moment the host does, racing the
         // truthful "tab closed". The tab is being closed whatever the end
         // reports, so its viewer is told so first.
-        let detach = self.detach_closed_tab(session_id, tab_id).await;
+        self.detach_closed_tab(session_id, tab_id).await;
         let ended = self.end_tab_host(session_id, tab).await;
         // The host's end hangs its pty up; this pass reaches what outlived
         // the hangup by the tab's marker and scope alone, never by a root:
@@ -1045,7 +1006,7 @@ impl Supervisor {
                 session_id,
                 &terminal,
                 tab_id,
-                tab.tab_scope(),
+                tab.scoped,
                 TabReapAnchor::MarkerOnly,
             )
             .await;
@@ -1058,7 +1019,7 @@ impl Supervisor {
                 ))
                 .await;
                 forget_host_tab(&entry.session.host_tabs, &tab.host);
-                super::tab_close_cleanup_result(tab_id, survivors, detach)?;
+                super::tab_close_cleanup_result(tab_id, survivors)?;
                 info!(session = %session_id, tab = %tab_id, "terminal tab closed");
                 Ok(())
             }
@@ -1767,8 +1728,8 @@ mod tests {
     /// Why: SPEC.md promises a tab strip in creation order, and host tabs
     /// have no window ids to order them by; their tags' creation stamps are
     /// the order (the cell's own order changes as tabs are adopted after a
-    /// restart, all at once). An exited tab must vanish from the strip as a
-    /// dead tmux window does and be reaped, a placeholder's host may still
+    /// restart, all at once). An exited tab must vanish from the strip and be
+    /// reaped, a placeholder's host may still
     /// run so hiding or reaping it would lose a running tab, and a tab whose
     /// close could not confirm its host ended would otherwise sit with a
     /// stopped runtime forever. Spec: a cell holding a running stand-in

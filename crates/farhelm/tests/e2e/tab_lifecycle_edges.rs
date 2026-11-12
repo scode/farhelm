@@ -4,7 +4,6 @@
 
 use crate::harness::*;
 
-use crate::terminal_backpressure::drain_for;
 use crate::terminal_tabs::{listed_tabs, run_in_shell, wait_for_shell, write_daemon_script};
 
 /// Observe that a delete racing a tab operation left no process with the owned session marker.
@@ -33,13 +32,12 @@ async fn wait_for_tab_race_cleanup(session_id: &str, context: &str) {
 // ---------------------------------------------------------------------------
 
 /// Opening a tab on a RESTART-GAP session — one whose row survived a
-/// supervisor restart but whose tmux did not — is the restart-first
-/// conflict, and it must not build a tmux session as a side effect.
+/// supervisor restart but whose terminal did not — is the restart-first
+/// conflict, and it must not start a tab host as a side effect.
 ///
-/// Distinct from the killed-tmux-session test: there the entry still
-/// holds a terminal and tmux disagrees; here the entry has no terminal at
-/// all, which is the branch that answers before tmux is consulted. Both
-/// must produce the same advice, because they are the same fact for a
+/// The entry has no terminal at all, which is the branch that answers
+/// before any host is asked; an entry whose host is still held but has
+/// ended gives the same advice, because they are the same fact for a
 /// user.
 #[farhelm_testtrace::test]
 async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
@@ -85,13 +83,7 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
             .kind(),
         ErrorKind::Conflict
     );
-    let sessions = tmux_query(&state.path().join("tmux.sock"), &["list-sessions"]).await;
-    assert!(
-        !sessions.status.success()
-            || !String::from_utf8_lossy(&sessions.stdout).contains(&format!("fh-{}", session.id)),
-        "a refused open must not have built a tmux session as a side effect"
-    );
-    // Nor a tab host: no launch record for a tab of this session, and no
+    // A refused open must not have built a tab host as a side effect: no launch record for a tab of this session, and no
     // live process serving a socket in the state directory.
     let tab_records: Vec<_> = std::fs::read_dir(state.path().join("launch"))
         .map(|entries| {
@@ -158,11 +150,9 @@ async fn closing_an_unknown_but_well_formed_tab_id_is_not_found_and_harms_nothin
 
 /// A closed tab's attached client is told, on that tab's own channel.
 ///
-/// A tab's forwarder holds a control client attached to the tmux SESSION,
-/// so losing the tab's WINDOW does not end it — the stream would simply
-/// go quiet forever. `detach_closed_tab` is the only thing that turns
-/// that into a visible event, which is why it is asserted directly rather
-/// than through "the terminal stopped updating".
+/// The client must learn why its stream ended, on that tab's own channel
+/// (`detach_closed_tab`), which is why the notice is asserted directly
+/// rather than through "the terminal stopped updating".
 #[farhelm_testtrace::test]
 async fn a_closed_tabs_channel_receives_its_detached_notice() {
     let h = harness().await;
@@ -430,12 +420,7 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let work = farhelm_teststate::tempdir().expect("workdir");
 
-    // Both this supervisor and its restart below attach for real (a tab
-    // before the restart, the rediscovered tab after), so both need the
-    // suite's loaded-CI timeout floors rather than production defaults.
-    let sup = suite_supervisor_with_timeouts(state.path(), suite_timeouts())
-        .await
-        .expect("supervisor");
+    let sup = supervisor_on(state.path()).await.expect("supervisor");
     let client = connect_client(&sup).await;
     let session = client
         .create_session(
@@ -481,7 +466,7 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
 
     client.detach(chan).await;
     retire_supervisor(state.path(), sup, client).await;
-    let sup = suite_supervisor_with_timeouts(state.path(), suite_timeouts())
+    let sup = supervisor_on(state.path())
         .await
         .expect("second supervisor");
     let client = connect_client(&sup).await;
@@ -517,14 +502,6 @@ async fn a_supervisor_restart_leaves_a_tabs_shell_and_scrollback_untouched() {
 /// pins is the DETACH being scoped to one terminal — a client whose
 /// background tab wedged must not lose the terminal it is looking at.
 ///
-/// Scope: this exercises whichever branch tmux happened to take for the
-/// stalled client (it answers a lagging client either by cutting it with
-/// `%pause` or by not reading the pane it is behind on,
-/// nondeterministically — see `TMUX_PAUSE_AFTER_SECS`), and pins the
-/// SUPERVISOR's per-terminal teardown, which is the same on both. The
-/// second branch used to make the surrounding terminals collateral damage
-/// until this detach fired; the session sink closes that, so what is left
-/// here is genuinely about the detach being scoped to one terminal.
 #[farhelm_testtrace::test]
 async fn a_stalled_tab_takes_the_stall_detach_alone_and_reattaches() {
     let stall = Duration::from_secs(3);
@@ -704,7 +681,7 @@ async fn an_open_tab_racing_a_delete_leaves_one_coherent_winner() {
             deleted.unwrap_err()
         );
         // Whichever way it went, nothing of the session may remain: no
-        // row, no tmux session, and no marked process — including a shell
+        // row, no tab host, and no marked process — including a shell
         // an open that WON would have started.
         assert!(
             h.client

@@ -32,14 +32,6 @@ report-skipped = "all"
 
 [test-groups]
 e2e = { max-threads = 4 }
-supervisor-tmux = { max-threads = 2 }
-
-[[profile.default.overrides]]
-# ScratchServer's process-local semaphore cannot coordinate nextest children.
-# Cover its modules rather than enumerating today's consumers, so new fixture
-# users inherit the two-server allowance. Pure tests in these modules share it.
-filter = "package(farhelm-supervisor) & (test(tmux::tests::) | test(tmux::stream::tests::) | test(tmux::sink::tests::))"
-test-group = "supervisor-tmux"
 
 [[profile.default.overrides]]
 filter = "package(farhelm) & binary(e2e)"

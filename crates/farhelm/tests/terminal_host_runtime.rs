@@ -27,7 +27,7 @@ use farhelm_supervisor::hosts::{
     HostTerminal, HostTerminalOptions, InputFate, Liveness, LivenessNotifier, NotTaken,
     Unavailability, spawn_host,
 };
-use farhelm_supervisor::terminal_process::{TerminalProbe, TerminalProcess};
+use farhelm_supervisor::terminal_process::TerminalProbe;
 use farhelm_terminal_emulator::{ClipboardTarget, Notice};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -217,13 +217,7 @@ async fn a_fresh_hosts_output_title_and_child_reach_the_runtime() {
     let root = terminal.child_root().expect("a running root");
     assert_eq!(root.pid, pid);
     assert_eq!(terminal.status().child_pid, pid);
-    assert_eq!(
-        terminal.probe().unwrap(),
-        TerminalProbe::Owned(TerminalProcess {
-            pid: Some(pid),
-            dead: false
-        })
-    );
+    assert_eq!(terminal.probe().unwrap(), TerminalProbe::Running(pid));
 }
 
 /// A device attributes query is answered end to end: the program reads the
@@ -300,13 +294,7 @@ async fn input_reaches_the_child_and_its_exit_ends_its_root() {
         }
     );
     assert_eq!(terminal.child_root(), None);
-    assert_eq!(
-        terminal.probe().unwrap(),
-        TerminalProbe::Owned(TerminalProcess {
-            pid: None,
-            dead: true
-        })
-    );
+    assert_eq!(terminal.probe().unwrap(), TerminalProbe::Dead);
     assert_eq!(terminal.exit_code(), Some(3));
     let change = within("the exit's announcement", changes.recv())
         .await

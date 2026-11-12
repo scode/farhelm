@@ -2,7 +2,7 @@
 //! genuine crash-partway-through cases.
 //!
 //! A duplicate agent shows as a second running terminal host
-//! (`agent_terminal_names` counts hosts and tmux sessions both),
+//! (`agent_terminal_names` counts the running hosts),
 //! and a reboot is simulated by ending every host. How a retry finds and
 //! settles a host an interrupted attempt started is tested in more depth in
 //! `host_creates.rs`.
@@ -58,21 +58,14 @@ async fn agent_terminal_count(state: &std::path::Path) -> usize {
 }
 
 /// The agent terminals running in the state directory `state`, each as
-/// `fh-<session id>`, sorted: the `fh-*` sessions its private tmux server
-/// holds, and every terminal host running there, named by
+/// `fh-<session id>`, sorted: every terminal host running there, named by
 /// the session whose launch record names its socket (`unrecorded:<socket>`
 /// for a host no record names, which a duplicate create could leave).
 ///
 /// Read from the processes and records themselves, never through a
 /// supervisor, and without connecting to a host (which would take it over).
 async fn agent_terminal_names(state: &std::path::Path) -> Vec<String> {
-    let sock = state.join("tmux.sock");
-    let out = tmux_query(&sock, &["list-sessions", "-F", "#{session_name}"]).await;
-    let mut names: Vec<String> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter(|line| line.starts_with("fh-"))
-        .map(str::to_string)
-        .collect();
+    let mut names = Vec::new();
     let mut recorded = std::collections::BTreeMap::new();
     if let Ok(entries) = std::fs::read_dir(state.join("launch")) {
         for entry in entries.flatten() {
@@ -135,8 +128,7 @@ async fn stored_sessions(state: &std::path::Path) -> Vec<StoredSession> {
 /// `Arc::strong_count` is useful below for diagnosing a connection task that
 /// never drains, but it is not a completion barrier for the kernel lock's
 /// final release. This test's own process spawns children while the claim
-/// file is open (the runtime that runs tmux, fake agents, and the
-/// supervisor binary), and a fork landing in that window keeps the open
+/// file is open (terminal hosts, fake agents, and the supervisor binary), and a fork landing in that window keeps the open
 /// file description alive until its child execs, even after the last
 /// `Supervisor` drops here. Poll the actual `flock` from a blocking thread
 /// so the replacement cannot race that inherited descriptor and silently
@@ -144,7 +136,7 @@ async fn stored_sessions(state: &std::path::Path) -> Vec<StoredSession> {
 ///
 /// The poll itself would reintroduce a smaller version of the same hazard if
 /// it released by closing: the process spawns children constantly
-/// (tmux, agents, the supervisor binary), and a fork landing
+/// (terminal hosts, agents, the supervisor binary), and a fork landing
 /// between the probe's acquisition and its drop inherits the open file
 /// description — after which the flock survives the probe's own close until
 /// that child execs, and the replacement supervisor started in that window
@@ -329,9 +321,9 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
 /// listing does; read from the row instead, it would tell a client that an
 /// interrupted session still runs in an old terminal, and the migration
 /// band would ask the user to move a terminal that no longer exists.
-/// Spec: after a reboot (tmux gone, the next supervisor reading another boot
-/// id), the session lists as interrupted with no kind, its row still says
-/// tmux, and the keyed retry replays the same session with
+/// Spec: after a reboot (every host gone, the next supervisor reading
+/// another boot id), the session lists as interrupted with no kind, its row
+/// still says host, and the keyed retry replays the same session with
 /// `agent_terminal: None` and the switch reported off.
 #[farhelm_testtrace::test]
 async fn a_replay_after_a_reboot_reports_no_terminal_kind() {
@@ -622,7 +614,7 @@ async fn deleting_a_pending_create_frees_its_key_without_relaunching_its_identit
     let sup1 = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams {
             faults: FaultHooks {
                 create_crash: Some(crash_at(CreateStage::AfterRecord)),
@@ -700,7 +692,7 @@ struct CrashScene {
     row: Option<StoredSession>,
     /// Agent terminals running at the moment of inspection
     /// ([`agent_terminal_names`]).
-    tmux: Vec<String>,
+    terminals: Vec<String>,
     /// The reservation, after the replacement supervisor's reload has run
     /// but BEFORE any retry — so reload's own settlement pass is visible
     /// rather than masked by the retry's reconciliation.
@@ -743,7 +735,7 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
     let rows = stored_sessions(state.path()).await;
     assert!(rows.len() <= 1, "one create can leave at most one row");
     let scene_row = rows.into_iter().next();
-    let scene_tmux = agent_terminal_names(&state_dir).await;
+    let scene_terminals = agent_terminal_names(&state_dir).await;
 
     // The retry arrives at a supervisor that never saw the first attempt
     // in memory — the only honest way to model a crash, and what makes
@@ -803,7 +795,7 @@ async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
 
     CrashScene {
         row: scene_row,
-        tmux: scene_tmux,
+        terminals: scene_terminals,
         reservation_after_reload,
     }
 }
@@ -830,9 +822,9 @@ async fn a_crash_after_the_reservation_lets_the_retry_perform_the_create() {
         LastOutcome::Launching
     );
     assert!(
-        scene.tmux.is_empty(),
+        scene.terminals.is_empty(),
         "the crash landed before any side effect, so no terminal may run: {:?}",
-        scene.tmux
+        scene.terminals
     );
     assert_eq!(
         scene.reservation_after_reload.outcome,
@@ -842,14 +834,14 @@ async fn a_crash_after_the_reservation_lets_the_retry_perform_the_create() {
     drop(slot);
 }
 
-/// Crash between tmux having the session and the launch being confirmed
-/// durably: the tmux session and its pane exist under a row that still
-/// says `Launching`.
+/// Crash between the terminal host starting and the launch being confirmed
+/// durably: the host and its agent exist under a row that still says
+/// `Launching`.
 ///
 /// The retry must not launch a second one. What makes that work is the
-/// unification item 6 asks for — reload rediscovers the pane and confirms
-/// the row, and the reservation settles from that same verdict instead of
-/// probing tmux a second time and risking a different answer. Settled by
+/// unification item 6 asks for — reload rediscovers the host by its tag and
+/// confirms the row, and the reservation settles from that same verdict
+/// instead of probing a second time and risking a different answer. Settled by
 /// RELOAD, before any retry arrives, which is what the reservation
 /// assertion pins.
 #[farhelm_testtrace::test]
@@ -860,12 +852,12 @@ async fn a_crash_during_the_launch_reconciles_to_the_session_that_started() {
     assert_eq!(row.outcome, LastOutcome::Launching);
     assert!(
         row.terminal_address.is_empty(),
-        "the confirmation never ran, so no pane was recorded"
+        "the confirmation never ran, so no terminal address was recorded"
     );
     assert_eq!(
-        scene.tmux,
+        scene.terminals,
         vec![format!("fh-{}", row.id)],
-        "but tmux really does hold the session"
+        "but the session's host really does run"
     );
     assert_eq!(
         scene.reservation_after_reload.outcome,
@@ -895,9 +887,9 @@ async fn a_crash_before_the_outcome_commit_still_replays_the_same_session() {
     );
     assert!(
         !row.terminal_address.is_empty(),
-        "with its pane recorded alongside"
+        "with its terminal address recorded alongside"
     );
-    assert_eq!(scene.tmux, vec![format!("fh-{}", row.id)]);
+    assert_eq!(scene.terminals, vec![format!("fh-{}", row.id)]);
     assert_eq!(
         scene.reservation_after_reload.outcome,
         ReservationOutcome::Created,
@@ -907,14 +899,14 @@ async fn a_crash_before_the_outcome_commit_still_replays_the_same_session() {
 }
 
 /// PLAN_M3.md item 6 meeting item 2's reboot conversion: a create that
-/// crashed BEFORE reaching tmux, then survived a reboot, must not be
+/// crashed BEFORE reaching a terminal, then survived a reboot, must not be
 /// replayed as though it had succeeded.
 ///
 /// The reboot converts its launching row to `interrupted`, which looks
 /// terminal — and settling a reservation from a terminal status alone
 /// would record "created" for a session that never launched and can never
 /// run, permanently. Provenance, not status, is what the settlement needs:
-/// this row never had a pane, so nothing ever saw it in tmux.
+/// this row never had a terminal address, so nothing ever saw its terminal.
 ///
 /// The retry must therefore still perform the create, under the same
 /// identity, exactly as it would have without the reboot.
@@ -943,7 +935,7 @@ async fn a_reboot_does_not_turn_a_never_launched_intent_into_a_created_one() {
         .await
         .expect_err("the injected crash must fail the create");
 
-    // A reboot: a different boot id AND no surviving tmux server.
+    // A reboot: a different boot id AND no surviving terminal host.
     drop(client1);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while Arc::strong_count(&sup1) > 1 {
