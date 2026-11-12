@@ -534,69 +534,98 @@ passed its review gate, and the PRs make the TODO.md and review-queue changes th
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-12 (claim 8204ad).
+### 2026-11-12: answer to a blocked question
 
-### The tmux removal stack is over its size limit halfway through
+The question, as the executor put it:
 
-**What this plan is about.** You asked for tmux and xterm.js to be removed from Farhelm completely, in four chained
-plans. This plan is the first of them, for the running product: a newly started supervisor ends the old tmux terminals
-that earlier releases warned would be ended, the supervisor's remaining code for driving tmux goes, the protocol stops
-describing two kinds of terminal (a protocol change, so every remote host shows "Needs update" until updated, which you
-accepted when planning), and the web page stops carrying xterm.js. You set a size limit of about 3,500 added lines for
-this plan's whole stack of six PRs, counting code, tests and docs but not deletions, changelog entries or lines moved
-unchanged, and asked to block and bring it back if it went over.
+> Blocked on 2026-11-12 (claim 8204ad).
+>
+> ### The tmux removal stack is over its size limit halfway through
+>
+> **What this plan is about.** You asked for tmux and xterm.js to be removed from Farhelm completely, in four chained
+> plans. This plan is the first of them, for the running product: a newly started supervisor ends the old tmux terminals
+> that earlier releases warned would be ended, the supervisor's remaining code for driving tmux goes, the protocol stops
+> describing two kinds of terminal (a protocol change, so every remote host shows "Needs update" until updated, which
+> you accepted when planning), and the web page stops carrying xterm.js. You set a size limit of about 3,500 added lines
+> for this plan's whole stack of six PRs, counting code, tests and docs but not deletions, changelog entries or lines
+> moved unchanged, and asked to block and bring it back if it went over.
+>
+> **What is done.** The first three PRs are built, each reviewed by the required Opus 5.5 reviewer with its findings
+> fixed, and open as drafts:
+>
+> - #3358 moves the supervisor's tests off tmux onto the new terminals (about 1,300 added lines). The four opt-in audits
+>   against the real Claude Code and Codex were moved too and pass.
+> - #3360 removes the supervisor's ability to create tmux terminals and everything that used it: test fixtures, the
+>   browser suite's old-terminal runs, a release-gate check, the tmux path of the README, video and docs screenshot
+>   harnesses (about 1,650 added, about 22,000 deleted).
+> - #3362 ends old terminals at startup (about 1,750 added): the supervisor ends the old tmux server without needing a
+>   tmux program, stops the old agents, marks their sessions interrupted with one new notification each, and Restart
+>   starts them fresh. This is the user-visible, breaking change, with its changelog entry, the rewritten docs page on
+>   new terminals and a corrected installer message.
+>
+> **Why it stopped.** Counted by the limit's rule, the three PRs together add about 4,700 lines (GitHub's own counts,
+> which include changelog entries, moved lines and TODO and review-queue removals, add up to about 5,350), already over
+> the whole stack's limit. The first two stayed under it (about 3,000); the third crossed it while being built and was
+> finished anyway, so that landing the first three is a real option below rather than a half-done change. The scope did
+> not grow; the estimate was low. Moving roughly 70 supervisor tests and their fixtures off tmux, and the tests the
+> startup shutdown needs against a real tmux server, cost far more lines than planned. Three PRs remain, mostly
+> deletions:
+>
+> - the fourth, the supervisor's remaining tmux code (taking over a running tmux server, its output and input handling,
+>   flow control built on tmux): perhaps 200 to 500 added lines, mostly rewritten comments and tests that keep surviving
+>   behavior covered;
+> - the fifth, the protocol change and xterm.js out of the page: perhaps 700 to 1,500 added lines (protocol test data,
+>   page and browser tests, docs, the release brick test's checks);
+> - the sixth, the desktop app's clipboard limit raised to the new terminal's: under 100 added lines.
+>
+> That would make the stack roughly 5,600 to 6,800 added lines by the limit's rule (about 6,300 to 7,500 by GitHub's
+> counts), against well over 25,000 deleted.
+>
+> ### The question
+>
+> How should this continue?
+>
+> - **Raise the limit to about 8,000 added lines by the limit's rule and finish as planned.** That leaves room above the
+>   high end of the estimate on either way of counting. The next executor builds the last three PRs on top of the three
+>   open ones, and all six land together, so the user-visible change waits for the rest. If even 8,000 is exceeded, the
+>   plan blocks again. Nothing you decided is dropped; the cost is a larger stack for the landing review and for you to
+>   read afterwards, most of it deletion.
+> - **Land the first three now and plan the rest separately.** Old terminals end on upgrade in the next release built
+>   after these land, and the product is consistent at that point: nothing creates tmux terminals any more. Until the
+>   rest lands, the supervisor keeps tmux code nothing reaches and the page keeps xterm.js, and the protocol change
+>   (hosts showing "Needs update") arrives in a later release than the ending of old terminals. The last three PRs
+>   become a new plan, which needs a planning round and your approval. The later plans would need checking against the
+>   split: the install and tooling plans may have what they need once the first three land, but the docs plan's final
+>   audit needs the rest gone.
+> - **Trim to fit.** Not realistic: the added lines are mostly tests that keep surviving behavior covered as tmux goes,
+>   and dropping them would lose coverage the plan requires.
+>
+> I recommend raising the limit to about 8,000 and finishing as planned. The overrun comes from moving tests off tmux,
+> not from new mechanisms, and the remaining work is already planned and approved in its current shape; splitting it
+> would add a planning round and a check of the later plans without making any of it smaller.
 
-**What is done.** The first three PRs are built, each reviewed by the required Opus 5.5 reviewer with its findings
-fixed, and open as drafts:
+The maintainer's answer:
 
-- #3358 moves the supervisor's tests off tmux onto the new terminals (about 1,300 added lines). The four opt-in audits
-  against the real Claude Code and Codex were moved too and pass.
-- #3360 removes the supervisor's ability to create tmux terminals and everything that used it: test fixtures, the
-  browser suite's old-terminal runs, a release-gate check, the tmux path of the README, video and docs screenshot
-  harnesses (about 1,650 added, about 22,000 deleted).
-- #3362 ends old terminals at startup (about 1,750 added): the supervisor ends the old tmux server without needing a
-  tmux program, stops the old agents, marks their sessions interrupted with one new notification each, and Restart
-  starts them fresh. This is the user-visible, breaking change, with its changelog entry, the rewritten docs page on new
-  terminals and a corrected installer message.
+### Raise the stack's size limit to about 8,000 added lines and finish as planned
 
-**Why it stopped.** Counted by the limit's rule, the three PRs together add about 4,700 lines (GitHub's own counts,
-which include changelog entries, moved lines and TODO and review-queue removals, add up to about 5,350), already over
-the whole stack's limit. The first two stayed under it (about 3,000); the third crossed it while being built and was
-finished anyway, so that landing the first three is a real option below rather than a half-done change. The scope did
-not grow; the estimate was low. Moving roughly 70 supervisor tests and their fixtures off tmux, and the tests the
-startup shutdown needs against a real tmux server, cost far more lines than planned. Three PRs remain, mostly deletions:
+The landing monitor answered this on the maintainer's behalf on 2026-11-12, under the maintainer's standing rule that a
+block which is not a huge issue gets a call and a TODO entry to revisit, so progress is not held up. A later change of
+mind is a follow-up, not a reason to stop the plan.
 
-- the fourth, the supervisor's remaining tmux code (taking over a running tmux server, its output and input handling,
-  flow control built on tmux): perhaps 200 to 500 added lines, mostly rewritten comments and tests that keep surviving
-  behavior covered;
-- the fifth, the protocol change and xterm.js out of the page: perhaps 700 to 1,500 added lines (protocol test data,
-  page and browser tests, docs, the release brick test's checks);
-- the sixth, the desktop app's clipboard limit raised to the new terminal's: under 100 added lines.
+The decision: the size limit for this plan's whole stack of six PRs is raised from about 3,500 to about 8,000 added
+lines, counted by the same rule as before (code, tests and docs; not deletions, changelog entries or lines moved
+unchanged). Build the remaining three PRs as planned on top of the three open ones (#3358, #3360, #3362): the
+supervisor's remaining tmux code, the protocol change with xterm.js out of the page, and the desktop app's clipboard
+limit. All six land together. Nothing the maintainer decided for this plan is dropped or changed.
 
-That would make the stack roughly 5,600 to 6,800 added lines by the limit's rule (about 6,300 to 7,500 by GitHub's
-counts), against well over 25,000 deleted.
+Why: the overrun comes from moving the supervisor's tests and fixtures off tmux, which keeps behavior that survives the
+removal covered, not from new mechanisms or a wider scope. The remaining work is already planned and approved in its
+current shape and is mostly deletion. Landing the first three now and planning the rest separately would need a new
+planning round and the maintainer's approval, and a check of the three later tmux plans against the split, without
+making any of the work smaller; the protocol change would also reach users in a later release than the ending of old
+terminals.
 
-### The question
-
-How should this continue?
-
-- **Raise the limit to about 8,000 added lines by the limit's rule and finish as planned.** That leaves room above the
-  high end of the estimate on either way of counting. The next executor builds the last three PRs on top of the three
-  open ones, and all six land together, so the user-visible change waits for the rest. If even 8,000 is exceeded, the
-  plan blocks again. Nothing you decided is dropped; the cost is a larger stack for the landing review and for you to
-  read afterwards, most of it deletion.
-- **Land the first three now and plan the rest separately.** Old terminals end on upgrade in the next release built
-  after these land, and the product is consistent at that point: nothing creates tmux terminals any more. Until the rest
-  lands, the supervisor keeps tmux code nothing reaches and the page keeps xterm.js, and the protocol change (hosts
-  showing "Needs update") arrives in a later release than the ending of old terminals. The last three PRs become a new
-  plan, which needs a planning round and your approval. The later plans would need checking against the split: the
-  install and tooling plans may have what they need once the first three land, but the docs plan's final audit needs the
-  rest gone.
-- **Trim to fit.** Not realistic: the added lines are mostly tests that keep surviving behavior covered as tmux goes,
-  and dropping them would lose coverage the plan requires.
-
-I recommend raising the limit to about 8,000 and finishing as planned. The overrun comes from moving tests off tmux, not
-from new mechanisms, and the remaining work is already planned and approved in its current shape; splitting it would add
-a planning round and a check of the later plans without making any of it smaller.
+If the stack goes over about 8,000 added lines by that rule, block again rather than finishing over the limit. Trimming
+tests to fit is not wanted: the plan's acceptance criteria require the coverage.
