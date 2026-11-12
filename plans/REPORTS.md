@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`omp-npx-docs`](reports/omp-npx-docs.report.md) landed 2026-11-08 in #3207: The OMP docs page stops promising that npx launches are followed (where `sh` is dash, as on Debian and Ubuntu, they are not; elsewhere untested), and misleading code comments say the same
 - [`snapshot-in-place-paint`](reports/snapshot-in-place-paint.report.md) landed 2026-11-08 in #3209: Paint a terminal snapshot straight into its blob, roughly halving peak memory for typical terminals with byte-identical output; the fixup-heavy worst case is recorded as a Maybe later entry
 - [`macos-remote-hosts`](reports/macos-remote-hosts.report.md) landed 2026-11-09 in #3213, #3214: Set up, update and uninstall an Apple-silicon Mac as a remote host over SSH, with the supervisor as a per-user launchd job and no tmux on Mac hosts
 - [`pin-rust-toolchain`](reports/pin-rust-toolchain.report.md) landed 2026-11-09 in #3230: Pin Rust to the newest stable in rust-toolchain.toml so local checks, CI and release builds agree; bumps are manual PRs
