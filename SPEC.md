@@ -2339,22 +2339,23 @@ choices explain the risk of a second browser tab and that a program without mous
 choice covers every client of the helm and takes effect in every mounted terminal of the current client immediately;
 other open clients pick it up when they reload, like the host choices. In the desktop app, the **Terminal** section also
 has tunnel consent and a free-form, comma-separated **File types to open with Cmd-click** field (Ctrl-click outside
-macOS). It defaults to `md, txt, json`; saving an empty list disables opening while downloads still save. This field
-requires an explicit, acknowledged save, but its value lives in the shared preference row. The dialog shows one
-prominent warning beside the field for each listed type outside `md`, `txt`, `json` and `log`; HTML-like types have a
-browser-specific warning, and all other unrecognized types have a generic warning. The warnings follow the draft as
-typed, including when another entry is malformed. A refused save leaves the draft and current helm policy unchanged and
-shows the reason inline. Under **Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has
-an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low,
-Default, High, Urgent; default Default). These are explicitly saved helm configuration, shared by every client, outside
-the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one exists
-and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered, and
-the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success or
-failure inline. The **Checkouts** section holds the explicitly saved **Default checkout folder** and, below it, a
-monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster launches** switch
-(see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository
-and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create
-or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
+macOS). It defaults to `md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif`; saving an empty list disables opening
+while downloads still save. This field requires an explicit, acknowledged save, but its value lives in the shared
+preference row. The dialog shows one prominent warning beside the field for each listed type outside `md`, `txt`,
+`json`, `log` and the image types in that default; HTML-like types have a browser-specific warning, and all other
+unrecognized types have a generic warning. The warnings follow the draft as typed, including when another entry is
+malformed. A refused save leaves the draft and current helm policy unchanged and shows the reason inline. Under
+**Notifications**, sounds has three device switches (see Status), and **ntfy alerts** has an off-by-default switch,
+server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High, Urgent;
+default Default). These are explicitly saved helm configuration, shared by every client, outside the preference row.
+Save refusals appear inline. The stored token is never returned: the form shows whether one exists and allows replacing
+or clearing it. Changing to another server clears a saved token unless a new one is entered, and the form says so before
+saving. **Send test** uses the saved configuration, even while disabled, and reports success or failure inline. The
+**Checkouts** section holds the explicitly saved **Default checkout folder** and, below it, a monospace multi-line
+post-clone command field and the default-on **Keep a checkout ready for faster launches** switch (see
+[Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository and
+host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create or
+after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
 first-use folder creation, and that the default applies to hosts without their own folder, set in each host's settings.
 The command's help explains that it runs in each new checkout on its host, after cloning and before the agent starts,
 that changes affect future checkouts only, and that command-line host overrides keep their command. The installed
@@ -3150,15 +3151,16 @@ whatever the agent renders is what you see. There is no composer, no message abs
   appears at the top of that terminal: success fades after a few seconds, while a failure stays until the next click or
   download there. Plain click only downloads. In the desktop app, Cmd-click on macOS (Ctrl-click elsewhere) also opens
   the completed save with the default app when the saved file's final extension is in the helm's shared list,
-  case-insensitively. The list defaults to .md, .txt and .json, and the saved file must still have the same final
-  extension as the path disclosed at hover. Other types are saved without opening; an opening failure leaves the save
-  successful and says why it was not opened. A browser modifier-click only downloads. The hover uses a file icon and
-  bright name, the host and full directory on a second line, and decimal size with the action hints on a third. A left
-  stripe and size color show under 1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals are
-  red and checking has a neutral stripe. Only an eligible desktop file has the opening hint. Any file the session's
-  account can read is in reach, within the existing shell authority; hover discloses the agent-provided target before an
-  explicit click. Only the helm can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to
-  http, https and file; every other scheme is ignored.
+  case-insensitively. The list defaults to .md, .txt, .json and the common image types .png, .jpg, .jpeg, .gif, .webp,
+  .bmp and .avif, and the saved file must still have the same final extension as the path disclosed at hover. Other
+  types are saved without opening; an opening failure leaves the save successful and says why it was not opened. A
+  browser modifier-click only downloads. The hover uses a file icon and bright name, the host and full directory on a
+  second line, and decimal size with the action hints on a third. A left stripe and size color show under 1 MB green,
+  1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals are red and checking has a neutral stripe. Only
+  an eligible desktop file has the opening hint. Any file the session's account can read is in reach, within the
+  existing shell authority; hover discloses the agent-provided target before an explicit click. Only the helm can ask
+  the supervisor for file reads. OSC hyperlink schemes are explicitly limited to http, https and file; every other
+  scheme is ignored.
 
 ## Attachments
 
@@ -4877,17 +4879,18 @@ Clicking a disclosed file path in a terminal transfers that file from the sessio
 the session's Unix account can read is in reach; the hover shows the host, resolved path and size before the click can
 download it. Confirmed 2026-10-18: only an explicit Cmd-click in the desktop app (Ctrl-click on non-macOS desktop
 builds) also opens the completed local save with the default app. The helm checks the saved file's final extension,
-ignoring ASCII case, against a shared user-chosen list that defaults to .md, .txt and .json. It also requires the saved
+ignoring ASCII case, against a shared user-chosen list that defaults to .md, .txt and .json (amended 2026-11-12 at the
+maintainer's request: the default also lists .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif). It also requires the saved
 file to retain the final extension disclosed at hover. An empty list opens nothing; any listed type can open, including
 HTML if the user adds it. A plain click or any browser click only downloads. The desktop app deliberately does not set
 the macOS quarantine flag on downloaded files, so these saves do not carry the "downloaded from the internet" prompt a
 browser save would carry. The click authorizes this transfer across the host boundary, including for agent-controlled
-files. In the desktop settings dialog, listed types outside `md`, `txt`, `json` and `log` get a prominent warning beside
-the field. For HTML-like types, it explains that an agent-written page can run scripts in the browser, open web
-addresses outside Farhelm's link permissions, and send cross-site requests to services on the user's machine, including
-localhost on other ports. Those requests may carry the service's cookies even though the page cannot read them directly.
-For other unrecognized types, it explains that Farhelm does not restrict the default app's handling of the file and that
-opening an agent-written file may run code.
+files. In the desktop settings dialog, listed types outside `md`, `txt`, `json`, `log` and (since that amendment) the
+default's image types get a prominent warning beside the field. For HTML-like types, it explains that an agent-written
+page can run scripts in the browser, open web addresses outside Farhelm's link permissions, and send cross-site requests
+to services on the user's machine, including localhost on other ports. Those requests may carry the service's cookies
+even though the page cannot read them directly. For other unrecognized types, it explains that Farhelm does not restrict
+the default app's handling of the file and that opening an agent-written file may run code.
 
 Opening a link is another bounded effect across the host boundary. Only an admitted HTTP(S) URL may reach the user's
 browser, after an Allow/Open click or under the requesting host's matching link permission. With **Open local-network

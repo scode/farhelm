@@ -1040,12 +1040,14 @@ fn OpenExtensionsSettings() -> Element {
 #[cfg(all(test, native_desktop))]
 mod open_extensions_tests {
     use super::open_extension_warnings;
-    use farhelm_proto::open_extensions::WarningKind;
+    use farhelm_proto::open_extensions::{DEFAULT, WarningKind};
 
-    /// Recognized document and log types need no risk message beside the field.
+    /// Recognized document, log and image types need no risk message beside
+    /// the field, and neither does the default the dialog starts from.
     #[test]
     fn safe_draft_has_no_warnings() {
         assert!(open_extension_warnings("md, txt, json, log").is_empty());
+        assert!(open_extension_warnings(DEFAULT).is_empty());
     }
 
     /// Each unrecognized type gets its own warning, even in an invalid draft.
