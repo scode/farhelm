@@ -4,13 +4,11 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.38.0 - 2026-11-11
 
-**DRAFT release notes - not yet finalized**
-
 ### 💥 Breaking
 
 - This release *requires* you to update your remote hosts. (#3132, #3254, #3252, #3261, #3329)
 - Farhelm now refuses to update an installation or remote host older than v0.23.0, and explains how to remove it and set it up again. Your data can stay on disk, but a fresh installation may not be able to use all of it. (#3239, #3241)
-- The earlier experimental containerized sessions are retired: existing ones can only be deleted, and their agents keep running until you delete them. Templates that used the old **Containerized** setting can launch once it is removed. (#3330)
+- The earlier experimental containerized sessions are retired: existing ones can only be deleted, and their agents keep running until you delete them. Templates that used the old **Containerized** setting can launch once it is removed. Containerized sessions remain EXPERIMENTAL and may change at any time in incompatible ways and are likely broken in various ways. (#3330)
 - EXPERIMENTAL: Tensorlake recipes now install Claude Code, Codex and your chosen packages on any base, including your own image or snapshot. A recipe that reused an image or snapshot needs a snapshot build before you add hosts from it, and a custom base must now meet [these requirements](https://farhelm.io/docs/using/tensorlake-sandboxes/#make-a-recipe). (#3178)
 
 ### 🚀 Added
