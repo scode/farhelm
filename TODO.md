@@ -229,6 +229,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     `@old-terminal` tag) and the Rust tests that ask for old terminals by name (`harness_tmux`,
     `supervisor_process_tmux`, `tests::tmux_supervisor`).
 
+  Plan: `plans/queue/tmux-end-old-terminals.md`.
+
+- **Finish removing tmux and xterm.js after old terminals end.** Asked for by the maintainer on 2026-11-11, with the
+  entry above, as one effort to remove every trace of tmux and xterm.js except the startup step that turns off a
+  supervisor's old private tmux server. The rest after the running product: stop requiring, probing, installing and
+  shipping tmux (setup, the desktop app, Linux provisioning, uninstall, the installer, the bundled musl tmux in
+  releases); drop tmux from test tooling, CI, the brick test and agent instructions; then bring the specs, docs and code
+  comments in line and audit what remains. Plan: `plans/queue/tmux-drop-from-install.md`, then
+  `plans/queue/tmux-drop-from-tooling.md` and `plans/queue/tmux-drop-from-docs.md`.
+
 - **Scroll the grid terminal entirely from a back buffer it keeps itself, instead of history sent by the supervisor.**
   The page already keeps the scrollback it shows and scrolling sends nothing
   (`crates/farhelm-ui/assets/grid-terminal.js`, "Scrollback"), but that history arrives as `history` messages from the
@@ -304,6 +314,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the user a structured question (multiple choice, say), presented like those artifacts rather than as plain text.
 
 - Initial version of agent2agent comms.
+
+- **Remove the startup shutdown of the old private tmux server ("phase 3").** The tmux removal plans
+  (`tmux-end-old-terminals` and its followers) keep one piece of tmux on purpose: a supervisor that finds the private
+  tmux server an older release left running turns it off at startup, marks the sessions that ran in it as interrupted
+  and tells the user. Once no installation can still hold such a server, remove that step and what exists only for it:
+  the startup code and its tests, the stored terminal-kind column and its reads (a schema change), the old-terminal
+  notification kinds, the scrub of `FARHELM_TMUX` from session environments, and the test fixtures that build a server
+  in the old layout. Asked for by the maintainer on 2026-11-11 while planning the removal. When that is safe (a release
+  count, or the upgrade floor passing the release that ended old terminals) is to be decided when this is picked up.
 
 - **Re-assess letting agents prompt running sessions.** `farhelm agent prompt` (an agent sending a message into another
   session's running Claude or Codex agent) landed and was turned off before any release: the helm refuses every such
@@ -486,7 +505,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   is unset without first checking for an interactive shell (`[[ $- == *i* ]]`) or a terminal can then cut short the
   environment an agent captures from it (Claude Code sources `.zshrc` without a terminal), leaving the agent without
   setup made later in that file, such as a PATH entry; this is the same as running the agent in a terminal outside tmux.
-  SPEC.md's "Ownership during cleanup and provisioning" section states the rule.
+  SPEC.md's "Ownership during cleanup and provisioning" section states the rule. Plan:
+  `plans/queue/tmux-drop-from-docs.md`.
 
 ## Tricky bugs
 
@@ -500,7 +520,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `COMMI` and `PR` are not, and fit xterm re-sending retained capitals instead, which this change does not address. The
   entry stays open to gather evidence: there is no reliable reproduction, so the fix is unconfirmed until the symptom
   stays absent in normal use. A recurrence after this change points back to the xterm composition defects the findings
-  doc cites.
+  doc cites. Plan: `plans/queue/tmux-end-old-terminals.md`.
 
 ## Deflake
 
@@ -964,7 +984,8 @@ are not.
 - **Check upstream xterm.js for two link bugs at the next upgrade.** After part of a wrapped URL is repainted, clicking
   it can still open the old target, and on very long wrapped lines a URL's click area shifts onto the row above. Farhelm
   does not work around non-security bugs in the vendored bundle (SPEC_impl.md, decided 2026-10-10), so when the bundle
-  is next upgraded, check whether upstream fixed these and remove this entry.
+  is next upgraded, check whether upstream fixed these and remove this entry. Plan:
+  `plans/queue/tmux-end-old-terminals.md`.
 
 - **Investigate harness-native notifications.** Claude Code and Codex can raise desktop notifications themselves, by
   writing terminal escape codes that a supporting terminal turns into a system notification. Claude Code picks the
