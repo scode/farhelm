@@ -37,6 +37,7 @@ use crate::rows::{
     self, absence_is_evidence, apply_optimistic_renames, count_banner,
     remove_row_reporting_menu_move, retire_vanished_renames, settle_optimistic_renames,
 };
+use crate::sandbox_sessions::{DeleteScope, EnvironmentDelete};
 use crate::session_ops::{HeaderAction, SessionGuard, SessionOps};
 use crate::{ApiBase, Host, HostId, Session, SessionStatus};
 
@@ -450,8 +451,94 @@ pub(crate) struct SharedPreferences(pub(crate) Signal<Preferences>);
 /// form as well as from the list; each sets this, and the list is where it
 /// is shown. Its shared setter reports changes to the in-flow band before
 /// publication, without clearing retained slots whose row DOM is absent.
+///
+/// The band can also carry an environment Delete's result, "The sandbox
+/// stays: …" (`delete_kept_text`). That count is only true until the next
+/// Delete in the same environment, so the third field remembers which host
+/// the band's current text describes, and what other notice it was shown
+/// with ([`KeptNotice`]); `publish_environment_delete` retires or replaces it.
 #[derive(Clone, Copy)]
-pub(crate) struct DeleteNotice(pub(crate) Signal<Option<String>>, Callback<Option<String>>);
+pub(crate) struct DeleteNotice(
+    pub(crate) Signal<Option<String>>,
+    Callback<Option<String>>,
+    Signal<Option<KeptNotice>>,
+);
+
+/// The band's current text is an environment Delete's "stays" result for
+/// `host`, shown ahead of `rest`, the reply's own notice (a checkout it could
+/// not discard, say) or `None`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct KeptNotice {
+    host: HostId,
+    rest: Option<String>,
+}
+
+/// What an accepted hosts read does to a band showing a "stays" count: if the
+/// read is successful and current and no longer lists the count's host, or
+/// lists it as being deleted, the environment is going or gone some other way
+/// (a later Delete that sealed it, perhaps in another window, or Hosts' own
+/// Delete sandbox/container), so the count is retired and the notice it was
+/// shown with, if any, takes its place. Returns the text to write (`None`:
+/// leave the band) and the tag afterwards.
+///
+/// Only a successful read retires it: `HostLookup::Absent`, or
+/// `HostLookup::Known` with the host in `HostPhase::Deleting`, including a
+/// destruction that failed and waits for Retry. That state is what a sealed
+/// environment shows from when the helm learns of the seal until the
+/// environment is destroyed, so without it the band would
+/// keep saying the environment stays through its whole destruction, and
+/// indefinitely after a failed one. A pending or failed read proves nothing,
+/// and a filtered session listing is never consulted.
+pub(super) fn kept_band_after_hosts_read(
+    tag: Option<&KeptNotice>,
+    hosts: &crate::hosts::HostsRead,
+) -> (Option<Option<String>>, Option<KeptNotice>) {
+    let gone = |host| match hosts.lookup(Some(host)) {
+        crate::hosts::HostLookup::Absent => true,
+        crate::hosts::HostLookup::Known(host) => {
+            crate::sandbox_sessions::being_deleted(host).is_some()
+        }
+        crate::hosts::HostLookup::Pending | crate::hosts::HostLookup::Failed(_) => false,
+    };
+    match tag {
+        Some(tag) if gone(tag.host) => (Some(tag.rest.clone()), None),
+        tag => (None, tag.cloned()),
+    }
+}
+
+/// What a successful Delete of a session on environment `host` does to the
+/// band: the text to write (`None`: leave the band as it is; `Some(None)`:
+/// clear it) and the band's kept-environment tag afterwards.
+///
+/// - With a count (`kept`), the band shows it ahead of the reply's notice,
+///   tagged with `host`.
+/// - Without one, a band still showing a count for the same host is
+///   retired: that count is no longer known to be current (this Delete may
+///   have sealed and destroyed the environment, or not; a missing count
+///   proves neither). The reply's own notice takes its place, or else the
+///   notice the count was shown with, so a checkout warning outlives it.
+/// - Otherwise the reply's notice behaves as any Delete notice: it replaces
+///   the band if present and leaves it alone if not. A count for another
+///   environment stays, since this Delete says nothing about that one.
+pub(super) fn environment_band(
+    tag: Option<&KeptNotice>,
+    host: HostId,
+    kept: Option<String>,
+    notice: Option<String>,
+) -> (Option<Option<String>>, Option<KeptNotice>) {
+    if let Some(kept) = kept {
+        let text = match &notice {
+            Some(notice) => format!("{kept}. {notice}"),
+            None => kept,
+        };
+        return (Some(Some(text)), Some(KeptNotice { host, rest: notice }));
+    }
+    match tag {
+        Some(tag) if tag.host == host => (Some(notice.or_else(|| tag.rest.clone())), None),
+        _ if notice.is_some() => (Some(notice), None),
+        tag => (None, tag.cloned()),
+    }
+}
 
 /// One unresolved plain Replace, shared by every control on this page.
 /// The source is reserved before key minting so a late reply from an older
@@ -487,20 +574,49 @@ impl DeleteNotice {
             // empty text: the latter renders the band's dismiss control.
             value.set(next);
         });
-        Self(value, replace)
+        Self(value, replace, Signal::new(None))
     }
 
     /// Show `notice` when there is one; `None` leaves any earlier notice.
-    pub(crate) fn publish(self, notice: Option<String>) {
+    /// A shown notice replaces any kept-environment result with it.
+    pub(crate) fn publish(mut self, notice: Option<String>) {
         if let Some(notice) = notice {
             self.1.call(Some(notice));
+            self.2.set(None);
+        }
+    }
+
+    /// Publish a successful Delete of a session on environment `host`:
+    /// `kept` is its "stays" result when the reply carried a count, `notice`
+    /// the reply's own notice ([`environment_band`] has the rules).
+    pub(crate) fn publish_environment_delete(
+        mut self,
+        host: HostId,
+        kept: Option<String>,
+        notice: Option<String>,
+    ) {
+        let (write, tag) = environment_band(self.2.peek().as_ref(), host, kept, notice);
+        if let Some(text) = write {
+            self.1.call(text);
+        }
+        self.2.set(tag);
+    }
+
+    /// Retire a "stays" count whose environment an accepted hosts read no
+    /// longer lists ([`kept_band_after_hosts_read`]).
+    pub(crate) fn reconcile_hosts(mut self, hosts: &crate::hosts::HostsRead) {
+        let (write, tag) = kept_band_after_hosts_read(self.2.peek().as_ref(), hosts);
+        if let Some(text) = write {
+            self.1.call(text);
+            self.2.set(tag);
         }
     }
 
     /// Remove this in-flow band before its old coordinates can survive in a
     /// session popover; host rows above the band are outside this report.
-    pub(crate) fn dismiss(self) {
+    pub(crate) fn dismiss(mut self) {
         self.1.call(None);
+        self.2.set(None);
     }
 }
 
@@ -764,6 +880,114 @@ pub(super) fn begin_row_operation(mut operations: SessionOps, asking: bool, id: 
 pub(super) fn end_row_operation(mut operations: SessionOps, id: &str) {
     operations.pending.write().remove(id);
     operations.held.write().remove(id);
+}
+
+// ===== Environment session Delete outcomes ==================================
+//
+// The shared Delete core (`admit_delete` in `ListView`) applies these to an
+// environment session's reply. They are pure so the decisions are testable
+// without mounting the list.
+
+/// Which surface sent a Delete, which is where an "unasked" answer (the helm
+/// could not ask the environment's own Farhelm, so nothing was decided)
+/// reopens as the warned whole-environment question.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum UnaskedOffer {
+    /// A sidebar row's Delete question.
+    Row,
+    /// The session view header's Delete question.
+    Header,
+    /// A bulk Delete. SPEC.md: a missing answer partway through "never turns
+    /// into a whole-sandbox Delete without that warned confirmation", and a
+    /// batch has no single question to reopen, so the row keeps its reason.
+    Bulk,
+}
+
+/// What a failed Delete leaves behind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum UnaskedFollowUp {
+    /// Open the row's warned whole-environment question. `explain` also puts
+    /// the helm's reason on the row, for when its menu is not open to show the
+    /// question at once.
+    RowQuestion { explain: bool },
+    /// Hand the session to the header showing it, which opens its own warned
+    /// question (`SessionOps::warned_delete`).
+    HeaderQuestion,
+    /// Show the refusal as the row's ordinary Delete error.
+    Error,
+}
+
+/// Decide [`UnaskedFollowUp`] for one failed Delete.
+///
+/// `escalates` is true only for an "unasked" answer to a Delete that asked
+/// the environment's Farhelm; every other refusal (busy, a definite refusal,
+/// a lost reply) is an ordinary error. The warned question is only ever
+/// opened, never answered: the user must still confirm it. A header that no
+/// longer shows the session cannot open it, so the reason goes on the row.
+pub(super) fn unasked_follow_up(
+    offer: UnaskedOffer,
+    escalates: bool,
+    row_menu_open: bool,
+    header_shows: bool,
+) -> UnaskedFollowUp {
+    if !escalates {
+        return UnaskedFollowUp::Error;
+    }
+    match offer {
+        UnaskedOffer::Row => UnaskedFollowUp::RowQuestion {
+            explain: !row_menu_open,
+        },
+        UnaskedOffer::Header if header_shows => UnaskedFollowUp::HeaderQuestion,
+        UnaskedOffer::Header | UnaskedOffer::Bulk => UnaskedFollowUp::Error,
+    }
+}
+
+/// The cached sessions a successful Delete removes from this page's list
+/// before the next listing confirms it. `reply` is `None` when the helm no
+/// longer knew the session; `peers` are the environment host's cached
+/// sessions captured with the consent.
+///
+/// Only a successful whole-environment Delete drops the peers at once: its
+/// success means the resource and everything in it are gone.
+///
+/// A Delete that asked the environment's Farhelm removes only its own
+/// session here, whatever the reply says. A reply without a count does NOT
+/// prove the environment went: the helm answers the same bare success when
+/// an earlier attempt had already deleted only this session (its supervisor
+/// answered "not found"), and the decoder yields no count when a success body
+/// is unreadable. Dropping peers then would also close a peer's open view
+/// (`on_removed`), which no later listing reopens. The listing refresh that
+/// follows every Delete removes the peers that really went with a seal. A
+/// session the helm no longer knew (`reply` is `None`) proves nothing about
+/// its peers either.
+pub(super) fn locally_removed(
+    id: &str,
+    environment: Option<EnvironmentDelete>,
+    reply: Option<&farhelm_proto::SessionDeleteOutcome>,
+    peers: Vec<String>,
+) -> Vec<String> {
+    let takes_peers = reply.is_some()
+        && environment.is_some_and(|environment| environment.scope == DeleteScope::Whole);
+    let mut removed = if takes_peers { peers } else { Vec::new() };
+    removed.push(id.to_owned());
+    removed.sort();
+    removed.dedup();
+    removed
+}
+
+/// An environment Delete's "stays" result: that the environment stayed, with
+/// the count its own Farhelm reported. `None` without a count, which proves
+/// nothing either way (`environment_band`).
+pub(super) fn delete_kept_text(
+    environment: EnvironmentDelete,
+    reply: &farhelm_proto::SessionDeleteOutcome,
+) -> Option<String> {
+    (environment.scope == DeleteScope::Session)
+        .then_some(reply.environment_remaining)
+        .flatten()
+        .map(|remaining| {
+            crate::environment_ui::ProviderUi(environment.provider).delete_kept(remaining)
+        })
 }
 
 /// Name a chosen host even after its registry row disappears.
@@ -2247,6 +2471,9 @@ pub(crate) fn ListView(
                     host_moved.into_iter().map(|id| id.to_string()),
                 ));
                 hosts.write().record(outcome);
+                // The environment of a "stays" count may have gone some other
+                // way; only this accepted read can show it.
+                delete_notice.reconcile_hosts(&hosts.peek());
             }
             answered
         }
@@ -2688,165 +2915,241 @@ pub(crate) fn ListView(
     //
     // The single-action wrapper below preserves the header's synchronous
     // started/not-started answer while bulk callers await the returned core.
-    let mut admit_delete =
-        move |id: String, guard: crate::DeleteGuard, sandbox: Option<HostId>| -> Option<RowWork> {
-            if rename_editor
+    //
+    // `environment` is the consent an environment session's question drew
+    // (`sandbox_sessions::EnvironmentDelete`); `offer` says which surface
+    // asked, which is where an "unasked" answer reopens as the warned
+    // whole-environment question (`unasked_follow_up`).
+    let mut admit_delete = move |id: String,
+                                 guard: crate::DeleteGuard,
+                                 environment: Option<EnvironmentDelete>,
+                                 offer: UnaskedOffer|
+          -> Option<RowWork> {
+        if rename_editor
+            .peek()
+            .as_ref()
+            .is_some_and(|editor| editor.id == id)
+            || !begin_row_op(&id)
+        {
+            return None;
+        }
+        // Shown from here until the reply: the row and, if this session is
+        // open, the header switch to their in-progress state. Cleared beside
+        // each `end_row_op` below, on success and on failure alike.
+        deleting.write().insert(id.clone());
+        // The cached peers on the same environment host, captured with
+        // the consent. Display cleanup after a confirmed removal of the
+        // environment (`locally_removed`), never membership evidence used
+        // to authorize it. Include an open peer even when the sidebar's
+        // current filter hides that session.
+        let mut peers = if let Some(environment) = environment {
+            listing
                 .peek()
                 .as_ref()
-                .is_some_and(|editor| editor.id == id)
-                || !begin_row_op(&id)
-            {
-                return None;
-            }
-            // Shown from here until the reply: the row and, if this session is
-            // open, the header switch to their in-progress state. Cleared beside
-            // each `end_row_op` below, on success and on failure alike.
-            deleting.write().insert(id.clone());
-            // This is display cleanup after confirmed resource deletion, not
-            // membership evidence used to authorize it. Include an open peer
-            // even when the sidebar's current filter hides that session.
-            let mut removed_ids = if let Some(host) = sandbox {
-                listing
-                    .peek()
-                    .as_ref()
-                    .and_then(|answer| answer.as_ref().ok())
-                    .map(|listing| {
-                        listing
-                            .sessions
-                            .iter()
-                            .filter(|session| session.host == Some(host))
-                            .map(|session| session.id.raw().to_string())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            if sandbox.is_some_and(|host| {
-                delete_open_host
-                    .as_ref()
-                    .is_some_and(|open| open.id == host)
-            }) && let Some(open) = selected.peek().clone()
-            {
-                removed_ids.push(open);
-            }
-            removed_ids.push(id.clone());
-            removed_ids.sort();
-            removed_ids.dedup();
-            if sandbox.is_none() {
-                super::trash::capture_row(&id);
-            }
-            let base = delete_base.clone();
-            let refresh = delete_refresh.clone();
-            let popovers = delete_popovers.clone();
-            Some(Box::pin(async move {
-                let outcome = if sandbox.is_some() {
-                    api::delete_sandbox_session(&base, &id).await
-                } else {
-                    delete_session(&base, &id, guard).await
-                };
-                let archived = outcome.as_ref().is_ok_and(|reply| reply.archived);
-                super::trash::finish_row_cue(&id, archived);
-                if let Ok(reply) = &outcome {
-                    delete_notice.publish(reply.notice.clone());
-                    if reply.archived {
-                        trash_revision.write().request();
-                    }
-                }
-                match outcome.err() {
-                    Some(e) => {
-                        errors.write().insert(id.clone(), format!("Delete: {e}"));
-                        deleting.write().remove(&id);
-                        end_row_op(&id);
-                        // A refusal changed nothing on the host, so no fleet
-                        // event will correct a stale row; read the listing now,
-                        // so a row the supervisor found alive shows that and
-                        // the next Delete decides from current state under the
-                        // same session-confirmation preference.
-                        refresh(Trigger::Explicit);
-                    }
-                    None => {
-                        errors.write().remove(&id);
-                        // Removed from the LOCAL listing immediately, before
-                        // releasing `pending` — the one deliberate optimistic
-                        // exception in this file (PLAN_M2.md's "no optimistic
-                        // status flips" is about STATUS badges specifically;
-                        // this is acting on a delete response already in
-                        // hand, not guessing). Waiting for the next poll
-                        // instead would leave the stale row's delete button
-                        // re-enabled with nothing left server-side to delete
-                        // — a second click in that window would 404 against
-                        // an id that no longer exists, a confusing failure
-                        // for an action that had already succeeded.
-                        if let Some(Ok(current)) = listing.write().as_mut() {
-                            let open_anchor = popovers.first_open_row(AnchorRegion::Sessions);
-                            // Judged on the displayed order, which an order hold
-                            // can make differ from the served one. The menu and
-                            // bell exclude each other; check their sole anchor
-                            // before removal discards the old layout baseline.
-                            let held = order_hold.peek().clone();
-                            let mut moved = false;
-                            for removed in &removed_ids {
-                                // Every cached peer must leave the list, even after
-                                // an earlier removal already moved the menu anchor.
-                                moved |= remove_row_reporting_menu_move(
-                                    &mut current.sessions,
-                                    removed,
-                                    open_anchor.as_deref(),
-                                    held.as_ref(),
-                                );
-                            }
-                            if moved {
-                                // The old paired clear also wrote the closed slot.
-                                // Keep those effect notifications, including when
-                                // removal took the anchor itself out of the list.
-                                popovers.close_registered(AnchorRegion::Sessions);
-                            }
-                        }
-                        // A listing read already in flight started before the
-                        // helm finished this delete, and it would otherwise
-                        // commit as the newest read (the refresh below only
-                        // queues behind it), putting the deleted row back with
-                        // its Delete button live until the refresh lands. The
-                        // fence supersedes every read that started before this
-                        // confirmed delete (see `ReadGate::fence`).
-                        listing_reads.write().fence();
-                        deleting.write().remove(&id);
-                        end_row_op(&id);
-                        // AFTER the local bookkeeping, so a selection change
-                        // this triggers repaints against the already-updated
-                        // listing: the owner clears the right pane if the
-                        // session it shows is the one that just went away.
-                        for removed in &removed_ids {
-                            on_removed.call(removed.clone());
-                        }
-                        // The optimistic removal takes the ROW and nothing else:
-                        // the fleet total, the matching count and the truncation
-                        // flag all still describe a list that included it, and
-                        // this client cannot recompute any of them (a truncated
-                        // walk does not even know whether the row it dropped was
-                        // one of the ones it was counting). The feed's own
-                        // notification would settle that — except under a latched
-                        // build mismatch, where the feed and the fallback are both
-                        // withdrawn and this explicit read is the ONLY thing that
-                        // will ever correct the banner.
-                        refresh(Trigger::Explicit);
-                    }
-                }
-            }))
+                .and_then(|answer| answer.as_ref().ok())
+                .map(|listing| {
+                    listing
+                        .sessions
+                        .iter()
+                        .filter(|session| session.host == Some(environment.host))
+                        .map(|session| session.id.raw().to_string())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
         };
+        if environment.is_some_and(|environment| {
+            delete_open_host
+                .as_ref()
+                .is_some_and(|open| open.id == environment.host)
+        }) && let Some(open) = selected.peek().clone()
+        {
+            peers.push(open);
+        }
+        // Environment Deletes never archive a checkout (SPEC.md, "Sandbox
+        // sessions"), so they never earn the trash cue.
+        if environment.is_none() {
+            super::trash::capture_row(&id);
+        }
+        let base = delete_base.clone();
+        let refresh = delete_refresh.clone();
+        let popovers = delete_popovers.clone();
+        Some(Box::pin(async move {
+            let outcome = match environment {
+                Some(environment) => {
+                    api::delete_in_environment(&base, &id, environment.scope).await
+                }
+                None => delete_session(&base, &id, guard)
+                    .await
+                    .map_err(api::EnvironmentDeleteRefusal::Refused),
+            };
+            // `Ok(None)`: the helm no longer knows the session, which
+            // counts as deleted (a bulk run's earlier Delete may have
+            // sealed and destroyed its environment). `Err`: the reason,
+            // and whether nothing was decided because the helm could not
+            // ask the environment's Farhelm.
+            let outcome = match outcome {
+                Ok(reply) => Ok(Some(reply)),
+                Err(api::EnvironmentDeleteRefusal::Gone) => Ok(None),
+                Err(api::EnvironmentDeleteRefusal::Unasked(text)) => Err((text, true)),
+                Err(api::EnvironmentDeleteRefusal::Refused(text)) => Err((text, false)),
+            };
+            let archived = outcome
+                .as_ref()
+                .is_ok_and(|reply| reply.as_ref().is_some_and(|reply| reply.archived));
+            super::trash::finish_row_cue(&id, archived);
+            // An environment session's success, including one the helm no
+            // longer knew, updates any "stays" result for its environment.
+            match (&outcome, environment) {
+                (Ok(Some(reply)), Some(environment)) => delete_notice.publish_environment_delete(
+                    environment.host,
+                    delete_kept_text(environment, reply),
+                    reply.notice.clone(),
+                ),
+                (Ok(None), Some(environment)) => {
+                    delete_notice.publish_environment_delete(environment.host, None, None)
+                }
+                (Ok(Some(reply)), None) => delete_notice.publish(reply.notice.clone()),
+                (Ok(None), None) | (Err(_), _) => {}
+            }
+            if let Ok(Some(reply)) = &outcome
+                && reply.archived
+            {
+                trash_revision.write().request();
+            }
+            match outcome {
+                Err((e, unasked)) => {
+                    deleting.write().remove(&id);
+                    end_row_op(&id);
+                    let escalates = unasked
+                        && environment.is_some_and(|environment| {
+                            environment.scope == crate::sandbox_sessions::DeleteScope::Session
+                        });
+                    let follow_up = unasked_follow_up(
+                        offer,
+                        escalates,
+                        menu_open.peek().as_deref() == Some(id.as_str()),
+                        selected.peek().as_deref() == Some(id.as_str()),
+                    );
+                    match follow_up {
+                        UnaskedFollowUp::RowQuestion { explain } => {
+                            // The question holds the session claim, like
+                            // one the user opened; it stays open until
+                            // answered, and shows when this row's menu
+                            // is (or next is) open.
+                            if let Some(claim) = operations.claim(&id) {
+                                row_questions.open(id.clone(), RowQuestion::DeleteWhole, claim);
+                                if explain {
+                                    errors.write().insert(id.clone(), format!("Delete: {e}"));
+                                } else {
+                                    errors.write().remove(&id);
+                                }
+                            } else {
+                                errors.write().insert(id.clone(), format!("Delete: {e}"));
+                            }
+                        }
+                        UnaskedFollowUp::HeaderQuestion => {
+                            errors.write().remove(&id);
+                            operations.warned_delete.set(Some(id.clone()));
+                        }
+                        UnaskedFollowUp::Error => {
+                            errors.write().insert(id.clone(), format!("Delete: {e}"));
+                        }
+                    }
+                    // A refusal changed nothing on the host, so no fleet
+                    // event will correct a stale row; read the listing now,
+                    // so a row the supervisor found alive shows that and
+                    // the next Delete decides from current state under the
+                    // same session-confirmation preference.
+                    refresh(Trigger::Explicit);
+                }
+                Ok(reply) => {
+                    let removed_ids = locally_removed(&id, environment, reply.as_ref(), peers);
+                    errors.write().remove(&id);
+                    // Removed from the LOCAL listing immediately, before
+                    // releasing `pending` — the one deliberate optimistic
+                    // exception in this file (PLAN_M2.md's "no optimistic
+                    // status flips" is about STATUS badges specifically;
+                    // this is acting on a delete response already in
+                    // hand, not guessing). Waiting for the next poll
+                    // instead would leave the stale row's delete button
+                    // re-enabled with nothing left server-side to delete
+                    // — a second click in that window would 404 against
+                    // an id that no longer exists, a confusing failure
+                    // for an action that had already succeeded.
+                    if let Some(Ok(current)) = listing.write().as_mut() {
+                        let open_anchor = popovers.first_open_row(AnchorRegion::Sessions);
+                        // Judged on the displayed order, which an order hold
+                        // can make differ from the served one. The menu and
+                        // bell exclude each other; check their sole anchor
+                        // before removal discards the old layout baseline.
+                        let held = order_hold.peek().clone();
+                        let mut moved = false;
+                        for removed in &removed_ids {
+                            // Every cached peer must leave the list, even after
+                            // an earlier removal already moved the menu anchor.
+                            moved |= remove_row_reporting_menu_move(
+                                &mut current.sessions,
+                                removed,
+                                open_anchor.as_deref(),
+                                held.as_ref(),
+                            );
+                        }
+                        if moved {
+                            // The old paired clear also wrote the closed slot.
+                            // Keep those effect notifications, including when
+                            // removal took the anchor itself out of the list.
+                            popovers.close_registered(AnchorRegion::Sessions);
+                        }
+                    }
+                    // A listing read already in flight started before the
+                    // helm finished this delete, and it would otherwise
+                    // commit as the newest read (the refresh below only
+                    // queues behind it), putting the deleted row back with
+                    // its Delete button live until the refresh lands. The
+                    // fence supersedes every read that started before this
+                    // confirmed delete (see `ReadGate::fence`).
+                    listing_reads.write().fence();
+                    deleting.write().remove(&id);
+                    end_row_op(&id);
+                    // AFTER the local bookkeeping, so a selection change
+                    // this triggers repaints against the already-updated
+                    // listing: the owner clears the right pane if the
+                    // session it shows is the one that just went away.
+                    for removed in &removed_ids {
+                        on_removed.call(removed.clone());
+                    }
+                    // The optimistic removal takes the ROW and nothing else:
+                    // the fleet total, the matching count and the truncation
+                    // flag all still describe a list that included it, and
+                    // this client cannot recompute any of them (a truncated
+                    // walk does not even know whether the row it dropped was
+                    // one of the ones it was counting). The feed's own
+                    // notification would settle that — except under a latched
+                    // build mismatch, where the feed and the fallback are both
+                    // withdrawn and this explicit read is the ONLY thing that
+                    // will ever correct the banner.
+                    refresh(Trigger::Explicit);
+                }
+            }
+        }))
+    };
     let mut bulk_admit_delete = admit_delete.clone();
     // The header still receives synchronous started/not-started acceptance.
     // Both callers own exactly the completion returned by the same admission.
-    let mut do_delete =
-        move |id: String, guard: crate::DeleteGuard, sandbox: Option<HostId>| -> bool {
-            if let Some(work) = admit_delete(id, guard, sandbox) {
-                spawn(work);
-                true
-            } else {
-                false
-            }
-        };
+    let mut do_delete = move |id: String,
+                              guard: crate::DeleteGuard,
+                              environment: Option<EnvironmentDelete>,
+                              offer: UnaskedOffer|
+          -> bool {
+        if let Some(work) = admit_delete(id, guard, environment, offer) {
+            spawn(work);
+            true
+        } else {
+            false
+        }
+    };
 
     // The delete button's initial click: decides whether this id needs
     // confirming at all. A skipped question uses the same request and guard
@@ -2879,7 +3182,7 @@ pub(crate) fn ListView(
         if (operations.busy_now(&target.id) && row_questions.peek_key(&target.id).is_none())
             || row_questions
                 .peek_key(&target.id)
-                .is_some_and(|question| question != RowQuestion::Delete)
+                .is_some_and(|question| !question.is_delete())
             || rename_editor
                 .read()
                 .as_ref()
@@ -2926,7 +3229,7 @@ pub(crate) fn ListView(
             // spawned. There is no lingering process tree to worry about,
             // not because nothing ever ran, but because the one thing
             // that could have left descendants never got the chance to.
-            do_delete_on_confirm(target.id, guard, target.sandbox);
+            do_delete_on_confirm(target.id, guard, target.environment, UnaskedOffer::Row);
         } else {
             // Unknown must not borrow a live status's "is still running" claim
             // it has no basis for — SPEC.md's no-guessing rule means an
@@ -2944,10 +3247,15 @@ pub(crate) fn ListView(
             // render that swapped the menu for the prompt must not retire
             // the opening that render's answers carry. (The Replace
             // question was refused above, so an open lane here is Delete.)
+            //
+            // An environment session opens the question its row was drawn
+            // with: the warned whole-environment one only while the helm is
+            // not connected to that environment (`DeleteTarget::question`).
             if row_questions.peek_key(&target.id).is_none()
                 && let Some(claim) = operations.claim(&target.id)
             {
-                row_questions.open(target.id, RowQuestion::Delete, claim);
+                let question = target.question();
+                row_questions.open(target.id, question, claim);
             }
         }
     };
@@ -2972,26 +3280,31 @@ pub(crate) fn ListView(
     // the UI to leave alone.
     // `guard` and `token` come from the row render that drew the prompt the
     // user answered (`status::delete_guard`), not from the row as it reads now.
-    let confirm_delete = move |(id, token, guard, sandbox): (
+    //
+    // An environment session's consent is the question's own: the warned
+    // lane answers with the whole-environment Delete, the other with the one
+    // that asks the environment's Farhelm (`RowQuestion::answered`).
+    let confirm_delete = move |(id, token, guard, environment): (
         String,
         ConfirmToken<RowQuestion>,
         crate::DeleteGuard,
-        Option<HostId>,
+        Option<EnvironmentDelete>,
     )| {
         // Consume only the opening that supplied the displayed consequence.
         // Its guard drops before synchronous admission below, without an event
         // or callback between releasing the question and claiming the request.
-        if *token.key() != RowQuestion::Delete || row_questions.take(&id, &token).is_none() {
+        if !token.key().is_delete() || row_questions.take(&id, &token).is_none() {
             return;
         }
-        do_delete(id, guard, sandbox);
+        let environment = token.key().answered(environment);
+        do_delete(id, guard, environment, UnaskedOffer::Row);
     };
 
     // The inline prompt's cancel button: closes the opening it was drawn
     // for, and nothing later. No API call, no `row_pending` involvement —
     // cancelling was never in flight to begin with.
     let cancel_delete = move |(id, token): (String, ConfirmToken<RowQuestion>)| {
-        if *token.key() == RowQuestion::Delete {
+        if token.key().is_delete() {
             row_questions.cancel_for(&id, &token);
         }
     };
@@ -3087,9 +3400,9 @@ pub(crate) fn ListView(
                 spawn(work);
             }
         }
-        HeaderAction::Delete(id, guard, sandbox, claim) => {
+        HeaderAction::Delete(id, guard, environment, claim) => {
             drop(claim);
-            if !header_delete_action(id.clone(), guard, sandbox) {
+            if !header_delete_action(id.clone(), guard, environment, UnaskedOffer::Header) {
                 errors.write().insert(
                     id,
                     "Delete: not started, another operation is in progress; try again".into(),
@@ -4207,6 +4520,20 @@ pub(crate) fn ListView(
                     .unwrap_or_default();
                 lifecycle::admitted_targets(drawn, &visible, &marked.peek())
             };
+            // Rechecked here, at admission: a question drawn before a host
+            // entered Deleting must not dispatch to it now. The rest of a
+            // mixed batch proceeds; each left-out row says why.
+            let (targets, excluded) = lifecycle::exclude_unavailable(targets, |target| {
+                crate::sandbox_sessions::deleting_reason(
+                    target.host,
+                    hosts.peek().hosts().unwrap_or_default(),
+                )
+            });
+            for (target, reason) in excluded {
+                errors
+                    .write()
+                    .insert(target.id.raw().to_owned(), action.unavailable(reason));
+            }
             if targets.is_empty() {
                 return;
             }
@@ -4225,24 +4552,22 @@ pub(crate) fn ListView(
                 .iter()
                 .map(|target| target.id.raw().to_owned())
                 .collect::<HashSet<_>>();
-            let sandbox_ids = targets
+            // Each environment target's consent as the modal drew it: one
+            // request per marked session of a reachable environment, one
+            // warned whole-environment Delete per unreachable one
+            // (`lifecycle::delete_requests`).
+            let environments = targets
                 .iter()
-                .filter(|target| target.sandbox)
-                .map(|target| target.id.raw().to_owned())
-                .collect::<HashSet<_>>();
-            let target_hosts = targets
-                .iter()
-                .map(|target| (target.id.raw().to_owned(), target.host))
-                .collect::<HashMap<_, _>>();
-            let mut seen_sandboxes = HashSet::new();
-            let targets = targets
-                .into_iter()
-                .filter(|target| {
-                    action != LifecycleAction::Delete
-                        || !target.sandbox
-                        || seen_sandboxes.insert(target.host)
+                .filter_map(|target| {
+                    target
+                        .environment_delete()
+                        .map(|environment| (target.id.raw().to_owned(), environment))
                 })
-                .collect();
+                .collect::<HashMap<_, _>>();
+            let targets = match action {
+                LifecycleAction::Delete => lifecycle::delete_requests(targets),
+                LifecycleAction::Stop => targets,
+            };
             let work = lifecycle::admit_batch(
                 targets,
                 |id, guard, refuse_if_tabs_open, refuse_if_agent_running| match action {
@@ -4250,11 +4575,10 @@ pub(crate) fn ListView(
                         bulk_admit_stop(id, refuse_if_tabs_open, refuse_if_agent_running, false)
                     }
                     LifecycleAction::Delete => {
-                        let sandbox = sandbox_ids
-                            .contains(&id)
-                            .then(|| target_hosts.get(&id).copied().flatten())
-                            .flatten();
-                        bulk_admit_delete(id, guard, sandbox)
+                        // A refusal or "unasked" answer stays on its row:
+                        // a bulk run never opens the warned question itself.
+                        let environment = environments.get(&id).copied();
+                        bulk_admit_delete(id, guard, environment, UnaskedOffer::Bulk)
                     }
                 },
                 |id| {
@@ -4309,6 +4633,20 @@ pub(crate) fn ListView(
             let displayed = rows::held_display_order(order_hold.peek().as_ref(), &current.sessions);
             marking::admitted_targets(drawn, &displayed, &marked.peek())
         };
+        // Sessions whose environment is being deleted take no lifecycle
+        // action, from a batch any more than from their row or header. They
+        // get the reason; the eligible rest of the selection goes ahead.
+        let (targets, excluded) = lifecycle::exclude_unavailable(targets, |row| {
+            crate::sandbox_sessions::deleting_reason(
+                row.host,
+                hosts.peek().hosts().unwrap_or_default(),
+            )
+        });
+        for (row, reason) in excluded {
+            errors
+                .write()
+                .insert(row.id.raw().to_owned(), action.unavailable(reason));
+        }
         let local = host_options(hosts.peek().hosts().unwrap_or_default())
             .into_iter()
             .find(|host| host.local)
@@ -4322,6 +4660,7 @@ pub(crate) fn ListView(
                         row,
                         hosts.peek().hosts().unwrap_or_default(),
                     ),
+                    crate::sandbox_sessions::delete_scope(hosts.peek().lookup(row.host)),
                 )
             })
             .collect();
@@ -5387,6 +5726,11 @@ pub(crate) fn ListView(
                 if !effective_marks.is_empty() {
                     marking::MarkedBar {
                         targets: effective_marks.clone(), disabled: nav_locked,
+                        unavailable: effective_marks
+                            .iter()
+                            .filter(|row| crate::sandbox_sessions::deleting_reason(row.host, hosts.read().hosts().unwrap_or_default()).is_some())
+                            .map(|row| row.id.raw().to_owned())
+                            .collect::<Vec<_>>(),
                         layout_epoch, on_action: bulk_metadata, on_clear: clear_marks,
                         on_lifecycle: bulk_lifecycle, on_open: marking_surface_opened,
                     }
@@ -6187,6 +6531,259 @@ fn listed_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An environment Delete on host 7 under `scope`, for the outcome tests.
+    fn environment_delete(scope: DeleteScope) -> EnvironmentDelete {
+        EnvironmentDelete {
+            host: 7,
+            provider: farhelm_proto::ProviderKind::Podman,
+            scope,
+        }
+    }
+
+    /// SPEC.md: when the helm cannot ask the environment's Farhelm, Delete
+    /// "offers the whole-sandbox Delete instead", never sends it on its own;
+    /// and in a bulk run a missing answer "leaves that row with its reason".
+    /// Only an "unasked" answer to the Delete that asked escalates, and only
+    /// to opening the warned question on the surface that sent it.
+    #[farhelm_testtrace::test]
+    fn only_an_unasked_answer_reopens_as_the_warned_question_where_it_was_asked() {
+        use UnaskedFollowUp::{Error, HeaderQuestion, RowQuestion};
+        for offer in [UnaskedOffer::Row, UnaskedOffer::Header, UnaskedOffer::Bulk] {
+            assert_eq!(unasked_follow_up(offer, false, true, true), Error);
+        }
+        assert_eq!(
+            unasked_follow_up(UnaskedOffer::Row, true, true, false),
+            RowQuestion { explain: false }
+        );
+        assert_eq!(
+            unasked_follow_up(UnaskedOffer::Row, true, false, false),
+            RowQuestion { explain: true },
+            "a closed menu cannot show the question, so the row says why"
+        );
+        assert_eq!(
+            unasked_follow_up(UnaskedOffer::Header, true, false, true),
+            HeaderQuestion
+        );
+        assert_eq!(
+            unasked_follow_up(UnaskedOffer::Header, true, false, false),
+            Error,
+            "a header no longer showing the session cannot ask"
+        );
+        assert_eq!(
+            unasked_follow_up(UnaskedOffer::Bulk, true, true, true),
+            Error
+        );
+    }
+
+    /// Only a successful whole-environment Delete may drop the other cached
+    /// sessions of that host at once. Dropping a peer that still exists hides
+    /// its row and closes its open view, which no later listing reopens; so a
+    /// Delete that asked the environment's Farhelm removes only its own
+    /// session whatever its reply says, and the listing refresh removes peers
+    /// that really went with a seal. An ordinary Delete never touches peers.
+    #[farhelm_testtrace::test]
+    fn local_removal_drops_peers_only_when_the_environment_went() {
+        // "peer" stands for another session of the same container, open in
+        // the session view while "gone" is deleted.
+        let peers = || vec!["peer".to_owned(), "gone".to_owned()];
+        let kept = farhelm_proto::SessionDeleteOutcome {
+            environment_remaining: Some(1),
+            ..Default::default()
+        };
+        let ended = farhelm_proto::SessionDeleteOutcome::default();
+        let session = Some(environment_delete(DeleteScope::Session));
+        let whole = Some(environment_delete(DeleteScope::Whole));
+        assert_eq!(
+            locally_removed("gone", session, Some(&kept), peers()),
+            ["gone"]
+        );
+        assert_eq!(locally_removed("gone", session, None, peers()), ["gone"]);
+        // The helm's bare success after an earlier attempt had deleted only
+        // this session: the container and the open peer are still there.
+        assert_eq!(
+            locally_removed("gone", session, Some(&ended), peers()),
+            ["gone"]
+        );
+        // A non-final Delete whose success body could not be read, through
+        // the real decoder: a success with a notice and no count.
+        let unreadable = crate::api::delete_reply(Err("connection reset".into()));
+        assert_eq!(unreadable.environment_remaining, None, "the premise");
+        assert!(unreadable.notice.is_some());
+        assert_eq!(
+            locally_removed("gone", session, Some(&unreadable), peers()),
+            ["gone"],
+            "the open peer must stay, or its view would close"
+        );
+        assert_eq!(
+            locally_removed("gone", whole, Some(&ended), peers()),
+            ["gone", "peer"]
+        );
+        assert_eq!(
+            locally_removed("gone", None, Some(&ended), peers()),
+            ["gone"]
+        );
+    }
+
+    /// The kept-environment result goes in the Delete notice band, worded per
+    /// provider from the count the environment's Farhelm reported. Nothing
+    /// else makes one: no count, or the whole-environment Delete.
+    #[farhelm_testtrace::test]
+    fn delete_kept_text_reports_the_environment_that_stayed() {
+        let session = environment_delete(DeleteScope::Session);
+        let kept = |remaining| farhelm_proto::SessionDeleteOutcome {
+            environment_remaining: Some(remaining),
+            ..Default::default()
+        };
+        assert_eq!(
+            delete_kept_text(session, &kept(2)).as_deref(),
+            Some("The container stays: 2 other sessions are in it")
+        );
+        let sandbox = EnvironmentDelete {
+            provider: farhelm_proto::ProviderKind::Tensorlake,
+            ..session
+        };
+        assert_eq!(
+            delete_kept_text(sandbox, &kept(1)).as_deref(),
+            Some("The sandbox stays: 1 other session is in it")
+        );
+        let ended = farhelm_proto::SessionDeleteOutcome::default();
+        assert_eq!(delete_kept_text(session, &ended), None);
+        assert_eq!(
+            delete_kept_text(environment_delete(DeleteScope::Whole), &kept(2)),
+            None
+        );
+    }
+
+    /// SPEC.md: the result "says the sandbox stays and how many other sessions
+    /// it holds". That count is only true until the next Delete in the same
+    /// environment: deleting its last two sessions must not leave the band
+    /// claiming that a destroyed environment stays. A later success there
+    /// replaces the count, or retires it when the reply has none, without
+    /// claiming destruction; a checkout warning shown with it survives; and a
+    /// Delete in another environment leaves it alone.
+    #[farhelm_testtrace::test]
+    fn a_later_delete_in_the_same_environment_retires_its_kept_count() {
+        let stays = |n: u32| format!("The sandbox stays: {n} other sessions are in it");
+        // First Delete: a count, with a checkout warning beside it.
+        let (write, tag) = environment_band(None, 7, Some(stays(2)), Some("Checkout kept.".into()));
+        assert_eq!(write, Some(Some(format!("{}. Checkout kept.", stays(2)))));
+        let tag = tag.expect("the band now describes host 7");
+        // The same environment answers with a newer count: replaced.
+        let (write, newer) = environment_band(Some(&tag), 7, Some(stays(1)), None);
+        assert_eq!(write, Some(Some(stays(1))));
+        assert_eq!(newer.as_ref().map(|tag| tag.host), Some(7));
+        // The sealing Delete answers with no count: the count is retired and
+        // the checkout warning it was shown with comes back.
+        let (write, after) = environment_band(Some(&tag), 7, None, None);
+        assert_eq!(write, Some(Some("Checkout kept.".into())));
+        assert_eq!(after, None);
+        // With no other notice the band clears; with a new notice that shows.
+        let bare = environment_band(newer.as_ref(), 7, None, None);
+        assert_eq!(bare, (Some(None), None));
+        let noticed = environment_band(newer.as_ref(), 7, None, Some("Left /work.".into()));
+        assert_eq!(noticed, (Some(Some("Left /work.".into())), None));
+        // Another environment's Delete without a notice leaves the count.
+        let other = environment_band(newer.as_ref(), 9, None, None);
+        assert_eq!(other, (None, newer.clone()));
+        // One with a notice replaces the band as any Delete notice does.
+        let other_notice = environment_band(newer.as_ref(), 9, None, Some("Left /x.".into()));
+        assert_eq!(other_notice, (Some(Some("Left /x.".into())), None));
+    }
+
+    /// SPEC.md accepts only a brief discrepancy before the list shows the
+    /// truth. A "stays" count whose environment was destroyed some other way
+    /// (another window's sealing Delete, Hosts' own Delete) must go once a
+    /// successful, current hosts read no longer lists that host, leaving the
+    /// checkout warning it was shown with. The same goes for a read that
+    /// lists the host as being deleted, with or without a failure: a sealed
+    /// environment shows that state for its whole destruction, and until a
+    /// Retry if the destruction fails, so waiting for its absence would leave the
+    /// count beside a "Deleting failed" host. A read that lists it in any
+    /// other state, or one that is pending or failed, proves nothing and
+    /// keeps it.
+    #[farhelm_testtrace::test]
+    fn a_hosts_read_without_the_environment_retires_its_kept_count() {
+        use crate::hosts::HostsRead;
+        let tag = KeptNotice {
+            host: 7,
+            rest: Some("Checkout kept.".into()),
+        };
+        // Only the id matters to this rule.
+        let host = |id| crate::Host {
+            id,
+            kind: crate::HostKind::Podman,
+            destination: None,
+            alias: None,
+            name: format!("env-{id}").into(),
+            identity: None,
+            remote_farhelm: None,
+            remote_state_dir: None,
+            state: crate::HostPhase::Unrecognized,
+            incarnation: 1,
+            trash_epoch: 0,
+            yolo_without_asking: false,
+            commands_without_asking: false,
+            own_sessions_without_asking: false,
+            is_session_owned: true,
+            links_without_asking: false,
+            local_links_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
+            tensorlake: None,
+            environment: None,
+        };
+        let mut read = HostsRead::default();
+        assert_eq!(
+            kept_band_after_hosts_read(Some(&tag), &read),
+            (None, Some(tag.clone())),
+            "a pending read keeps it"
+        );
+        read.record(Ok(vec![host(7), host(9)]));
+        assert_eq!(
+            kept_band_after_hosts_read(Some(&tag), &read),
+            (None, Some(tag.clone())),
+            "the host is still listed"
+        );
+        read.record(Ok(vec![host(9)]));
+        read.record(Err("helm unreachable".into()));
+        assert_eq!(
+            kept_band_after_hosts_read(Some(&tag), &read),
+            (None, Some(tag.clone())),
+            "a failed read keeps it, whatever the retained snapshot says"
+        );
+        read.record(Ok(vec![host(9)]));
+        assert_eq!(
+            kept_band_after_hosts_read(Some(&tag), &read),
+            (Some(Some("Checkout kept.".into())), None),
+            "absent from a successful read: retired, the checkout warning stays"
+        );
+        let bare = KeptNotice {
+            host: 7,
+            rest: None,
+        };
+        assert_eq!(
+            kept_band_after_hosts_read(Some(&bare), &read),
+            (Some(None), None)
+        );
+        assert_eq!(kept_band_after_hosts_read(None, &read), (None, None));
+
+        for failure in [None, Some("the provider refused")] {
+            let deleting = crate::Host {
+                state: crate::HostPhase::Deleting {
+                    failure: failure.map(Into::into),
+                },
+                ..host(7)
+            };
+            let mut read = HostsRead::default();
+            read.record(Ok(vec![deleting, host(9)]));
+            assert_eq!(
+                kept_band_after_hosts_read(Some(&tag), &read),
+                (Some(Some("Checkout kept.".into())), None),
+                "listed as being deleted ({failure:?}): retired, the checkout warning stays"
+            );
+        }
+    }
 
     /// A late rejected return must not close a newer mounted draft. Only its
     /// own settlement can authorize the parent to discard the current seeds.

@@ -71,8 +71,10 @@ that its required systemd or SSH substrate ran.
 - The real Linux `podman_environments` e2e module uses a throwaway helm, the production provider and the ordinary
   in-container supervisor/installer. One recipe build covers a public GitHub managed checkout, endpoint credential
   delivery, ordinary grid/tab/file/upload/download protocols, a nonce-proven loopback HTTP relay, pause/Resume process
-  survival, Stop and conversation Restart with a stand-in, helm reconnection, external-stop automatic start once,
-  confirmed Delete and nonforcing cleanup of an image held by another owned container. The explicitly ignored
+  survival, Stop and conversation Restart with a stand-in, helm reconnection, external-stop automatic start once, the
+  user's environment Delete (unasked while paused, one that keeps the container for a session an agent inside created
+  and reports the count, and the last session's, which seals and destroys the container) and nonforcing cleanup of an
+  image held by another owned container. The explicitly ignored
   `real_ssh_environment_managed_checkout_and_ordinary_features` variant runs the same scenario through a real localhost
   SSH place on an owned, preconfigured machine. Select it with `--run-ignored only` and its exact test name when SSH
   acceptance is requested. It fails if strict passwordless localhost SSH is unavailable. This protocol coverage leaves

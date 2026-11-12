@@ -79,9 +79,11 @@ list, a session that has already ended and has no shell tabs open is deleted at 
 When a confirmation opens, Enter confirms it; **Cancel** backs out. The YOLO question still starts on **Cancel**.
 
 [Container sessions](/docs/agents/containerized-sessions/#stopping-and-deleting) and
-[session-owned sandboxes](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) always confirm Delete.
-It permanently destroys the whole environment and all its files, bypassing the checkout trash. Their Suspend, Resume
-and Stop and suspend controls act on that environment. The earlier experimental containerized sessions support
+[session-owned sandboxes](/docs/using/tensorlake-sandboxes/#delete-a-session-in-its-own-sandbox) always confirm Delete.
+Unless another session still uses it, the session's checkout is deleted permanently, bypassing the checkout trash, and
+deleting the last session there also destroys the whole environment and all its files. When Farhelm cannot reach the
+Farhelm inside the environment, Delete offers to destroy the whole environment instead, with a warning. Their Suspend,
+Resume and Stop and suspend controls act on that environment. The earlier experimental containerized sessions support
 [Delete only](/docs/agents/containerized-sessions/#earlier-containerized-sessions).
 
 **Stop** ends the agent and closes all of the session's shell tabs. With tabs open, it

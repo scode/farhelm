@@ -83,7 +83,8 @@ pub(crate) use environments::{
 /// The Tensorlake recipe calls (see the module's own docs).
 mod tensorlake_recipes;
 pub(crate) use sandbox_sessions::{
-    create_environment_session, delete_sandbox_session, sandbox_launch_body, stop_and_suspend,
+    EnvironmentDeleteRefusal, create_environment_session, delete_in_environment,
+    sandbox_launch_body, stop_and_suspend,
 };
 pub(crate) use tensorlake_recipes::{
     build_recipe, create_recipe, delete_orphan_sandbox, delete_recipe, fetch_orphan_sandboxes,
@@ -4171,7 +4172,7 @@ pub(crate) async fn delete_session(
 
 /// Bare successes retain their old shape; only `archived: true` authorizes a
 /// local archive cue. Losing the reply must never lose a preservation notice.
-fn delete_reply(body: Result<String, String>) -> farhelm_proto::SessionDeleteOutcome {
+pub(crate) fn delete_reply(body: Result<String, String>) -> farhelm_proto::SessionDeleteOutcome {
     let parsed = body.and_then(|text| {
         serde_json::from_str::<farhelm_proto::SessionDeleteOutcome>(&text)
             .map_err(|e| e.to_string())

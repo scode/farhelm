@@ -157,6 +157,45 @@ pub(super) fn admitted_targets(
         .collect()
 }
 
+/// Which bulk lifecycle controls the toolbar offers and enables for the
+/// effective marks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LifecycleOffer {
+    /// Stop is drawn: some mark is not a retired container (those are
+    /// Delete-only, as in their own row).
+    pub(super) stop_shown: bool,
+    /// Some drawn Stop target is not in an environment being deleted.
+    pub(super) stop_enabled: bool,
+    /// Some mark is not in an environment being deleted.
+    pub(super) delete_enabled: bool,
+}
+
+impl LifecycleOffer {
+    /// `unavailable` holds the marks whose environment is being deleted
+    /// (`sandbox_sessions::deleting_reason`). Those take no lifecycle action,
+    /// so a control whose every target is one of them is disabled. A mixed
+    /// selection keeps the control: the list leaves those rows out with
+    /// their reason and acts on the rest.
+    pub(super) fn new(targets: &[Session], unavailable: &[String]) -> Self {
+        let available = |row: &&Session| !unavailable.iter().any(|id| id == row.id.raw());
+        let mut stop = targets
+            .iter()
+            .filter(|row| !row.is_retired_container())
+            .peekable();
+        let stop_shown = stop.peek().is_some();
+        Self {
+            stop_shown,
+            stop_enabled: stop.any(|row| available(&row)),
+            delete_enabled: targets.iter().any(|row| available(&row)),
+        }
+    }
+}
+
+/// The tooltip of a bulk lifecycle control disabled because every target's
+/// environment is being deleted.
+const ALL_BEING_DELETED: &str =
+    "The marked sessions' environments are being deleted, so their actions are unavailable";
+
 /// Noncomposing Escape can clear marks without claiming the key's default action.
 pub(super) fn clears_on_escape(event: &KeyboardEvent) -> bool {
     event.key() == Key::Escape && !event.is_composing() && event.default_action_enabled()
@@ -209,6 +248,10 @@ fn return_header_focus_with_script(destination: &str) {
 pub(super) fn MarkedBar(
     targets: Vec<Session>,
     disabled: bool,
+    /// The ids among `targets` whose environment is being deleted; they take
+    /// no lifecycle action ([`LifecycleOffer`]).
+    #[props(default)]
+    unavailable: Vec<String>,
     layout_epoch: ReadSignal<u64>,
     on_action: EventHandler<(MetadataAction, Vec<Session>)>,
     on_lifecycle: EventHandler<(LifecycleAction, Vec<Session>)>,
@@ -324,6 +367,7 @@ pub(super) fn MarkedBar(
         .and_then(|position| order.get(position))
         .or_else(|| order.get(0));
     let menu_is_open = open();
+    let offer = LifecycleOffer::new(&targets, &unavailable);
     rsx! {
         div { class: "marked-bar", "data-marked-count": targets.len(),
             // The rendered open state survives synchronous child dismissal in
@@ -337,9 +381,9 @@ pub(super) fn MarkedBar(
             // This surviving, nonsequential target receives the modal's
             // confirming handback while the admitted work runs independently.
             span { class: "marked-count", tabindex: "-1", "{targets.len()} marked" }
-            if targets.iter().any(|row| !row.is_retired_container()) {button {
-                r#type: "button", class: "btn btn-neutral marked-stop", disabled,
-                "data-tooltip": "Stop the agents and close terminal tabs in the marked sessions currently shown",
+            if offer.stop_shown {button {
+                r#type: "button", class: "btn btn-neutral marked-stop", disabled: disabled || !offer.stop_enabled,
+                "data-tooltip": if offer.stop_enabled { "Stop the agents and close terminal tabs in the marked sessions currently shown" } else { ALL_BEING_DELETED },
                 aria_haspopup: "dialog",
                 onclick: { let drawn: Vec<_> = targets.iter().filter(|row| !row.is_retired_container()).cloned().collect(); move |_| {
                     on_lifecycle.call((LifecycleAction::Stop, drawn.clone()));
@@ -347,8 +391,8 @@ pub(super) fn MarkedBar(
                 "Stop"
             }}
             button {
-                r#type: "button", class: "btn btn-danger marked-delete", disabled,
-                "data-tooltip": "Delete the marked sessions currently shown",
+                r#type: "button", class: "btn btn-danger marked-delete", disabled: disabled || !offer.delete_enabled,
+                "data-tooltip": if offer.delete_enabled { "Delete the marked sessions currently shown" } else { ALL_BEING_DELETED },
                 aria_haspopup: "dialog",
                 onclick: { let drawn = targets.clone(); move |_| {
                     on_lifecycle.call((LifecycleAction::Delete, drawn.clone()));
@@ -628,6 +672,42 @@ mod tests {
         let menu_owned = event(false);
         menu_owned.prevent_default();
         assert!(!clears_on_escape(&menu_owned));
+    }
+
+    /// The marked toolbar must not offer a lifecycle action whose every target
+    /// is in an environment being deleted: those sessions' row and header
+    /// actions are already unavailable. A mixed selection keeps the control
+    /// enabled, since the list acts on the eligible rest. Retired containers
+    /// stay Delete-only, as before.
+    #[farhelm_testtrace::test]
+    fn lifecycle_controls_disable_when_every_target_is_being_deleted() {
+        let deleting = row_specimen("deleting");
+        let other = row_specimen("other");
+        let unavailable = vec![deleting.id.raw().to_owned()];
+        assert_eq!(
+            LifecycleOffer::new(std::slice::from_ref(&deleting), &unavailable),
+            LifecycleOffer {
+                stop_shown: true,
+                stop_enabled: false,
+                delete_enabled: false,
+            }
+        );
+        assert_eq!(
+            LifecycleOffer::new(&[deleting.clone(), other.clone()], &unavailable),
+            LifecycleOffer {
+                stop_shown: true,
+                stop_enabled: true,
+                delete_enabled: true,
+            }
+        );
+        assert_eq!(
+            LifecycleOffer::new(std::slice::from_ref(&other), &[]),
+            LifecycleOffer {
+                stop_shown: true,
+                stop_enabled: true,
+                delete_enabled: true,
+            }
+        );
     }
 
     /// The toolbar's visible count must come from the supplied effective targets;

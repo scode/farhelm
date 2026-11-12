@@ -9251,7 +9251,7 @@ pub(super) fn CreateSessionForm(
                                         p { "{recipe.size.cpus} CPU · {recipe.size.memory_gb} GB memory · {recipe.size.disk_gb} GB disk" }
                                     }
                                 }
-                                p { "The sandbox bills while running. Suspend preserves its processes and files and stops CPU and memory billing; snapshot storage still bills. Tensorlake suspends it after 30 minutes without a connection from Farhelm. Delete irreversibly removes the whole sandbox, every process, its files and snapshots." }
+                                p { "The sandbox bills while running. Suspend preserves its processes and files and stops CPU and memory billing; snapshot storage still bills. Tensorlake suspends it after 30 minutes without a connection from Farhelm. Deleting its last session irreversibly removes the sandbox, every process, its files and snapshots." }
                                 a { href: "https://www.tensorlake.ai/pricing", target: "_blank", rel: "noopener noreferrer",
                                     "data-tooltip": "Open Tensorlake's pricing page in your browser", "Tensorlake pricing" }
                                 button { r#type: "button", class: "btn btn-neutral",

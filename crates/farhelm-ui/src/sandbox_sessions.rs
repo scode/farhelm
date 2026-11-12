@@ -89,14 +89,119 @@ pub(crate) fn provider_ui(host: &Host) -> crate::environment_ui::ProviderUi {
     )
 }
 
-/// Both suspended and changing resources withhold supervisor lifecycle verbs.
+/// Suspended, changing and being-deleted resources withhold supervisor
+/// lifecycle verbs. A being-deleted one withholds Delete and Clone as well
+/// ([`being_deleted`]); the frozen ones keep both.
 pub(crate) fn frozen(host: &Host) -> bool {
     matches!(
         host.state,
         HostPhase::Suspended { .. }
             | HostPhase::Stopped { .. }
             | HostPhase::TensorlakeChanging { .. }
+            | HostPhase::Deleting { .. }
     )
+}
+
+/// `Some(failed)` while the host's sandbox or container is being destroyed
+/// after its Farhelm sealed it (or a whole-environment Delete is running),
+/// with `failed` once that destruction failed and waits for Retry in Hosts.
+///
+/// Its sessions show as being deleted with every action unavailable
+/// (SPEC.md, "Sandbox sessions"): nothing is routed to a sealed supervisor,
+/// and the only way forward is the destruction already under way.
+pub(crate) fn being_deleted(host: &Host) -> Option<bool> {
+    match &host.state {
+        HostPhase::Deleting { failure } => Some(failure.is_some()),
+        _ => None,
+    }
+}
+
+/// Why a session on `host` takes no lifecycle action right now: its
+/// environment is being destroyed ([`being_deleted`]). `None` for any other
+/// host, including one the read does not list.
+///
+/// Surfaces that act on several sessions at once (the marked toolbar and
+/// bulk admission) decide from this, so a batch cannot reach a session whose
+/// row and header already refuse it (SPEC.md, "Sandbox sessions").
+pub(crate) fn deleting_reason(host: Option<HostId>, hosts: &[Host]) -> Option<&'static str> {
+    let host = hosts.iter().find(|candidate| {
+        Some(candidate.id) == host
+            && candidate.is_session_owned
+            && candidate.kind.environment_provider().is_some()
+    })?;
+    let failed = being_deleted(host)?;
+    Some(provider_ui(host).session_deleting_help(failed))
+}
+
+// ===== Environment session Delete ==========================================
+//
+// SPEC.md, "Sandbox sessions": a user's Delete of a session in a disposable
+// environment asks the environment's own Farhelm, which alone knows whether
+// the session is its last. When the helm cannot ask, the page offers the
+// warned whole-environment Delete instead. Which of the two a click gets is
+// decided here, once, for the row, the header and the bulk modal alike.
+
+/// What one environment session Delete asks the helm for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DeleteScope {
+    /// Ask the environment's own Farhelm to delete this session and, when no
+    /// other session remains, seal the environment so the helm destroys it
+    /// (`?delete_environment_session=true`). Its confirmation states both
+    /// outcomes.
+    Session,
+    /// Destroy the whole environment with everything in it, listed or not
+    /// (`?delete_sandbox=true`), behind the warned confirmation. Only ever
+    /// sent after the user answered that warning.
+    Whole,
+}
+
+/// One environment session Delete: the host it targets, that host's
+/// provider, and the consent the user gave. Host and provider travel with the
+/// scope so a reply can be applied to the right cached peers, and worded for
+/// the right resource, even after the listing or host read changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EnvironmentDelete {
+    pub(crate) host: HostId,
+    pub(crate) provider: farhelm_proto::ProviderKind,
+    pub(crate) scope: DeleteScope,
+}
+
+impl EnvironmentDelete {
+    /// The Delete a click on a session of `host` opens with: its ownership
+    /// facts, and the scope [`delete_scope`] picks from the current host read.
+    pub(crate) fn for_host(host: &Host, hosts: &crate::hosts::HostsRead) -> Self {
+        Self {
+            host: host.id,
+            provider: provider_ui(host).0,
+            scope: delete_scope(hosts.lookup(Some(host.id))),
+        }
+    }
+
+    /// The same Delete with the consent of a different question.
+    pub(crate) fn with_scope(self, scope: DeleteScope) -> Self {
+        Self { scope, ..self }
+    }
+}
+
+/// Which confirmation a Delete of a session on `host` opens with, decided by
+/// whether the helm is connected to that environment's Farhelm right now,
+/// never by the provider or by its suspended or paused state.
+///
+/// Only a current host read that shows the host not connected opens the
+/// warned whole-environment Delete directly. A pending or failed read asks
+/// the environment's Farhelm instead: the helm decides again when it sends,
+/// and an "unasked" answer then offers the warned Delete, so an uncertain
+/// read can never widen the consent the user is asked for.
+pub(crate) fn delete_scope(lookup: crate::hosts::HostLookup<'_>) -> DeleteScope {
+    match lookup {
+        crate::hosts::HostLookup::Known(host) if !crate::hosts::is_connected(&host.state) => {
+            DeleteScope::Whole
+        }
+        crate::hosts::HostLookup::Known(_)
+        | crate::hosts::HostLookup::Pending
+        | crate::hosts::HostLookup::Absent
+        | crate::hosts::HostLookup::Failed(_) => DeleteScope::Session,
+    }
 }
 
 /// Keep ordinary transition details, adapting a settled suspension's fixed
@@ -393,6 +498,199 @@ pub(crate) struct ControlButtons {
     pub(crate) resume: bool,
     pub(crate) disabled: bool,
     pub(crate) start: Callback<bool>,
+}
+
+#[cfg(test)]
+mod delete_tests {
+    use super::*;
+    use crate::hosts::{HostLookup, HostsRead};
+    use farhelm_proto::ProviderKind;
+
+    /// A session-owned environment host of `kind` in `state`; everything
+    /// else as plain as possible, since only ownership and phase matter here.
+    fn environment(kind: crate::HostKind, state: HostPhase) -> Host {
+        Host {
+            id: 7,
+            kind,
+            destination: None,
+            alias: None,
+            name: "farhelm-sess-test".into(),
+            identity: None,
+            remote_farhelm: None,
+            remote_state_dir: None,
+            state,
+            incarnation: 1,
+            trash_epoch: 0,
+            yolo_without_asking: false,
+            commands_without_asking: false,
+            own_sessions_without_asking: false,
+            is_session_owned: true,
+            links_without_asking: false,
+            local_links_without_asking: false,
+            icon: Default::default(),
+            color: Default::default(),
+            tensorlake: None,
+            environment: None,
+        }
+    }
+
+    fn connected() -> HostPhase {
+        HostPhase::Connected {
+            identity: None,
+            build_version: "build".into(),
+            old_version: false,
+            newer_version: false,
+            refresh: crate::RefreshHealth::Pending,
+        }
+    }
+
+    /// SPEC.md, "Sandbox sessions": which confirmation a Delete opens comes
+    /// from whether the helm is connected to the environment's Farhelm, never
+    /// from the provider or its suspended state. Only a current read showing
+    /// it disconnected opens the warned whole-environment Delete directly; an
+    /// unknown read asks, because the helm decides again when it sends and
+    /// an uncertain read must not widen the consent asked for.
+    #[farhelm_testtrace::test]
+    fn delete_scope_follows_the_connection_not_the_provider() {
+        for kind in [crate::HostKind::Tensorlake, crate::HostKind::Podman] {
+            let live = environment(kind, connected());
+            assert_eq!(delete_scope(HostLookup::Known(&live)), DeleteScope::Session);
+            for state in [
+                HostPhase::Suspended {
+                    observed_at: 1,
+                    suspended_by_farhelm_at: None,
+                    resume_failed: None,
+                },
+                HostPhase::Unreachable {
+                    cause: "unreachable".into(),
+                    last_error: "timed out".into(),
+                },
+                HostPhase::Connecting {
+                    attempt: 1,
+                    stage: None,
+                    last_error: None,
+                },
+                HostPhase::VersionSkew {
+                    peer_protocol: 1,
+                    peer_build: "old".into(),
+                    our_protocol: 2,
+                    our_build: "new".into(),
+                    remediation: "update".into(),
+                },
+            ] {
+                let away = environment(kind, state);
+                assert_eq!(delete_scope(HostLookup::Known(&away)), DeleteScope::Whole);
+            }
+        }
+        assert_eq!(delete_scope(HostLookup::Pending), DeleteScope::Session);
+        assert_eq!(delete_scope(HostLookup::Absent), DeleteScope::Session);
+        assert_eq!(
+            delete_scope(HostLookup::Failed("offline")),
+            DeleteScope::Session
+        );
+    }
+
+    /// A click captures the host, its provider and the scope from the same
+    /// host read the page renders from; a failed newer read falls back to
+    /// asking, even when the retained snapshot shows the host connected.
+    #[farhelm_testtrace::test]
+    fn environment_delete_for_host_reads_the_current_host_state() {
+        let paused = environment(
+            crate::HostKind::Podman,
+            HostPhase::Suspended {
+                observed_at: 1,
+                suspended_by_farhelm_at: Some(1),
+                resume_failed: None,
+            },
+        );
+        let mut read = HostsRead::default();
+        read.record(Ok(vec![paused.clone()]));
+        assert_eq!(
+            EnvironmentDelete::for_host(&paused, &read),
+            EnvironmentDelete {
+                host: 7,
+                provider: ProviderKind::Podman,
+                scope: DeleteScope::Whole,
+            }
+        );
+        read.record(Err("refresh failed".into()));
+        assert_eq!(
+            EnvironmentDelete::for_host(&paused, &read).scope,
+            DeleteScope::Session
+        );
+        assert_eq!(
+            EnvironmentDelete::for_host(&paused, &read)
+                .with_scope(DeleteScope::Whole)
+                .scope,
+            DeleteScope::Whole
+        );
+    }
+
+    /// Batch surfaces look a session's host up by id. Only a session-owned
+    /// environment host in its Deleting phase gives a reason; a connected
+    /// environment, an ordinary host with the same phase word, or a host the
+    /// read does not list leaves the session eligible.
+    #[farhelm_testtrace::test]
+    fn deleting_reason_names_only_environments_being_deleted() {
+        let failed = environment(
+            crate::HostKind::Podman,
+            HostPhase::Deleting {
+                failure: Some("podman rm failed".into()),
+            },
+        );
+        let live = Host {
+            id: 8,
+            ..environment(crate::HostKind::Podman, connected())
+        };
+        let ordinary = Host {
+            id: 9,
+            kind: crate::HostKind::Ssh,
+            is_session_owned: false,
+            ..environment(
+                crate::HostKind::Podman,
+                HostPhase::Deleting { failure: None },
+            )
+        };
+        let hosts = [failed, live, ordinary];
+        assert_eq!(
+            deleting_reason(Some(7), &hosts),
+            Some(
+                crate::environment_ui::ProviderUi(ProviderKind::Podman).session_deleting_help(true)
+            )
+        );
+        assert_eq!(deleting_reason(Some(8), &hosts), None);
+        assert_eq!(deleting_reason(Some(9), &hosts), None);
+        assert_eq!(deleting_reason(Some(10), &hosts), None);
+        assert_eq!(deleting_reason(None, &hosts), None);
+    }
+
+    /// While a sealed environment is destroyed, and after that fails, its
+    /// sessions show as being deleted with their actions unavailable: the
+    /// host's Deleting phase is the one signal, and it also freezes the
+    /// lifecycle verbs the frozen phases withhold.
+    #[farhelm_testtrace::test]
+    fn being_deleted_sessions_lose_their_actions() {
+        let deleting = environment(
+            crate::HostKind::Tensorlake,
+            HostPhase::Deleting { failure: None },
+        );
+        assert_eq!(being_deleted(&deleting), Some(false));
+        assert!(frozen(&deleting));
+        let failed = environment(
+            crate::HostKind::Tensorlake,
+            HostPhase::Deleting {
+                failure: Some("quota".into()),
+            },
+        );
+        assert_eq!(being_deleted(&failed), Some(true));
+        assert!(frozen(&failed));
+        let live = environment(crate::HostKind::Tensorlake, connected());
+        assert_eq!(being_deleted(&live), None);
+        assert!(!frozen(&live));
+        let ui = provider_ui(&failed);
+        assert!(ui.session_deleting_help(false).contains("being deleted"));
+        assert!(ui.session_deleting_help(true).contains("Retry in Hosts"));
+    }
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

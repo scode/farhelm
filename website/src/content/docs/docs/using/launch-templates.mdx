@@ -51,8 +51,9 @@ supply the agent or host.
 The editor's **Host** field can also choose **New container** with a recipe and container host, or **New sandbox**
 with a recipe. The same choices appear under **Runs on** in the launcher. Applying one restores the recipe and where it
 runs. A removed container host or deleted recipe makes it unavailable. For these destinations, **Folder** means the new
-environment's home and a managed checkout is cloned inside. Deleting that environment removes the checkout permanently,
-without trash. See [Container sessions](/docs/agents/containerized-sessions/) and
+environment's home and a managed checkout is cloned inside. Deleting its session removes the checkout permanently,
+without trash, unless another session still uses it; deleting the environment removes every checkout in it the same
+way. See [Container sessions](/docs/agents/containerized-sessions/) and
 [session-owned sandboxes](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox).
 
 A **Session name** can be a **Base name** or a **Fixed name**. When you apply a base name in the session launcher or a
