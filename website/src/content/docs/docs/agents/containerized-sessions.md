@@ -57,10 +57,10 @@ Recipes also choose
 **Settings → Credentials** first. These settings work for containers as well as sandboxes. The recipe supplies the
 container's login user, endpoints and credentials.
 
-The Recipes list shows build status and **Rebuild** for the Tensorlake account and each container host. A container's
-first launch on a host builds any missing software image. On later launches, Farhelm prepares it again when more than 24
-hours old, after a Farhelm update or after the software image is rebuilt. Existing containers keep their software.
-Rebuild affects future launches. User-owned base images are retained.
+The Recipes list shows each container host's build status with **Rebuild**, beside the Tensorlake snapshot's own **Build
+snapshot** or **Rebuild snapshot**. A container's first launch on a host builds any missing software image. On later
+launches, Farhelm prepares it again when more than 24 hours old, after a Farhelm update or after the software image is
+rebuilt. Existing containers keep their software. Rebuild affects future launches. User-owned base images are retained.
 
 **Settings → Tensorlake** keeps the cloud account's API key, SSH key, creation confirmation and sandbox leftovers.
 **Settings → Containers** keeps host readiness and container leftovers. Recipes are edited in **Recipes** for both.
@@ -147,9 +147,10 @@ or changing that host's destination. A refusal names what still needs cleanup.
 ## Earlier containerized sessions
 
 The earlier experimental feature ran only the agent and tabs inside a container and mounted a host checkout. Those
-sessions now support **Delete only**. Terminal access, Stop, Restart, Clone and Replace are unavailable. Stored
-templates and recent setups still load. Remove their retired container choice before launching again, then select a
-recipe-based container in the launcher or template editor.
+sessions now support **Delete only**. Their rows are marked **Retired container**, and their agents keep running until
+you delete them. Terminal access, Stop, Restart, Clone and Replace are unavailable. Stored templates and recent setups
+still load. Remove their retired container choice before launching again, then select a recipe-based container in the
+launcher or template editor.
 
 Continue with [Start a session](/docs/using/start-a-session/) or
 [make a shared recipe](/docs/using/tensorlake-sandboxes/#make-a-recipe).

@@ -23,25 +23,30 @@ test("header actions", async ({ page, request }) => {
   // and, at its far end, these buttons.
   const header = page.locator("header.session-topbar");
   await expect(header).toBeVisible();
+  await director.callout(header.locator(".header-stop"), "Stop: ends the agent and closes its shell tabs. The session stays.", {
+    side: "bottom",
+    dx: -210,
+  });
   await director.callout(
     header.locator(".restart-primary"),
     "Restart: resumes this session's conversation. Greyed out, as here, when Farhelm cannot resume it; hover to see why.",
-    { side: "bottom", dx: -200 },
+    { side: "bottom", dx: -90, dy: 100 },
   );
   await director.callout(header.locator(".header-replace"), "Replace: a fresh conversation with the same settings.", {
     side: "bottom",
-    dx: -120,
-    dy: 150,
+    dx: -50,
+    dy: 230,
   });
   await director.callout(header.locator(".header-clone"), "Clone: another session like this one, which stays.", {
     side: "bottom",
-    dy: 300,
+    dy: 340,
   });
-  // Stagger the boxes vertically. Replace's arrow then stays to the right of
-  // Restart's explanation, and Clone's arrow clears both other boxes.
+  // Stagger the boxes diagonally, in button order: each box sits lower and
+  // further right than the one before, so each arrow drops past the right
+  // edge of every box above it without crossing one.
   // The action buttons sit at the row's far end; crop to them rather than
   // the whole row, which is wider than the docs' text column.
-  await shot(page, `${PAGE}/header-actions`, [header.locator(".restart-primary"), header.locator(".header-delete").first()]);
+  await shot(page, `${PAGE}/header-actions`, [header.locator(".header-stop"), header.locator(".header-delete").first()]);
 });
 
 test("row menu", async ({ page, request }) => {
@@ -52,7 +57,7 @@ test("row menu", async ({ page, request }) => {
   await expect(panel).toBeVisible();
   await director.callout(
     panel.locator(".session-row-stop"),
-    "Stop: ends the agent and everything it started. The session and its terminal stay.",
+    "Stop: ends the agent and everything it started, and closes its shell tabs. The session and its terminal stay.",
     { side: "right", dy: -5 },
   );
   await director.callout(panel.locator(".session-row-delete"), "Delete: removes the session altogether.", {

@@ -71,10 +71,12 @@ it. See the [security model](/docs/how-it-works/security-model/) for the rest of
 ## Update remote hosts, or uninstall
 
 Your remote hosts are not updated automatically unless you turn on **Update remote hosts automatically** in Settings,
-under **Hosts**. Once Farhelm on your Mac has restarted on a new version, the **Hosts** button at the foot of the
-navigation rail shows an up-arrow, hosts that run an older version appear above your sessions with an **Update** button,
-and the host list lets you update them too; see [Manage hosts](/docs/using/manage-hosts/#update-a-host).
+under **Hosts**, or choose **Always update** above your sessions. Once Farhelm on your Mac has restarted on a new
+version, the **Hosts** button at the foot of the navigation rail shows an up-arrow, hosts that run an older version
+appear above your sessions with an **Update** button, and the host list lets you update them too; see
+[Manage hosts](/docs/using/manage-hosts/#update-a-host).
 
 To remove Farhelm, see [Uninstall Farhelm](/docs/get-started/uninstall/). Uninstall keeps your managed checkouts,
-including their trash and [prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) inside the directory set
-as **Checkout folder**.
+including their trash and [prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) inside your Mac's
+checkout directory: its own **Checkout folder** in its host settings, or else **Default checkout folder** under
+**Settings → Checkouts**.

@@ -18,7 +18,7 @@ action and **Restart with…** or **Replace with…**.
 
 <Screenshot
   name="stop-restart-resume/header-actions"
-  alt="The action buttons at the right of the row above the terminal, with restart, replace, and clone explained."
+  alt="The action buttons at the right of the row above the terminal, with stop, restart, replace, and clone explained."
 />
 
 Restart always continues the session's own conversation; there is no restart that starts a new one. When Farhelm has no
@@ -86,6 +86,8 @@ and Stop and suspend controls act on that environment. The earlier experimental 
 
 **Stop** ends the agent and closes all of the session's shell tabs, including what they started. With tabs open, it
 asks you to confirm closing them. A tab Farhelm cannot close is named in a notice; the other tabs still close.
+Jobs you run under your own tmux inside a session can keep running afterwards, as they would outside Farhelm; the tmux
+server itself ends.
 **Restart** leaves shell tabs running, as does an agent exiting on its own. You can open another tab after Stop.
 
 To act on several sessions, [mark them in the session list](/docs/using/session-list/#mark-several-sessions) and use

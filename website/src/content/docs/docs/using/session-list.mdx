@@ -88,7 +88,8 @@ count and progress too. A failed cleanup also appears in the
 
 ### Notices about a host
 
-The bell above **Hosts** in the navigation rail, the column of icons down the left edge of the sidebar, turns red and
+The bell above **Hosts** in the navigation rail, the column of icons down the left edge of the sidebar (labelled
+**Notifications** when the rail is expanded), turns red and
 shows a count when there is something you have not read. Open it to see which host and checkout could not be cleaned
 up, its last measured size when known, and why. **Retry now** makes one more cleanup attempt; **Open Trash** takes you
 to the full list of archived checkouts.
@@ -118,7 +119,8 @@ the card; [Approve what agents do](/docs/using/approve-agent-requests/) covers i
 A session that has ended says how in words under its name, instead of a coloured dot (with **Compact** ticked, as an
 icon you can hover over):
 
-- **Exited**, with the agent's exit code. "stopped by user" is added when you stopped it.
+- **Exited**, with the agent's exit code. "stopped by user" is added when you stopped it, or "stopped before the agent
+  finished starting" if you stopped it while it was still starting.
 - **Interrupted**: the host rebooted, which ended the agent. The session waits for you to start it again.
 - **Error**: the agent could not start; the reason follows the word. An agent that starts and then quits shows exited.
 

@@ -74,9 +74,14 @@ test("host settings", async ({ page, request }) => {
     { side: "right", dy: -10 },
   );
   await director.callout(
-    dialog.locator(".host-commands-without-asking"),
-    "On: agents here run farhelm commands without asking you first.",
+    dialog.locator(".host-own-sessions-without-asking"),
+    "On: agents here start, stop, restart and delete sessions on this host without asking.",
     { side: "right", dy: 0 },
+  );
+  await director.callout(
+    dialog.locator(".host-commands-without-asking"),
+    "On: agents here act on sessions on any of your hosts, and change templates, without asking.",
+    { side: "right", dy: 30 },
   );
   await director.callout(
     dialog.locator("label").filter({ has: page.locator(".host-links-without-asking-toggle") }),

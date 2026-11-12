@@ -66,8 +66,11 @@ test("destination", async ({ page, request }) => {
   // clips it; scrolling its last entry into view is what a person does to
   // reach it, and keeps local home, which the last callout names, in the shot.
   await folders.getByRole("option", { name: "Reset destination to local home" }).scrollIntoViewIfNeeded();
-  // Four callouts stacked down the left margin, each nudged (dy) so the
+  // Three callouts stacked down the left margin, each nudged (dy) so the
   // boxes clear one another while the arrows stay level with their controls.
+  // The host's callout sits to its right, in the empty row beside the host
+  // menu: on the left it would cover Browse, which sits below the host menu
+  // at the label column's edge.
   await director.callout(
     destination.locator(".destination-type-control"),
     "Folder starts in a directory that already exists; Managed checkout clones a GitHub repository into a new one.",
@@ -76,7 +79,7 @@ test("destination", async ({ page, request }) => {
   await director.callout(
     destination.locator(".create-session-host"),
     "The host the session runs on. Starts on the host of the session you have open.",
-    { side: "left", dy: 10 },
+    { side: "right" },
   );
   await director.callout(
     destination.getByLabel("Folder", { exact: true }),
@@ -108,12 +111,12 @@ test("checkout setup", async ({ page, request }) => {
   await field.locator("input").fill("~/work");
   await director.callout(
     field.locator("input"),
-    "Asked once: the directory every host's managed checkouts go into. ~ is each host's own home, and Farhelm creates the directory on first use.",
+    "Asked once: where managed checkouts go on every host without its own. ~ is each host's own home, and Farhelm creates the directory on first use.",
     { side: "left" },
   );
   await director.callout(
     field.getByRole("button", { name: "Save" }),
-    "Saves it for every host. Change it later in Settings.",
+    "Saves the default. Change it later in Settings → Checkouts, or give a host its own in its settings.",
     { side: "left", dy: 40 },
   );
   await shot(page, `${PAGE}/checkout-setup`, [destination], { maxWidth: 930 });

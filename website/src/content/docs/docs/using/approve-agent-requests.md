@@ -59,8 +59,8 @@ Cards normally offer three buttons:
 
 For a session request that stays on the requesting host (including the source when copying a session), the card also
 offers **Always allow on &lt;host&gt; only**, with that host's name. It turns on **Manage sessions on this host without
-asking** and allows this request. The existing **Always allow from &lt;host&gt;** remains beside it and grants the
-broader permission to act across your hosts and change templates. Other cards already waiting still need an answer.
+asking** and allows this request. **Always allow from &lt;host&gt;** beside it grants the broader permission to act
+across your hosts and change templates. Other cards already waiting still need an answer.
 
 An agent-supplied [wrapper prefix](/docs/agents/agent-wrappers/) on a host that asks before YOLO is a special case: its
 launch card offers **Allow** and **Deny** only, even if you turned on either command permission for that host. The
@@ -70,8 +70,8 @@ prefixes. An agent that creates or edits a template so that it carries a wrapper
 
 The oldest waiting request opens first. Other requests appear as headers below it; click one to read and answer that
 request instead. The card shows how many requests are waiting, and the request you chose stays open until it is answered
-or expires. Then the oldest remaining request opens. A long request scrolls as a whole; its command text is shown in
-full.
+or expires. Then the oldest remaining request opens. A long request keeps its answer buttons in view: its details scroll
+inside the card, and long commands and prompts scroll in their own boxes, with nothing cut off.
 
 The rest of Farhelm stays usable while requests wait, and several can wait at once, up to four from one host. While four
 are waiting, that host's agents are turned away until you answer one. Cards stay clickable even over an open dialog.
@@ -121,7 +121,7 @@ If the session that asked is deleted while its card waits, the request is refuse
 
 An agent can delete another session, including its terminal tabs and stored state. It needs `--stop-if-running` when
 anything is still running, and the card says what will stop. It cannot delete its own session; it can still stop its own
-agent and leave the session listed.
+agent, which also closes the session's terminal tabs, and leave the session listed.
 
 ## Stop asking for a host
 
@@ -131,8 +131,8 @@ A copy's source session must be on that host too. This includes creating a sessi
 other hosts, template changes, [host changes](/docs/using/approve-agent-requests/#host-changes) and links stay outside
 this permission. Sending messages to agents in existing sessions is unavailable.
 
-It starts off on every host, including Tensorlake sandboxes and hosts you added before the update. Turn it on in host
-settings or choose **Always allow on &lt;host&gt; only** on a qualifying card. The
+It starts off on every host, including Tensorlake sandboxes. Turn it on in host settings or choose **Always allow on
+&lt;host&gt; only** on a qualifying card. The
 [helm, the program that shows all your hosts' sessions and serves the UI](/docs/how-it-works/the-pieces/), must still be
 reachable to handle these requests.
 
