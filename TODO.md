@@ -55,13 +55,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   visible and could be cancelled there. Give that wait a limit that returns the launcher with an error. Plan:
   `plans/queue/wake-launch-stuck.md`.
 
-- **Find out why double-clicking the version text sometimes selects nothing in Chromium.**
-  `header controls stay interactive and text stays selectable beside the forced-class spacer` in
-  `e2e/tests/window-chrome.spec.ts` failed once in a whole browser run and 1 of 20 repeats (Chromium, Tensorlake) during
-  the landing of nonblocking-session-actions on 2026-11-10, which changed header CSS and added a window-level key and
-  pointer capture listener. Not diagnosed, and not checked on main; first establish whether it predates that plan. Plan:
-  `plans/queue/version-dblclick-flake.md`.
-
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
   that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open
