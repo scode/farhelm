@@ -383,58 +383,217 @@ updates TODO.md as described. Open, not merged. If a `## Decisions` section exis
 satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12). Never edit
 `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-12 (claim 428cce).
+### 2026-11-12: answer to a blocked question
 
-### Should deleting one of several sessions in a sandbox or container keep the environment?
+The question, as the executor put it:
 
-This plan lets an agent inside a sandbox or container session start more sessions in that same environment (each asking
-you through an approval card, under the same approval settings as any other host), and lets agents elsewhere start
-sessions in new sandboxes and containers behind a card that always asks. That part is built and up for review (#3334,
-#3338, #3348 and #3354, the last holding the end-to-end tests and the TODO update), and it can land whatever you answer
-here. One part of the plan is not built, because the plan's premise for it turned out to be wrong and its decision now
-contradicts a later one of yours.
+> Blocked on 2026-11-12 (claim 428cce).
+>
+> ### Should deleting one of several sessions in a sandbox or container keep the environment?
+>
+> This plan lets an agent inside a sandbox or container session start more sessions in that same environment (each
+> asking you through an approval card, under the same approval settings as any other host), and lets agents elsewhere
+> start sessions in new sandboxes and containers behind a card that always asks. That part is built and up for review
+> (#3334, #3338, #3348 and #3354, the last holding the end-to-end tests and the TODO update), and it can land whatever
+> you answer here. One part of the plan is not built, because the plan's premise for it turned out to be wrong and its
+> decision now contradicts a later one of yours.
+>
+> **What the plan says.** When you planned this on 2026-11-08, you answered that an environment should stay until the
+> last session in it is deleted. The plan describes that rule as already existing (from the sandbox-sessions plan) and
+> asks only to make it normal: deleting one session would remove just that session and say the other sessions and the
+> environment remain, deleting the last session would remove the sandbox or container and its files, and deleting a
+> session that is not the last would be refused while the environment is suspended or unreachable.
+>
+> **What actually landed.** On 2026-11-09, while finishing sandbox sessions, you replaced that rule: "deleting a sandbox
+> session destroys its whole sandbox. This was the original intent." Delete now always removes the whole sandbox or
+> container, every session and process in it, and its files. Its confirmation lists the other sessions Farhelm knows
+> about but makes no claim that the list is complete, and nothing counts sessions or tracks which ones remain. You also
+> said then that losing a leftover session this way is an accepted consequence, and that a reviewer must not bring back
+> "peer-preservation or finality machinery". At the time a second session in an environment could only appear after a
+> rare failed Replace. Container sessions follow the same rule. So today, if an agent starts a second session in a
+> container and you later delete either session from the session list, the whole container goes, including the other
+> session.
+>
+> **What this plan built meanwhile.** When an agent inside the environment deletes another session there, only that
+> session is removed, never the environment, because the asking agent's own session is still in it. Your own Delete is
+> unchanged.
+>
+> **The question:** now that agents can put several sessions into one sandbox or container routinely, should your Delete
+> of one of them keep the environment while other sessions remain? Choosing yes reverses the 2026-11-09 instruction for
+> this case.
+>
+> - **Keep the environment until its last listed session is deleted** (the plan's 2026-11-08 answer). Delete of a
+>   session that has other sessions in Farhelm's list removes only that session; Delete of the last one removes the
+>   sandbox or container and its files, as today. The count comes from the sessions Farhelm already lists for that
+>   environment, with no new tracking, so a session Farhelm does not list (one a failed Replace left behind, say) can
+>   still be destroyed with the last listed one. Removing a single session needs the Farhelm running inside the
+>   environment to do it, so that Delete is refused while the environment is suspended or unreachable; removing the
+>   whole environment goes straight to Tensorlake or Podman and keeps working then. Cost: a second Delete path and new
+>   confirmation wording ("the container stays: 2 other sessions use it"), roughly a medium-sized PR with tests for both
+>   providers.
+> - **Keep Delete as it is: one Delete removes the whole environment.** Nothing more is built. An agent can still remove
+>   a sibling session without destroying the environment. Cost: deleting a session an agent spawned, once you are done
+>   with it, also destroys the session that spawned it, unless you ask the agent to delete it instead.
+> - **Ask each time.** When other sessions are listed, the confirmation offers both "Delete this session only" and
+>   "Delete session and sandbox". This keeps the current consequence one click away, but it puts a choice in front of
+>   every such Delete and still needs the second Delete path, so it costs at least as much as the first option.
+>
+> **Recommendation:** keep the environment until its last listed session is deleted. With agents now creating sessions
+> inside environments, a sandbox or container routinely holds several sessions, and deleting a finished helper session
+> should not destroy the work in the session that started it. Counting the sessions Farhelm already lists avoids the
+> membership tracking you removed on 2026-11-09.
 
-**What the plan says.** When you planned this on 2026-11-08, you answered that an environment should stay until the last
-session in it is deleted. The plan describes that rule as already existing (from the sandbox-sessions plan) and asks
-only to make it normal: deleting one session would remove just that session and say the other sessions and the
-environment remain, deleting the last session would remove the sandbox or container and its files, and deleting a
-session that is not the last would be refused while the environment is suspended or unreachable.
+The maintainer's answer:
 
-**What actually landed.** On 2026-11-09, while finishing sandbox sessions, you replaced that rule: "deleting a sandbox
-session destroys its whole sandbox. This was the original intent." Delete now always removes the whole sandbox or
-container, every session and process in it, and its files. Its confirmation lists the other sessions Farhelm knows about
-but makes no claim that the list is complete, and nothing counts sessions or tracks which ones remain. You also said
-then that losing a leftover session this way is an accepted consequence, and that a reviewer must not bring back
-"peer-preservation or finality machinery". At the time a second session in an environment could only appear after a rare
-failed Replace. Container sessions follow the same rule. So today, if an agent starts a second session in a container
-and you later delete either session from the session list, the whole container goes, including the other session.
+### The environment's own supervisor decides whether a Delete removes the environment
 
-**What this plan built meanwhile.** When an agent inside the environment deletes another session there, only that
-session is removed, never the environment, because the asking agent's own session is still in it. Your own Delete is
-unchanged.
+The maintainer's answer, in conversation with the landing monitor on 2026-11-12, verbatim:
 
-**The question:** now that agents can put several sessions into one sandbox or container routinely, should your Delete
-of one of them keep the environment while other sessions remain? Choosing yes reverses the 2026-11-09 instruction for
-this case.
+> so the blocked plan. i don't get it. what is so stupidly hard about just having a protocol message that goes to the
+> supervisor that says "kill this session and disallow all future sessions" which is atomically either accepted by the
+> supervisor or not? (it only succeeds if it is the last session)
 
-- **Keep the environment until its last listed session is deleted** (the plan's 2026-11-08 answer). Delete of a session
-  that has other sessions in Farhelm's list removes only that session; Delete of the last one removes the sandbox or
-  container and its files, as today. The count comes from the sessions Farhelm already lists for that environment, with
-  no new tracking, so a session Farhelm does not list (one a failed Replace left behind, say) can still be destroyed
-  with the last listed one. Removing a single session needs the Farhelm running inside the environment to do it, so that
-  Delete is refused while the environment is suspended or unreachable; removing the whole environment goes straight to
-  Tensorlake or Podman and keeps working then. Cost: a second Delete path and new confirmation wording ("the container
-  stays: 2 other sessions use it"), roughly a medium-sized PR with tests for both providers.
-- **Keep Delete as it is: one Delete removes the whole environment.** Nothing more is built. An agent can still remove a
-  sibling session without destroying the environment. Cost: deleting a session an agent spawned, once you are done with
-  it, also destroys the session that spawned it, unless you ask the agent to delete it instead.
-- **Ask each time.** When other sessions are listed, the confirmation offers both "Delete this session only" and "Delete
-  session and sandbox". This keeps the current consequence one click away, but it puts a choice in front of every such
-  Delete and still needs the second Delete path, so it costs at least as much as the first option.
+> Let's go with my design then, and for the "supervisor is unavailable" (sandbox is is not running or otherwise not
+> available), the warning makes sense. Note that I have plans to make it so that a session can (when permitted by
+> polich) spawn sessions on the same host (in this case sandbox) even when the helm is unavailable. This will mean this
+> case can happen not just in an edge case ("helm started a session with an injected message to do useful work, then
+> lost connectivity with supervisor"), but also in real workloads where an unattended/disconnected supervisor hosts
+> sessions that created other sessions. Make sure this will also fundamentally work in this case. Adjust the design.
 
-**Recommendation:** keep the environment until its last listed session is deleted. With agents now creating sessions
-inside environments, a sandbox or container routinely holds several sessions, and deleting a finished helper session
-should not destroy the work in the session that started it. Counting the sessions Farhelm already lists avoids the
-membership tracking you removed on 2026-11-09.
+The maintainer asked the landing monitor to adjust the design to that requirement. The rest of this entry is that
+adjustment, checked against the code by a fresh-context Opus 5.5 reviewer and revised from its findings before it was
+recorded; the two product choices it left open (finishing a sealed environment's destruction automatically, and what a
+non-final Delete does with the checkout) were made by the monitor and are marked below.
+
+#### What this replaces
+
+It replaces this plan's 2026-11-08 Decisions bullet "Environment lifetime with several sessions", including "The
+non-final Delete still refuses while suspended or unreachable"; the acceptance criterion that a non-final Delete is
+refused while the environment is suspended or unreachable (it now offers the whole-environment Delete with a warning);
+and the instruction to reuse the landed multi-session rule rather than add a mechanism. For an environment whose
+supervisor answers, it replaces sandbox-sessions' 2026-11-09 rule that Delete always destroys the whole sandbox.
+
+The supervisor's seal below, and the new supervisor request that carries it, are the one piece of session-finality state
+and the one protocol change the maintainer approves for this. SPEC_impl.md's prohibitions on finality state and
+membership protocols stay in force for everything else: no record on the helm's side of which sessions an environment
+holds, no Resume to count sessions, and no automatic recovery of failed Replaces. Amend SPEC.md's Sandbox sessions
+paragraph on Delete destroying the whole sandbox, its bulk-Delete modal sentence, its Container sessions paragraph on
+user Delete confirming destruction, and the SPEC_impl.md passages that state the old rule.
+
+#### Why the helm cannot decide
+
+Only the Farhelm supervisor inside the sandbox or container knows which sessions it holds. The helm's list can miss
+some: a Replace whose reply was lost, and, once the maintainer's planned feature lands, sessions that agents inside the
+environment start while the helm is not connected, possibly many in an unattended environment. So no Delete may decide
+"this was the last session" from the helm's list, a cache or anything stored on the helm's side, and nothing should be
+built to make that list complete.
+
+#### Delete when the supervisor answers
+
+The user's Delete of a sandbox or container session first takes the host's provisioning lock without waiting, as host
+removal does, so a setup or update in progress gives a plain "try again" instead of a sealed environment the helm cannot
+destroy yet. It then sends the environment's supervisor one request: delete this session, and if no other session
+remains, seal the environment (refuse every new session from then on).
+
+The supervisor decides under the supervisor-wide lock that every create already holds while it launches and that Delete
+already holds across its teardown, after the session's in-flight agent requests have finished. Inside that one step:
+
+- It counts the other sessions in its state store, in any state, including one still launching (a launch is recorded
+  before its terminal starts) and one being restarted (a Restart takes a session out of the running set for the whole
+  relaunch, so the running set is not the count). A create whose earlier attempt never recorded a session is not
+  counted; once sealed, its retry is refused.
+- It seals only after the Delete's own checks pass (the session is still the one shown, its tabs can be found). If there
+  are no other sessions, it records the seal so that it survives a supervisor restart, ends the session, and answers
+  "sealed". Once sealed it answers "sealed" even if ending the session then fails: the environment's destruction ends it
+  anyway, and until then the sealed supervisor refuses to restart it. A sealed supervisor never unseals.
+- A sealed supervisor refuses every way of adding a session or starting a new run, from any source and with or without a
+  helm connected. Today that is creates from any source (the helm's own, Replace's replacement, agent spawn and create),
+  a retry of an earlier create attempt, recovery of an accepted checkout launch, Restart and Restart with, and opening a
+  terminal tab; and, once it exists, a spawn the supervisor admits on its own. The check goes at each of those entry
+  points, not only in one create path.
+- If other sessions remain, it deletes only that session and answers "deleted" with how many sessions remain. The
+  session's checkout is removed without archiving it (the monitor's choice: it keeps both outcomes the same for the
+  checkout, and environment Deletes already never archive). The helm's ordinary list refresh shows the sessions that
+  remain, including ones it did not know about.
+
+There is never a separate "refuse, then delete just this session" exchange: the other sessions could end between the
+two, leaving an empty, unsealed environment that keeps running and, for Tensorlake, billing.
+
+On "sealed", the helm destroys the sandbox or container through its provider, as today's whole-environment Delete does.
+A sealed supervisor also says so in the session list it sends the helm on every connection. Whenever the helm sees a
+sealed environment, whether or not it sent the request (after a lost reply, a failed destruction, or its own restart),
+it finishes the destruction itself through the provider without asking the supervisor again (the monitor's choice: the
+user already confirmed that outcome, and a sealed environment otherwise sits there running and billing). While it is
+being destroyed, and if destruction fails, the environment shows as being deleted, in Hosts and in the sidebar's
+attention area, with the reason and Retry. The request needs no intent key: the seal is what makes a repeat safe. A
+sealed supervisor answers "sealed" to any delete, and a retry that finds its session already gone on an unsealed
+supervisor means the earlier attempt deleted only that session.
+
+On "deleted", the result says the environment stays, with the number the supervisor reported ("The container stays: 2
+other sessions are in it"), never a count of the helm's own. Two windows deleting an environment's last two sessions at
+once can briefly show that message in one window just before the other window's Delete seals and destroys; the list then
+shows the truth.
+
+The confirmation shown before the request cannot know which outcome will happen, so it states both: the session and its
+checkout are deleted, and if it is the last session in the sandbox or container, the sandbox or container and all its
+files go too. It is never skipped by "Skip session confirmations", because it may destroy the environment. Which
+confirmation is shown comes from whether the helm currently has a connection to that environment's supervisor, never
+from the provider or its suspended or paused state.
+
+Bulk Delete sends one such request per marked session, never one per environment; the supervisor takes them one at a
+time, and the last one seals if nothing else remains. Its confirmation states the same two outcomes for environment
+rows.
+
+#### Delete when the supervisor does not answer
+
+When the supervisor cannot be asked (the sandbox is suspended, the container paused, the environment unreachable, or its
+supervisor runs an older Farhelm that this helm cannot talk to until it is updated), Delete does not guess and does not
+ask the user to resume first. It offers the explicit whole-environment Delete, with a confirmation that warns the
+sandbox or container may hold other sessions, including ones Farhelm does not list because they were started while it
+was not connected, and that all of them, their processes and files are destroyed. The warning may add that resuming or
+updating first lets Farhelm delete just this session; that is wording only, with no automatic Resume. It destroys
+through the provider as today, which works while suspended.
+
+A request that gets no answer, or a host that turns out to be disconnected when the helm sends it, is treated the same
+way: the helm reports that nothing was decided and offers the whole-environment Delete with its warning. It never
+destroys anything the user did not confirm in that warning. If the supervisor did seal, that shows at the next
+connection and the destruction finishes as above. One case is accepted: an environment sealed and then suspended or
+unreachable before the helm read the seal shows with no sessions until the helm can reach it again; Hosts' whole-
+environment Delete is the way out meanwhile.
+
+#### Unchanged
+
+**Delete sandbox** and **Delete container** in Hosts keep destroying the whole environment after their confirmation,
+whether or not the supervisor answers. An agent inside the environment that deletes another session there uses the
+ordinary single-session Delete, which never seals or destroys the environment, as this plan already built. Delete aimed
+at an environment session from outside the environment stays refused: only the user deletes an environment. Suspend and
+Stop and suspend keep their wording for every session in the environment, without counts or claims that the list is
+complete. If a Replace's new session is admitted before a user Delete of its source, that Delete is not final and
+removes the source, and Replace's own removal of the source finding it already gone counts as success; in the other
+order the sealed supervisor refuses Replace's create, and Replace reports that the environment is being deleted. Every
+provider follows the same rule; nothing here is specific to Tensorlake or Podman.
+
+#### How to build it
+
+Build it as further PRs on top of the open stack (#3334, #3338, #3348, #3354), or restructure the stack per the plan's
+PR discipline. The supervisor request is a new protocol request with a protocol version bump, so it goes through this
+plan's "Changing the core abstractions" consult as well as the code review gate; the maintainer's approval of the design
+does not skip either. Tests, at the supervisor level where they are provider-independent, for Tensorlake through the
+provider-neutral path and its fakes, and for Podman with local containers (no real sandbox):
+
+- the last session sealing and the environment destroyed; a non-final Delete removing only that session and its checkout
+  and reporting how many remain;
+- a create racing the Delete (admitted first, so the Delete is not final; or refused once sealed), and a create retry
+  and a checkout recovery refused after the seal;
+- a create the supervisor admits with no helm connected counted by a later Delete;
+- two windows deleting the only two sessions at once (one "deleted", one "sealed");
+- Delete of one session while another is mid-Restart (counted, not sealed);
+- Delete of the asking session while its agent's spawn request is in flight (the spawned session is counted);
+- a teardown failing after the seal (answers "sealed"; restart refused);
+- the seal surviving a supervisor restart; the helm restarting after "sealed" and before destruction (it finishes the
+  destruction); an unanswered request (nothing destroyed, the warning offered);
+- bulk Delete over several sessions of one environment; and the unreachable path's warning and whole-environment Delete.
+
+A later change of mind is a follow-up, not a reason to stop the plan.
