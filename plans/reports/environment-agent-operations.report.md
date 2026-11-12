@@ -278,3 +278,175 @@ before it was built (above).
 - #3364: four rounds; fixed a Delete answer without the remaining-session count making the page drop the environment's
   other sessions from the list, bulk actions reaching sessions being deleted, and the "stays" message outliving the
   environment (twice). The last round found nothing.
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round, and main gained only plan-queue and TODO.md changes since the stack was based, so
+nothing on main interacts with it. Four independent reviewers read the whole stack in parts (the spec and the seal, the
+helm's Delete, the page's Delete, and agents in and launching environments) against the plan's Decisions, your
+2026-11-12 Delete design above all. They found no design problem and no way for an agent inside a sandbox or container
+to reach outside it: the helm decides an agent's reach from the connection its request came in on, never from what the
+request says. They did find about a dozen smaller defects, two of them real bugs, all fixed below before anything
+merged; I read every fix, and the checks after them are listed at the end. The design holds as built:
+
+- the environment's Farhelm counts its sessions and seals in one step that no create can slip into, counting sessions in
+  any state, including one still starting or restarting;
+- once sealed it refuses every way of starting something: a new session from any source, a retry of an earlier create,
+  resuming a checkout launch whose reply was lost (the helm's recovery path for those), Restart, Restart with, and
+  opening a terminal tab; the seal survives a restart of that Farhelm;
+- the helm never decides "last session" itself, never destroys anything on an unanswered request, and picks which
+  confirmation to show only from whether it is connected to that environment's Farhelm.
+
+The tmux removal plan being built now, tmux-end-old-terminals, makes its own protocol change and rewrites Restart and
+tab opening. It has to take protocol version 77, since this stack uses 75 and 76, and keep the seal checks this stack
+put into those paths. I will check both when that plan comes to land.
+
+#### Fixes made while landing
+
+Each fix went into the PR whose code it changes; together about 600 added lines, most of them the new tests.
+
+- **A guarded Delete could destroy an environment.** The page's Delete request to the helm can carry conditions ("only
+  if nothing is running", "only if the agent has ended"), which the helm ignored for the new environment Delete. The
+  page never sends them for it and nothing else Farhelm ships calls this Delete, so only a hand-written API call could
+  hit it, but such a call would have deleted a running session and, for the last one, sealed and destroyed the
+  environment. The helm now refuses it, as the whole-environment Delete already did, before the environment's Farhelm is
+  asked anything (#3361).
+- **An agent's new-environment launch could be cut off halfway.** It ran on the asking session's own connection, so if
+  that connection dropped right after Allow, the launch could stop between registering the new environment and starting
+  to build it, leaving an environment entry nothing ever builds or removes, or a host shown as setting up until the helm
+  restarts. It now runs as the helm's own work, as your own launches already do; a dropped connection only loses the
+  agent's reply (#3348).
+- **The "stays" message outlived the environment.** "The sandbox stays: 1 other session is in it" went away only when
+  Hosts stopped listing the environment, so it showed through the whole destruction after another Delete sealed it, and
+  indefinitely beside "Deleting failed" when destruction failed. It now goes as soon as Hosts shows the environment as
+  being deleted (#3364).
+- **Specs still stating the old rule.** SPEC.md's "Skip session confirmations" passage, its bulk Delete dialog sentence
+  and its Durability paragraph still described Delete as always destroying the whole environment, and SPEC_impl.md
+  described the sealed refusal wrongly. All four now match the design (#3334).
+- **Three missing tests.** Your design asked for tests that a retried create and a resumed checkout launch are refused
+  once sealed; neither existed. Both are added, and a run with the seal checks taken out failed both, so they catch the
+  bug (#3359). Separately, #3338 rewrote the test that checked an agent inside an environment cannot prompt a session
+  elsewhere so that it no longer reached that check (agent prompts are switched off in this release, and the rewritten
+  test kept them off); a new test switches them on and checks it, so turning prompts back on cannot open that hole
+  (#3338).
+- Smaller: the new-environment card's wording for where the container or sandbox goes is now defined with each
+  provider's other wording, so a new provider has to choose its own (#3348); comments that claimed a failed destruction
+  keeps the host's connection held, and that a sealed host refuses Suspend and Resume, now say what the code does
+  (#3361); four code comments the seal PR had separated from the code they describe are back in place (#3359); and the
+  docs pages now say the deleted session's checkout is kept when another session still uses it, as the confirmation does
+  (#3364).
+
+#### What the report says that is not quite right
+
+- "The 'stays' message can be briefly wrong in one case": it now also goes when Hosts shows the environment as being
+  deleted, not only when Hosts stops listing it, so it no longer lingers through a destruction or after a failed one.
+- The changelog fragment of #3359 (an internal note for the release curator, not a user-facing entry) says nothing uses
+  the seal yet. That was true only of #3359 on its own. Nothing needs doing: a `none` fragment adds no changelog entry.
+
+#### Things you should know that the report does not say
+
+- **A new-environment launch holds up the asking session.** While an agent's launch into a new sandbox or container runs
+  (up to the nine-minute approval wait plus thirty minutes), Farhelm keeps that agent's session busy: your Delete or
+  Replace of that session waits until the launch ends, with no limit of its own, and the agent's other farhelm commands
+  are refused meanwhile. The agent instructions tell agents to run the launch in the background, which this undercuts.
+- **A process inside an environment can probably make Farhelm destroy that environment.** The seal lives in the
+  environment's own Farhelm database, which a process running there can most likely write, and the helm finishes
+  destroying any environment it sees sealed without asking (the landing monitor's choice when it adjusted your design).
+  So an agent inside could have its own sandbox or container destroyed, snapshots included, without your Delete. It can
+  already delete every file in there, but the design says only you delete an environment. Nobody checked the file
+  permissions inside environments.
+- **After a destruction fails, Suspend, Resume and Update are not refused.** The helm answers them as busy only while a
+  destruction runs. Once one has failed, a hand-written API call can still suspend, resume or update that environment;
+  the page offers none of them for an environment being deleted. Either way the environment keeps showing as "Deleting
+  failed" and Retry still destroys it, whatever state it is in, so nothing is lost.
+
+#### Possible follow-ups
+
+- **Answer the agent at Allow** for new-environment launches, so the asking session is not held up for the whole build.
+  I recommend doing it: the hold-up surprises both you (a Delete that waits) and the agent (refused commands).
+- **Seals the helm did not ask for.** Either keep the environment's own processes from writing the seal, or have the
+  helm ask you before finishing a seal it did not request. I recommend the second, which is simpler and covers any way a
+  seal could appear: the helm knows which Deletes it sent.
+- **Agent commands refused inside environments are listed one by one**, so a new agent command would be allowed
+  everywhere until someone adds it to that list. I recommend making every agent command declare its reach, so a new one
+  cannot be forgotten; it is a refactor with no visible change.
+- **Two stale messages**: the launcher's note about managed checkouts for new containers and sandboxes still reads as if
+  Delete removes the environment, and a refusal still says recipe templates can only be used in Farhelm's window, while
+  agents can now launch from them. Worth fixing when that code is next touched.
+- **The real-container test's weak spots**: it checks that an agent inside sees no other host only by the absence of the
+  text "this machine", and it launches with `farhelm agent create` where the acceptance criterion says agents can
+  "spawn" sessions in their own environment. I did not check whether `farhelm spawn` takes a path the test misses;
+  tightening both checks is a small follow-up.
+
+#### Checks
+
+Browser runs were on Tensorlake sandboxes at your request; the sandboxes run Node 24.16 where the development machine
+runs 24.20, which these tests do not depend on, and each shard is recorded in the recorder's mode for arbitrary
+commands. Rust tests ran locally through the recorder's nextest mode (four slots, no retries, the pinned tmux).
+
+On the stack as delivered, restacked onto main:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-ui --target wasm32-unknown-unknown` passed.
+- `cargo nextest run --workspace --exclude farhelm-desktop -E 'not test(/^podman_environments::/)'`: 6,140 passed (run
+  `03e72af3-1c2a-4f04-b72d-99e2ec0a7cad`), the supervisor's end-to-end suite included, which had not run since the seal
+  checks were added at every create, Restart and tab entry point.
+- The whole ordinary browser suite on both engines, from a fresh build, on ten sandboxes: 3,315 passed, 3 failed, and 14
+  skipped by the specs' own conditions (engine-specific cases, and the real-agent spec, which needs installed agents)
+  (runs `9bda7618-fc29-4b84-a080-858ad2661419`, `f8bc84c0-0901-45b9-9515-c826b2dd2a0e`,
+  `e560721e-56e0-433c-a547-d960a67fb67b`, `85997c5b-1b77-4d66-b091-8d1bc85aa15b`,
+  `d6c70ec7-626e-49f2-a38a-c65606cdf02b`, `8d26b6d6-e4ac-4e15-8e0c-4e4e864f556d`,
+  `82fee637-fd9e-4897-afd1-f7fb7d16cd3e`, `2dc5f83a-31b7-452d-a677-4b0c53e06de4`, `4b07bc95-d5a5-410a-93fd-f9916f44a903`
+  and `67420e2b-7e76-47f0-b5b6-3d0e835d908b`). The three failures are open, recorded flakes in areas this plan does not
+  touch, each on Chromium: the trash dialog's reachability at width 1000, a provisioning progress test ("incarnation
+  churn keeps a followed run"), and a quick launch test (the page body never seen focused after a blur, as FLAKES.md
+  records). All three passed in the run below.
+
+After the landing fixes, rebased onto main again (plan and TODO.md changes only):
+
+- The same lints, test-sleep check, changelog and agents-md checks, workspace and binary clippy, desktop and wasm
+  compiles: passed.
+- The specs for approval cards, bulk session actions, container and sandbox sessions, Tensorlake hosts, the hosts panel
+  and retired container sessions on both engines, and the three flaky specs above on Chromium, from a fresh build: 342
+  passed, none failed or skipped (runs `802eb609-ad1e-458b-a1c0-f666f0626c81`, `3df93d81-a5b1-44af-9be3-578e5804b9ce`,
+  `e43d301a-07f7-49f8-8f66-26f5af0cbdd3`, `795a5fc6-cd9a-4cf0-8fad-0e560ff41bff`,
+  `35da944b-5e04-4884-a5d2-8b4da687380b`, `55b30b39-79b8-4b9b-b04e-83857f82d6da`,
+  `75e2b85d-1782-490b-ad32-dc548882d90a`, `1afd1765-66b4-47f5-ba21-a95f249fb741`, `9f510859-6849-4398-86ad-93d7da6dae02`
+  and `12f0309e-2aa2-45d5-bc27-796fe7cbe211`).
+- `cargo nextest run -p farhelm-helm -p farhelm-supervisor -p farhelm-proto -p farhelm-ui --lib`: 4,834 passed, 1 failed
+  (run `0360b6db-c2ed-4d6c-8ce1-a48ffcd25b6f`). The failure, the helm's
+  `provisioning::tests::a_plan_made_while_running_does_not_run_once_suspended`, hit its five-second wait for a
+  provisioning run, most likely because the four crates' tests were sharing the machine; this stack does not change that
+  code, the test passed in the workspace run above, and it passed ten times alone (runs
+  `0a043bbe-2c1d-4795-b127-da306a7c641c`, `9efe7915-3ba7-4b1b-a63c-7355616beddc`,
+  `c1b4d0fb-23f8-4677-8d02-c666cf599ac8`, `29158f2e-3f07-47fc-8a65-9ee883df993b`,
+  `02f47423-2e9c-45ea-a13a-662bf10e1365`, `e3b3a21b-4aed-4bc2-b042-c1e81956c82d`,
+  `52ccb4e8-c345-4a85-9551-cd7d69434ed7`, `731f9d80-b845-4f5e-926a-11bac0b2736b`, `9e8d6627-feb0-4aaf-b4ac-ee5851195737`
+  and `385b0942-e354-417c-a8cb-1741999d0bc4`), each in under a fifth of a second. Its failed run is kept; one failure
+  under load is not enough to record it in FLAKES.md, so it is not recorded there.
+- The landing fixes' own tests, run while they were written: the supervisor's seal tests with the schema, seal-count and
+  checkout tests, 21 passed (`6beefd04-d584-4965-bd05-18e94182609d`); the helm's agent request and session tests, 282
+  passed (`8b559280-c4f8-4490-bf3f-017354356df4`); the page's list, approval, provider, hosts and sandbox session tests,
+  167 passed (`a92ea0ee-c0e0-44a8-9078-bb1742bb0764`). A run with the seal checks deliberately removed failed both new
+  seal tests (`c2fe7fdb-b4ad-468c-ace5-f0dbea9ae3c1`), showing they catch the bug.
+
+Reused: the real-container scenario (`cargo nextest run -p farhelm --test e2e -E 'test(/^podman_environments::/)'`),
+which the executor ran on #3364 before its review fixes (`62c2017c-ccdc-4453-8991-9a5745d11051`) and with the agent
+scenario on #3354 (`7b22a2b9-6e3e-4ea5-9b41-c5eac8ae72a3`, `e051ae61-53c4-4b4c-b6a1-6dd27950cd0e`). Since then only the
+page's code, the helm's refusal of a guarded Delete and how it runs an agent's new-environment launch changed; the
+scenario sends no guarded Delete and launches no new environment for an agent.
+
+After the merge, on main (the same tree outside the plan queue), because the landing fixes changed how the helm runs an
+agent's new-environment launch and four docs pages:
+
+- The end-to-end tests of agents' requests through a real supervisor and the CLI, with the CLI's own tests
+  (`cargo nextest run -p farhelm --test e2e --bin farhelm -E 'test(/^agent_relay::/) | binary(farhelm)'`, then
+  `-E 'test(/^agent_listing_real_stack::/) | test(/^prompt_running_agent::/)'`): 209 and 8 passed (runs
+  `06186d40-38f6-4d53-9bc7-4348bd29fb70` and `a2ba1c3c-6f2c-41b1-ab43-9ebd8f369007`).
+- The website build (`bun install --frozen-lockfile && bun run build` in `website/`): passed.
+
+Skipped: the old-terminal browser set and the doctests; nothing here touches old terminals or documentation examples.
