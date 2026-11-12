@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`macos-remote-hosts`](reports/macos-remote-hosts.report.md) landed 2026-11-09 in #3213, #3214: Set up, update and uninstall an Apple-silicon Mac as a remote host over SSH, with the supervisor as a per-user launchd job and no tmux on Mac hosts
 - [`pin-rust-toolchain`](reports/pin-rust-toolchain.report.md) landed 2026-11-09 in #3230: Pin Rust to the newest stable in rust-toolchain.toml so local checks, CI and release builds agree; bumps are manual PRs
 - [`xhigh-effort-label`](reports/xhigh-effort-label.report.md) landed 2026-11-09 in #3232: The extra-high effort level reads "xhigh" instead of "Xhigh" wherever effort labels show
 - [`settings-dialog-fixed-size`](reports/settings-dialog-fixed-size.report.md) landed 2026-11-09 in #3231: The Settings dialog keeps one fixed height across sections (about 640px, capped by the window), its body scrolling for taller sections
