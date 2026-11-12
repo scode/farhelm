@@ -96,6 +96,10 @@ const DEFAULT_PATH: &str = "/usr/bin:/bin";
 ///   child is in neither. A supervisor started from inside the user's own
 ///   tmux has them; a child that inherited them would send a plain `tmux`
 ///   command to that server and believe it runs in one of its panes.
+/// - `FARHELM_TMUX` named the tmux program the supervisor ran its old
+///   terminals with. The supervisor runs no tmux any more, and the variable
+///   means nothing to anything a session runs; installed units keep setting
+///   it until their next setup or Update rewrites them.
 /// - `LISTEN_PID`, `LISTEN_FDS`, `LISTEN_FDNAMES`: systemd's socket
 ///   activation hand-off, which names descriptors given to the supervisor
 ///   process, not to the child.
@@ -103,9 +107,10 @@ const DEFAULT_PATH: &str = "/usr/bin:/bin";
 /// The terminal's own variables (`TERM`, `COLORTERM`, `TERM_PROGRAM`,
 /// `TERM_PROGRAM_VERSION`) are not here because [`host_child_env`] always
 /// sets them, which replaces whatever the supervisor's terminal left.
-const NOT_INHERITED: [&str; 5] = [
+const NOT_INHERITED: [&str; 6] = [
     "TMUX",
     "TMUX_PANE",
+    "FARHELM_TMUX",
     "LISTEN_PID",
     "LISTEN_FDS",
     "LISTEN_FDNAMES",
@@ -1088,23 +1093,26 @@ mod tests {
     ///
     /// Why: the child's environment is SPEC.md's "as if the user had
     /// SSHed in" contract, so the supervisor's own variables must pass
-    /// through; and a new terminal must not claim to be tmux or the
-    /// terminal the supervisor happened to start from, since programs adapt
-    /// to what these variables say. Spec: from a supervisor environment
-    /// holding `HOME`, `PATH`, a `FARHELM_` variable, an outer tmux's
-    /// `TMUX`/`TMUX_PANE`, an outer terminal's `TERM`, `TERM_PROGRAM`,
-    /// `TERM_PROGRAM_VERSION` and `COLORTERM`, and systemd's `LISTEN_*`, the
-    /// child gets `HOME`, `PATH` and the `FARHELM_` variable unchanged,
-    /// `TERM=xterm-256color`, `COLORTERM=truecolor`, `TERM_PROGRAM=farhelm`,
-    /// `TERM_PROGRAM_VERSION` set to this build's version, `SHELL` and `PWD`
-    /// from the arguments, and no `TMUX`, `TMUX_PANE` or `LISTEN_*`; the
-    /// result is sorted by name.
+    /// through; a new terminal must not claim to be tmux or the terminal
+    /// the supervisor happened to start from, since programs adapt to what
+    /// these variables say; and the tmux program the supervisor once ran its
+    /// old terminals with is nothing a session needs. Spec: from a
+    /// supervisor environment holding `HOME`, `PATH`, a `FARHELM_` variable,
+    /// `FARHELM_TMUX`, an outer tmux's `TMUX`/`TMUX_PANE`, an outer
+    /// terminal's `TERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION` and
+    /// `COLORTERM`, and systemd's `LISTEN_*`, the child gets `HOME`, `PATH`
+    /// and the `FARHELM_` variable unchanged, `TERM=xterm-256color`,
+    /// `COLORTERM=truecolor`, `TERM_PROGRAM=farhelm`, `TERM_PROGRAM_VERSION`
+    /// set to this build's version, `SHELL` and `PWD` from the arguments, and
+    /// no `FARHELM_TMUX`, `TMUX`, `TMUX_PANE` or `LISTEN_*`; the result is
+    /// sorted by name.
     #[test]
     fn the_child_gets_the_supervisors_environment_in_farhelms_terminal() {
         let child = host_child_env(
             env(&[
                 ("HOME", "/home/someone"),
                 ("PATH", "/opt/bin:/usr/bin"),
+                ("FARHELM_AGENT_HOOKS", "off"),
                 ("FARHELM_TMUX", "/opt/tmux"),
                 ("TMUX", "/tmp/tmux-1000/default,42,0"),
                 ("TMUX_PANE", "%3"),
@@ -1124,7 +1132,7 @@ mod tests {
             child,
             env(&[
                 ("COLORTERM", "truecolor"),
-                ("FARHELM_TMUX", "/opt/tmux"),
+                ("FARHELM_AGENT_HOOKS", "off"),
                 ("HOME", "/home/someone"),
                 ("PATH", "/opt/bin:/usr/bin"),
                 ("PWD", "/work"),

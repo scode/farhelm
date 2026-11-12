@@ -566,7 +566,7 @@ mod tests {
                         ]),
                     },
                     terminal_address: String::new(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: crate::store::LastOutcome::Running,
                     canonical_cwd: None,
                     captured_conversation: captured.map(str::to_string),

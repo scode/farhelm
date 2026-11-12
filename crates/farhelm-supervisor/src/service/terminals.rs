@@ -862,16 +862,16 @@ fn missing_terminal_message(
     };
     match (outcome, kind) {
         (LastOutcome::Interrupted, _) => format!(
-            "session {id} has no terminal: its host rebooted and the terminal did not survive; \
-             {way_out}"
+            "session {id} has no terminal: it ended while no supervisor was watching (a host \
+             reboot, or an update that ended an old terminal); {way_out}, in a new terminal"
         ),
         (_, TerminalKind::Host) => format!(
             "session {id} has no terminal on this host: its terminal host has ended, never \
              started, or could not be reached; {way_out}, in a new terminal"
         ),
         (_, TerminalKind::Tmux) => format!(
-            "session {id} has no terminal on this host: the supervisor (or its tmux server) \
-             restarted and the terminal did not survive"
+            "session {id} has no terminal on this host: it ran in an old terminal, which an \
+             update of Farhelm ended; {way_out}, in a new terminal"
         ),
     }
 }
@@ -3053,8 +3053,10 @@ mod tests {
     ///
     /// This is the sentence the browser shows when an interrupted session
     /// is opened, so its two claims are pinned: an `Interrupted` outcome
-    /// names the reboot and the restart-with-resume way forward, while
-    /// every other outcome says only that this host has no terminal. The
+    /// names its two causes (a host reboot, or an update that ended an old
+    /// terminal) and the restart-with-resume way forward, while every other
+    /// outcome says only that this host has no terminal, an old terminal's
+    /// with the same way forward. The
     /// negative assertion guards the regression this replaced — wording
     /// that stated the restart came "after the agent ended", an ordering
     /// SPEC.md says the supervisor cannot know after a reboot.
@@ -3066,7 +3068,10 @@ mod tests {
             RestartOffer::Resume,
             TerminalKind::Tmux,
         );
-        assert!(resumable.contains("host rebooted"), "{resumable}");
+        assert!(
+            resumable.contains("host reboot") && resumable.contains("ended an old terminal"),
+            "{resumable}"
+        );
         assert!(
             resumable.contains("restart offers to resume"),
             "{resumable}"
@@ -3084,7 +3089,7 @@ mod tests {
                 offer,
                 TerminalKind::Tmux,
             );
-            assert!(text.contains("host rebooted"), "{text}");
+            assert!(text.contains("host reboot"), "{text}");
             assert!(
                 text.contains("replace starts it over") && !text.contains("restart offers"),
                 "{offer:?}: {text}"
@@ -3114,10 +3119,23 @@ mod tests {
                 "{other:?}: {text}"
             );
             assert!(
-                !text.contains("rebooted"),
+                !text.contains("reboot"),
                 "{other:?} must not claim a reboot: {text}"
             );
         }
+        let old = missing_terminal_message(
+            "s-1",
+            &LastOutcome::Exited {
+                exit_code: Some(0),
+                annotation: None,
+            },
+            RestartOffer::Resume,
+            TerminalKind::Tmux,
+        );
+        assert!(
+            old.contains("old terminal") && old.contains("restart offers to resume"),
+            "an ended old session is told why and how to go on: {old}"
+        );
         for text in [
             resumable,
             missing_terminal_message(
@@ -3147,7 +3165,7 @@ mod tests {
     /// text says its terminal host has ended, never started, or could not
     /// be reached, names no tmux, and offers to resume the conversation in
     /// a new terminal when the conversation was captured and points at
-    /// replace otherwise; an `Interrupted` host session is told of the
+    /// replace otherwise; an `Interrupted` host session is told of a host
     /// reboot as a tmux one is.
     #[farhelm_testtrace::test]
     fn a_host_session_without_a_terminal_is_told_its_host_ended() {
@@ -3185,7 +3203,7 @@ mod tests {
             RestartOffer::Resume,
             TerminalKind::Host,
         );
-        assert!(rebooted.contains("host rebooted"), "{rebooted}");
+        assert!(rebooted.contains("host reboot"), "{rebooted}");
     }
 
     /// Records whether a gated test future was cancelled before release.

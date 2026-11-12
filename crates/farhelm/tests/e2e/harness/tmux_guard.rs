@@ -1,39 +1,11 @@
-//! Apply supervisor CLI environment precedence to shared private-server ownership.
+//! The shared private-server guard (`farhelm_teststate::tmux::guard`), as
+//! this suite's fixtures use it, with the guard's own end-to-end check.
 //!
-//! The shared guard owns diagnostics and teardown. Only this adapter knows
-//! which child-only overrides the supervisor's CLI will use when it starts.
+//! The adapter that applied the supervisor CLI's `FARHELM_TMUX` precedence
+//! to a spawned supervisor's server is gone: no supervisor starts or adopts
+//! a tmux server any more, so no test owns one through a supervisor.
 
 pub(crate) use farhelm_teststate::tmux::guard::TmuxServerGuard;
-use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
-
-/// Capture the inheriting child's tmux choice before spawning it. These
-/// commands do not use env_clear or current_dir; explicit removals and repeated
-/// overrides follow Command's final effective entries.
-pub(crate) fn for_supervisor_child(
-    socket: PathBuf,
-    command: &std::process::Command,
-) -> TmuxServerGuard {
-    let (program, path) = supervisor_child_program(command);
-    TmuxServerGuard::with_environment(socket, &program, path.as_deref())
-}
-
-/// Keep CLI precedence separate from executable resolution so the shared
-/// support crate never depends on a production supervisor implementation.
-fn supervisor_child_program(command: &std::process::Command) -> (PathBuf, Option<OsString>) {
-    let effective = |name: &str| {
-        command
-            .get_envs()
-            .find(|(key, _)| *key == OsStr::new(name))
-            .map_or_else(
-                || std::env::var_os(name),
-                |(_, value)| value.map(OsStr::to_os_string),
-            )
-    };
-    let override_value = effective("FARHELM_TMUX");
-    let program = farhelm_supervisor::tmux::resolve_tmux_program(None, override_value.as_deref());
-    (program, effective("PATH"))
-}
 
 #[cfg(test)]
 mod tests {
@@ -41,30 +13,6 @@ mod tests {
     use farhelm_teststate::process::{CommandRunLimits, run_bounded};
     use std::path::Path;
     use std::time::Duration;
-
-    /// Child-only overrides follow CLI precedence without changing the test
-    /// process's environment. Generic PATH resolution is tested by the shared guard.
-    #[farhelm_testtrace::test]
-    fn child_override_and_path_are_captured_from_the_launch_command() {
-        let state = farhelm_teststate::tempdir().unwrap();
-        let executable = state.path().join("tmux");
-        let mut command = std::process::Command::new("unused");
-        command
-            .env("FARHELM_TMUX", &executable)
-            .env("PATH", "/nonexistent");
-        assert_eq!(
-            supervisor_child_program(&command),
-            (executable, Some(OsString::from("/nonexistent")))
-        );
-        command.env("FARHELM_TMUX", "").env("PATH", state.path());
-        assert_eq!(
-            supervisor_child_program(&command),
-            (
-                PathBuf::from("tmux"),
-                Some(state.path().as_os_str().to_owned())
-            )
-        );
-    }
 
     /// Teardown must capture while the session exists, for successful scopes,
     /// returned errors and panic unwinding alike. Afterwards an independent

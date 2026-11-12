@@ -20378,3 +20378,30 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: implemented in change `utonlsqkwzolmrklsumnxkuyrzzptnyr`, bookmark
   `plan/sandbox-stop-click-guards/01-capture-guards`, [PR #3337](https://github.com/scode/farhelm/pull/3337/changes).
+
+## startup-surviving-tab-adoption-source-gap.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: A
+  conditional lead: startup could adopt a surviving shell tab as the agent if an agent-gone/tab-alive state existed. The
+  finding states no supported producer of that state was established (ordinary Delete and Open Tab do not create it).
+- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
+  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed in plan `tmux-end-old-terminals`, draft PR
+  [#3362](https://github.com/scode/farhelm/pull/3362/changes) (`03-end-old-terminals`): startup no longer looks an old
+  tmux pane up; it ends the old terminals and takes every old row as having no terminal.
+
+## startup-alternative-live-clone-pane-source-gap.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
+  Hypothetical: startup might remove a checkout still being prepared if a pane-less row resolves to a dead pane while
+  another eligible pane runs its clone. The file says this is "an incomplete source investigation" with no supported
+  producer of that row/pane arrangement.
+- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
+  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed in plan `tmux-end-old-terminals`, draft PR
+  [#3362](https://github.com/scode/farhelm/pull/3362/changes) (`03-end-old-terminals`): startup no longer looks an old
+  tmux pane up; it ends the old terminals and takes every old row as having no terminal.

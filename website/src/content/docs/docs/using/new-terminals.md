@@ -1,25 +1,38 @@
 ---
-title: Move sessions to new terminals
-description: Why Farhelm's terminals no longer run in tmux, what that means for sessions you already have, and how to move them.
+title: New terminals
+description: Why Farhelm's terminals no longer run in tmux, what happened to sessions that still ran in an old terminal when you updated, and how to get them back.
 sidebar:
   order: 11
 ---
 
-Farhelm has changed how it runs your sessions' terminals. Until now, every session's terminal, and every shell tab
-beside it, ran inside a Farhelm managed tmux on its host. xterm.js was also used in the UI to render the terminal.
+Farhelm has changed how it runs your sessions' terminals. Until 0.34.0, every session's terminal, and every shell tab
+beside it, ran inside a Farhelm managed tmux on its host, and xterm.js drew it in the UI.
 
-As of 0.34.0, all newly created terminals (new agent sessions, new shell tabs) run without tmux, and no xterm.js is
-involved either. Instead, each terminal is owned by a small Farhelm processes which does the bare minimum to maintain
-the terminal - including for short periods of time while other Farhelm processes are restarting, such as during
-upgrades.
+Since 0.34.0, every new terminal (a new agent session, a new shell tab) runs without tmux, and no xterm.js is involved
+either. Instead, each terminal is owned by a small Farhelm process that does the bare minimum to keep the terminal
+running, including for short periods while other Farhelm processes restart, such as during updates.
 
-Sessions you already have running when you upgrade to 0.34.0 keep their old terminals and keep working as they always
-have for now - inside of tmux, and with xterm.js on the client.
+Farhelm has since stopped supporting old terminals, the ones that still ran in tmux. Earlier releases warned about them
+with a note at the top of each such session and a notification in the session list.
 
-An upcoming Farhelm release will stop supporting old terminals and will forcibly terminate anything still running in
-one. Restart, replace, stop or delete each session that still runs in an old terminal, and close and reopen any of its
-shell tabs that are still old terminals, as soon as possible (restarting a session restarts only its agent, not its
-tabs). Each such session shows a loud note at the top and a notification in the session list.
+## What happened to old terminals
+
+The first time a host's Farhelm starts on a release without old terminals, it ends the tmux that ran them, and
+everything that still ran in them:
+
+- A session whose agent was still running in an old terminal now shows as interrupted, with a notification saying so.
+  **Restart** starts the agent again in a new terminal and resumes its conversation; if Restart is unavailable for the
+  session, **Replace** starts it anew. The new terminal starts empty: the old terminal's scrollback and its last screen
+  are gone.
+- A session whose agent had already stopped or exited keeps its status and gets no notification, but its terminal no
+  longer shows the agent's last screen, which lived in the old terminal. Restart starts it in a new terminal as usual.
+- Old shell tabs are closed. Open new ones where you need them.
+
+Programs that old agents and tabs had left running in the background are stopped too, wherever Farhelm can tell which
+session they belong to. Any it cannot tell are stopped when you delete their session.
+
+The old notification asking you to restart such a session is now greyed and marked **Resolved**
+([Read the session list](/docs/using/session-list/#when-a-row-shows-a-bell) says how notifications work).
 
 ## Why terminals are leaving tmux
 
@@ -39,47 +52,15 @@ tmux was intended to be as much of an implementation detail as possible, but it 
 A new terminal stands on its own: a problem with one does not take the others down, and it no longer depends on which
 tmux version a host has.
 
-## What an old session shows
-
-When something in a session on a host that makes new terminals still runs in an old terminal, an amber note appears at
-the top of the session. It asks you to act as soon as possible, because an upcoming Farhelm release will forcibly
-terminate whatever still runs in an old terminal:
-
-- If the agent is running in an old terminal, it asks you to restart (the conversation resumes), replace, stop or delete
-  the session. For a session that cannot be restarted, it asks you to replace, stop or delete it instead, and says why
-  it cannot be restarted: either Farhelm does not know the agent's conversation yet (most agents report it after your
-  first prompt), or the session has no way to resume one.
-- Otherwise, if some shell tabs are old, it names those tabs and asks you to close them and open new ones. Restarting
-  the session would not help with these, since it restarts only the agent, not the tabs. This is the note you see right
-  after restarting a session that had old tabs.
-
-A session whose agent has stopped, and that has no old tabs, shows no note even if the agent's terminal is old: nothing
-is running in it any more, and restarting the session later gives the agent a new terminal.
-
-So that you hear about sessions you never open, each such session also gets a notification: a red bell on its row in the
-session list ([Read the session list](/docs/using/session-list/#when-a-row-shows-a-bell) says how the bell works). It
-says what the note says, in one message for the agent and the tabs, and ends with a link to this page. A session gets
-only one such notification, even when restarting it leaves old tabs open. Once nothing in the session runs in an old
-terminal any more, the notification is greyed and marked **Resolved**.
-
-**What's changing** opens this page. The **×** hides the note until you next open the session.
-
-The bar under the terminal also says which kind each of the session's terminals is: old, new, or both. Hover over it to
-see each terminal listed, the agent first and then **Terminal 1**, **Terminal 2**, and so on, as the tabs are named
-above the terminal.
-
-## What is the same, and what is not yet
-
-Old terminals keep working exactly as before for now. You use both kinds the same way: type to the agent, scroll back,
-select and copy, paste or drop text, screenshots and files, and open links.
+## What is different in a new terminal
 
 Typing with an input method, as for Chinese, Japanese or Korean, does not work fully in a new terminal yet. What you
 commit reaches the agent, but the text you are composing, and the input method's list of candidates, do not appear at
 the terminal's cursor while you type.
 
-Emoji presentation selectors, as in ❤️, now give eligible characters two columns in a new terminal, and text
-presentation selectors can make a wide character narrow. This follows Ghostty's defaults; tmux also widens characters
-that are not eligible and does not narrow them.
+Emoji presentation selectors, as in ❤️, give eligible characters two columns in a new terminal, and text presentation
+selectors can make a wide character narrow. This follows Ghostty's defaults; tmux also widened characters that are not
+eligible and did not narrow them.
 
 New terminals drop some invisible formatting characters from program output, including zero-width spaces, text-direction
 marks, line and paragraph separators, word joiners, byte order marks and Hangul fillers. Those characters are also
@@ -95,26 +76,21 @@ and
 show the behavior Farhelm will revisit.
 
 Programs in a new terminal see `TERM_PROGRAM=farhelm`, with Farhelm's version in `TERM_PROGRAM_VERSION`. `TMUX` is
-unset. An agent started, or a tab opened, before you upgraded keeps the earlier environment, which claims tmux, until it
-is restarted or closed. If a startup file of your login shell starts tmux whenever it is not already inside tmux, it now
-does so in a new terminal too, including while the agent starts. One that replaces the shell with tmux (`exec tmux`)
-keeps the agent from starting at all, and the session's terminal shows your tmux instead. To leave Farhelm's terminals
-alone, have the startup file skip tmux when `TERM_PROGRAM` is `farhelm`.
+unset. If a startup file of your login shell starts tmux whenever it is not already inside tmux, it does so in a new
+terminal too, including while the agent starts. One that replaces the shell with tmux (`exec tmux`) keeps the agent from
+starting at all, and the session's terminal shows your tmux instead. To leave Farhelm's terminals alone, have the
+startup file skip tmux when `TERM_PROGRAM` is `farhelm`.
 
 ## tmux is still needed
 
-The Farhelm desktop app and setup on Linux hosts still require tmux for now and check its version, even after you move
-every session: keep it installed on those machines. On your local Mac, the desktop app does not start without a new
-enough tmux; [Install Farhelm](/docs/get-started/install/#if-the-installer-asks-for-tmux) says which version. Setting up
-a remote Linux host still checks the host's tmux too, and brings Farhelm's own copy when the host has no new enough one.
-Remote Macs set up over SSH do not require or install tmux ([Add a remote host](/docs/get-started/add-a-remote-host/)
-covers both).
+The Farhelm desktop app and setup on Linux hosts still require tmux for now and check its version: keep it installed on
+those machines. On your local Mac, the desktop app does not start without a new enough tmux;
+[Install Farhelm](/docs/get-started/install/#if-the-installer-asks-for-tmux) says which version. Setting up a remote
+Linux host still checks the host's tmux too, and brings Farhelm's own copy when the host has no new enough one. Remote
+Macs set up over SSH do not require or install tmux ([Add a remote host](/docs/get-started/add-a-remote-host/) covers
+both).
 
-Farhelm's tmux only runs for old terminals, though. Farhelm runs no tmux on a host whose sessions all have new
-terminals, and on a host that still has old terminals, Farhelm's tmux stops by itself once the last of them is gone
-(every old session restarted, replaced or deleted, and every old tab closed). An old session cannot do without it: if
-tmux is missing or too old on its host, Farhelm cannot reach that session's terminal and shows the session as exited.
-While that host's old tmux is still running, the agent may still be running in it too, so Farhelm refuses to restart or
-delete the session until a supported tmux is installed again; the refusal says how.
+Farhelm itself no longer runs tmux for any session: it ends the tmux it ran old terminals in when it updates, and never
+starts one again.
 
 A later release will say when Farhelm stops needing tmux.

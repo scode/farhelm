@@ -121,7 +121,8 @@ icon you can hover over):
 
 - **Exited**, with the agent's exit code. "stopped by user" is added when you stopped it, or "stopped before the agent
   finished starting" if you stopped it while it was still starting.
-- **Interrupted**: the host rebooted, which ended the agent. The session waits for you to start it again.
+- **Interrupted**: a reboot of the host, or a Farhelm update that ended an
+  [old terminal](/docs/using/new-terminals/), ended the agent. The session waits for you to start it again.
 - **Error**: the agent could not start; the reason follows the word. An agent that starts and then quits shows exited.
 
 An exited session's terminal stays readable for as long as its host stays up. A reboot clears it, so an interrupted
@@ -250,9 +251,10 @@ A bell appears on a row, just left of its age, when Farhelm has noticed somethin
 on. Most are about following the agent's conversation, which is what lets **Restart** pick that conversation up again
 later. For example, the agent has been working for a while and never told Farhelm which conversation it is in, so
 **Restart** cannot pick it up. Each notification says what happened and what you can do about it, such as starting the
-session over with **Replace with**, or, when nothing can be done, what you lose. The other kind tells you that something
-in the session still runs in an old terminal, which an upcoming release will forcibly terminate
-([Move sessions to new terminals](/docs/using/new-terminals/) explains). A link to a Farhelm docs page in a
+session over with **Replace with**, or, when nothing can be done, what you lose. The other kind tells you that the
+session's agent ran in an old terminal, which Farhelm ended when it updated, and how to start it again
+([New terminals](/docs/using/new-terminals/) explains). Releases before that one warned instead that something in the
+session still ran in an old terminal; those warnings now show as resolved. A link to a Farhelm docs page in a
 notification opens that page when you click it.
 
 A red, filled bell means at least one notification is new. Click it to list them, newest first, with the ones you have

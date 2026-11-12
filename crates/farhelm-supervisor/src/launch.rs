@@ -137,22 +137,16 @@ pub const AGENT_ID_ENV_VAR: &str = "FARHELM_AGENT_ID";
 /// The variables tmux sets in every pane it runs, naming its own server
 /// and the pane. Farhelm removes both from agents and terminal tabs.
 ///
-/// Every agent and tab in an old terminal runs inside Farhelm's private
-/// tmux server, so with these left in place a plain `tmux new-window` or
-/// `tmux split-window`, typed by the user or run by an agent, lands in that
-/// hidden server, where Stop, Restart, Delete and tab close never clean it
-/// up (SPEC.md, "Ownership during cleanup and provisioning", which declares
-/// that use unsupported). Removing them makes tmux behave as it would in an
-/// SSH login: it reaches the user's own server, or says none is running.
-/// Nothing Farhelm runs inside a pane needs them: every Farhelm tmux call
-/// names its socket explicitly, and in-pane helpers find the supervisor
-/// through `FARHELM_SUPERVISOR_SOCK`. Deliberately reaching the private
-/// server by its socket stays possible and stays unsupported.
-///
-/// A terminal host's child never gets either
-/// (`service::core::host_launch::host_child_env`), so for an agent or tab in
-/// a terminal host this removal finds nothing to remove unless a startup
-/// file set them; it stays one code path for both kinds.
+/// Hygiene about the user's own tmux: a Farhelm terminal is not a tmux
+/// pane, so nothing in it may claim to be one. A terminal host's child
+/// never gets either (`service::core::host_launch::host_child_env`, which
+/// covers a supervisor started from inside the user's tmux), so this removal
+/// finds something only when a login shell's startup file set them; it then
+/// keeps a plain `tmux` command in the session behaving as it would in an
+/// SSH login, reaching the user's own server or saying none is running.
+/// Earlier releases ran every terminal in Farhelm's private tmux server,
+/// whose panes had both; that server is gone
+/// (`service::core::old_terminals`).
 pub const PRIVATE_TMUX_ENV_VARS: [&str; 2] = ["TMUX", "TMUX_PANE"];
 
 /// What the shim needs to launch the agent: written as JSON by the

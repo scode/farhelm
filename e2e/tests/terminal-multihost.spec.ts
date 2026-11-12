@@ -3664,7 +3664,7 @@ test.describe("multi-host", () => {
 
       const notice = page.locator(".interrupted-card");
       await expect(notice).toBeVisible({ timeout: 60_000 });
-      await expect(notice).toContainText("host restart paused this session");
+      await expect(notice).toContainText("host reboot or a Farhelm update ended this session's agent");
       await expect(page.locator(".session-details .status-badge")).toHaveText("Interrupted");
       await expect(page.locator("#terminal")).toHaveCount(0);
       await expect(page.locator("#term-connecting")).toHaveCount(0);

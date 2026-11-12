@@ -38,6 +38,10 @@
 //!   the one place that already asks tmux, every couple of seconds, what
 //!   runs in the private tmux server
 //!   ([`Supervisor::reconcile_old_terminal_notifications`]).
+//! - [`NotificationKind::OldTerminalEnded`]: the startup step that ends the
+//!   old terminals (`super::core::old_terminals`), once for each session
+//!   whose agent it found in one, when the reload converts that agent to
+//!   interrupted.
 //!
 //! # The old-terminal notification is per session, not per launch
 //!
@@ -99,11 +103,19 @@ pub(crate) enum NotificationKind {
     /// Something in the session still runs in an old terminal (its agent in
     /// a tmux pane, or an open tmux tab), which an upcoming release will
     /// forcibly terminate. One per session, not per launch (module docs).
+    /// Kept decodable for stored rows; this release resolves every one at
+    /// startup, since it ends the old terminals.
     OldTerminal,
+    /// The session's agent ran in an old terminal, which this release ended
+    /// at startup. A kind of its own rather than [`Self::OldTerminal`]
+    /// reused: every start resolves the old-terminal warnings, and the
+    /// notice must stay unresolved until the user reads or clears it, across
+    /// later starts. Nothing resolves it.
+    OldTerminalEnded,
 }
 
 impl NotificationKind {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::HookSilent,
         Self::HookNotAdded,
         Self::ResumeWithdrawn,
@@ -112,6 +124,7 @@ impl NotificationKind {
         Self::ClaudePinCorrected,
         Self::MusePinCorrected,
         Self::OldTerminal,
+        Self::OldTerminalEnded,
     ];
 
     /// Whether Resume becoming available ends this warning's condition.
@@ -127,7 +140,8 @@ impl NotificationKind {
             | Self::CodexPinCorrected
             | Self::ClaudePinCorrected
             | Self::MusePinCorrected
-            | Self::OldTerminal => false,
+            | Self::OldTerminal
+            | Self::OldTerminalEnded => false,
         }
     }
 
@@ -145,7 +159,8 @@ impl NotificationKind {
             | NotificationKind::CodexPinCorrected
             | NotificationKind::ClaudePinCorrected
             | NotificationKind::MusePinCorrected
-            | NotificationKind::OldTerminal => false,
+            | NotificationKind::OldTerminal
+            | NotificationKind::OldTerminalEnded => false,
         }
     }
 
@@ -161,6 +176,7 @@ impl NotificationKind {
             NotificationKind::ClaudePinCorrected => "claude_pin_corrected",
             NotificationKind::MusePinCorrected => "muse_pin_corrected",
             NotificationKind::OldTerminal => "old_terminal",
+            NotificationKind::OldTerminalEnded => "old_terminal_ended",
         }
     }
 }
@@ -180,6 +196,16 @@ pub(crate) const OLD_TERMINAL_TEXT: &str = "This session must be restarted, repl
     session restarts only its agent, not its tabs. Otherwise an upcoming Farhelm release will \
     forcibly terminate this session's old terminals as part of transitioning away from using tmux \
     to manage sessions. See https://farhelm.io/docs/using/new-terminals/";
+
+/// The text of a [`NotificationKind::OldTerminalEnded`] notice: what
+/// happened, what the user loses, what they can do, and the docs page the
+/// old-terminal warning linked (clickable in the session list, as above).
+/// "Its last screen is gone" because that screen lived in the ended server.
+pub(crate) const OLD_TERMINAL_ENDED_TEXT: &str = "This session ran in an old terminal, which this \
+    release of Farhelm ended when it started, so its agent is no longer running and its last \
+    screen is gone. Restart starts the agent again in a new terminal and resumes its \
+    conversation; if Restart is unavailable, Replace starts it anew. See \
+    https://farhelm.io/docs/using/new-terminals/";
 
 /// Describe the correction without promising that no further ancestor can report.
 /// The notification remains unresolved so the store posts it once per launch.

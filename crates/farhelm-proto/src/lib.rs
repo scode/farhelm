@@ -860,8 +860,9 @@ pub enum SessionStatus {
     /// exists — there is no "error, but no detail" case the way there is
     /// an "exited, but its terminal could not reduce it to a code" case.
     Error { detail: String },
-    /// The host rebooted while this session's durable last-known outcome was
-    /// launching or running, and the agent's terminal (its terminal host, or
+    /// The host rebooted (or, for an agent in an old terminal, an update ended
+    /// that terminal at startup) while this session's durable last-known
+    /// outcome was launching or running, and the agent's terminal (its terminal host, or
     /// for an old terminal the private tmux server) — the only liveness truth
     /// this system keeps — did not survive that reboot (PLAN_M3.md item 2,
     /// SPEC.md's Durability section). Distinct from `Unknown`: `Unknown`

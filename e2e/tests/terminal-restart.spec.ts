@@ -169,14 +169,14 @@ test("an interrupted session's view leads with the resume offer, and declining c
   const restart = page.locator(".restart-primary");
   await expect(restart).toHaveAttribute(
     "data-tooltip",
-    /interrupted by a host reboot.*resumes this session's own conversation/,
+    /interrupted by a host reboot or a Farhelm update.*resumes this session's own conversation/,
   );
   const described = await restart.getAttribute("aria-describedby");
   expect(described, "the explanation must exist as a real element, not only as a tooltip").toBe(
     "restart-offer-description",
   );
   const offer = page.locator(`#${described}`);
-  await expect(offer).toContainText("Interrupted by a host reboot");
+  await expect(offer).toContainText("Interrupted by a host reboot or a Farhelm update");
   await expect(offer).toContainText("resumes this session's own conversation");
   // The VISIBLE glyph is the compact "Restart" every header action uses —
   // the header's supported minimum width has no room for the longest
@@ -208,7 +208,7 @@ test("an interrupted session's view leads with the resume offer, and declining c
   await expect(page.locator(".tab-strip")).toHaveCount(0);
   const notice = page.locator(".interrupted-card");
   await expect(notice).toBeVisible();
-  await expect(notice).toContainText("host restart paused this session");
+  await expect(notice).toContainText("host reboot or a Farhelm update ended this session's agent");
   await expect(notice).toContainText("resumes this session's own conversation");
   await expect(notice.locator(".restart-from-notice")).toHaveText("Restart");
   await expect(notice.locator(".restart-from-notice")).toHaveClass(/btn-primary/);
