@@ -1,9 +1,9 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-12T02:19:35Z",
-  "captured_from": "1d28a4eaf62a929a33b0cff50ea4634a540a3dcb",
-  "commit": "f30cbdc3f3593b31ae3459064497ad7607c9e977",
+  "captured_at": "2026-11-12T04:23:36Z",
+  "captured_from": "2c5a1d5a8ebe7c0d0889ac5db40b272d75ae02cb",
+  "commit": "56d7311875c71df6781cfa2155f2cd07f8a09050",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 596,
@@ -337,6 +337,26 @@
       "height": 628,
       "width": 1638
     },
+    "release-notes/v0-38-0-container-launch": {
+      "height": 382,
+      "width": 1860
+    },
+    "release-notes/v0-38-0-custom-recipe": {
+      "height": 574,
+      "width": 1728
+    },
+    "release-notes/v0-38-0-host-checkouts": {
+      "height": 486,
+      "width": 1544
+    },
+    "release-notes/v0-38-0-host-permissions": {
+      "height": 544,
+      "width": 1544
+    },
+    "release-notes/v0-38-0-recipes": {
+      "height": 452,
+      "width": 1728
+    },
     "session-list/controls": {
       "height": 1160,
       "width": 1652
@@ -370,7 +390,7 @@
       "width": 2272
     },
     "start-a-session/effort-and-permissions": {
-      "height": 642,
+      "height": 982,
       "width": 2542
     },
     "start-a-session/harness-and-model": {

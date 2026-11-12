@@ -1,0 +1,29 @@
+{
+  "screenshots": [
+    {
+      "entry": 3321,
+      "name": "release-notes/v0-38-0-container-launch",
+      "alt": "The session launcher's Runs on control offers New container beside Existing host."
+    },
+    {
+      "entry": 3321,
+      "name": "release-notes/v0-38-0-recipes",
+      "alt": "The new recipe form in Settings → Recipes shows bases for containers and Tensorlake sandboxes."
+    },
+    {
+      "entry": 3178,
+      "name": "release-notes/v0-38-0-custom-recipe",
+      "alt": "A recipe using Your image shows its base requirements, optional packages, and installation of Claude Code and Codex."
+    },
+    {
+      "entry": 3205,
+      "name": "release-notes/v0-38-0-host-permissions",
+      "alt": "Host settings has a separate switch for managing sessions on this host without asking, off by default."
+    },
+    {
+      "entry": 3250,
+      "name": "release-notes/v0-38-0-host-checkouts",
+      "alt": "A host's Checkouts section accepts its own checkout directory and explains the default when empty."
+    }
+  ]
+}

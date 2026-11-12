@@ -148,6 +148,10 @@ test("harness and model", async ({ page, request }) => {
 
 /** Explain the independent effort and approval choices without covering either control. */
 test("effort and permissions", async ({ page, request }) => {
+  // The permissions explanation is much taller than the effort explanation.
+  // Extra height and separated centers keep the footer from clamping them
+  // together after the destination gained its Runs on row.
+  await page.setViewportSize({ width: 1600, height: 1500 });
   const { director } = await open(page, request);
   const form = await openLauncher(page);
   await form.locator(".launch-composer-harness-choice button", { hasText: /^Codex$/ }).click();
@@ -165,12 +169,12 @@ test("effort and permissions", async ({ page, request }) => {
   await director.callout(effortChoice, "How much effort the model puts in. Default leaves it to the agent.", {
     side: "right",
     dx: 160,
-    dy: -40,
+    dy: -130,
   });
   await director.callout(
     permissionChoices,
     "Guarded lets the agent approve its own actions through a safety check, which can still refuse or ask you. YOLO skips those checks: the agent runs commands and changes files without asking. Custom passes your own flags and counts as YOLO.",
-    { side: "right", dx: 900, dy: 90 },
+    { side: "right", dx: 900, dy: 120 },
   );
   await shot(page, `${PAGE}/effort-and-permissions`, [effort, permissions]);
 });
