@@ -23,6 +23,127 @@ import { shot } from "./shot";
 
 const PAGE = "release-notes";
 
+// v0.38.0's ordinary fleet has no Tensorlake key or built recipe, so the
+// launcher cannot offer New sandbox honestly. Progress, cleanup failures and
+// approval cards likewise need state ordinary docs shots do not create.
+// Its real Podman capability check does expose New container. That button,
+// unsaved recipe drafts and host settings show the new controls without
+// changing a saved preference, creating an environment or billing a sandbox.
+
+/** Show the real launcher's new container choice without submitting a launch. */
+test("v0.38.0 container launch choice", async ({ page, request }) => {
+  const name = `${PAGE}/v0-38-0-container-launch`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  const { director } = await open(page, request);
+  const form = await openLauncher(page);
+  const placement = form.getByRole("group", { name: "Runs on", exact: true });
+  const choice = placement.getByRole("button", { name: "New container", exact: true });
+  // This offer comes from the fleet's real capability check. A stand-in
+  // recipe or a rewritten provider reply would make this picture dishonest.
+  await expect(choice).toBeEnabled();
+  await expect(placement.getByRole("button", { name: "Existing host", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await director.callout(choice,
+    "EXPERIMENTAL: create this session in a rootless Podman container on a Linux host. Its checkout and files live inside; Delete removes them.",
+    { side: "right", dx: 70, dy: 40 });
+  await shot(page, name, [placement], { maxWidth: 930 });
+});
+
+/** Show the shared recipe bases before saving or building any environment. */
+test("v0.38.0 shared recipes", async ({ page, request }) => {
+  const name = `${PAGE}/v0-38-0-recipes`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1600, height: 1700 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  await dialog.getByRole("navigation", { name: "Settings sections" })
+    .getByRole("button", { name: "Recipes", exact: true }).click();
+  const panel = dialog.locator("#settings-recipes");
+  await expect(panel.locator(".recipe-list-empty")).toHaveText("No recipes yet.");
+  await panel.getByRole("button", { name: "New recipe", exact: true }).click();
+  const software = panel.getByRole("group", { name: "Software", exact: true });
+  await expect(software.getByRole("button")).toHaveCount(4);
+  await expect(software.getByRole("button", { name: /^Managed Ubuntu/ })).toHaveAttribute("aria-pressed", "true");
+  await dialog.focus();
+  // Settings has a fixed height and the recipe has sticky answers. Center
+  // the bases in its scrollport so the fourth choice is not under Save.
+  await software.locator("..").evaluate(element => element.scrollIntoView({ block: "center" }));
+  await director.callout(software,
+    "Settings → Recipes now serves containers and Tensorlake sandboxes. Managed Ubuntu works for both; the other bases say where they run.",
+    { side: "left", dy: 20 });
+  await shot(page, name, [software.locator("..")], { maxWidth: 930 });
+});
+
+/** A custom Tensorlake base still receives the recipe's agents and packages. */
+test("v0.38.0 custom recipe software", async ({ page, request }) => {
+  const name = `${PAGE}/v0-38-0-custom-recipe`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1600, height: 1800 });
+  const { director } = await open(page, request);
+  const dialog = await openSettings(page);
+  await dialog.getByRole("navigation", { name: "Settings sections" })
+    .getByRole("button", { name: "Recipes", exact: true }).click();
+  const panel = dialog.locator("#settings-recipes");
+  await panel.getByRole("button", { name: "New recipe", exact: true }).click();
+  const software = panel.getByRole("group", { name: "Software", exact: true });
+  const image = software.getByRole("button", { name: /^Your image/ });
+  await image.click();
+  await expect(image).toHaveAttribute("aria-pressed", "true");
+  const requirements = panel.locator(".recipe-base-requirements");
+  const packages = panel.locator(".recipe-packages");
+  const installation = panel.getByText("Farhelm then adds Claude Code and Codex with their official installers and takes a snapshot.", { exact: true });
+  await expect(requirements).toBeVisible();
+  await expect(packages).toBeEditable();
+  await expect(installation).toBeVisible();
+  await dialog.focus();
+  // The base cards and software fields cannot all fit inside Settings.
+  // Photograph the build contract itself, with its requirements above it.
+  await packages.evaluate(element => element.scrollIntoView({ block: "center" }));
+  await director.callout(packages,
+    "Your own image or snapshot is now a base for a build: Farhelm installs Claude Code, Codex and your chosen packages before taking its snapshot. Check the base requirements above.",
+    { side: "left", dy: 10 });
+  await shot(page, name, [requirements, packages, installation], { maxWidth: 930 });
+});
+
+/** Keep same-host authority visibly separate from permission to manage the whole fleet. */
+test("v0.38.0 same-host permissions", async ({ page, request }) => {
+  const name = `${PAGE}/v0-38-0-host-permissions`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1600, height: 1600 });
+  const { scenario, director } = await open(page, request);
+  const dialog = await openRemoteHostSettings(page, scenario);
+  const own = dialog.locator(".host-settings-own-sessions");
+  const fleet = dialog.locator(".host-settings-fleet-commands");
+  await expect(own.getByRole("checkbox")).not.toBeChecked();
+  await expect(fleet.getByRole("checkbox")).not.toBeChecked();
+  await own.scrollIntoViewIfNeeded();
+  await dialog.focus();
+  await director.callout(own,
+    "Off by default. Let agents manage sessions on their own host without asking; requests for other hosts still ask.",
+    { side: "left", dy: -20 });
+  await shot(page, name, [own, fleet], { maxWidth: 930 });
+});
+
+/** A host's unsaved checkout directory demonstrates its override without changing later shots. */
+test("v0.38.0 host checkout directory", async ({ page, request }) => {
+  const name = `${PAGE}/v0-38-0-host-checkouts`;
+  skipFrozenReleaseShot(name);
+  await page.setViewportSize({ width: 1600, height: 1400 });
+  const { scenario, director } = await open(page, request);
+  const dialog = await openRemoteHostSettings(page, scenario);
+  const section = dialog.getByRole("region", { name: "Checkouts", exact: true });
+  const field = section.locator(".checkout-root-field");
+  await expect(field.locator("input")).toBeEditable();
+  await expect(field.locator("input")).toBeEmpty();
+  await field.locator("input").fill("~/work/checkouts");
+  await dialog.focus();
+  await director.callout(field.locator("input"),
+    "Give this host its own checkout directory here. Leave it empty to use the default in Settings → Checkouts. Existing checkouts stay where they are.",
+    { side: "left", dy: 20 });
+  await shot(page, name, [section], { maxWidth: 930 });
+});
+
 // v0.37.1's Credentials and hover controls need only navigation and unsaved
 // drafts. Migration notices need old terminals, which this fleet does not
 // create, and trash progress needs a confirmed deletion, which ordinary docs

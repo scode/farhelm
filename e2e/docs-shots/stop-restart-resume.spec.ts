@@ -49,6 +49,7 @@ test("header actions", async ({ page, request }) => {
   await shot(page, `${PAGE}/header-actions`, [header.locator(".header-stop"), header.locator(".header-delete").first()]);
 });
 
+/** Show Stop's tab-closing behavior without claiming it contains detached work. */
 test("row menu", async ({ page, request }) => {
   const { scenario, director } = await open(page, request);
   const row = rowOf(page, scenario, (session) => session.status === "waiting");
@@ -57,8 +58,8 @@ test("row menu", async ({ page, request }) => {
   await expect(panel).toBeVisible();
   await director.callout(
     panel.locator(".session-row-stop"),
-    "Stop: ends the agent and everything it started, and closes its shell tabs. The session and its terminal stay.",
-    { side: "right", dy: -5 },
+    "Stop: ends the agent and closes its terminal tabs. Some detached jobs on Linux can keep running. The session stays.",
+    { side: "right", dy: -50 },
   );
   await director.callout(panel.locator(".session-row-delete"), "Delete: removes the session altogether.", {
     side: "right",
