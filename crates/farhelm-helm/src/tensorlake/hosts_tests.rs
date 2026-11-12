@@ -1615,6 +1615,17 @@ async fn lifecycle_host(
     host: HostId,
     verb: &str,
 ) -> (axum::http::StatusCode, String) {
+    let (status, _, body) = lifecycle_host_with_headers(harness, host, verb).await;
+    (status, body)
+}
+
+/// [`lifecycle_host`], keeping the response headers for the tests that check
+/// the helm-only markers a client acts on.
+async fn lifecycle_host_with_headers(
+    harness: &crate::rest_harness::Harness,
+    host: HostId,
+    verb: &str,
+) -> (axum::http::StatusCode, axum::http::HeaderMap, String) {
     use tower::ServiceExt as _;
     let request = axum::http::Request::builder()
         .method("POST")
@@ -1624,10 +1635,11 @@ async fn lifecycle_host(
         .unwrap();
     let response = harness.router().oneshot(request).await.unwrap();
     let status = response.status();
+    let headers = response.headers().clone();
     let bytes = axum::body::to_bytes(response.into_body(), 4096)
         .await
         .unwrap();
-    (status, String::from_utf8(bytes.to_vec()).unwrap())
+    (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
 }
 
 /// Suspend must withdraw routing without losing the registered machine. Resume
@@ -1780,8 +1792,18 @@ async fn lifecycle_resume_replaces_a_pre_suspension_connected_actor() {
 
 /// A failed suspend may not strand a hold, and a busy lifecycle request may
 /// not race removal or an update. Neither refusal forgets the registered host.
+///
+/// Only the busy refusal carries the host-busy marker: a launch waking its
+/// host waits out a refusal with the marker and gives up at once on any other
+/// (SPEC_impl.md, "Tensorlake hosts"), so a marker on the vendor failure or on
+/// the not-an-environment refusal would have it wait for nothing.
 #[farhelm_testtrace::test]
 async fn lifecycle_refusal_releases_the_hold_and_busy_hosts_do_not_mutate() {
+    let busy_marker = |headers: &axum::http::HeaderMap| {
+        headers
+            .get(farhelm_proto::http::HOST_BUSY_HEADER)
+            .map(|value| value.to_str().unwrap().to_owned())
+    };
     let api = FakeApi::default()
         .with_sandbox(
             "sbx-1",
@@ -1794,17 +1816,26 @@ async fn lifecycle_refusal_releases_the_hold_and_busy_hosts_do_not_mutate() {
         );
     let (harness, host) = sandbox_helm(&api, true).await;
     harness.await_state(host, HostState::is_connected).await;
-    let (status, body) = lifecycle_host(&harness, host, "suspend").await;
+    let (status, headers, body) = lifecycle_host_with_headers(&harness, host, "suspend").await;
     assert_eq!(
         status,
         axum::http::StatusCode::SERVICE_UNAVAILABLE,
         "{body}"
     );
+    assert_eq!(busy_marker(&headers), None, "a vendor failure is not busy");
     harness.await_state(host, HostState::is_connected).await;
     let lock = harness.state.manager.try_host_provision_lock(host).unwrap();
     let calls = api.calls().len();
-    let (status, body) = lifecycle_host(&harness, host, "suspend").await;
-    assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    for verb in ["suspend", "resume"] {
+        let (status, headers, body) = lifecycle_host_with_headers(&harness, host, verb).await;
+        assert_eq!(status, axum::http::StatusCode::CONFLICT, "{verb}: {body}");
+        assert_eq!(
+            busy_marker(&headers).as_deref(),
+            Some(farhelm_proto::http::HOST_BUSY_OPERATION),
+            "{verb}: {body}"
+        );
+        assert!(body.contains("This host is busy"), "{verb}: {body}");
+    }
     assert_eq!(api.calls().len(), calls);
     drop(lock);
     let local = harness
@@ -1816,8 +1847,13 @@ async fn lifecycle_refusal_releases_the_hold_and_busy_hosts_do_not_mutate() {
         .find(|row| row.kind.is_reserved_local())
         .unwrap()
         .id;
-    let (status, body) = lifecycle_host(&harness, local, "resume").await;
+    let (status, headers, body) = lifecycle_host_with_headers(&harness, local, "resume").await;
     assert_eq!(status, axum::http::StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        busy_marker(&headers),
+        None,
+        "not an environment host is not busy"
+    );
 }
 
 /// Resume is an explicit recovery action even when a transport bug retired

@@ -6,6 +6,34 @@
 use crate::{AppState, store::HostId};
 use farhelm_proto::ErrorKind;
 
+/// Suspend or Resume refused because another operation holds the host's
+/// provisioning lock (setup, an update, removal, an edit, or another Suspend
+/// or Resume).
+///
+/// Typed rather than a plain conflict because it is the one lifecycle refusal
+/// a client may answer by waiting: the lock is released when that operation
+/// ends, while every other refusal here (not an environment host, no account
+/// key, a vendor failure) stays true however long the client waits. A launch
+/// waking its host retries on it (SPEC_impl.md, "Tensorlake hosts").
+/// `http_error` answers it with 409 and the helm-only
+/// [`farhelm_proto::http::HOST_BUSY_HEADER`], so a provider's error text or a
+/// remote supervisor's reply can never make a client wait.
+#[derive(Debug, thiserror::Error)]
+#[error("This host is busy; try again after its current operation finishes")]
+pub(crate) struct HostBusy;
+
+/// Take the host's provisioning lock for a lifecycle change, or refuse with
+/// [`HostBusy`]. Every provider's Suspend and Resume goes through this, so
+/// the busy refusal reads the same and carries the same marker for each.
+pub(crate) fn provision_lock_or_busy(
+    manager: &crate::manager::ConnectionManager,
+    host: HostId,
+) -> anyhow::Result<crate::manager::ProvisionLockGuard> {
+    manager
+        .try_host_provision_lock(host)
+        .ok_or_else(|| anyhow::Error::new(HostBusy))
+}
+
 /// Dispatch the ordinary host Suspend/Resume path without changing its locking
 /// or cancellation lifetime. The provider re-reads the row under its existing
 /// provisioning lock before changing a resource.

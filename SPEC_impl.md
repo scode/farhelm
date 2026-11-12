@@ -7111,6 +7111,19 @@ host's history may not have revealed when a shortcut pressed; the current Ready 
 authority and the server validates its configuration. Ordinary guarded answers keep their exact epoch comparison. A lost
 create race refreshes the preview but never submits again automatically.
 
+`resume_host_connected` tolerates the Suspend and Resume other surfaces may run beside a launch. The helm marks the one
+lifecycle refusal that waiting can clear, another operation holding the host's provisioning lock, with the helm-only
+`x-farhelm-host-busy` header, the same for every provider; the helper sends Resume again each second while it gets that
+refusal, stops as soon as the host connects through another Resume, and fails at once on any other refusal. All its
+waiting, busy refusals included, shares one 60-second budget that only the accepted Resume request does not spend, so a
+slow resume is never cut off. It reads the host's phase before the request, and a suspension stamped later than that one
+(`observed_at` or `suspended_by_farhelm_at`), any suspension when it did not start suspended, or a suspension after the
+connection published a phase of its own fails the wake at once. A suspension with the starting marks is not one: it is
+the starting reading, which keeps showing while the wake's Resume is refused as busy behind an operation that publishes
+no hold of its own (an update run, an edit), and which comes back after the hold of another Suspend of a host Farhelm
+had already suspended, since that republishes the stored marks. A failed-resume mark that reading already carried
+belongs to an earlier Resume, so only one that appears later fails the wake.
+
 The launcher's preparation signal belongs to its own submit and names the host being resumed. It surrounds
 `resume_host_connected`, including that helper's bounded reconnection wait; only that form treats its own pending host
 as available and replaces the unavailable note with preparation progress. Both destination paths say the session starts
