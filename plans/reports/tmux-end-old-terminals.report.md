@@ -202,3 +202,137 @@ problem above; all fixed, and a second review of the fixes found only wording, f
 pause to start before the attach reply (see the open questions). #3370, the flake record, had the same review: no
 blocking finding; its evidence paragraph was corrected to the recorded tree status, tmux identities and locale, and the
 cause wording made neutral. Commit messages each went through cold reads (up to three).
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round, and main gained only plan-queue changes since the stack was based. The plan that
+landed just before it (agents in sandboxes and containers managing their own sessions) was already beneath this stack,
+which was rebased onto it while being built. A rebase that applies cleanly can still drop another plan's rules, so one
+of four independent reviewers checked only that. Its rules all hold:
+
+- once the last session of a sandbox or container is deleted, its Farhelm refuses anything new (a new session from any
+  source, a retried create, Restart, Restart With, opening a tab) until the helm destroys it. That refusal is still in
+  place on every path this stack rewrote, including Restart of a session this release ended.
+- deleting one session in an environment still accounts for its other sessions;
+- an agent inside an environment can still act only within it;
+- the protocol is version 77 (that plan used 75 and 76);
+- no environment's supervisor is started with the removed `--tmux` flag.
+
+The other three reviewers read the startup step that ends old terminals, the supervisor's removal of tmux, and the
+protocol, helm and page changes. None found anything that would break users or main. In particular:
+
+- the startup step signals only a process of this user that answers on the old socket and names that socket on its
+  command line, so the user's own tmux and other users' or other state directories' servers are never touched;
+- restarting a session that already runs in a new terminal still keeps its scrollback (only old tmux sessions lose
+  theirs), and tabs, Delete, Stop and supervisor shutdown work as before;
+- no service unit, launchd file, desktop app or environment ever passed the removed `--tmux` flag (the units only set an
+  environment variable the supervisor now ignores), so only a unit written by hand can break, as the changelog says.
+
+#### Fixes made while landing
+
+Each fix went into the PR whose change it corrects, so the report's one-line PR summaries do not mention them. A fresh
+reviewer read all of them together. It found one formatting error in my spec edit and two wording points, all fixed, and
+judged the code fix and the restored tests correct.
+
+- **Five deleted tests restored.** #3360 deleted five tests that ran against tmux whose subject was not tmux: after one
+  browser tab takes a terminal over from another, only the winning tab's connection can pause it, have it detached as
+  stalled, or detach it. That code still runs for every terminal and nothing else tested it, so a change letting a
+  displaced tab's pause silence the terminal the other tab now holds would have passed every test. They are now
+  supervisor tests on terminal hosts, in #3369, with no product change. Each failed when the check it guards was
+  deliberately broken.
+- **The startup step could stop an unrelated process.** If the old tmux server exited on its own between being found and
+  being signalled, the step still stopped the processes it had found under that server's process ID that carried
+  Farhelm's session markers. That ID could by then belong to another process, and the spec says those processes count
+  only once the server is verified and signalled. In that case the step now stops only what the sessions' own records
+  name, as it does when no server answers; what it misses is stopped when the session is deleted, the residual the
+  report already accepts (#3362). The window is milliseconds at startup, and no test reaches it.
+- **Text.**
+  - Two instruction files used a test #3368 deleted as their example of a test filter, so following them selected
+    nothing.
+  - SPEC.md's update and durability passages now say the update to this release was the one exception to sessions
+    surviving updates (#3362).
+  - Comments naming deleted files, and a two-second shutdown step that went with tmux, were corrected (#3360, #3368).
+  - The changelog entries now name Replace as the way out where Restart is unavailable (#3362). They also say a browser
+    tab left open across the update misdraws a terminal it opens, not only one it reconnects (#3369).
+
+#### What the report says that is not quite right
+
+- "Tests whose subject was tmux or byte streams were deleted with their code": five whose subject survives were deleted
+  too; they are restored (above).
+- "About 40 test fixtures that still insert old-kind rows (they are the input of the startup conversion)": many are
+  leftover defaults in tests unrelated to the conversion. They still test their subject; the later plans can switch them
+  to new-terminal rows.
+- The OMP agent check that the report says was not run anywhere ran locally after the fixes (below), and passed.
+
+#### Things you should know that the report does not say
+
+- **On a Mac, the old socket files stay and are warned about at every start.** On macOS a socket nothing listens on
+  refuses connections just as a wedged server does (the plan says so; this comes from the code and the plan, not from a
+  Mac). So the step cannot tell a dead old server from a wedged one, leaves `tmux.sock` and its config in place, and
+  logs a warning at every supervisor start until the third tmux plan removes the step. That is every Mac rebooted since
+  its old server last ran, the common case rather than the rare one the plan described. Sessions are still converted; it
+  is only log noise, and I recommend leaving it for that plan rather than adding code here.
+- **The startup step's three tests need a tmux program on the test machine.** They build an old-style server with
+  whatever tmux comes first on the path and fail loudly without one. They pass on the sandboxes, which have no system
+  tmux, only because the test runner puts its pinned tmux first. The third tmux plan retires that pinned tmux and has to
+  keep one available for these tests.
+- **Two changelog entries ask to update remote hosts**: this stack's and the one the sandbox and container work added
+  for its own protocol change. If both reach the same release, the curator should merge them.
+
+#### Possible follow-ups
+
+- **A test that something else answering on the old socket is left alone.** The check that keeps the startup step from
+  signalling a process that is not the old server is its main safety property, and it is tested only as a function, not
+  end to end. I recommend one small test with a stand-in listener on the socket.
+- **Text that still describes old terminals as live**: a SPEC.md passage on how a launch in an old terminal runs startup
+  files, the protocol's comments on old-terminal mechanics, and a few test comments. The fourth tmux plan (docs) sweeps
+  such text; these instances are not named in it, so its executor finds them by its own search.
+
+#### Checks
+
+The slow runs were on Tensorlake sandboxes at your request, as generic recorder runs on the same sandbox setup as the
+report's: the browser suite on seven, the Rust tests on three. The sandboxes' Node is 24.16, against 24.20 on the
+development machine, which these tests do not depend on.
+
+On the stack as delivered, restacked onto main:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `cargo check -p farhelm-ui --target wasm32-unknown-unknown`,
+  `cargo check -p farhelm-desktop`, `scripts/check-desktop-assets.sh`, the JS harness (527 passed) and the website
+  build: passed. The workspace has no doctests (`41215003`).
+- The whole ordinary browser suite on both engines, from a fresh build: 3,311 passed, 1 failed, 14 skipped by the specs'
+  own conditions (`129ff792`, `757cd8a5`, `652a9b1b`, `f7096b79`, `f6d9ce06`, `6276a28b`, `64fc367b`). The failure, a
+  WebKit test of the template shortcut popups ("closes a number popup below a new bolt chord"), timed out waiting for
+  its preferences write. The stack does not touch that spec, and it passed ten times out of ten on the same build
+  (`f010f01f`). Its failed run is kept; one failure is not enough to record it in FLAKES.md.
+- The whole Rust workspace except the desktop app (`cargo nextest run --workspace --exclude farhelm-desktop`, from a
+  nextest archive of the same tree): 5,802 of 5,803 passed, the real Podman environment scenario included (`f20c0508`,
+  `595b0fc5`, `9d702021`). Two of those passes were early returns for what the sandboxes lack (a system tmux, and the
+  Bun runtime the OMP agent checks need), and the one failure is the test macro's compile contract, which needs `cargo`;
+  all three ran locally after the fixes (below).
+
+After the landing fixes, on the tree that merged:
+
+- The same formatting, test-sleep, dprint, changelog and agents-md checks and workspace clippy: passed.
+- `cargo nextest run -p farhelm-supervisor --lib` with the terminal-host tests, the connection tests (the five restored
+  tests among them, with the stall-race test's final three-second timeout), the old-terminal tests and the OMP agent
+  checks: 181 passed (`1f566fcc`).
+- `cargo nextest run -p farhelm --test e2e` on the `old_terminals::` module and the stock-tmux test
+  (`a_scoped_stop_leaves_jobs_in_a_session_started_stock_tmux_server`): 4 passed (`d1ce8ff4`).
+- `cargo nextest run -p farhelm-testtrace-macros -E 'test(attribute_compile_contract_matrix)'`: passed (`acb3b728`).
+- While they were written, the restored tests passed in two runs and six repetition runs (`723b6bf5`, `71c462cb`,
+  `077853eb`, `aa967d0c`, `f1bafd30`, `a4926c4b`, `9e0b46d5`, `026f9208`), and with the checks they guard deliberately
+  broken the targeted tests failed (`9eeda9df`, `6f72f61c`). One test's stall timeout was raised from one to three
+  seconds after those runs, for room under load; `1f566fcc` above has it.
+
+Reused: the browser suite and Rust workspace runs above were on the tree before the fixes. They still apply, because
+afterwards only one branch of the startup step (which now stops less), tests, comments and text changed, and those ran
+again above. Also reused, the executor's grid component suite run on #3369 (160 passed, plus eight container file-path
+hover tests that fail on main too, as the report says): nothing after it touches the grid component.
+
+Skipped: the desktop smoke (only its removed `--tmux` argument changed; the end-to-end suite's real supervisor processes
+run without it), and anything macOS-only (no Mac here, as in the report).
