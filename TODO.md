@@ -26,17 +26,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
-- **Revisit raising tmux-end-old-terminals' size limit to about 8,000 added lines.** Decided on the maintainer's behalf
-  on 2026-11-12 when that plan, the first of the four tmux removal plans, blocked halfway through: its first three PRs
-  (#3358 moving the supervisor's tests off tmux, #3360 removing tmux terminal creation, #3362 ending old terminals at
-  startup) already add about 4,700 lines against a limit of about 3,500 for the whole six-PR stack, mostly from moving
-  roughly 70 supervisor tests and their fixtures off tmux. The remaining three PRs (the supervisor's last tmux code, the
-  protocol change with xterm.js out of the page, the desktop clipboard limit) are expected to bring it to about 5,600 to
-  6,800, against well over 25,000 deleted. The plan was told to finish as planned under the raised limit, all six PRs
-  landing together. The alternative was landing the first three now (old terminals end on upgrade; the protocol change
-  comes in a later release) and planning the last three as a new plan, which needs another planning round and a check of
-  the later tmux plans against the split.
-
 - **Revisit raising sandbox-suspend-overlap's size gate to about 1,000 lines.** Decided on the maintainer's behalf on
   2026-11-12 when that plan blocked: its first PR (#3339, the host-scoped Suspend and Resume rule) came to about 600
   changed lines against a gate of about 400 for the whole plan, because the estimate was low rather than the scope
