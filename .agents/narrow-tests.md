@@ -155,4 +155,4 @@ selects by test name across files.
   a concrete remaining question. These integration assertions complement ordinary appshot visual review.
 - `scripts/test-provision-centos.sh` — already narrow where it counts: the cargo part is a single named test
   (`provisioning_and_update_over_ssh_preserve_an_operable_session`); the cost is the docker container and the one-time
-  musl/tmux payload builds, which cache across runs.
+  musl payload build, which caches across runs.

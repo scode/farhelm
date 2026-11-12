@@ -5,9 +5,10 @@
 # payloads through FARHELM_TEST_PODMAN_PAYLOAD_DIR for use on clones, where Cargo is unavailable.
 # An explicit FARHELM_HELM_PAYLOAD_DIR takes precedence and is used read-only.
 #
-# The output is a release-shaped farhelm archive plus the pinned static tmux,
-# using the ordinary installer inputs. Packaged output stays under the checkout's
-# target/. Cargo honors CARGO_TARGET_DIR and temporary copies are removed on exit.
+# The output is a release-shaped farhelm archive, the one payload provisioning
+# pushes to a Linux host, using the ordinary installer inputs. Packaged output
+# stays under the checkout's target/. Cargo honors CARGO_TARGET_DIR and
+# temporary copies are removed on exit.
 # stdout is only the payload directory, so the archive packer can reuse this producer.
 set -euo pipefail
 
@@ -34,9 +35,7 @@ if [ -z "$payload_dir" ]; then
   rustup target add "$target" >&2
   cargo build --locked -p farhelm --target "$target" >&2
   farhelm_payload="$cargo_target_dir/$target/debug/farhelm"
-  tmux_payload="$("$repo/scripts/build-pinned-tmux-ci.sh")/tmux"
   "$repo/scripts/check-static-elf.sh" "$farhelm_payload" "$target" >&2
-  "$repo/scripts/check-static-elf.sh" "$tmux_payload" "$target" >&2
 
   payload_dir="$repo/target/podman-test-payloads/$target"
   mkdir -p "$payload_dir"
@@ -47,9 +46,7 @@ if [ -z "$payload_dir" ]; then
   install -m 0755 "$farhelm_payload" "$stage/$package/farhelm"
   install -m 0644 "$repo/LICENSE" "$stage/$package/LICENSE"
   tar -czf "$stage/$package.tar.gz" -C "$stage" "$package"
-  install -m 0755 "$tmux_payload" "$stage/tmux-$target"
   mv "$stage/$package.tar.gz" "$payload_dir/$package.tar.gz"
-  mv "$stage/tmux-$target" "$payload_dir/tmux-$target"
 fi
 
 # NEXTEST_ENV uses one NAME=value per line. Reject line breaks in the path
@@ -61,7 +58,6 @@ case "$payload_dir" in
 esac
 test -d "$payload_dir"
 test -f "$payload_dir/farhelm-$target.tar.gz"
-test -f "$payload_dir/tmux-$target"
 if [ -n "${NEXTEST_ENV:-}" ]; then
   printf 'FARHELM_HELM_PAYLOAD_DIR=%s\n' "$payload_dir" >> "$NEXTEST_ENV"
 fi

@@ -586,8 +586,8 @@ fn app_supervisors(state_dirs: &[PathBuf], app: &app::AppPlan) -> Result<Vec<App
 /// as for any supervisor the app did not start. A supervisor that does not
 /// exit within the grace refuses, and so does one that ended but whose last
 /// threads are still exiting a few seconds later (it may still hold the
-/// version and state it used); uninstall never kills one, since a kill
-/// can take its tmux server and every session with it. A stop that could not
+/// version and state it used); uninstall never kills one, because its stop
+/// is the supervisor's orderly one (SPEC.md, uninstall). A stop that could not
 /// be confirmed (the process could not be read or signalled) refuses too and
 /// keeps the record, which is what lets a later uninstall or app launch
 /// still recognize that supervisor. The record of a supervisor confirmed
@@ -1567,9 +1567,9 @@ mod tests {
     /// A supervisor that does not stop within the grace refuses the
     /// uninstall with nothing removed, and is not killed.
     ///
-    /// Why: killing a supervisor can take its tmux server and every session
-    /// with it, so uninstall never escalates; and removing the app under a
-    /// supervisor still running from it is what the locks exist to prevent.
+    /// Why: SPEC.md promises the supervisor's orderly stop, never a kill, so
+    /// uninstall never escalates; and removing the app under a supervisor
+    /// still running from it is what the locks exist to prevent.
     /// Spec: with the app's recorded supervisor ignoring SIGTERM, uninstall
     /// refuses saying it did not stop and that nothing was removed; the
     /// supervisor keeps running with its record in place.

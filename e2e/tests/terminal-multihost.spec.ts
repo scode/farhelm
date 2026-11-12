@@ -4719,8 +4719,9 @@ test.describe("multi-host", () => {
       expect(noticeWhileHeld, "the notice showed before the reply was released").toBe(true);
       // The confirmed run's host actions, in the order the plan froze them:
       // the reload comes before the stop, so systemd has already forgotten
-      // the unit's process-only stop policy and the stop ends the
-      // installation's private tmux server with the supervisor.
+      // the unit's process-only stop policy and the stop ends everything
+      // in the unit's control group (its terminal hosts) with the
+      // supervisor.
       expect(injectedHostActions(info.remote_ssh).slice(actionsBefore.length)).toEqual([
         "disable-supervisor",
         "remove-unit",

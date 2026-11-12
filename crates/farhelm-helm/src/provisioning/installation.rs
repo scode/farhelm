@@ -8,109 +8,86 @@ use super::backend::{
     ActionOutcome, BackendFailure, PreparedPayload, ProvisioningBackend, stage_payload,
 };
 use super::payloads::PayloadSource;
-use super::plan::{PayloadKind, ProvisioningAction, ProvisioningPlan};
-use std::collections::{HashMap, HashSet};
+use super::plan::{ProvisioningAction, ProvisioningPlan};
 
-/// Finish every staged writer before returning the first failure in plan order.
+/// Resolve and stage the plan's one payload, the `farhelm` binary for the
+/// inspected target, before any host action runs.
 ///
-/// `try_join_all` would drop siblings while their blocking cache-publication
-/// tasks still write. Their future owns the cache lock, so dropping it could
-/// admit a retry over an unfinished writer. No remote action may begin until
-/// this function returns all payloads successfully.
+/// `None` for a plan that installs nothing (uninstall). Every Add and
+/// Update plan uploads or installs exactly one payload, so the first such
+/// action names it; a failure carries that action's index so progress
+/// reports it on the step the user is looking at, while nothing on the host
+/// has been touched yet.
 pub(super) async fn prepare_payloads(
     payloads: &dyn PayloadSource,
     plan: &ProvisioningPlan,
-) -> Result<HashMap<PayloadKind, PreparedPayload>, (usize, BackendFailure)> {
-    let mut seen = HashSet::new();
-    let preparations = plan
-        .actions
-        .iter()
-        .enumerate()
-        .filter_map(|(index, action)| match action {
-            ProvisioningAction::UploadPayload { payload, arch, .. }
-            | ProvisioningAction::InstallPayload { payload, arch, .. }
-                if seen.insert(*payload) =>
-            {
-                Some((index, *payload, *arch))
-            }
-            _ => None,
-        })
-        .map(|(index, payload, arch)| async move {
-            let source = payloads
-                .path(payload, arch)
-                .await
-                .map_err(|error| (index, BackendFailure::new(format!("{error:#}"), "")))?;
-            let staged = stage_payload(&source)
-                .await
-                .map_err(|error| (index, error))?;
-            Ok::<_, (usize, BackendFailure)>((payload, staged))
-        });
-    let mut prepared = HashMap::new();
-    let mut failure: Option<(usize, BackendFailure)> = None;
-    for outcome in futures_util::future::join_all(preparations).await {
-        match outcome {
-            Ok((payload, staged)) => {
-                prepared.insert(payload, staged);
-            }
-            Err((index, error)) => {
-                if failure.as_ref().is_none_or(|(first, _)| index < *first) {
-                    failure = Some((index, error));
-                }
-            }
-        }
-    }
-    match failure {
-        Some(failure) => Err(failure),
-        None => Ok(prepared),
-    }
+) -> Result<Option<PreparedPayload>, (usize, BackendFailure)> {
+    let Some((index, arch)) =
+        plan.actions
+            .iter()
+            .enumerate()
+            .find_map(|(index, action)| match action {
+                ProvisioningAction::UploadPayload { arch, .. }
+                | ProvisioningAction::InstallPayload { arch, .. } => Some((index, *arch)),
+                _ => None,
+            })
+    else {
+        return Ok(None);
+    };
+    let source = payloads
+        .path(arch)
+        .await
+        .map_err(|error| (index, BackendFailure::new(format!("{error:#}"), "")))?;
+    stage_payload(&source)
+        .await
+        .map(Some)
+        .map_err(|error| (index, error))
 }
 
 /// Execute an Add installation action without any host connection authority.
 ///
-/// Attach, Update and Uninstall actions are refused. The ordinary service
-/// dispatches those itself; preparation explicitly omits attachment and must
-/// fail if planning ever adds an action it does not understand.
+/// Attach, Update-only and Uninstall actions are refused. The ordinary
+/// service dispatches those itself; preparation explicitly omits attachment
+/// and must fail if planning ever adds an action it does not understand.
+///
+/// The bundled tmux's removal is refused here too, although Add plans it.
+/// The ordinary service runs it itself because a failed removal only warns
+/// there, and snapshot preparation skips it: the sandbox image it installs
+/// into has no Farhelm installation (preparation refuses setup-managed
+/// installs and copied state), so it is not expected to carry an earlier
+/// tmux.
 pub(super) async fn execute_install_action(
     backend: &dyn ProvisioningBackend,
     plan: &ProvisioningPlan,
     action: &ProvisioningAction,
-    prepared: &HashMap<PayloadKind, PreparedPayload>,
+    prepared: Option<&PreparedPayload>,
 ) -> Result<ActionOutcome, BackendFailure> {
     match action {
         ProvisioningAction::EnsureDirectories { directories } => {
             backend.ensure_directories(&plan.target, directories).await
         }
         ProvisioningAction::UploadPayload {
-            payload,
             destination,
             temporary,
             ..
         } => {
-            let source = prepared.get(payload).ok_or_else(|| {
+            let source = prepared.ok_or_else(|| {
                 BackendFailure::new("the prepared payload disappeared before upload", "")
             })?;
             backend
-                .upload_path(&plan.target, *payload, source, destination, temporary)
+                .upload_path(&plan.target, source, destination, temporary)
                 .await
         }
         ProvisioningAction::InstallPayload {
-            payload,
             destination,
             temporary,
             ..
         } => {
-            let source = prepared.get(payload).ok_or_else(|| {
+            let source = prepared.ok_or_else(|| {
                 BackendFailure::new("the prepared payload disappeared before installation", "")
             })?;
             backend
-                .install_path(
-                    &plan.target,
-                    *payload,
-                    source,
-                    destination,
-                    temporary,
-                    0o755,
-                )
+                .install_path(&plan.target, source, destination, temporary, 0o755)
                 .await
         }
         ProvisioningAction::WriteUnit {

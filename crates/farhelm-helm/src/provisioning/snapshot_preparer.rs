@@ -106,14 +106,21 @@ impl EnvironmentPreparer for InstallerSnapshotPreparer {
             // sandbox preparation; repeating the ordinary unprivileged action
             // can fail through polkit even while boot linger is enabled. The
             // final guard verifies actual linger and persistent enablement.
+            // The bundled tmux's removal is for hosts an earlier release set
+            // up. Preparation installs into a sandbox image with no Farhelm
+            // installation (it refuses setup-managed installs and copied
+            // state), so the image is not expected to carry such a tmux.
             if matches!(
                 action,
-                ProvisioningAction::AttachSupervisor | ProvisioningAction::EnableLinger { .. }
+                ProvisioningAction::AttachSupervisor
+                    | ProvisioningAction::EnableLinger { .. }
+                    | ProvisioningAction::RemoveBundledTmux { .. }
             ) {
                 continue;
             }
             let outcome =
-                execute_install_action(self.backend.as_ref(), &plan, action, &prepared).await?;
+                execute_install_action(self.backend.as_ref(), &plan, action, prepared.as_ref())
+                    .await?;
             if let ActionOutcome::Degraded(reason) = outcome {
                 anyhow::bail!("the snapshot installation is not boot-capable: {reason}");
             }
@@ -125,7 +132,7 @@ impl EnvironmentPreparer for InstallerSnapshotPreparer {
 #[cfg(test)]
 mod tests {
     use super::super::backend::{CommandLauncher, Reach, SystemBackend};
-    use super::super::plan::{PayloadKind, PayloadTarget};
+    use super::super::plan::PayloadTarget;
     use super::*;
     use crate::tensorlake::prepared::{SnapshotPreparer, TensorlakeSnapshotPreparer};
     use crate::tensorlake::ssh::TensorlakeSshAccess;
@@ -195,7 +202,7 @@ mod tests {
     struct NoFinalPayloads;
     #[async_trait]
     impl PayloadSource for NoFinalPayloads {
-        async fn path(&self, _: PayloadKind, _: PayloadTarget) -> anyhow::Result<PathBuf> {
+        async fn path(&self, _: PayloadTarget) -> anyhow::Result<PathBuf> {
             panic!("finalization must not resolve payloads")
         }
     }
@@ -238,9 +245,7 @@ mod tests {
             user_unit_dir: root.path().join("remote-units"),
             arch: PayloadTarget::LinuxX86_64,
             distro_id: "fixture".into(),
-            needs_tmux: false,
             launchd_domain: None,
-            host_tmux: Some("/usr/bin/tmux".into()),
         };
         let plan = layout
             .plan(

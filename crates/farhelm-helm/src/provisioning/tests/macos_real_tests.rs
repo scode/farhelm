@@ -39,15 +39,12 @@ fn mac_fixture_failure(context: &str, error: impl std::fmt::Display) -> ! {
 }
 
 /// A single verified Darwin file, replaceable only with another operator input.
-/// A tmux request is an immediate fixture failure, even if a tmux happens to be
-/// installed on the remote machine.
 #[derive(Debug)]
 struct MacPayload(Mutex<PathBuf>);
 
 #[async_trait]
 impl PayloadSource for MacPayload {
-    async fn path(&self, kind: PayloadKind, target: PayloadTarget) -> anyhow::Result<PathBuf> {
-        anyhow::ensure!(kind == PayloadKind::Farhelm, "Mac plan requested tmux");
+    async fn path(&self, target: PayloadTarget) -> anyhow::Result<PathBuf> {
         anyhow::ensure!(
             target == PayloadTarget::MacosAarch64,
             "wrong Mac payload target"
@@ -230,7 +227,7 @@ impl OwnedMac {
     }
 
     /// Guard every executable plan path before confirmation, including upload
-    /// temporaries. Rejecting Linux actions also makes a hidden tmux path fail.
+    /// temporaries. Linux-only actions are rejected outright.
     fn assert_plan(&self, plan: &ProvisioningPlan) {
         assert!(
             plan.target == self.target,
@@ -247,18 +244,15 @@ impl OwnedMac {
                     }
                 }
                 ProvisioningAction::UploadPayload {
-                    payload,
                     arch,
                     destination,
                     temporary,
                 }
                 | ProvisioningAction::InstallPayload {
-                    payload,
                     arch,
                     destination,
                     temporary,
                 } => {
-                    assert_eq!(*payload, PayloadKind::Farhelm);
                     assert_eq!(*arch, PayloadTarget::MacosAarch64);
                     assert_eq!(destination, &self.lib.join("farhelm"));
                     assert!(temporary.starts_with(&self.lib));
@@ -1086,9 +1080,9 @@ async fn remote_macos_reboot_job_measurement() {
         let staged = stage_payload(&payload).await.unwrap();
         let program = fixture.lib.join("farhelm");
         let temporary = fixture.lib.join(format!(".farhelm.farhelm-tmp-{}", uuid::Uuid::new_v4()));
-        fixture.backend.upload_path(&fixture.target, PayloadKind::Farhelm, &staged, &program, &temporary).await
+        fixture.backend.upload_path(&fixture.target, &staged, &program, &temporary).await
             .unwrap_or_else(|_| panic!("could not upload the owned reboot payload"));
-        fixture.backend.install_path(&fixture.target, PayloadKind::Farhelm, &staged, &program, &temporary, 0o755).await
+        fixture.backend.install_path(&fixture.target, &staged, &program, &temporary, 0o755).await
             .unwrap_or_else(|_| panic!("could not install the owned reboot payload"));
         let plist = super::super::macos::supervisor_plist(&program, &fixture.state, &fixture.label).unwrap();
         // Exclusive creation adds only this nonce entry to the shared directory;

@@ -174,14 +174,14 @@ cgroup v2, the systemd cgroup manager, a usable user manager and engine events, 
 base `docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852`. The fixture
 requires that image to be present before it starts. The production recipe then uses network apt and official agent
 installers, and the managed checkout clones a public GitHub repository. Its focused nextest setup automatically builds
-matching static native-musl CLI/tmux payloads once per selected suite, using `musl-tools`, `file`, binutils and the
-pinned tmux build prerequisites. It exposes the staged path only to that module, which reserves four slots and has a
-40-minute nextest limit. An explicit `FARHELM_HELM_PAYLOAD_DIR` override is kept through the recorder by name. Automatic
-setup supplies the payload variable by default. Tensorlake Rust packs stage matching payloads locally and pass the
-private staged path through the worker recorder. Cargo is unavailable on clones. An intentional opt-out uses
-`FARHELM_TEST_SKIP_PODMAN=1` retained through the recorder's `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` option. Setup
-then skips the payload build. Read and report explicit SKIPPED output as missing real-environment coverage and exclude
-it from runtime pass evidence. `.agents/validation.md` gives focused selections.
+the matching static native-musl CLI payload once per selected suite, using `musl-tools`, `file` and binutils. It exposes
+the staged path only to that module, which reserves four slots and has a 40-minute nextest limit. An explicit
+`FARHELM_HELM_PAYLOAD_DIR` override is kept through the recorder by name. Automatic setup supplies the payload variable
+by default. Tensorlake Rust packs stage matching payloads locally and pass the private staged path through the worker
+recorder. Cargo is unavailable on clones. An intentional opt-out uses `FARHELM_TEST_SKIP_PODMAN=1` retained through the
+recorder's `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` option. Setup then skips the payload build. Read and report
+explicit SKIPPED output as missing real-environment coverage and exclude it from runtime pass evidence.
+`.agents/validation.md` gives focused selections.
 
 The opt-in `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` checks four native fresh/stored dark/light cases:
 startup palette, ordinary Settings choices, private-profile persistence, fonts and same-attachment terminal input, its

@@ -11,7 +11,7 @@ Intel Macs and other platforms are refused. Only the installer is limited: Linux
 hosts, and a helm sets up its remote hosts over SSH.
 
 Installation needs `curl`, `tar` with gzip support, and one of `sha256sum`, `shasum` or `openssl` for checksum
-verification. The Mac app does not need tmux.
+verification. Farhelm does not need tmux, on the Mac or on any host.
 
 Run the installer as your normal user:
 
@@ -184,7 +184,7 @@ and stop custom service arrangements yourself.
 
 Your session history, attachments, credentials, host registry, preferences, logs and cached payloads remain. The output
 names the known retained state location; custom data locations also remain untouched. Project directories, agent tools
-and their data, separately installed dependencies such as tmux, unrelated files, and shared directories such as
+and their data, programs you installed separately (tmux, say), unrelated files, and shared directories such as
 `~/.local/bin` and `~/Applications` are preserved. There is no purge option. Uninstalling a helm does not remove remote
 installations or stop sessions on remote hosts.
 

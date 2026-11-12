@@ -123,35 +123,8 @@ mod tests {
 
     #[async_trait]
     impl PayloadSource for FixedPayloads {
-        async fn path(
-            &self,
-            _payload: PayloadKind,
-            _arch: PayloadTarget,
-        ) -> anyhow::Result<PathBuf> {
+        async fn path(&self, _arch: PayloadTarget) -> anyhow::Result<PathBuf> {
             Ok(self.0.clone())
-        }
-    }
-
-    /// A release fixture with Farhelm present but the required tmux artifact
-    /// missing, used to prove whole-plan payload preflight.
-    #[derive(Debug)]
-    struct MissingTmuxPayload {
-        farhelm: PathBuf,
-        requested: Mutex<Vec<PayloadKind>>,
-    }
-
-    #[async_trait]
-    impl PayloadSource for MissingTmuxPayload {
-        async fn path(
-            &self,
-            payload: PayloadKind,
-            _arch: PayloadTarget,
-        ) -> anyhow::Result<PathBuf> {
-            self.requested.lock().unwrap().push(payload);
-            match payload {
-                PayloadKind::Farhelm => Ok(self.farhelm.clone()),
-                PayloadKind::Tmux => bail!("the tmux payload is missing"),
-            }
         }
     }
 
@@ -409,14 +382,7 @@ mod tests {
     ) -> Result<ActionOutcome, BackendFailure> {
         let prepared = stage_payload(source).await?;
         backend
-            .install_path(
-                target,
-                PayloadKind::Farhelm,
-                &prepared,
-                destination,
-                temporary,
-                mode,
-            )
+            .install_path(target, &prepared, destination, temporary, mode)
             .await
     }
 
@@ -513,9 +479,7 @@ mod tests {
                     home,
                     arch: PayloadTarget::LinuxX86_64,
                     distro_id: "ubuntu".to_string(),
-                    needs_tmux: false,
                     launchd_domain: None,
-                    host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
                 })),
                 user_unit: Mutex::new(Ok(None)),
                 unit_reads: Mutex::new(Vec::new()),
@@ -746,21 +710,16 @@ mod tests {
         async fn upload_path(
             &self,
             _target: &ProvisioningTarget,
-            kind: PayloadKind,
             _payload: &PreparedPayload,
             _destination: &Path,
             _temporary: &Path,
         ) -> Result<ActionOutcome, BackendFailure> {
-            self.record(match kind {
-                PayloadKind::Farhelm => "upload-farhelm",
-                PayloadKind::Tmux => "upload-tmux",
-            })
+            self.record("upload-farhelm")
         }
 
         async fn install_path(
             &self,
             _target: &ProvisioningTarget,
-            kind: PayloadKind,
             payload: &PreparedPayload,
             destination: &Path,
             _temporary: &Path,
@@ -776,10 +735,7 @@ mod tests {
                         )
                     })?;
             }
-            self.record(match kind {
-                PayloadKind::Farhelm => "install-farhelm",
-                PayloadKind::Tmux => "install-tmux",
-            })
+            self.record("install-farhelm")
         }
 
         async fn install_bytes_checked(
@@ -950,10 +906,18 @@ mod tests {
             _unit: &str,
             _farhelm_program: &Path,
             _state_dir: &Path,
-            _tmux_program: &Path,
-            _tmux_socket: &Path,
         ) -> Result<ActionOutcome, BackendFailure> {
             self.record("stop-supervisor")
+        }
+
+        /// Recorded under the plan step's id, like the other operations:
+        /// the bundled tmux is the only file a plan removes this way.
+        async fn remove_file(
+            &self,
+            _target: &ProvisioningTarget,
+            _path: &Path,
+        ) -> Result<ActionOutcome, BackendFailure> {
+            self.record("remove-bundled-tmux")
         }
 
         async fn remove_directory(
@@ -1027,9 +991,7 @@ mod tests {
             user_unit_dir: root.path().join("units"),
             arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
-            needs_tmux: true,
             launchd_domain: None,
-            host_tmux: None,
         };
         assert!(!root.path().join("lib").exists() && !root.path().join("units").exists());
         for operation in [ProvisioningOperation::Add, ProvisioningOperation::Update] {
@@ -1060,9 +1022,7 @@ mod tests {
             user_unit_dir: root.path().join("units"),
             arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
-            needs_tmux: true,
             launchd_domain: None,
-            host_tmux: None,
         };
 
         for value in [".", "/", ".."] {
@@ -1102,19 +1062,20 @@ mod tests {
         }
     }
 
-    /// An update keeps the private tmux in Farhelm's own directory even when
-    /// the registered binary lives in a shared bin directory.
+    /// An update removes the bundled tmux from Farhelm's own directory even
+    /// when the registered binary lives in a shared bin directory.
     ///
     /// Why it matters: the registered binary is often `~/.local/bin/farhelm`
-    /// (where the install script puts it). Deriving the tmux destination from
-    /// the binary's directory installed Farhelm's tmux as `~/.local/bin/tmux`,
-    /// overwriting the user's own tmux or shadowing the distribution's on
-    /// their shell PATH. Spec: tmux goes to `~/.local/lib/farhelm/tmux`, which
-    /// the plan ensures exists; the binary still goes to its registered path.
-    /// Both installation steps name their staging and destination paths, and
-    /// progress repeats the same list the plan asks the user to authorize.
+    /// (where the install script puts it), and `~/.local/bin/tmux` beside it
+    /// is the user's own tmux, not anything Farhelm installed. Deriving the
+    /// removal from the binary's directory would delete it. Spec: the binary
+    /// goes to its registered path, the plan ensures the private directory,
+    /// and the removal names `~/.local/lib/farhelm/tmux`, where earlier
+    /// releases always put their tmux. Every step names the paths it
+    /// touches, and progress repeats the same list the plan asks the user to
+    /// authorize.
     #[farhelm_testtrace::test]
-    fn update_plan_keeps_the_private_tmux_out_of_the_binary_directory() {
+    fn update_plan_removes_the_bundled_tmux_from_the_private_directory_only() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("home");
         let binary = home.join(".local/bin/farhelm");
@@ -1123,9 +1084,7 @@ mod tests {
             user_unit_dir: root.path().join("units"),
             arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
-            needs_tmux: true,
             launchd_domain: None,
-            host_tmux: None,
         };
         let row = HostRow {
             id: 1,
@@ -1153,21 +1112,24 @@ mod tests {
             .expect("an absolute registered binary plans an update");
 
         let private = home.join(".local/lib/farhelm");
-        let installed = |kind: PayloadKind| {
-            plan.actions
-                .iter()
-                .find_map(|action| match action {
-                    ProvisioningAction::InstallPayload {
-                        payload,
-                        destination,
-                        ..
-                    } if *payload == kind => Some(destination.clone()),
-                    _ => None,
-                })
-                .expect("the plan installs the payload")
-        };
-        assert_eq!(installed(PayloadKind::Farhelm), binary);
-        assert_eq!(installed(PayloadKind::Tmux), private.join("tmux"));
+        let installed = plan
+            .actions
+            .iter()
+            .find_map(|action| match action {
+                ProvisioningAction::InstallPayload { destination, .. } => Some(destination.clone()),
+                _ => None,
+            })
+            .expect("the plan installs the payload");
+        assert_eq!(installed, binary);
+        let removed: Vec<_> = plan
+            .actions
+            .iter()
+            .filter_map(|action| match action {
+                ProvisioningAction::RemoveBundledTmux { path } => Some(path.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(removed, [private.join("tmux")]);
         assert!(
             plan.actions.iter().any(|action| matches!(
                 action,
@@ -1195,13 +1157,12 @@ mod tests {
         );
         for (action, step) in plan.actions.iter().zip(&steps.steps) {
             if let ProvisioningAction::InstallPayload {
-                payload,
                 destination,
                 temporary,
                 ..
             } = action
             {
-                assert_eq!(step.paths.len(), 2, "{payload:?} names both touched paths");
+                assert_eq!(step.paths.len(), 2, "the install names both touched paths");
                 assert_eq!(step.paths[0].full, destination.display().to_string());
                 assert_eq!(step.paths[1].full, temporary.display().to_string());
                 assert_eq!(
@@ -1214,10 +1175,14 @@ mod tests {
                 );
             }
         }
-        assert_eq!(steps.steps[3].id, "upload-tmux");
-        assert_eq!(steps.steps[3].name, "Upload tmux");
-        assert_eq!(steps.steps[4].id, "install-tmux");
-        assert_eq!(steps.steps[4].name, "Install tmux");
+        let removal = steps
+            .steps
+            .iter()
+            .find(|step| step.id == "remove-bundled-tmux")
+            .expect("the update removes the bundled tmux");
+        assert_eq!(removal.name, "Remove the bundled tmux");
+        assert_eq!(removal.paths.len(), 1);
+        assert_eq!(removal.paths[0].short, "~/.local/lib/farhelm/tmux");
         assert_plan_progress_matches(&plan, &steps);
     }
 
@@ -1232,9 +1197,7 @@ mod tests {
             user_unit_dir: root.path().join("units"),
             arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
-            needs_tmux: false,
             launchd_domain: None,
-            host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         };
         let plan = layout(root.path())
             .plan(
@@ -1285,6 +1248,10 @@ mod tests {
                     "- Enable lingering, to start at boot\n",
                     "  The supervisor starts at boot if linger succeeds; if lingering is refused, starts at login, not at boot\n",
                     "- Restart the supervisor\n",
+                    "- Remove the bundled tmux\n",
+                    "  {}\n",
+                    "  Earlier releases installed their own tmux here; Farhelm no longer uses it, ",
+                    "and tmux typed in a session afterwards no longer runs this copy.\n",
                     "- Connect to the supervisor\n",
                 ),
                 root.path().join("lib").display(),
@@ -1297,6 +1264,7 @@ mod tests {
                 unit_temp.display(),
                 unit,
                 unit_path.display(),
+                root.path().join("lib/tmux").display(),
             )
         );
         let steps = plan.steps();
@@ -1385,9 +1353,7 @@ mod tests {
             user_unit_dir: root.path().join("units"),
             arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
-            needs_tmux: true,
             launchd_domain: None,
-            host_tmux: None,
         };
         let error = layout(root.path())
             .plan_for_row(&row, ProvisioningTarget::ssh("user@host"), &reach, "nonce")
@@ -2535,6 +2501,10 @@ mod tests {
                 "  The supervisor runs persistently under the systemd user manager\n",
                 "- Enable lingering, to start at boot\n",
                 "  The supervisor starts at boot if linger succeeds; if lingering is refused, starts at login, not at boot\n",
+                "- Remove the bundled tmux\n",
+                "  {}\n",
+                "  Earlier releases installed their own tmux here; Farhelm no longer uses it, ",
+                "and tmux typed in a session afterwards no longer runs this copy.\n",
                 "- Connect to the supervisor\n",
             ),
             root.path().join("lib").display(),
@@ -2547,6 +2517,7 @@ mod tests {
             unit_temp.display(),
             unit,
             unit_path.display(),
+            root.path().join("lib/tmux").display(),
         );
         assert_eq!(confirmation, expected);
         assert_eq!(
@@ -2755,63 +2726,6 @@ mod tests {
             assert!(backend.operations.lock().unwrap().is_empty());
             assert!(service.memory.lock().await.busy.is_empty());
         }
-    }
-
-    /// Preflight visits every required payload before mutating, even when an
-    /// earlier payload exists and only the private-tmux artifact is missing.
-    #[farhelm_testtrace::test]
-    async fn payload_preflight_validates_the_complete_required_set() {
-        let harness = harness().await;
-        let root = tempfile::tempdir().unwrap();
-        let farhelm = root.path().join("farhelm-payload");
-        tokio::fs::write(&farhelm, b"farhelm").await.unwrap();
-        let backend = FakeBackend::absent(root.path().to_path_buf());
-        {
-            let mut reach = backend.reach.lock().unwrap();
-            let ReachOutcome::Supported(reach) = &mut *reach else {
-                panic!("fixture must be supported")
-            };
-            reach.needs_tmux = true;
-            reach.host_tmux = None;
-        }
-        let payloads = Arc::new(MissingTmuxPayload {
-            farhelm,
-            requested: Mutex::new(Vec::new()),
-        });
-        let service = ProvisioningService::injected(
-            harness.store.clone(),
-            Arc::clone(&harness.manager),
-            backend.clone(),
-            Arc::clone(&payloads) as Arc<dyn PayloadSource>,
-            layout(root.path()),
-            PathBuf::from("/test/farhelm"),
-        );
-        let response = service
-            .probe(ProbeRequest {
-                target: ProbeDestination::Ssh {
-                    destination: "preflight.example".to_string(),
-                },
-                remote_farhelm: None,
-                remote_state_dir: None,
-                new_entry: None,
-            })
-            .await
-            .unwrap();
-        let ProbeResponse::Provisionable { probe_id, .. } = response else {
-            panic!("missing tmux still yields a confirmable plan")
-        };
-        let accepted = service
-            .start_add(ProvisionRequest { probe_id })
-            .await
-            .unwrap();
-        let failed = wait_finished(&service, accepted.host_id).await;
-        assert_eq!(failed.status, RunStatus::Failed);
-        assert!(failed.message.unwrap().contains("tmux payload is missing"));
-        assert_eq!(
-            payloads.requested.lock().unwrap().as_slice(),
-            [PayloadKind::Farhelm, PayloadKind::Tmux]
-        );
-        assert!(backend.operations.lock().unwrap().is_empty());
     }
 
     /// A failed post-insert actor reconciliation rolls back only the new row,
@@ -3952,9 +3866,7 @@ mod tests {
             user_unit_dir: root.path().join("units"),
             arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
-            needs_tmux: false,
             launchd_domain: None,
-            host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         });
         *backend.inspect_failure.lock().unwrap() = Some("inspection broke".to_string());
         assert!(service.plan_update(host).await.is_err());
@@ -5164,6 +5076,99 @@ mod tests {
         }
     }
 
+    /// Why this matters: the bundled tmux is removed once the new supervisor
+    /// already runs, and nothing of the install needs the file, so a removal
+    /// that fails must not turn a working Add or Update into a failed run
+    /// that asks for a rerun. It must not pass unnoticed either, since `tmux`
+    /// typed in a session would keep finding that copy.
+    ///
+    /// Spec: with the removal failing on the host, Add and Update both
+    /// complete; the removal step is degraded with a message saying the
+    /// bundled tmux may have been left in place and carrying the host's
+    /// error; the connect step after it still runs; and the run's message
+    /// is that one line without the host's error, never the login-only
+    /// start that a refused linger reports. When the Add's linger is
+    /// refused too, the run's message names both warnings, linger's first,
+    /// each in its own words, joined by "; ".
+    #[farhelm_testtrace::test]
+    async fn a_failed_bundled_tmux_removal_warns_and_the_run_completes() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        *backend.fail.lock().unwrap() = Some("remove-bundled-tmux".to_string());
+        // One-shot: only the Add's linger is refused, so the Update below
+        // shows the tmux warning alone.
+        *backend.linger.lock().unwrap() = Some(Err("permission denied".to_string()));
+        let service = service(&harness, backend.clone(), root.path());
+
+        let response = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Ssh {
+                    destination: "tmux-left-add.example".to_string(),
+                },
+                remote_farhelm: None,
+                remote_state_dir: None,
+                new_entry: None,
+            })
+            .await
+            .unwrap();
+        let ProbeResponse::Provisionable { probe_id, .. } = response else {
+            panic!("expected plan")
+        };
+        let accepted = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap();
+        let added = wait_finished(&service, accepted.host_id).await;
+
+        let host = harness
+            .store
+            .add_ssh_host("tmux-left-update.example", None, None)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        let plan = service.plan_update(host).await.unwrap();
+        let accepted = service
+            .start_update(
+                host,
+                ProvisionRequest {
+                    probe_id: plan.probe_id,
+                },
+            )
+            .await
+            .unwrap();
+        let updated = wait_finished(&service, accepted.host_id).await;
+
+        let tmux_summary = "the bundled tmux may have been left in place";
+        let add_summary = format!("starts at login, not at boot; {tmux_summary}");
+        for (operation, view, summary) in [
+            ("add", added, add_summary.as_str()),
+            ("update", updated, tmux_summary),
+        ] {
+            assert_eq!(view.status, RunStatus::Completed, "{operation}: {view:?}");
+            let step = |id: &str| {
+                view.steps
+                    .iter()
+                    .find(|step| step.step == id)
+                    .unwrap_or_else(|| panic!("{operation} has a {id} step: {view:?}"))
+            };
+            let removal = step("remove-bundled-tmux");
+            assert_eq!(removal.status, StepStatus::Degraded, "{operation}");
+            let message = removal.message.as_deref().unwrap_or_default();
+            assert!(
+                message.starts_with("the bundled tmux may have been left in place: ")
+                    && message.contains("planted failure in remove-bundled-tmux"),
+                "{operation}: {message}"
+            );
+            assert_eq!(
+                step("attach-supervisor").status,
+                StepStatus::Completed,
+                "{operation}"
+            );
+            assert_eq!(view.message.as_deref(), Some(summary), "{operation}");
+        }
+    }
+
     /// Probe and confirmed ADD share the host-scoped progress reader:
     /// provision returns 202 with an identity, then GET exposes that run.
     #[farhelm_testtrace::test]
@@ -5657,16 +5662,15 @@ mod tests {
     ///
     /// Spec: a connected host with no running sessions plans, in order,
     /// disabling the unit, removing its unit file, reloading the user manager
-    /// so the stop ends the private tmux server too, stopping the unit, the
-    /// state directory's terminal hosts and any server retained at the
-    /// private socket, removing the lib directory, and forgetting the host.
-    /// Cleanup freezes the dialed `farhelm` and the state directory for the
-    /// hosts, and the accepted host tmux client, or the private fallback when
-    /// none is available, and the host's socket. The confirmation names the unit, the unit file
-    /// and the lib directory by their concrete paths, says it is an
-    /// uninstall from that destination, and ends by naming the kept state
-    /// directory. The plan and progress entries also name the same ordered
-    /// actions; planning only inspects and leaves the host untouched.
+    /// so the stop ends the unit's whole control group, stopping the unit and
+    /// the state directory's terminal hosts, removing the lib directory, and
+    /// forgetting the host. Cleanup freezes the dialed `farhelm` and the
+    /// state directory for the hosts. The confirmation names the unit, the
+    /// unit file and the lib directory by their concrete paths, says it is an
+    /// uninstall from that destination, says the lib directory goes with
+    /// everything in it, and ends by naming the kept state directory. The
+    /// plan and progress entries also name the same ordered actions; planning
+    /// only inspects and leaves the host untouched.
     #[farhelm_testtrace::test]
     async fn uninstall_plans_the_removals_and_names_the_kept_data() {
         let (harness, host, root, backend, service) = uninstall_fixture(Vec::new(), false).await;
@@ -5692,14 +5696,11 @@ mod tests {
             matches!(
                 &preview.plan.actions[3],
                 ProvisioningAction::StopSupervisor {
-                    farhelm_program, state_dir, tmux_program, tmux_socket, ..
-                } if farhelm_program == &lib.join("farhelm")
-                    && state_dir == &state
-                    && tmux_program == Path::new("/usr/bin/tmux")
-                    && tmux_socket == &state.join("tmux.sock")
+                    farhelm_program, state_dir, ..
+                } if farhelm_program == &lib.join("farhelm") && state_dir == &state
             ),
             "the cleanup uses the dialed farhelm for the hosts of this host's frozen state \
-             directory, and the accepted client and the frozen state socket for tmux"
+             directory"
         );
         let ProvisioningAction::RemoveUnit {
             destination: unit, ..
@@ -5716,10 +5717,10 @@ mod tests {
                     "- Remove the systemd user unit\n",
                     "  {}\n",
                     "- Reload systemd user units\n",
-                    "- Stop the supervisor, its terminal hosts and its tmux server\n",
+                    "- Stop the supervisor and its terminal hosts\n",
                     "- Remove the install directory\n",
                     "  {}\n",
-                    "  The Farhelm binary and any private tmux in it are removed.\n",
+                    "  The Farhelm binary, and anything else in that directory, is removed.\n",
                     "- Remove the host from the list\n",
                     "Kept: the host's Farhelm data in {}. Deleting that directory by hand removes the data too.\n",
                 ),
@@ -5733,19 +5734,6 @@ mod tests {
         assert_eq!(preview.plan.state_dir, state);
         assert_eq!(harness.store.list_hosts().await.unwrap(), before);
         assert_eq!(*backend.operations.lock().unwrap(), ["inspect-uninstall"]);
-        if let ReachOutcome::Supported(reach) = &mut *backend.reach.lock().unwrap() {
-            reach.needs_tmux = true;
-            reach.host_tmux = None;
-        }
-        let private = service.plan_uninstall(host).await.unwrap();
-        assert!(
-            matches!(
-                &private.plan.actions[3],
-                ProvisioningAction::StopSupervisor { tmux_program, tmux_socket, .. }
-                    if tmux_program == &lib.join("tmux") && tmux_socket == &state.join("tmux.sock")
-            ),
-            "the private fallback remains in the same installation layout"
-        );
     }
 
     /// Why this matters: the host may only leave the list once Farhelm is
@@ -6848,33 +6836,6 @@ mod tests {
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 
-    /// Host-tmux acceptance must use the SAME floor the remote supervisor
-    /// enforces at startup. If this test drifted looser, provisioning
-    /// would skip the private payload on a host whose tmux the supervisor
-    /// then refuses — a "successful" provision that cannot start a
-    /// session.
-    ///
-    /// The at-the-floor case is spelled through the constant rather than a
-    /// literal so a future floor bump does not need this test edited; the
-    /// too-old cases stay literal because the floor is DESIGNED to exclude
-    /// exactly these distro packages (Ubuntu 24.04's 3.4, 26.04's 3.6,
-    /// Debian 13 and Fedora 42's 3.5a) and a bump can only make that truer.
-    #[farhelm_testtrace::test]
-    fn host_tmux_acceptance_tracks_the_supervisor_floor() {
-        let floor = farhelm_supervisor::tmux::TMUX_FLOOR;
-        assert!(tmux_meets_floor(&format!("tmux {floor}")));
-        assert!(tmux_meets_floor("tmux 99.0"));
-        assert!(!tmux_meets_floor("tmux 3.6"));
-        assert!(!tmux_meets_floor("tmux 3.5a"));
-        assert!(!tmux_meets_floor("tmux 3.4"));
-        assert!(!tmux_meets_floor("tmux 3.3a"));
-        // A host with no tmux reports an empty field, and a host whose
-        // tmux answered something unrecognizable is equally unknown; both
-        // must request the private payload rather than be assumed usable.
-        assert!(!tmux_meets_floor("not installed"));
-        assert!(!tmux_meets_floor(""));
-    }
-
     /// The production classifier requires both the private marker and exit
     /// 75; authentication failure, unmarked 75, and malformed hello remain
     /// errors even when process creation itself succeeds. The final skew
@@ -7447,7 +7408,6 @@ mod tests {
             backend
                 .upload_path(
                     &ProvisioningTarget::ssh("scripted.example"),
-                    PayloadKind::Farhelm,
                     &prepared,
                     &destination,
                     &upload_temporary,
@@ -7859,108 +7819,77 @@ mod tests {
     /// of this change (see the workspace's centos-gate task).
     #[farhelm_testtrace::test]
     fn reach_output_parser_covers_platform_and_tool_boundaries() {
-        let supported = |os: &str, arch: &str, tmux_path: &str, tmux: &str, manager: &str| {
+        let supported = |os: &str, arch: &str, manager: &str| {
             format!(
-                "{REACH_RECORD_MARKER}\0{os}\0/home/test\0{arch}\0{tmux_path}\0{tmux}\0{manager}\0/home/test/.config/systemd/user\0\0"
+                "{REACH_RECORD_MARKER}\0{os}\0/home/test\0{arch}\0{manager}\0/home/test/.config/systemd/user\0\0"
             )
         };
         // A non-Ubuntu ID with every real capability present is supported,
         // and the ID it reported rides along unchanged for the plan to
         // display — this is the behavior the ubuntu-only gate used to
         // block.
-        let ReachOutcome::Supported(debian) = parse_reach_output(
-            supported("debian", "x86_64", "/usr/bin/tmux", "tmux 3.3", "usable").as_bytes(),
-        )
-        .unwrap() else {
+        let ReachOutcome::Supported(debian) =
+            parse_reach_output(supported("debian", "x86_64", "usable").as_bytes()).unwrap()
+        else {
             panic!("a usable manager is supported regardless of distro ID")
         };
         assert_eq!(debian.distro_id, "debian");
-        let ReachOutcome::Supported(centos) = parse_reach_output(
-            supported("centos", "x86_64", "/usr/bin/tmux", "tmux 3.4", "usable").as_bytes(),
-        )
-        .unwrap() else {
+        let ReachOutcome::Supported(centos) =
+            parse_reach_output(supported("centos", "x86_64", "usable").as_bytes()).unwrap()
+        else {
             panic!("a usable manager is supported regardless of distro ID")
         };
         assert_eq!(centos.distro_id, "centos");
         // No /etc/os-release at all reports an empty ID over the wire; the
         // manager check is the real requirement, so an empty ID is still
         // supported rather than refused for lack of a name to show.
-        let ReachOutcome::Supported(unknown) = parse_reach_output(
-            supported("", "x86_64", "/usr/bin/tmux", "tmux 3.4", "usable").as_bytes(),
-        )
-        .unwrap() else {
+        let ReachOutcome::Supported(unknown) =
+            parse_reach_output(supported("", "x86_64", "usable").as_bytes()).unwrap()
+        else {
             panic!("an empty distro ID is not a reason to refuse an otherwise usable host")
         };
         assert_eq!(unknown.distro_id, "");
         assert!(matches!(
-            parse_reach_output(supported("ubuntu", "riscv64", "", "", "usable").as_bytes())
-                .unwrap(),
+            parse_reach_output(supported("ubuntu", "riscv64", "usable").as_bytes()).unwrap(),
             ReachOutcome::Manual(_)
         ));
         assert!(parse_reach_output(b"too\0short\0").is_err());
-        let clean = supported("ubuntu", "x86_64", "/usr/bin/tmux", "tmux 3.4", "usable");
+        let clean = supported("ubuntu", "x86_64", "usable");
         assert!(parse_reach_output(format!("shell banner{clean}").as_bytes()).is_err());
         assert!(parse_reach_output(format!("{clean}trailing output").as_bytes()).is_err());
         assert!(matches!(
-            parse_reach_output(supported("ubuntu", "x86_64", "", "", "unavailable").as_bytes())
-                .unwrap(),
+            parse_reach_output(supported("ubuntu", "x86_64", "unavailable").as_bytes()).unwrap(),
             ReachOutcome::Manual(_)
         ));
-        let ReachOutcome::Supported(missing) =
-            parse_reach_output(supported("ubuntu", "x86_64", "", "", "usable").as_bytes()).unwrap()
+        let ReachOutcome::Supported(ubuntu) =
+            parse_reach_output(supported("ubuntu", "x86_64", "usable").as_bytes()).unwrap()
         else {
             panic!("x86_64 Ubuntu with a user manager is supported")
         };
-        assert!(missing.needs_tmux);
-        assert_eq!(missing.distro_id, "ubuntu");
-        let newline_id = supported("ubuntu\nplan-step", "x86_64", "", "", "usable");
+        assert_eq!(ubuntu.distro_id, "ubuntu");
+        let newline_id = supported("ubuntu\nplan-step", "x86_64", "usable");
         assert!(
             parse_reach_output(newline_id.as_bytes()).is_err(),
             "a control character in the host claim must remain malformed output"
         );
-        let oversized_id = supported(&"x".repeat(65), "x86_64", "", "", "usable");
+        let oversized_id = supported(&"x".repeat(65), "x86_64", "usable");
         assert!(
             parse_reach_output(oversized_id.as_bytes()).is_err(),
             "an oversized host claim must remain malformed output"
         );
-        let ReachOutcome::Supported(old) = parse_reach_output(
-            supported("ubuntu", "aarch64", "/usr/bin/tmux", "tmux 3.2", "usable").as_bytes(),
-        )
-        .unwrap() else {
+        let ReachOutcome::Supported(aarch64) =
+            parse_reach_output(supported("ubuntu", "aarch64", "usable").as_bytes()).unwrap()
+        else {
             panic!("aarch64 Ubuntu with a user manager is supported")
         };
-        assert_eq!(old.arch, PayloadTarget::LinuxAarch64);
-        assert!(old.needs_tmux);
-        // A host whose tmux clears the floor is the ONLY case that skips
-        // the private payload; without it nothing here would notice an
-        // acceptance path that had stopped accepting anything at all.
-        let at_floor = format!("tmux {}", farhelm_supervisor::tmux::TMUX_FLOOR);
-        let ReachOutcome::Supported(usable_tmux) = parse_reach_output(
-            supported("ubuntu", "x86_64", "/usr/bin/tmux", &at_floor, "usable").as_bytes(),
-        )
-        .unwrap() else {
-            panic!("x86_64 Ubuntu with a user manager is supported")
-        };
-        assert!(!usable_tmux.needs_tmux);
-        // The EXECUTABLE, not its directory: uninstall runs it to end the
-        // private tmux server.
-        assert_eq!(usable_tmux.host_tmux, Some(PathBuf::from("/usr/bin/tmux")));
-        // The version clears the floor here, so a relative tmux path is
-        // the only thing left that can force the payload.
-        let ReachOutcome::Supported(relative_tmux) = parse_reach_output(
-            supported("ubuntu", "x86_64", "bin/tmux", &at_floor, "usable").as_bytes(),
-        )
-        .unwrap() else {
-            panic!("an otherwise supported host remains provisionable")
-        };
-        assert!(relative_tmux.needs_tmux);
+        assert_eq!(aarch64.arch, PayloadTarget::LinuxAarch64);
         assert_eq!(
-            relative_tmux.user_unit_dir,
+            aarch64.user_unit_dir,
             PathBuf::from("/home/test/.config/systemd/user")
         );
         assert!(matches!(
             parse_reach_output(
-                supported("ubuntu", "x86_64", "/usr/bin/tmux", "tmux 3.4", "unsupported-xdg")
+                supported("ubuntu", "x86_64", "unsupported-xdg")
                     .as_bytes()
             )
             .unwrap(),
@@ -7970,9 +7899,8 @@ mod tests {
         {
             let mut non_utf8_home = format!("{REACH_RECORD_MARKER}\0ubuntu\0/home/").into_bytes();
             non_utf8_home.push(0xff);
-            non_utf8_home.extend_from_slice(
-                b"\0x86_64\0/usr/bin/tmux\0tmux 3.4\0usable\0/home/test/.config/systemd/user\0\0",
-            );
+            non_utf8_home
+                .extend_from_slice(b"\0x86_64\0usable\0/home/test/.config/systemd/user\0\0");
             assert!(matches!(
                 parse_reach_output(&non_utf8_home).unwrap(),
                 ReachOutcome::Manual(reason)
@@ -7992,7 +7920,7 @@ mod tests {
     fn reach_output_refuses_a_setup_managed_supervisor_unit() {
         let with_owner = |owner: &str| {
             format!(
-                "{REACH_RECORD_MARKER}\0ubuntu\0/home/test\0x86_64\0/usr/bin/tmux\0tmux 3.4\0usable\0/home/test/.config/systemd/user\0{owner}\0"
+                "{REACH_RECORD_MARKER}\0ubuntu\0/home/test\0x86_64\0usable\0/home/test/.config/systemd/user\0{owner}\0"
             )
         };
         assert!(matches!(
@@ -8423,20 +8351,17 @@ mod tests {
         );
     }
 
-    /// A removed private socket, and a state directory with no terminal
-    /// hosts, must let uninstall finish without a tmux client or a `farhelm`,
-    /// regardless of the host's supported stat implementation. Permission
-    /// and I/O diagnostics must still retain the host: a failed lookup does
-    /// not establish that its server or its hosts are gone. Execute the real
-    /// stop script with controlled stat output, a deliberately absent client
-    /// and a deliberately absent `farhelm`, so neither a real socket, a real
-    /// `hosts` directory nor an installed program can hide a mistaken refusal
-    /// or an overly broad absence match. Each diagnostic is given to one
-    /// lookup at a time while the other reports its path missing, so a
-    /// refusal is pinned to the lookup that saw the diagnostic.
+    /// A state directory with no terminal hosts must let uninstall finish
+    /// without a `farhelm`, regardless of the host's supported stat
+    /// implementation. Permission and I/O diagnostics must still retain the
+    /// host: a failed lookup does not establish that its hosts are gone.
+    /// Execute the real stop script with controlled stat output and a
+    /// deliberately absent `farhelm`, so neither a real `hosts` directory nor
+    /// an installed program can hide a mistaken refusal or an overly broad
+    /// absence match.
     #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
-    async fn uninstall_stop_accepts_only_known_missing_socket_diagnostics() {
+    async fn uninstall_stop_accepts_only_known_missing_hosts_diagnostics() {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("home");
         let bin = root.path().join("bin");
@@ -8456,107 +8381,81 @@ mod tests {
         };
         let target = ProvisioningTarget::ssh("scripted.example");
         let state = root.path().join("missing-state");
-        let socket = root.path().join("missing.sock");
-        let tmux = root.path().join("removed-tmux");
         let farhelm = root.path().join("removed-farhelm");
         assert!(
-            !state.exists() && !socket.exists() && !tmux.exists() && !farhelm.exists(),
-            "fixture starts without state, socket, client or farhelm"
+            !state.exists() && !farhelm.exists(),
+            "fixture starts without state or farhelm"
         );
-        const MISSING: &str = "stat: cannot statx 'fixture': No such file or directory";
         for (diagnostic, absent) in [
+            ("stat: cannot stat 'hosts': No such file or directory", true),
             (
-                "stat: cannot stat 'missing.sock': No such file or directory",
+                "stat: cannot stat 'hosts': No such file or directory (os error 2)",
                 true,
             ),
-            (
-                "stat: cannot stat 'missing.sock': No such file or directory (os error 2)",
-                true,
-            ),
-            (
-                "stat: can't stat 'missing.sock': No such file or directory",
-                true,
-            ),
+            ("stat: can't stat 'hosts': No such file or directory", true),
             (
                 "stat: cannot stat 'No such file or directory': Permission denied (os error 13)",
                 false,
             ),
             (
-                "stat: cannot stat 'missing.sock': Input/output error (os error 5)",
+                "stat: cannot stat 'hosts': Input/output error (os error 5)",
                 false,
             ),
         ] {
-            for at_hosts in [true, false] {
-                let (hosts_answer, socket_answer) = if at_hosts {
-                    (diagnostic, MISSING)
-                } else {
-                    (MISSING, diagnostic)
-                };
-                write_fake_tool(&bin, "stat", &fake_stat(hosts_answer, socket_answer)).await;
-                let result = system
-                    .stop(
-                        &target,
-                        "farhelm-supervisor.service",
-                        &farhelm,
-                        &state,
-                        &tmux,
-                        &socket,
-                    )
-                    .await;
-                if absent {
-                    assert!(
-                        matches!(result.unwrap(), ActionOutcome::Skipped(_)),
-                        "{diagnostic} (at the hosts lookup: {at_hosts})"
-                    );
-                } else {
-                    let failure = result.expect_err("non-absence lookup failure must refuse");
-                    assert!(
-                        failure.rendered().contains(diagnostic),
-                        "{} (at the hosts lookup: {at_hosts})",
-                        failure.rendered()
-                    );
-                }
+            write_fake_tool(&bin, "stat", &fake_stat(diagnostic)).await;
+            let result = system
+                .stop(&target, "farhelm-supervisor.service", &farhelm, &state)
+                .await;
+            if absent {
+                assert!(
+                    matches!(result.unwrap(), ActionOutcome::Skipped(_)),
+                    "{diagnostic}"
+                );
+            } else {
+                let failure = result.expect_err("non-absence lookup failure must refuse");
+                assert!(
+                    failure.rendered().contains(diagnostic),
+                    "{}",
+                    failure.rendered()
+                );
             }
         }
     }
 
-    /// A stand-in `stat` for the stop script, which looks up two paths: the
-    /// state directory's `hosts` (whose path ends in `/hosts`) and the tmux
-    /// socket. Each lookup fails with its own diagnostic.
+    /// A stand-in `stat` for the stop script, whose only lookup with no
+    /// `hosts` present is the state directory's `hosts`. Every lookup fails
+    /// with `answer`.
     #[cfg(target_os = "linux")]
-    fn fake_stat(hosts_answer: &str, socket_answer: &str) -> String {
+    fn fake_stat(answer: &str) -> String {
         format!(
-            "for last; do :; done\n\
-             case \"$last\" in */hosts) printf '%s\\n' {hosts} >&2 ;; \
-             *) printf '%s\\n' {socket} >&2 ;; esac\n\
+            "printf '%s\\n' {answer} >&2\n\
              exit 1",
-            hosts = shell_words::quote(hosts_answer),
-            socket = shell_words::quote(socket_answer),
+            answer = shell_words::quote(answer),
         )
     }
 
     /// Why this matters: terminal hosts outlive their supervisor by design,
-    /// so a remote uninstall must end them itself, the way it ends the
-    /// private tmux server. It must never pass over hosts it could not
-    /// confirm stopped, and a retry after the lib removal, which deletes the
-    /// `farhelm` that stops them, must still finish. The step runs the
+    /// so a remote uninstall must end them itself. It must never pass over
+    /// hosts it could not confirm stopped, and a retry after the lib
+    /// removal, which deletes the `farhelm` that stops them, must still
+    /// finish. The step runs the
     /// installed `farhelm`'s stop command, whose exit status 0 is the only
     /// proof (SPEC_impl.md, "Terminal host"); an older `farhelm` that lacks
     /// the command answers 2, which must not read as success. An empty
     /// `hosts` still runs the command: the command's contract has callers
     /// decide by whether `hosts` exists and judges its contents itself.
     ///
-    /// Spec, on the real stop script with stand-in `systemctl`, `farhelm`
-    /// and tmux:
+    /// Spec, on the real stop script with stand-in `systemctl` and
+    /// `farhelm`:
     /// - With no `hosts` in the state directory, `farhelm` never runs.
     /// - Whenever `hosts` exists, empty included,
     ///   `farhelm internal stop-terminal-hosts --state-dir <state>` runs,
-    ///   after the unit stop and before tmux.
+    ///   after the unit stop.
     /// - After its exit status 0 the step removes the socket files left in
     ///   `hosts` and then `hosts`, so a retry, with or without the `farhelm`,
     ///   finds nothing and skips.
     /// - Any other status (1, 2) fails the step with the command's own
-    ///   lines and a summary naming the socket directory, before tmux.
+    ///   lines and a summary naming the socket directory.
     /// - After a 0, an entry in `hosts` that is not a socket (a file, a
     ///   symlink), a socket that cannot be removed, or a `hosts` that cannot
     ///   be listed fails the step, naming what is left, with `hosts` kept.
@@ -8608,16 +8507,8 @@ mod tests {
             ),
         )
         .await;
-        write_fake_tool(
-            &lib,
-            "tmux",
-            &format!("printf 'tmux %s\\n' \"$*\" >> {quoted_log}"),
-        )
-        .await;
         let farhelm = lib.join("farhelm");
         let removed_farhelm = root.path().join("removed-farhelm");
-        let tmux = lib.join("tmux");
-        let socket = state.join("tmux.sock");
         let system = SystemBackend {
             control_dir: root.path().to_path_buf(),
             linger: LingerBehavior::Simulated(Ok(())),
@@ -8628,18 +8519,11 @@ mod tests {
         };
         let target = ProvisioningTarget::ssh("scripted.example");
         let stop = |farhelm: &Path| {
-            let (system, target, state, tmux, socket) = (&system, &target, &state, &tmux, &socket);
+            let (system, target, state) = (&system, &target, &state);
             let farhelm = farhelm.to_path_buf();
             async move {
                 system
-                    .stop(
-                        target,
-                        "farhelm-supervisor.service",
-                        &farhelm,
-                        state,
-                        tmux,
-                        socket,
-                    )
+                    .stop(target, "farhelm-supervisor.service", &farhelm, state)
                     .await
             }
         };
@@ -8665,7 +8549,6 @@ mod tests {
             "farhelm internal stop-terminal-hosts --state-dir {}\n",
             state.display()
         );
-        let tmux_kill = format!("tmux -S {} kill-server\n", socket.display());
         // Root reads and writes directories whatever their mode, so the
         // permission cases cannot establish their premise there.
         // SAFETY: geteuid has no preconditions and cannot fail.
@@ -8680,20 +8563,17 @@ mod tests {
         assert_eq!(calls().await, "", "no hosts directory runs no farhelm");
 
         // An empty `hosts` under a running unit: the unit stops first, then
-        // the command runs, then tmux, and `hosts` is gone afterwards.
+        // the command runs, and `hosts` is gone afterwards.
         tokio::fs::create_dir(&hosts).await.unwrap();
         tokio::fs::write(&unit_state, "active\n").await.unwrap();
-        tokio::fs::write(&socket, b"fixture socket placeholder")
-            .await
-            .unwrap();
         assert!(matches!(
             stop(&farhelm).await.unwrap(),
             ActionOutcome::Completed
         ));
         assert_eq!(
             calls().await,
-            format!("systemctl stop\n{host_stop}{tmux_kill}"),
-            "the hosts are stopped after the unit and before the tmux server"
+            format!("systemctl stop\n{host_stop}"),
+            "the hosts are stopped after the unit"
         );
         assert!(!hosts.exists(), "a confirmed stop removes the empty hosts");
         // The retry after the lib removal, and one before it, find nothing.
@@ -8715,13 +8595,10 @@ mod tests {
         assert_eq!(calls().await, host_stop);
         assert!(!hosts.exists(), "the leftover socket and hosts are removed");
 
-        // Only 0 counts: 1 and 2 fail the step before tmux, keeping `hosts`.
+        // Only 0 counts: 1 and 2 fail the step, keeping `hosts`.
         tokio::fs::create_dir(&hosts).await.unwrap();
         bind_dead_socket();
         for code in [1, 2] {
-            tokio::fs::write(&socket, b"fixture socket placeholder")
-                .await
-                .unwrap();
             answer_with(
                 code,
                 "farhelm internal stop-terminal-hosts: terminal host a1b2c3d4: could not confirm it stopped\n",
@@ -8743,13 +8620,8 @@ mod tests {
                 "{rendered}"
             );
             assert_eq!(calls().await, host_stop, "a failed host stop ends the step");
-            assert!(
-                socket.exists(),
-                "tmux is not reached after a failed host stop"
-            );
             assert!(dead_socket.exists(), "a failed stop leaves hosts as it was");
         }
-        tokio::fs::remove_file(&socket).await.unwrap();
         answer_with(0, "").await;
 
         // After a 0, what is not a socket is not removed, and fails the step
@@ -8791,9 +8663,6 @@ mod tests {
             assert!(dead_socket.exists());
 
             // A `hosts` that cannot be listed is never read as empty.
-            tokio::fs::write(&socket, b"fixture socket placeholder")
-                .await
-                .unwrap();
             set_mode(&hosts, 0o000).await.unwrap();
             let result = stop(&farhelm).await;
             set_mode(&hosts, 0o700).await.unwrap();
@@ -8803,9 +8672,8 @@ mod tests {
                 "{}",
                 failure.rendered()
             );
-            assert_eq!(calls().await, host_stop, "tmux is not reached");
+            assert_eq!(calls().await, host_stop);
             assert!(dead_socket.exists());
-            tokio::fs::remove_file(&socket).await.unwrap();
         }
 
         // `hosts` with its farhelm gone: hosts may run, and the step says how
@@ -8956,17 +8824,8 @@ mod tests {
             fail_before_rename: false,
         };
         let target = ProvisioningTarget::ssh("scripted.example");
-        let tmux = root.path().join("no-tmux");
-        let socket = state.join("tmux.sock");
         let outcome = system
-            .stop(
-                &target,
-                "farhelm-supervisor.service",
-                &farhelm,
-                &state,
-                &tmux,
-                &socket,
-            )
+            .stop(&target, "farhelm-supervisor.service", &farhelm, &state)
             .await;
         assert!(
             matches!(outcome, Ok(ActionOutcome::Completed)),
@@ -8985,9 +8844,7 @@ mod tests {
                             &target,
                             "farhelm-supervisor.service",
                             &retry_farhelm,
-                            &state,
-                            &tmux,
-                            &socket,
+                            &state
                         )
                         .await
                         .unwrap(),
@@ -9600,11 +9457,8 @@ mod tests {
     /// and the unit's run state; `remove_unit` refuses a unit whose
     /// first line is setup's marker (with or without a trailing newline) and
     /// keeps it, removes an unmarked one, and skips an absent one; `stop`
-    /// stops a running unit before private socket cleanup, and still cleans
-    /// up tmux for an inactive unit. Exact absence is a skip, other tmux
-    /// errors fail, an accepted stop removes its socket, and an absent socket
-    /// needs no client binary; `disable` passes
-    /// `--runtime` exactly when the backend links
+    /// stops a running unit and skips an inactive one with nothing left to
+    /// end; `disable` passes `--runtime` exactly when the backend links
     /// units for this boot only; `remove_directory` refuses a path that is
     /// itself a symlink and leaves both the link and its target, removes the
     /// real tree under a symlinked parent, and removes a tree and then skips
@@ -9657,7 +9511,6 @@ mod tests {
         tokio::fs::write(lib.join("farhelm"), b"binary")
             .await
             .unwrap();
-        tokio::fs::write(lib.join("tmux"), b"tmux").await.unwrap();
 
         // The inspection reports existence and the host's canonical path
         // for each asked path: a state directory reached through a symlink
@@ -9818,8 +9671,6 @@ mod tests {
                     "farhelm-supervisor.service",
                     &no_farhelm,
                     root.path(),
-                    &lib.join("tmux"),
-                    &root.path().join("tmux.sock")
                 )
                 .await
                 .unwrap(),
@@ -9833,8 +9684,6 @@ mod tests {
                     "farhelm-supervisor.service",
                     &no_farhelm,
                     root.path(),
-                    &lib.join("tmux"),
-                    &root.path().join("tmux.sock")
                 )
                 .await
                 .unwrap(),
@@ -9860,195 +9709,6 @@ mod tests {
                 "--user --runtime disable -- farhelm-supervisor.service",
             ]
         );
-
-        // A socket left behind is not evidence of absence. Exercise the
-        // remote shell with exact diagnostics, including a path that itself
-        // contains the tolerated phrase, so substring matching cannot pass.
-        let socket = root.path().join("no server running on fixture.sock");
-        let tmux = lib.join("tmux");
-        for (diagnostic, absent) in [
-            (format!("no server running on {}", socket.display()), true),
-            (
-                format!(
-                    "error connecting to {} (No such file or directory)",
-                    socket.display()
-                ),
-                true,
-            ),
-            (
-                format!(
-                    "error connecting to {} (Permission denied)",
-                    socket.display()
-                ),
-                false,
-            ),
-        ] {
-            // Every case must reach the client branch independently: a prior
-            // accepted stop now removes the socket instead of leaving it stale.
-            tokio::fs::write(&socket, b"fixture socket placeholder")
-                .await
-                .unwrap();
-            write_fake_tool(
-                &lib,
-                "tmux",
-                &format!(
-                    "printf '%s\\n' {} >&2; exit 1",
-                    shell_words::quote(&diagnostic),
-                ),
-            )
-            .await;
-            let result = system
-                .stop(
-                    &target,
-                    "farhelm-supervisor.service",
-                    &no_farhelm,
-                    root.path(),
-                    &tmux,
-                    &socket,
-                )
-                .await;
-            if absent {
-                assert!(matches!(result.unwrap(), ActionOutcome::Skipped(_)));
-                assert!(
-                    !socket.exists(),
-                    "an excused stop must remove its stale socket"
-                );
-            } else {
-                assert!(result.unwrap_err().rendered().contains("Permission denied"));
-                assert!(
-                    socket.exists(),
-                    "an unexcused failure must preserve its socket"
-                );
-            }
-        }
-        tokio::fs::write(&active, "active\n").await.unwrap();
-        tokio::fs::write(&log, "").await.unwrap();
-        write_fake_tool(
-            &lib,
-            "tmux",
-            &format!(
-                "printf 'private-tmux-kill\\n' >> {}",
-                shell_words::quote(&log.display().to_string()),
-            ),
-        )
-        .await;
-        assert!(matches!(
-            system
-                .stop(
-                    &target,
-                    "farhelm-supervisor.service",
-                    &no_farhelm,
-                    root.path(),
-                    &tmux,
-                    &socket
-                )
-                .await
-                .unwrap(),
-            ActionOutcome::Completed
-        ));
-        assert_eq!(
-            tokio::fs::read_to_string(&log)
-                .await
-                .unwrap()
-                .lines()
-                .collect::<Vec<_>>(),
-            [
-                "--user show -p ActiveState --value -- farhelm-supervisor.service",
-                "--user stop -- farhelm-supervisor.service",
-                "private-tmux-kill",
-            ]
-        );
-        assert!(!socket.exists(), "a successful stop must remove its socket");
-        tokio::fs::remove_file(&tmux).await.unwrap();
-        tokio::fs::write(&active, "inactive\n").await.unwrap();
-        assert!(
-            matches!(
-                system
-                    .stop(
-                        &target,
-                        "farhelm-supervisor.service",
-                        &no_farhelm,
-                        root.path(),
-                        &tmux,
-                        &socket
-                    )
-                    .await
-                    .unwrap(),
-                ActionOutcome::Skipped(_)
-            ),
-            "a lib-gone retry must not execute a missing client for an absent socket"
-        );
-
-        // EACCES makes both shell existence predicates false. A missing
-        // private client must not turn that unknown server state into a skip.
-        // Root bypasses directory modes, so it cannot establish this premise.
-        let blocked = root.path().join("blocked-socket-parent");
-        tokio::fs::create_dir(&blocked).await.unwrap();
-        tokio::fs::write(
-            blocked.join("tmux.sock"),
-            b"protected fixture socket placeholder",
-        )
-        .await
-        .unwrap();
-        set_mode(&blocked, 0o600).await.unwrap();
-        let searchable = std::process::Command::new("test")
-            .arg("-x")
-            .arg(&blocked)
-            .status()
-            .unwrap();
-        if !searchable.success() {
-            let hidden = std::process::Command::new("test")
-                .arg("-e")
-                .arg(blocked.join("tmux.sock"))
-                .status()
-                .unwrap();
-            assert!(
-                !hidden.success(),
-                "fixture premise: search denial hides an existing socket child"
-            );
-            let failure = system
-                .stop(
-                    &target,
-                    "farhelm-supervisor.service",
-                    &no_farhelm,
-                    root.path(),
-                    &tmux,
-                    &blocked.join("tmux.sock"),
-                )
-                .await
-                .expect_err("unknown socket state must retain the host");
-            assert!(failure.rendered().contains("Permission denied"));
-        } else {
-            eprintln!(
-                "SKIPPED directory-permission subcase: runner bypasses the fixture directory mode"
-            );
-        }
-        set_mode(&blocked, 0o700).await.unwrap();
-        // A searchable filesystem can still refuse a child lookup. Inject
-        // that diagnostic at the existing stat boundary: an I/O failure is
-        // not the missing-path evidence a no-client retry needs.
-        write_fake_tool(
-            &bin,
-            "stat",
-            &fake_stat(
-                "stat: cannot statx 'hosts': No such file or directory",
-                "stat: cannot statx 'fixture No such file or directory': Input/output error",
-            ),
-        )
-        .await;
-        let failure = system
-            .stop(
-                &target,
-                "farhelm-supervisor.service",
-                &no_farhelm,
-                root.path(),
-                &tmux,
-                &socket,
-            )
-            .await
-            .expect_err("lookup errors must keep the host listed");
-        assert!(failure.rendered().contains("Input/output error"));
-        tokio::fs::remove_file(bin.join("stat")).await.unwrap();
 
         // A lib directory that became a symlink after planning is refused by
         // the removal command itself, dangling or not, and neither the link
@@ -10115,13 +9775,130 @@ mod tests {
                     "farhelm-supervisor.service",
                     &no_farhelm,
                     root.path(),
-                    &lib.join("tmux"),
-                    &root.path().join("tmux.sock")
                 )
                 .await
                 .is_err()
         );
         assert!(system.remove_directory(&local, &lib).await.is_err());
+    }
+
+    /// Why this matters: Update and a repeated Add remove the tmux an
+    /// earlier release installed in Farhelm's private directory, and every
+    /// Linux plan carries that step whether or not the file is there. A
+    /// missing file must therefore never fail a run, while a removal that
+    /// did not happen must not read as done, and a symlink must not lead
+    /// the step to delete whatever it points at.
+    ///
+    /// Spec, on the real remote command over the ssh stand-in and on the
+    /// local transport: an existing file is removed (completed); an absent
+    /// one is a skip naming its path; a dangling symlink is removed (it
+    /// counts as present); a symlink to a file removes the link and keeps
+    /// its target; a directory at the path fails the step and stays; a file
+    /// whose parent directory cannot be searched fails the step with the
+    /// permission error and stays, rather than being reported already gone.
+    /// The last case is skipped as root, which searches any directory.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn remove_file_removes_one_file_and_skips_an_absent_one() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // Root searches directories whatever their mode, so the
+        // unsearchable-parent case cannot establish its premise there.
+        // SAFETY: geteuid has no preconditions and cannot fail.
+        let root_user = unsafe { libc::geteuid() } == 0;
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let bin = root.path().join("bin");
+        let lib = root.path().join("lib");
+        for dir in [&home, &bin, &lib] {
+            tokio::fs::create_dir_all(dir).await.unwrap();
+        }
+        let system = SystemBackend {
+            launcher: Arc::new(FixtureHomeLauncher { home, bin }),
+            ..test_system_backend(root.path())
+        };
+        let tmux = lib.join("tmux");
+        let kept = root.path().join("kept");
+        tokio::fs::write(&kept, b"not Farhelm's").await.unwrap();
+        for target in [
+            ProvisioningTarget::ssh("scripted.example"),
+            ProvisioningTarget::Local,
+        ] {
+            tokio::fs::write(&tmux, b"bundled tmux").await.unwrap();
+            assert!(matches!(
+                system.remove_file(&target, &tmux).await.unwrap(),
+                ActionOutcome::Completed
+            ));
+            assert!(!tmux.exists(), "{target:?} removes the file");
+            match system.remove_file(&target, &tmux).await.unwrap() {
+                ActionOutcome::Skipped(message) => {
+                    assert!(message.contains(tmux.to_str().unwrap()), "{message}")
+                }
+                other => panic!("{target:?}: an absent file is a skip, got {other:?}"),
+            }
+
+            tokio::fs::symlink(root.path().join("nowhere"), &tmux)
+                .await
+                .unwrap();
+            assert!(matches!(
+                system.remove_file(&target, &tmux).await.unwrap(),
+                ActionOutcome::Completed
+            ));
+            assert!(
+                tokio::fs::symlink_metadata(&tmux).await.is_err(),
+                "{target:?} removes a dangling link"
+            );
+
+            tokio::fs::symlink(&kept, &tmux).await.unwrap();
+            assert!(matches!(
+                system.remove_file(&target, &tmux).await.unwrap(),
+                ActionOutcome::Completed
+            ));
+            assert!(tokio::fs::symlink_metadata(&tmux).await.is_err());
+            assert_eq!(
+                tokio::fs::read(&kept).await.unwrap(),
+                b"not Farhelm's",
+                "{target:?} keeps the link's target"
+            );
+
+            tokio::fs::create_dir(&tmux).await.unwrap();
+            system
+                .remove_file(&target, &tmux)
+                .await
+                .expect_err("a directory at the path fails the step");
+            assert!(tmux.is_dir(), "{target:?} leaves the directory");
+            tokio::fs::remove_dir(&tmux).await.unwrap();
+
+            // A shell `-e` test answers false here as it does for a missing
+            // file, which would have skipped a removal that never happened.
+            if !root_user {
+                tokio::fs::write(&tmux, b"bundled tmux").await.unwrap();
+                let searchable = std::fs::Permissions::from_mode(0o755);
+                tokio::fs::set_permissions(&lib, std::fs::Permissions::from_mode(0o600))
+                    .await
+                    .unwrap();
+                let premise = tokio::fs::symlink_metadata(&tmux).await;
+                let outcome = system.remove_file(&target, &tmux).await;
+                // Restored before any assertion, so a failure still leaves a
+                // tree the temporary directory can delete.
+                tokio::fs::set_permissions(&lib, searchable).await.unwrap();
+                assert_eq!(
+                    premise.map_err(|error| error.kind()).err(),
+                    Some(std::io::ErrorKind::PermissionDenied),
+                    "the parent cannot be searched"
+                );
+                let failure = outcome.expect_err("an unsearchable parent fails the step");
+                assert!(
+                    failure.rendered().contains("Permission denied"),
+                    "{target:?} reports the lookup's own error: {}",
+                    failure.rendered()
+                );
+                assert!(tmux.exists(), "{target:?} leaves the file");
+                tokio::fs::remove_file(&tmux).await.unwrap();
+            } else {
+                eprintln!("SKIPPED: unsearchable-parent case needs a non-root user ({target:?})");
+            }
+        }
     }
 
     /// Final removal runs after the supervisor job is gone, so an unrelated
@@ -10306,40 +10083,76 @@ mod tests {
         }
     }
 
-    /// A host needing private tmux receives that payload before the unit, and
-    /// the rendered unit searches the isolated payload directory first.
+    /// Why this matters: the bundled tmux an earlier release installed may
+    /// still be what that release's running supervisor drives, so removing
+    /// it while that supervisor is up could break its sessions mid-update.
+    /// Spec: every Linux Add and Update plan removes `<lib>/tmux` exactly
+    /// once, after the step that starts the new supervisor (enabling and
+    /// starting it for Add, restarting it for Update) and as the step just
+    /// before connecting to it; the unit's `PATH` begins with the lib
+    /// directory holding `farhelm`.
     #[farhelm_testtrace::test]
-    fn tmux_payload_plan_is_concrete_and_ordered() {
+    fn linux_plans_remove_the_bundled_tmux_once_the_new_supervisor_runs() {
         let root = tempfile::tempdir().unwrap();
-        let plan = layout(root.path())
-            .plan(
-                ProvisioningOperation::Add,
-                ProvisioningTarget::ssh("host"),
-                &Reach {
-                    home: root.path().join("home"),
-                    user_unit_dir: root.path().join("home/.config/systemd/user"),
-                    arch: PayloadTarget::LinuxX86_64,
-                    distro_id: "ubuntu".to_string(),
-                    needs_tmux: true,
-                    launchd_domain: None,
-                    host_tmux: None,
-                },
-                "nonce",
-            )
-            .unwrap();
-        assert!(matches!(
-            &plan.actions[4],
-            ProvisioningAction::InstallPayload {
-                payload: PayloadKind::Tmux,
-                arch: PayloadTarget::LinuxX86_64,
-                destination,
-                ..
-            } if destination == &root.path().join("lib/tmux")
-        ));
-        let ProvisioningAction::WriteUnit { content, .. } = &plan.actions[5] else {
-            panic!("the unit follows both payloads")
+        let reach = Reach {
+            home: root.path().join("home"),
+            user_unit_dir: root.path().join("home/.config/systemd/user"),
+            arch: PayloadTarget::LinuxX86_64,
+            distro_id: "ubuntu".to_string(),
+            launchd_domain: None,
         };
-        assert!(content.contains(&format!("PATH={}", root.path().join("lib").display())));
+        // `starts` is the step after which the new supervisor runs; for Add,
+        // lingering comes between it and the removal.
+        for (operation, starts, before_removal) in [
+            (
+                ProvisioningOperation::Add,
+                "enable-supervisor",
+                "enable-linger",
+            ),
+            (
+                ProvisioningOperation::Update,
+                "restart-supervisor",
+                "restart-supervisor",
+            ),
+        ] {
+            let plan = layout(root.path())
+                .plan(operation, ProvisioningTarget::ssh("host"), &reach, "nonce")
+                .unwrap();
+            let labels = step_labels(&plan);
+            let position = |label: &str| {
+                labels
+                    .iter()
+                    .position(|step| *step == label)
+                    .unwrap_or_else(|| panic!("{operation:?} plans {label}: {labels:?}"))
+            };
+            assert!(
+                position(starts) < position("remove-bundled-tmux"),
+                "{operation:?}: the removal follows {starts}: {labels:?}"
+            );
+            assert_eq!(
+                &labels[labels.len() - 3..],
+                [before_removal, "remove-bundled-tmux", "attach-supervisor"],
+                "{operation:?}: {labels:?}"
+            );
+            let removed: Vec<_> = plan
+                .actions
+                .iter()
+                .filter_map(|action| match action {
+                    ProvisioningAction::RemoveBundledTmux { path } => Some(path.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(removed, [root.path().join("lib/tmux")], "{operation:?}");
+            let unit = plan
+                .actions
+                .iter()
+                .find_map(|action| match action {
+                    ProvisioningAction::WriteUnit { content, .. } => Some(content.clone()),
+                    _ => None,
+                })
+                .expect("every Linux plan writes the supervisor unit");
+            assert!(unit.contains(&format!("PATH={}:", root.path().join("lib").display())));
+        }
     }
 
     /// The confirmation's host line names whichever distro the reach probe
@@ -10357,9 +10170,7 @@ mod tests {
             user_unit_dir: root.path().join("home/.config/systemd/user"),
             arch: PayloadTarget::LinuxAarch64,
             distro_id: distro_id.to_string(),
-            needs_tmux: false,
             launchd_domain: None,
-            host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         };
         let named = layout(root.path())
             .plan(
@@ -10401,9 +10212,7 @@ mod tests {
             user_unit_dir: user_units.clone(),
             arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
-            needs_tmux: false,
             launchd_domain: None,
-            host_tmux: Some(PathBuf::from("/usr/bin/tmux")),
         };
         let layout = PlanLayout::production(local_state.clone());
 
@@ -10455,85 +10264,6 @@ mod tests {
                         )
             ));
         }
-    }
-
-    /// Execution resolves each install action through its own payload kind,
-    /// so the private-tmux branch cannot receive the Farhelm executable.
-    /// Assert installed bytes, not only operation labels: the label can be
-    /// correct even when the source selected for that action is wrong.
-    #[farhelm_testtrace::test]
-    async fn tmux_install_uses_the_distinct_tmux_fixture() {
-        let harness = harness().await;
-        let root = tempfile::tempdir().unwrap();
-        let backend = FakeBackend::absent(root.path().to_path_buf());
-        // Operation labels alone cannot detect substituting Farhelm's bytes
-        // for tmux. Materialize both destinations through the existing fake.
-        backend
-            .stateful
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        {
-            let mut outcome = backend.reach.lock().unwrap();
-            let ReachOutcome::Supported(reach) = &mut *outcome else {
-                panic!("the fixture starts supported")
-            };
-            reach.needs_tmux = true;
-            reach.host_tmux = None;
-        }
-        std::fs::write(root.path().join("farhelm-payload"), b"farhelm").unwrap();
-        std::fs::write(root.path().join("tmux-payload"), b"tmux").unwrap();
-        let payloads = Arc::new(MutablePayload {
-            farhelm: Mutex::new(root.path().join("farhelm-payload")),
-            tmux: root.path().join("tmux-payload"),
-        });
-        let service = ProvisioningService::injected(
-            harness.store.clone(),
-            Arc::clone(&harness.manager),
-            backend.clone(),
-            payloads,
-            layout(root.path()),
-            PathBuf::from("/test/farhelm"),
-        );
-        let response = service
-            .probe(ProbeRequest {
-                target: ProbeDestination::Ssh {
-                    destination: "tmux-fixture.example".to_string(),
-                },
-                remote_farhelm: None,
-                remote_state_dir: None,
-                new_entry: None,
-            })
-            .await
-            .unwrap();
-        let ProbeResponse::Provisionable { probe_id, .. } = response else {
-            panic!("the missing private tmux must produce a plan")
-        };
-        let accepted = service
-            .start_add(ProvisionRequest { probe_id })
-            .await
-            .unwrap();
-        assert_eq!(
-            wait_finished(&service, accepted.host_id).await.status,
-            RunStatus::Completed
-        );
-        let operations = backend.operations.lock().unwrap();
-        assert!(
-            operations
-                .iter()
-                .any(|operation| operation == "install-farhelm")
-        );
-        assert!(
-            operations
-                .iter()
-                .any(|operation| operation == "install-tmux")
-        );
-        assert_eq!(
-            std::fs::read(root.path().join("lib/farhelm")).unwrap(),
-            b"farhelm"
-        );
-        assert_eq!(
-            std::fs::read(root.path().join("lib/tmux")).unwrap(),
-            b"tmux"
-        );
     }
 
     /// Pending plans retain exactly the newest 64 opaque tokens.
@@ -11789,13 +11519,7 @@ mod tests {
                 fail_before_rename: false,
             };
             let error = backend
-                .upload_path(
-                    &target,
-                    PayloadKind::Farhelm,
-                    &prepared,
-                    &destination,
-                    &temporary,
-                )
+                .upload_path(&target, &prepared, &destination, &temporary)
                 .await
                 .expect_err("a failed or corrupt transfer must fail its own action");
             assert!(error.rendered().contains(diagnostic), "{error:?}");
@@ -11849,13 +11573,7 @@ mod tests {
         let prepared = stage_payload(&source).await.unwrap();
 
         backend
-            .upload_path(
-                &target,
-                PayloadKind::Farhelm,
-                &prepared,
-                &destination,
-                &temporary,
-            )
+            .upload_path(&target, &prepared, &destination, &temporary)
             .await
             .expect("remote upload should complete after orphan cleanup");
         assert!(
@@ -11868,14 +11586,7 @@ mod tests {
         );
 
         backend
-            .install_path(
-                &target,
-                PayloadKind::Farhelm,
-                &prepared,
-                &destination,
-                &temporary,
-                0o755,
-            )
+            .install_path(&target, &prepared, &destination, &temporary, 0o755)
             .await
             .expect("the verified upload should be installable");
         assert_eq!(tokio::fs::read(&destination).await.unwrap(), b"new bytes");
@@ -11915,13 +11626,7 @@ mod tests {
         let prepared = stage_payload(&source).await.unwrap();
         assert!(matches!(
             backend
-                .upload_path(
-                    &target,
-                    PayloadKind::Farhelm,
-                    &prepared,
-                    &destination,
-                    &temporary
-                )
+                .upload_path(&target, &prepared, &destination, &temporary)
                 .await
                 .unwrap(),
             ActionOutcome::Completed
@@ -11936,14 +11641,7 @@ mod tests {
         );
 
         let error = backend
-            .install_path(
-                &target,
-                PayloadKind::Farhelm,
-                &prepared,
-                &destination,
-                &temporary,
-                0o755,
-            )
+            .install_path(&target, &prepared, &destination, &temporary, 0o755)
             .await
             .expect_err("install must recheck bytes at the nonce path");
         assert!(
@@ -12072,14 +11770,7 @@ mod tests {
             .await
             .unwrap();
         backend
-            .install_path(
-                &target,
-                PayloadKind::Farhelm,
-                &prepared,
-                &destination,
-                &temporary,
-                0o755,
-            )
+            .install_path(&target, &prepared, &destination, &temporary, 0o755)
             .await
             .unwrap();
         assert_eq!(
@@ -12261,33 +11952,25 @@ mod tests {
         );
     }
 
-    /// Per-kind sources prevent a private-tmux plan from ever substituting
-    /// the supervisor executable merely because both artifacts share an
-    /// architecture.
+    /// A payload source whose `farhelm` the real-transport case swaps
+    /// between its ADD and UPDATE runs, so the update installs a binary
+    /// that differs from the one it replaces.
     #[derive(Debug)]
     struct MutablePayload {
         farhelm: Mutex<PathBuf>,
-        tmux: PathBuf,
     }
 
     #[async_trait]
     impl PayloadSource for MutablePayload {
-        async fn path(
-            &self,
-            payload: PayloadKind,
-            _arch: PayloadTarget,
-        ) -> anyhow::Result<PathBuf> {
-            Ok(match payload {
-                PayloadKind::Farhelm => self.farhelm.lock().unwrap().clone(),
-                PayloadKind::Tmux => self.tmux.clone(),
-            })
+        async fn path(&self, _arch: PayloadTarget) -> anyhow::Result<PathBuf> {
+            Ok(self.farhelm.lock().unwrap().clone())
         }
     }
 
     /// Failure-safe cleanup for every real user unit created below.
     ///
-    /// Drop uses only the nonce-named unit and the fixture's own tmux socket.
-    /// It never broad-matches Farhelm units or paths, and therefore remains
+    /// Drop uses only the nonce-named unit and the fixture's own state
+    /// directory. It never broad-matches Farhelm units or paths, and therefore remains
     /// safe on assertion failure as well as on the happy path.
     struct UnitGuard {
         unit: String,
@@ -12391,13 +12074,6 @@ mod tests {
                     String::from_utf8_lossy(&reload.stderr)
                 );
             }
-            let _ = std::process::Command::new("tmux")
-                .arg("-S")
-                .arg(self.state_dir.join("tmux.sock"))
-                .arg("kill-server")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
 
             let active = std::process::Command::new("systemctl")
                 .args(["--user", "is-active", "--", &self.unit])
@@ -12411,25 +12087,12 @@ mod tests {
                 .stderr(Stdio::null())
                 .status()
                 .context("verifying nonce unit disablement")?;
-            let tmux_alive = std::process::Command::new("tmux")
-                .arg("-S")
-                .arg(self.state_dir.join("tmux.sock"))
-                .arg("has-session")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .context("verifying nonce tmux teardown")?;
-            if active.success()
-                || enabled.success()
-                || self.unit_path.exists()
-                || tmux_alive.success()
-            {
+            if active.success() || enabled.success() || self.unit_path.exists() {
                 bail!(
-                    "nonce teardown verification failed: active={}, enabled={}, file={}, tmux={}",
+                    "nonce teardown verification failed: active={}, enabled={}, file={}",
                     active.success(),
                     enabled.success(),
                     self.unit_path.exists(),
-                    tmux_alive.success()
                 );
             }
             // Whatever the unit's control group no longer reaches: a unit
@@ -12550,13 +12213,6 @@ mod tests {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status();
-            let _ = std::process::Command::new("tmux")
-                .arg("-S")
-                .arg(self.state_dir.join("tmux.sock"))
-                .arg("kill-server")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
             // Hosts the unit no longer reaches, then what still listens, said
             // out loud: Drop cannot fail the test, and the fixture's root goes
             // right after it, so a surviving host would otherwise go unseen.
@@ -12655,9 +12311,7 @@ mod tests {
     /// debug binary is linked against the runner's glibc and would not
     /// execute on the CentOS Stream 9 container, so
     /// `scripts/test-provision-centos.sh` points this at the musl-static
-    /// build the release actually ships. `FARHELM_TEST_TMUX` is its partner
-    /// in [`debug_tmux`]; a remote run needs both, because a plan installs
-    /// whichever of the two payloads the target lacks.
+    /// build the release actually ships.
     fn debug_farhelm() -> Option<PathBuf> {
         if let Some(configured) = std::env::var_os("FARHELM_TEST_BINARY") {
             let configured = PathBuf::from(configured);
@@ -12675,38 +12329,6 @@ mod tests {
             .expect("the test binary lives under target/debug/deps");
         let payload = debug_dir.join(format!("farhelm{}", std::env::consts::EXE_SUFFIX));
         payload.is_file().then_some(payload)
-    }
-
-    /// Locate a real tmux payload independently of Farhelm. The normal
-    /// localhost reach check uses this installation directly, while the
-    /// source remains available if the private-payload branch is selected.
-    ///
-    /// `FARHELM_TEST_TMUX` overrides the PATH lookup exactly as
-    /// `FARHELM_TEST_BINARY` overrides [`debug_farhelm`]'s, and for the same
-    /// reason: this host's tmux is a dynamically linked distribution package
-    /// that cannot run on the target, and a remote target with no tmux of
-    /// its own is precisely the case where the plan pushes this payload.
-    /// The two variables are a pair — override one for a remote run and you
-    /// must override the other.
-    fn debug_tmux() -> Option<PathBuf> {
-        if let Some(configured) = std::env::var_os("FARHELM_TEST_TMUX") {
-            let configured = PathBuf::from(configured);
-            assert!(
-                configured.is_file(),
-                "FARHELM_TEST_TMUX does not name a file: {}",
-                configured.display()
-            );
-            return Some(configured);
-        }
-        let output = std::process::Command::new("sh")
-            .args(["-c", "command -v tmux"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let path = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
-        path.is_absolute().then_some(path)
     }
 
     /// How long [`wait_real_run`] tolerates seeing the SAME step list
@@ -13235,217 +12857,6 @@ mod tests {
         state_dir.join("hosts").join(socket)
     }
 
-    /// Prove server absence through tmux's exact socket diagnostic before
-    /// fixture teardown can hide a leak. kill-server can return before the
-    /// server finishes exiting; unrelated command failures must not pass.
-    async fn wait_private_tmux_gone(program: &Path, socket: &Path) {
-        let observed = tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let output = tokio::process::Command::new(program)
-                    .arg("-S").arg(socket).arg("has-session")
-                    .env("LC_ALL", "C").output().await.unwrap();
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !output.status.success() && matches!(stderr.trim(), message
-                    if message == format!("no server running on {}", socket.display())
-                    || message == format!("error connecting to {} (No such file or directory)", socket.display())) {
-                    return;
-                }
-                assert!(output.status.success(), "unexpected tmux absence probe: {stderr}");
-                tokio::time::sleep(Duration::from_millis(50)).await; // sleep-ok: bounded polling of the exact private-server disappearance oracle
-            }
-        }).await;
-        assert!(
-            observed.is_ok(),
-            "the fixture's private tmux still answers after stop"
-        );
-    }
-
-    /// An inactive process-only service can leave its ended pane alive even
-    /// after its unit is removed. Retry must end that private server through
-    /// the production SSH stop path before teardown, then tolerate another
-    /// retry with no server or private executable left. Observe the server's
-    /// process as well as its socket: unlinking the socket alone must not hide
-    /// a server that never exited.
-    #[farhelm_testtrace::test]
-    async fn uninstall_retry_ends_tmux_after_systemd_forgets_the_inactive_unit() {
-        if !user_manager_available().await || !ssh_available("localhost").await {
-            eprintln!(
-                "SKIPPED uninstall_retry_ends_tmux_after_systemd_forgets_the_inactive_unit: systemd user manager or passwordless localhost SSH unavailable"
-            );
-            return;
-        }
-        let tmux =
-            debug_tmux().expect("the recorded tmux substrate provides an absolute executable");
-        let root = tempfile::tempdir().unwrap();
-        let unit = format!("farhelm-provisioning-test-{}.service", uuid::Uuid::new_v4());
-        let unit_path = root.path().join(&unit);
-        let socket = root.path().join("tmux.sock");
-        let config = root.path().join("tmux.conf");
-        tokio::fs::write(&config, "set -g remain-on-exit on\n")
-            .await
-            .unwrap();
-        let script = root.path().join("start-service.sh");
-        tokio::fs::write(&script, format!(
-            "#!/bin/sh\n{} -S {} -f {} new-session -d -s ended true || exit 1\nexec /usr/bin/sleep 300\n",
-            shell_words::quote(tmux.to_str().unwrap()),
-            shell_words::quote(socket.to_str().unwrap()),
-            shell_words::quote(config.to_str().unwrap()),
-        )).await.unwrap();
-        set_mode(&script, 0o755).await.unwrap();
-        tokio::fs::write(
-            &unit_path,
-            format!(
-                "[Service]\nType=exec\nKillMode=process\nExecStart={}\n",
-                script.display(),
-            ),
-        )
-        .await
-        .unwrap();
-        let mut guard = UnitGuard {
-            unit: unit.clone(),
-            unit_path: unit_path.clone(),
-            state_dir: root.path().to_path_buf(),
-            cleaned: false,
-            keep_root: Arc::default(),
-        };
-        let start = tokio::process::Command::new("systemctl")
-            .args(["--user", "--runtime", "enable", "--now", "--"])
-            .arg(&unit_path)
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            start.status.success(),
-            "nonce service start: {}",
-            String::from_utf8_lossy(&start.stderr)
-        );
-        let settled = tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let pane = tokio::process::Command::new(&tmux)
-                    .arg("-S")
-                    .arg(&socket)
-                    .args(["list-panes", "-a", "-F", "#{pane_dead}"])
-                    .output()
-                    .await
-                    .unwrap();
-                if pane.status.success() && pane.stdout == b"1\n" {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await; // sleep-ok: polling until the fixture's retained pane reports dead
-            }
-        })
-        .await;
-        assert!(settled.is_ok(), "fixture did not retain an ended pane");
-        let policy = tokio::process::Command::new("systemctl")
-            .args(["--user", "show", "-p", "KillMode", "--value", "--", &unit])
-            .output()
-            .await
-            .unwrap();
-        assert!(policy.status.success());
-        assert_eq!(policy.stdout, b"process\n");
-        let stopped = tokio::process::Command::new("systemctl")
-            .args(["--user", "stop", "--", &unit])
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            stopped.status.success(),
-            "nonce process-only stop: {stopped:?}"
-        );
-        let backend = SystemBackend::with_simulated_linger(root.path().to_path_buf(), Ok(()), true);
-        let target = ProvisioningTarget::ssh("localhost");
-        // The fixture root, the stop's state directory, has no `hosts`, so
-        // the farhelm the stop would run for terminal hosts is never needed.
-        let no_farhelm = root.path().join("no-farhelm");
-        backend.remove_unit(&target, &unit_path).await.unwrap();
-        backend.daemon_reload(&target).await.unwrap();
-        let state = backend
-            .inspect_uninstall(
-                &target,
-                &unit,
-                None,
-                &[&unit_path],
-                &root.path().join("lib"),
-            )
-            .await
-            .unwrap();
-        assert!(
-            !state.unit_running() && !state.paths[0].exists,
-            "fixture must be inactive with its unit file gone: {state:?}"
-        );
-        let pane = tokio::process::Command::new(&tmux)
-            .arg("-S")
-            .arg(&socket)
-            .args(["list-panes", "-a", "-F", "#{pane_dead}"])
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            pane.status.success(),
-            "fixture tmux vanished before retry: {pane:?}"
-        );
-        assert_eq!(
-            pane.stdout, b"1\n",
-            "the retained ended pane must survive process-only stop and reload"
-        );
-        let pid = tokio::process::Command::new(&tmux)
-            .arg("-S")
-            .arg(&socket)
-            .args(["display-message", "-p", "#{pid}"])
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            pid.status.success(),
-            "fixture server must report its PID: {pid:?}"
-        );
-        let pid: i32 = std::str::from_utf8(&pid.stdout)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        assert!(
-            pid > 0 && alive(pid),
-            "fixture server must still be alive before stop"
-        );
-        assert!(matches!(
-            backend
-                .stop(&target, &unit, &no_farhelm, root.path(), &tmux, &socket)
-                .await
-                .unwrap(),
-            ActionOutcome::Completed
-        ));
-        wait_for_exit(pid, "uninstall must end its owned private tmux process").await;
-        assert!(
-            !socket.exists(),
-            "stop must remove the stale socket before lib removal"
-        );
-        // No manual socket removal: a retry must work after the step which
-        // deletes the private client, even if the helm restarted in between.
-        assert!(matches!(
-            backend
-                .stop(&target, &unit, &no_farhelm, root.path(), &tmux, &socket)
-                .await
-                .unwrap(),
-            ActionOutcome::Skipped(_)
-        ));
-        assert!(matches!(
-            backend
-                .stop(
-                    &target,
-                    &unit,
-                    &no_farhelm,
-                    root.path(),
-                    &root.path().join("removed-tmux"),
-                    &socket
-                )
-                .await
-                .unwrap(),
-            ActionOutcome::Skipped(_)
-        ));
-        guard.cleanup().unwrap();
-    }
-
     /// Exercise the complete installer against a real user manager, through
     /// direct local process/file operations, through ssh to localhost, or
     /// through ssh to a genuinely different machine.
@@ -13510,12 +12921,6 @@ mod tests {
             );
             return;
         };
-        let Some(tmux_payload) = debug_tmux() else {
-            eprintln!(
-                "SKIPPED {test_name}: no absolute tmux executable is available; install one or set FARHELM_TEST_TMUX"
-            );
-            return;
-        };
         let root = FixtureRoot::new();
         let lib_dir = root.path().join("lib");
         let supervisor_state = root.path().join("supervisor-state");
@@ -13534,8 +12939,8 @@ mod tests {
         // identifiable in the target's journal.
         let unit = format!("farhelm-provisioning-test-{}.service", uuid::Uuid::new_v4());
         let unit_path = unit_dir.join(&unit);
-        // No guard for a remote target: every resource it verifies —
-        // this user manager's units, the fixture's tmux socket — belongs to
+        // No guard for a remote target: every resource it verifies (this
+        // user manager's units, the fixture's terminal hosts) belongs to
         // the machine running the test, and the remote install owns none of
         // them. The container is the teardown.
         let mut guard = (!remote).then(|| UnitGuard {
@@ -13555,7 +12960,6 @@ mod tests {
         .unwrap();
         let payloads = Arc::new(MutablePayload {
             farhelm: Mutex::new(payload.clone()),
-            tmux: tmux_payload,
         });
         let launcher = RecordingLauncher::new();
         // Linger stays simulated in every shape, including the remote one:
@@ -13874,8 +13278,7 @@ mod tests {
         if use_ssh {
             // An ENDED session keeps its terminal alive: a terminal host
             // keeps its process and final screen after its program exits (a
-            // provisioned supervisor creates new terminals in hosts), as a
-            // tmux terminal's dead pane keeps the private tmux server.
+            // provisioned supervisor creates new terminals in hosts).
             // Uninstall accepts ended sessions, and its stop must end that
             // process as well. Removing the unit and reloading restores
             // control-group termination; the ended terminal distinguishes
@@ -13910,7 +13313,6 @@ mod tests {
                 settled.is_ok(),
                 "the `true` session never reported having ended"
             );
-            let tmux_socket = supervisor_state.join("tmux.sock");
             let listing = client.list_sessions().await.unwrap();
             assert!(
                 listing
@@ -14034,7 +13436,6 @@ mod tests {
                 "uninstall left the supervisor running"
             );
             if !remote {
-                wait_private_tmux_gone(&payloads.tmux, &tmux_socket).await;
                 wait_no_listening_host_sockets(&supervisor_state)
                     .expect("the uninstall's stop ended every terminal host");
                 let socket = ended_socket.as_ref().expect("captured on this machine");
@@ -14109,7 +13510,7 @@ mod tests {
     }
 
     /// A planted failure is followed by checked teardown of a real active
-    /// runtime unit and tmux server, then verified again from the outer scope.
+    /// runtime unit, then verified again from the outer scope.
     #[farhelm_testtrace::test]
     async fn teardown_guard_runs_on_failure() {
         if !user_manager_available().await {
@@ -14132,8 +13533,8 @@ mod tests {
             .output()
             .unwrap();
         // Enabling can leave a live unit even if a later setup step fails.
-        // Own cleanup before checking activation or starting tmux; the root
-        // directory must outlive this guard so its socket remains reachable.
+        // Own cleanup before checking activation; the root directory must
+        // outlive this guard, which names it as the state directory.
         let guard = UnitGuard {
             unit: unit.clone(),
             unit_path: unit_path.clone(),
@@ -14145,18 +13546,6 @@ mod tests {
             activated.status.success(),
             "failed to activate nonce unit: {}",
             String::from_utf8_lossy(&activated.stderr)
-        );
-        let tmux_socket = root.path().join("tmux.sock");
-        let tmux_started = std::process::Command::new("tmux")
-            .arg("-S")
-            .arg(&tmux_socket)
-            .args(["new-session", "-d", "/usr/bin/sleep", "300"])
-            .output()
-            .unwrap();
-        assert!(
-            tmux_started.status.success(),
-            "failed to start nonce tmux server: {}",
-            String::from_utf8_lossy(&tmux_started.stderr)
         );
         assert!(planted_failure(guard).is_err());
         assert!(
@@ -14171,15 +13560,8 @@ mod tests {
             .args(["--user", "is-enabled", "--", &unit])
             .status()
             .unwrap();
-        let tmux_alive = std::process::Command::new("tmux")
-            .arg("-S")
-            .arg(tmux_socket)
-            .arg("has-session")
-            .status()
-            .unwrap();
         assert!(!active.success());
         assert!(!enabled.success());
-        assert!(!tmux_alive.success());
     }
 
     /// Build a tiny but real `.tar.gz` archive at `<dir>/<package>-<target>.tar.gz`,
@@ -14290,29 +13672,28 @@ mod tests {
     }
 
     /// Spec: `DirectoryPayloads` extracts the `farhelm` binary out of the
-    /// published archive and copies the bare tmux binary verbatim, for both
-    /// provisioning architectures, landing under the Farhelm-owned cache with
-    /// mode 0755 — the happy path plan lines 467–475 ask for, run against
-    /// tiny real archives built in-test rather than committed binary
-    /// fixtures (3b commits the signed release fixture set).
+    /// published archive, for both Linux provisioning architectures, landing
+    /// under the Farhelm-owned cache with mode 0755 — the happy path plan
+    /// lines 467–475 ask for, run against tiny real archives built in-test
+    /// rather than committed binary fixtures (3b commits the signed release
+    /// fixture set).
     ///
     /// F12 (review round 1) pins the RETURNED PATH's shape — inside
-    /// `.farhelm_extract_tmp/`, named after the published asset — without pinning an
-    /// exact filename, since F2 (review round 2) makes every call's
-    /// destination a uniquely named private snapshot rather than a name
-    /// shared across calls. F9 (review round 2) also assigns the SOURCE
+    /// `.farhelm_extract_tmp/`, named after the published asset — without
+    /// pinning an exact filename, since F2 (review round 2) makes every
+    /// call's destination a uniquely named private snapshot rather than a
+    /// name shared across calls. F9 (review round 2) also assigns the SOURCE
     /// files distinct, non-executable modes before materializing, and
     /// requires those modes — not just their bytes — to survive unchanged:
-    /// a regression that `chmod 0755`d the operator's own archive or tmux
-    /// binary instead of only the extracted/copied output would satisfy
-    /// every earlier assertion here and still be a real bug.
+    /// a regression that `chmod 0755`d the operator's own archive instead
+    /// of only the extracted output would satisfy every earlier assertion
+    /// here and still be a real bug.
     #[farhelm_testtrace::test]
-    async fn directory_payloads_extracts_farhelm_and_copies_tmux_for_both_arches() {
+    async fn directory_payloads_extracts_farhelm_for_both_arches() {
         use std::os::unix::fs::PermissionsExt as _;
 
         let dir = tempfile::tempdir().unwrap();
         let mut original_archives = std::collections::HashMap::new();
-        let mut original_tmux = std::collections::HashMap::new();
         for arch in [PayloadTarget::LinuxX86_64, PayloadTarget::LinuxAarch64] {
             let archive = farhelm_archive_for(arch);
             write_release_archive(
@@ -14322,26 +13703,18 @@ mod tests {
                 archive.member,
                 format!("farhelm-bytes-{arch:?}").as_bytes(),
             );
-            let tmux_bytes = format!("tmux-bytes-{arch:?}").into_bytes();
-            std::fs::write(dir.path().join(tmux_name(arch).unwrap()), &tmux_bytes).unwrap();
-            // Distinct, non-executable modes so a regression that chmods a
-            // SOURCE instead of only its extracted/copied output cannot
-            // hide behind a content-only comparison (F9, review round 2).
+            // A non-executable mode so a regression that chmods the SOURCE
+            // instead of only its extracted output cannot hide behind a
+            // content-only comparison (F9, review round 2).
             std::fs::set_permissions(
                 dir.path().join(archive_name(archive)),
                 std::fs::Permissions::from_mode(0o640),
-            )
-            .unwrap();
-            std::fs::set_permissions(
-                dir.path().join(tmux_name(arch).unwrap()),
-                std::fs::Permissions::from_mode(0o600),
             )
             .unwrap();
             original_archives.insert(
                 arch,
                 std::fs::read(dir.path().join(archive_name(archive))).unwrap(),
             );
-            original_tmux.insert(arch, tmux_bytes);
         }
         let payloads = DirectoryPayloads::new(
             dir.path().to_path_buf(),
@@ -14352,7 +13725,7 @@ mod tests {
             let extracted_dir = dir.path().join(DIRECTORY_PAYLOAD_CACHE);
             let farhelm_asset = archive_name(archive);
 
-            let farhelm_path = payloads.path(PayloadKind::Farhelm, arch).await.unwrap();
+            let farhelm_path = payloads.path(arch).await.unwrap();
             assert_eq!(
                 farhelm_path.parent(),
                 Some(extracted_dir.as_path()),
@@ -14380,31 +13753,6 @@ mod tests {
                 "extracted farhelm binary must be executable"
             );
 
-            let tmux_asset = tmux_name(arch).unwrap().to_string();
-            let tmux_path = payloads.path(PayloadKind::Tmux, arch).await.unwrap();
-            assert_eq!(
-                tmux_path.parent(),
-                Some(extracted_dir.as_path()),
-                "the returned path must live in the Farhelm-owned materialization cache"
-            );
-            assert!(
-                tmux_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.starts_with(&format!("{tmux_asset}."))
-                        && name.ends_with(".bin")),
-                "the returned filename must be {tmux_asset}.<unique>.bin, got {tmux_path:?}"
-            );
-            assert_eq!(
-                std::fs::read(&tmux_path).unwrap(),
-                format!("tmux-bytes-{arch:?}").as_bytes()
-            );
-            assert_eq!(
-                std::fs::metadata(&tmux_path).unwrap().permissions().mode() & 0o777,
-                0o755,
-                "copied tmux binary must be executable"
-            );
-
             assert_eq!(
                 std::fs::read(dir.path().join(archive_name(archive))).unwrap(),
                 original_archives[&arch],
@@ -14419,20 +13767,6 @@ mod tests {
                 0o640,
                 "materialization must never change the operator's staged archive's mode"
             );
-            assert_eq!(
-                std::fs::read(dir.path().join(tmux_name(arch).unwrap())).unwrap(),
-                original_tmux[&arch],
-                "materialization must never mutate the operator's staged tmux binary"
-            );
-            assert_eq!(
-                std::fs::metadata(dir.path().join(tmux_name(arch).unwrap()))
-                    .unwrap()
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o600,
-                "materialization must never change the operator's staged tmux binary's mode"
-            );
         }
     }
 
@@ -14446,10 +13780,7 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
-        let error = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap_err();
+        let error = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap_err();
         let expected = dir.path().join(archive_name(farhelm_archive_for(
             PayloadTarget::LinuxX86_64,
         )));
@@ -14473,10 +13804,7 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
-        let error = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap_err();
+        let error = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap_err();
         let message = format!("{error:#}");
         assert!(
             message.contains("is not a regular file"),
@@ -14506,10 +13834,7 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
-        let error = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap_err();
+        let error = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap_err();
         let message = format!("{error:#}");
         assert!(
             !message.contains("does not exist"),
@@ -14547,10 +13872,7 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
-        let error = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap_err();
+        let error = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap_err();
         assert_eq!(
             format!("{error:#}"),
             format!(
@@ -14585,10 +13907,7 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
-        let error = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap_err();
+        let error = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap_err();
         assert_eq!(
             format!("{error:#}"),
             format!(
@@ -14630,10 +13949,7 @@ mod tests {
                 dir.path().to_path_buf(),
                 dir.path().join(DIRECTORY_PAYLOAD_CACHE),
             );
-            let error = payloads
-                .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-                .await
-                .unwrap_err();
+            let error = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap_err();
             assert!(
                 format!("{error:#}").contains("not a regular file"),
                 "{entry_type:?} entry must be refused as malformed: {error:#}"
@@ -14678,10 +13994,7 @@ mod tests {
             dir.path().to_path_buf(),
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
-        payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap_err();
+        payloads.path(PayloadTarget::LinuxX86_64).await.unwrap_err();
 
         assert_eq!(
             std::fs::read(&sentinel).unwrap(),
@@ -14719,27 +14032,14 @@ mod tests {
             archive.member,
             b"generation-one",
         );
-        std::fs::write(
-            dir.path()
-                .join(tmux_name(PayloadTarget::LinuxX86_64).unwrap()),
-            b"tmux-generation-one",
-        )
-        .unwrap();
 
         let payloads = DirectoryPayloads::new(
             dir.path().to_path_buf(),
             dir.path().join(DIRECTORY_PAYLOAD_CACHE),
         );
-        let farhelm_path_one = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap();
-        let tmux_path_one = payloads
-            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap();
+        let farhelm_path_one = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap();
 
-        // Replace both staged assets under the SAME published names.
+        // Replace the staged asset under the SAME published name.
         write_release_archive(
             dir.path(),
             archive.package,
@@ -14747,46 +14047,20 @@ mod tests {
             archive.member,
             b"generation-two",
         );
-        std::fs::write(
-            dir.path()
-                .join(tmux_name(PayloadTarget::LinuxX86_64).unwrap()),
-            b"tmux-generation-two",
-        )
-        .unwrap();
 
-        let farhelm_path_two = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap();
-        let tmux_path_two = payloads
-            .path(PayloadKind::Tmux, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap();
+        let farhelm_path_two = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap();
 
         assert_ne!(
             farhelm_path_one, farhelm_path_two,
             "each call must get its own private snapshot file"
         );
-        assert_ne!(
-            tmux_path_one, tmux_path_two,
-            "each call must get its own private snapshot file"
-        );
         assert_eq!(std::fs::read(&farhelm_path_two).unwrap(), b"generation-two");
-        assert_eq!(
-            std::fs::read(&tmux_path_two).unwrap(),
-            b"tmux-generation-two"
-        );
         // The FIRST caller's snapshot must remain exactly what it was
         // handed — the second call's materialization is not permitted to
         // reach back and disturb it.
         assert_eq!(
             std::fs::read(&farhelm_path_one).unwrap(),
             b"generation-one",
-            "an earlier caller's snapshot must survive a later materialization"
-        );
-        assert_eq!(
-            std::fs::read(&tmux_path_one).unwrap(),
-            b"tmux-generation-one",
             "an earlier caller's snapshot must survive a later materialization"
         );
     }
@@ -14955,9 +14229,7 @@ mod tests {
                     },
                     |runtime| {
                         runtime
-                            .block_on(
-                                payloads.path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64),
-                            )
+                            .block_on(payloads.path(PayloadTarget::LinuxX86_64))
                             .unwrap();
                         let mode = std::fs::metadata(payload_dir.join(DIRECTORY_PAYLOAD_CACHE))
                             .unwrap()
@@ -15007,7 +14279,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn no_payloads_message_is_exactly_the_settled_recovery_text() {
         let error = NoPayloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
+            .path(PayloadTarget::LinuxX86_64)
             .await
             .unwrap_err();
         assert_eq!(
@@ -15057,9 +14329,7 @@ mod tests {
             state_dir.path(),
         )
         .unwrap();
-        let result = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await;
+        let result = payloads.path(PayloadTarget::LinuxX86_64).await;
         let after: Vec<_> = std::fs::read_dir(payload_dir.path())
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
@@ -15122,10 +14392,7 @@ mod tests {
             state_dir.path(),
         )
         .unwrap();
-        let error = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap_err();
+        let error = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap_err();
         assert!(
             format!("{error:#}").contains("this farhelm was built from source"),
             "a developer build must refuse rather than download: {error:#}"
@@ -15191,10 +14458,7 @@ mod tests {
             "{production:?}"
         );
 
-        let error = payloads
-            .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-            .await
-            .unwrap_err();
+        let error = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap_err();
         assert_eq!(
             format!("{error:#}"),
             "this farhelm is an unreleased build (version 0.0.0-unreleased), so no published \
@@ -15224,10 +14488,7 @@ mod tests {
                 dir_state.path(),
             )
             .unwrap();
-            let path = payloads
-                .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
-                .await
-                .unwrap();
+            let path = payloads.path(PayloadTarget::LinuxX86_64).await.unwrap();
             assert_eq!(
                 std::fs::read(path).unwrap(),
                 b"directory-selection-bytes",
@@ -15301,14 +14562,13 @@ mod tests {
     /// selection resolves the URL, `ProvisioningService` runs a real plan,
     /// and the executor installs whatever the source handed it. The seams
     /// this covers are the ones unit tests structurally cannot — selection
-    /// dropping the URL, payload preparation staging the wrong file,
-    /// `install-tmux` receiving the farhelm binary — each of which would
-    /// leave the downloader and the executor both passing their own tests
-    /// while "add host" installed the wrong thing.
+    /// dropping the URL, payload preparation staging the wrong file or
+    /// another target's archive — each of which would leave the downloader
+    /// and the executor both passing their own tests while "add host"
+    /// installed the wrong thing.
     ///
-    /// `needs_tmux` is on so BOTH payload kinds travel the download path,
-    /// and the fixture bytes differ per kind, so a crossed payload fails
-    /// loudly rather than installing a plausible file. Everything is
+    /// The fixture's `farhelm` bytes differ per target, so a crossed target
+    /// fails loudly rather than installing a plausible file. Everything is
     /// injected: a loopback fixture server, a temporary state directory, and
     /// the recording backend — no environment variable is read or written.
     #[farhelm_testtrace::test]
@@ -15326,9 +14586,7 @@ mod tests {
             home: root.path().to_path_buf(),
             arch: PayloadTarget::LinuxX86_64,
             distro_id: "ubuntu".to_string(),
-            needs_tmux: true,
             launchd_domain: None,
-            host_tmux: None,
         });
 
         // The fixture release is signed with the throwaway test key for
@@ -15375,19 +14633,13 @@ mod tests {
 
         let operations = backend.operations.lock().unwrap().clone();
         assert!(
-            operations.contains(&"install-farhelm".to_string())
-                && operations.contains(&"install-tmux".to_string()),
-            "both payloads must have been installed: {operations:?}"
+            operations.contains(&"install-farhelm".to_string()),
+            "the payload must have been installed: {operations:?}"
         );
         assert_eq!(
             std::fs::read(root.path().join("lib/farhelm")).unwrap(),
             expected_member("farhelm", "x86_64-unknown-linux-musl"),
             "the host must receive the verified farhelm from the release"
-        );
-        assert_eq!(
-            std::fs::read(root.path().join("lib/tmux")).unwrap(),
-            expected_member("tmux", "x86_64-unknown-linux-musl"),
-            "the host must receive the verified tmux from the release"
         );
     }
 
@@ -15858,7 +15110,7 @@ mod tests {
                             runtime.spawn(async move {
                                 barrier.wait().await;
                                 payloads
-                                    .path(PayloadKind::Farhelm, PayloadTarget::LinuxX86_64)
+                                    .path(PayloadTarget::LinuxX86_64)
                                     .await
                             })
                         })

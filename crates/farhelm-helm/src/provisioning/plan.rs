@@ -114,15 +114,6 @@ mod target_serialization_tests {
     }
 }
 
-/// Installation artifacts selected independently; callers must never use a
-/// Farhelm executable to satisfy a tmux request or vice versa.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
-#[serde(rename_all = "kebab-case")]
-pub enum PayloadKind {
-    Farhelm,
-    Tmux,
-}
-
 /// Release targets accepted before confirmation, with no unsupported OS/CPU pair.
 ///
 /// The two Linux wire spellings predate OS-aware provisioning. Keeping them
@@ -190,11 +181,11 @@ pub(crate) enum ProvisioningAction {
     EnsureDirectories {
         directories: Vec<DirectorySpec>,
     },
-    /// Remote plans transfer the verified snapshot to this nonce temporary
-    /// before the install step can change the live executable. Local plans
-    /// copy within their install action and have no upload step.
+    /// Remote plans transfer the verified snapshot of the `farhelm` binary,
+    /// the one payload a plan installs, to this nonce temporary before the
+    /// install step can change the live executable. Local plans copy within
+    /// their install action and have no upload step.
     UploadPayload {
-        payload: PayloadKind,
         arch: PayloadTarget,
         destination: PathBuf,
         temporary: PathBuf,
@@ -202,7 +193,6 @@ pub(crate) enum ProvisioningAction {
     /// Install the local snapshot or the remote upload from this same plan.
     /// A remote install must not start another network transfer.
     InstallPayload {
-        payload: PayloadKind,
         arch: PayloadTarget,
         destination: PathBuf,
         temporary: PathBuf,
@@ -251,6 +241,29 @@ pub(crate) enum ProvisioningAction {
     RestartSupervisor {
         unit: String,
     },
+    /// Delete the tmux that releases before this one installed in Farhelm's
+    /// private lib directory on a Linux host whose own tmux was too old.
+    /// Farhelm no longer uses it, but its directory comes first on sessions'
+    /// `PATH`, so left in place it would keep answering `tmux` typed in a
+    /// session. Every Linux Add and Update plans it, because the upgrade
+    /// floor still lets Update reach hosts that carry one and an Add may run
+    /// over an earlier install; an absent file is a skip, so a host that
+    /// never had one passes it untouched. It runs once the new supervisor
+    /// is running (after the start or restart), never while an earlier
+    /// supervisor that may still drive that tmux is up.
+    ///
+    /// A removal that fails degrades the step rather than failing the run.
+    /// The new supervisor already runs by then and nothing of the install
+    /// depends on the file, so reporting Update or Add as failed, and asking
+    /// for a rerun, would misstate a working host; the step's warning says
+    /// the file may have been left in place instead (a timeout or a lost
+    /// connection may still have removed it). Snapshot preparation skips the
+    /// step: the sandbox image it installs into has no Farhelm installation
+    /// (preparation refuses setup-managed installs and copied state), so it
+    /// is not expected to carry an earlier tmux.
+    RemoveBundledTmux {
+        path: PathBuf,
+    },
     AttachSupervisor,
     /// UNINSTALL's first host change: stop the user manager from starting
     /// the supervisor at boot or login, while leaving it running. Keeping it
@@ -268,25 +281,25 @@ pub(crate) enum ProvisioningAction {
         unit: String,
         destination: PathBuf,
     },
-    /// Stop the supervisor and its unit's remaining processes, including
-    /// the private tmux server, then end the state directory's terminal
-    /// hosts and the server at the private socket. Those two explicit steps
-    /// reach what outlived the unit: hosts, and a server left behind after
-    /// systemd has forgotten an inactive unit. Every path is frozen before
-    /// confirmation, like the removal paths: the `farhelm` that stops the
-    /// hosts (the plan's binary, still in place because the lib directory
-    /// goes after this step), the state directory whose hosts it ends, and
-    /// the tmux client and socket.
+    /// Stop the supervisor and every process left in its unit's control
+    /// group, then end the state directory's terminal hosts, which reach
+    /// what outlived the unit. Every path is frozen before confirmation,
+    /// like the removal paths: the `farhelm` that stops the hosts (the
+    /// plan's binary, still in place because the lib directory goes after
+    /// this step) and the state directory whose hosts it ends.
+    ///
+    /// There is no tmux step. A private tmux server an earlier release left
+    /// running in the unit's control group ends with the unit; one that
+    /// outlived an already stopped unit survives uninstall, a residual the
+    /// maintainer accepted when tmux was dropped (SPEC.md, uninstall).
     StopSupervisor {
         unit: String,
         farhelm_program: PathBuf,
         state_dir: PathBuf,
-        tmux_program: PathBuf,
-        tmux_socket: PathBuf,
     },
-    /// Delete Farhelm's private lib directory: the `farhelm` binary and any
-    /// private tmux provisioning put beside it. Planning refuses a layout in
-    /// which the state directory lies inside it, so this never removes data.
+    /// Delete Farhelm's private lib directory, with the `farhelm` binary in
+    /// it. Planning refuses a layout in which the state directory lies
+    /// inside it, so this never removes data.
     RemoveDirectory {
         path: PathBuf,
     },
@@ -302,22 +315,8 @@ impl ProvisioningAction {
     pub(super) fn label(&self) -> &'static str {
         match self {
             Self::EnsureDirectories { .. } => "create-directories",
-            Self::UploadPayload {
-                payload: PayloadKind::Farhelm,
-                ..
-            } => "upload-farhelm",
-            Self::UploadPayload {
-                payload: PayloadKind::Tmux,
-                ..
-            } => "upload-tmux",
-            Self::InstallPayload {
-                payload: PayloadKind::Farhelm,
-                ..
-            } => "install-farhelm",
-            Self::InstallPayload {
-                payload: PayloadKind::Tmux,
-                ..
-            } => "install-tmux",
+            Self::UploadPayload { .. } => "upload-farhelm",
+            Self::InstallPayload { .. } => "install-farhelm",
             Self::WriteUnit { .. } => "write-unit",
             Self::WriteLaunchAgent { .. } => "write-launch-agent",
             Self::StartLaunchAgent { refresh: false, .. } => "start-launch-agent",
@@ -328,6 +327,7 @@ impl ProvisioningAction {
             Self::EnableSupervisor { .. } => "enable-supervisor",
             Self::EnableLinger { .. } => "enable-linger",
             Self::RestartSupervisor { .. } => "restart-supervisor",
+            Self::RemoveBundledTmux { .. } => "remove-bundled-tmux",
             Self::AttachSupervisor => "attach-supervisor",
             Self::DisableSupervisor { .. } => "disable-supervisor",
             Self::RemoveUnit { .. } => "remove-unit",
@@ -340,7 +340,7 @@ impl ProvisioningAction {
     /// Give every frozen action one user-facing step, including actions that
     /// the old confirmation text hid. The helm owns this wording so a client
     /// cannot promise a different run than the one it was asked to confirm.
-    fn step(&self, home: &Path, target: PayloadTarget) -> PlanStep {
+    fn step(&self, home: &Path) -> PlanStep {
         let (name, paths, explanation): (&str, Vec<&Path>, Option<String>) = match self {
             Self::EnsureDirectories { directories } => (
                 "Create directories",
@@ -350,26 +350,15 @@ impl ProvisioningAction {
                     .collect(),
                 Some("Existing shared directories keep their permissions.".to_string()),
             ),
-            Self::UploadPayload {
-                payload, temporary, ..
-            } => (
-                match payload {
-                    PayloadKind::Farhelm => "Upload the farhelm binary",
-                    PayloadKind::Tmux => "Upload tmux",
-                },
-                vec![temporary],
-                None,
-            ),
+            Self::UploadPayload { temporary, .. } => {
+                ("Upload the farhelm binary", vec![temporary], None)
+            }
             Self::InstallPayload {
-                payload,
                 destination,
                 temporary,
                 ..
             } => (
-                match payload {
-                    PayloadKind::Farhelm => "Install the farhelm binary",
-                    PayloadKind::Tmux => "Install tmux",
-                },
+                "Install the farhelm binary",
                 vec![destination, temporary],
                 None,
             ),
@@ -437,26 +426,29 @@ impl ProvisioningAction {
                 )),
             ),
             Self::RestartSupervisor { .. } => ("Restart the supervisor", vec![], None),
+            Self::RemoveBundledTmux { path } => (
+                "Remove the bundled tmux",
+                vec![path],
+                Some(
+                    "Earlier releases installed their own tmux here; Farhelm no longer uses it, \
+                     and tmux typed in a session afterwards no longer runs this copy."
+                        .to_string(),
+                ),
+            ),
             Self::AttachSupervisor => ("Connect to the supervisor", vec![], None),
             Self::DisableSupervisor { .. } => ("Disable the supervisor", vec![], None),
             Self::RemoveUnit { destination, .. } => {
                 ("Remove the systemd user unit", vec![destination], None)
             }
-            Self::StopSupervisor { .. } => (
-                "Stop the supervisor, its terminal hosts and its tmux server",
-                vec![],
-                None,
-            ),
+            Self::StopSupervisor { .. } => {
+                ("Stop the supervisor and its terminal hosts", vec![], None)
+            }
             Self::RemoveDirectory { path } => (
                 "Remove the install directory",
                 vec![path],
                 Some(
-                    if target.is_macos() {
-                        "The Farhelm binary is removed."
-                    } else {
-                        "The Farhelm binary and any private tmux in it are removed."
-                    }
-                    .to_string(),
+                    "The Farhelm binary, and anything else in that directory, is removed."
+                        .to_string(),
                 ),
             ),
             Self::ForgetHost => ("Remove the host from the list", vec![], None),
@@ -600,7 +592,7 @@ impl ProvisioningPlan {
             steps: self
                 .actions
                 .iter()
-                .map(|action| action.step(&self.host_home, self.host_arch))
+                .map(|action| action.step(&self.host_home))
                 .collect(),
             kept,
         }
@@ -765,8 +757,8 @@ impl PlanLayout {
                 name.to_string_lossy()
             ))
         };
-        // `lib_dir` is Farhelm's private directory, which is also where the
-        // private tmux goes. An UPDATE may install the farhelm binary
+        // `lib_dir` is Farhelm's private directory, where earlier releases
+        // also put their private tmux. An UPDATE may install the farhelm binary
         // elsewhere (the registered path, often a shared bin directory on the
         // user's PATH); that directory is ensured too, but nothing else of
         // Farhelm's is placed in it, which is why it is `shared` and never
@@ -806,14 +798,12 @@ impl PlanLayout {
         let farhelm_temporary = temporary(&farhelm_path, farhelm_name);
         if remote {
             actions.push(ProvisioningAction::UploadPayload {
-                payload: PayloadKind::Farhelm,
                 arch: reach.arch,
                 destination: farhelm_path.clone(),
                 temporary: farhelm_temporary.clone(),
             });
         }
         actions.push(ProvisioningAction::InstallPayload {
-            payload: PayloadKind::Farhelm,
             arch: reach.arch,
             destination: farhelm_path.clone(),
             temporary: farhelm_temporary,
@@ -848,35 +838,6 @@ impl PlanLayout {
                 host_arch: reach.arch,
             });
         }
-        if reach.needs_tmux {
-            let tmux_path = lib_dir.join("tmux");
-            let tmux_temporary = temporary(
-                &tmux_path,
-                tmux_path.file_name().ok_or_else(|| {
-                    BackendFailure::new(
-                        format!(
-                            "provisioning tmux destination {:?} has no file name",
-                            tmux_path
-                        ),
-                        "",
-                    )
-                })?,
-            );
-            if remote {
-                actions.push(ProvisioningAction::UploadPayload {
-                    payload: PayloadKind::Tmux,
-                    arch: reach.arch,
-                    destination: tmux_path.clone(),
-                    temporary: tmux_temporary.clone(),
-                });
-            }
-            actions.push(ProvisioningAction::InstallPayload {
-                payload: PayloadKind::Tmux,
-                arch: reach.arch,
-                destination: tmux_path,
-                temporary: tmux_temporary,
-            });
-        }
         let content = supervisor_unit(&farhelm_path, &state_dir)?;
         actions.extend([
             ProvisioningAction::WriteUnit {
@@ -903,6 +864,9 @@ impl PlanLayout {
                 unit: self.unit_name.clone(),
             });
         }
+        actions.push(ProvisioningAction::RemoveBundledTmux {
+            path: lib_dir.join("tmux"),
+        });
         actions.push(ProvisioningAction::AttachSupervisor);
         Ok(ProvisioningPlan {
             operation,
@@ -954,12 +918,11 @@ impl PlanLayout {
     /// goes through the ordinary checks, and after it the service lets a
     /// retry proceed without a connection. Reloading first makes systemd
     /// forget the removed unit's `KillMode=process`, so stopping ends its
-    /// whole control group, including its terminal hosts, the private tmux
-    /// server and its retained panes. This default control-group behavior
-    /// was verified against a real user manager when uninstall was built.
-    /// The stop then ends the state directory's terminal hosts and any tmux
-    /// server still reachable at the host's private socket: an inactive unit
-    /// can leave either behind even after systemd has forgotten the unit.
+    /// whole control group, including its terminal hosts. This default
+    /// control-group behavior was verified against a real user manager when
+    /// uninstall was built. The stop then ends the state directory's
+    /// terminal hosts, which an inactive unit can leave behind even after
+    /// systemd has forgotten the unit.
     ///
     /// Three refusals guard the `rm -rf` of the lib directory, all on the
     /// host's symlink-resolved paths with verified alternate home prefixes
@@ -1008,7 +971,7 @@ impl PlanLayout {
                 )));
             }
         }
-        // The stop step names the kept data's tmux socket in its script, and
+        // The stop step names the kept data directory in its script, and
         // the kept-data notice shows this path for copying, so it must pass
         // the same text check every remote command line applies. Checking it
         // here refuses before confirmation; left to the stop step, the run
@@ -1152,11 +1115,6 @@ impl PlanLayout {
             unit: self.unit_name.clone(),
             farhelm_program: farhelm_path.clone(),
             state_dir: facts.state_dir.named.clone(),
-            tmux_program: reach
-                .host_tmux
-                .clone()
-                .unwrap_or_else(|| paths.lib_dir.join("tmux")),
-            tmux_socket: facts.state_dir.named.join("tmux.sock"),
         });
         if facts.lib_dir.is_some() {
             actions.push(ProvisioningAction::RemoveDirectory {
@@ -1200,12 +1158,13 @@ impl PlanLayout {
                         ),
                     )));
                 }
-                // Only the binary's own path follows the registration. The
-                // private tmux stays in Farhelm's private directory: the
-                // registered binary often lives in a shared bin directory on
-                // the user's PATH, where a `tmux` would overwrite or shadow
-                // the user's own. The unit pins tmux by absolute path, so
-                // nothing needs it next to the binary.
+                // Only the binary's own path follows the registration: the
+                // bundled tmux an earlier release left is removed from
+                // Farhelm's private directory, where every release since
+                // 0.18.0 put it, never from beside a registered binary that
+                // may live in a shared bin directory next to the user's own
+                // (where releases before 0.18.0 put theirs, deliberately
+                // left alone since then).
                 layout.override_farhelm_path = Some(PathBuf::from(farhelm));
             }
             if let Some(state_dir) = &row.remote_state_dir {
@@ -1245,21 +1204,20 @@ pub(super) fn supervisor_unit(farhelm: &Path, state_dir: &Path) -> Result<String
 mod macos_plan_tests {
     use super::*;
 
-    /// A Mac supplies a launchd domain and deliberately has no tmux path.
+    /// A Mac supplies a launchd domain.
     fn reach() -> Reach {
         Reach {
             home: "/Users/host".into(),
             user_unit_dir: "/Users/host/Library/LaunchAgents".into(),
             arch: PayloadTarget::MacosAarch64,
             distro_id: "macOS".into(),
-            needs_tmux: false,
             launchd_domain: Some("user/501".into()),
-            host_tmux: None,
         }
     }
 
     /// Setup/Update must expose the same frozen native actions in question
-    /// and progress, with no hidden tmux/systemd work or reboot promise.
+    /// and progress, with no hidden systemd work or reboot promise. A Mac
+    /// never had a bundled tmux, so its plans carry no step removing one.
     #[test]
     fn mac_actions_are_explicit_and_linux_serialization_is_preserved() {
         assert_eq!(
@@ -1308,7 +1266,7 @@ mod macos_plan_tests {
     }
 
     /// Mac uninstall keeps the shared containment guarantees but has no
-    /// disable override, reload, or private-tmux cleanup to run.
+    /// disable override or reload to run.
     #[test]
     fn mac_uninstall_removes_plist_before_stopping_and_keeps_data() {
         let layout = PlanLayout::production("/local/state".into());

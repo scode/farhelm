@@ -433,7 +433,6 @@ mod tests {
         assert!(plist.contains("<string>/owned/a &amp; b/farhelm</string>"));
         assert!(plist.contains("<string>/owned/state &lt;one&gt;</string>"));
         assert!(plist.contains("<string>FARHELM_SESSION_ID</string>"));
-        assert!(!plist.contains("FARHELM_TMUX"));
     }
 
     /// Invalid service targets must fail before a host command can be formed.

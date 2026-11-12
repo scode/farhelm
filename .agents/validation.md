@@ -87,16 +87,15 @@ that its required systemd or SSH substrate ran.
   `cargo nextest run -p farhelm --test e2e -E 'test(/^podman_environments::/)'`. Nextest reserves all four slots and
   allows 40 minutes for its 30-minute scenario, five-minute cleanup and teardown. The matching setup runs
   `bash scripts/build-podman-test-payloads.sh` once per selected suite. By default it adds the native musl Rust target,
-  builds this source's CLI, reuses/builds the pinned static tmux, checks both ELF payloads and stages the ordinary
-  release-shaped files under `target/podman-test-payloads/`. Build tools include `musl-tools`, `file`, binutils and the
-  pinned tmux builder's prerequisites. Only selections containing this module trigger that payload build.
-  `FARHELM_HELM_PAYLOAD_DIR` can supply an absolute directory of matching staged payloads. Retain it intentionally with
-  `--keep-farhelm-env FARHELM_HELM_PAYLOAD_DIR`. Automatic setup exposes that variable only to matching tests through
-  nextest's setup environment. Archive workers receive prebuilt matching payloads from the Rust packer and retain its
-  private `FARHELM_TEST_PODMAN_PAYLOAD_DIR` through the recorder. Cargo is unavailable on those workers. An intentional
-  opt-out sets `FARHELM_TEST_SKIP_PODMAN=1` and passes `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` to the recorder.
-  Setup then skips the payload build and the test prints SKIPPED. Report that as missing real-environment coverage and
-  exclude it from runtime pass evidence.
+  builds this source's CLI, checks that it is a static ELF and stages the ordinary release-shaped `farhelm` archive
+  under `target/podman-test-payloads/`. Build tools include `musl-tools`, `file` and binutils. Only selections
+  containing this module trigger that payload build. `FARHELM_HELM_PAYLOAD_DIR` can supply an absolute directory of
+  matching staged payloads. Retain it intentionally with `--keep-farhelm-env FARHELM_HELM_PAYLOAD_DIR`. Automatic setup
+  exposes that variable only to matching tests through nextest's setup environment. Archive workers receive prebuilt
+  matching payloads from the Rust packer and retain its private `FARHELM_TEST_PODMAN_PAYLOAD_DIR` through the recorder.
+  Cargo is unavailable on those workers. An intentional opt-out sets `FARHELM_TEST_SKIP_PODMAN=1` and passes
+  `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` to the recorder. Setup then skips the payload build and the test prints
+  SKIPPED. Report that as missing real-environment coverage and exclude it from runtime pass evidence.
 - `bash -n scripts/build-podman-test-payloads.sh` and `shellcheck scripts/build-podman-test-payloads.sh` inspect the
   focused payload producer. Its real artifact/install contract is exercised by the Podman e2e selection above.
 - `cargo fmt --all -- --check`
@@ -762,9 +761,9 @@ that its required systemd or SSH substrate ran.
   `| binary(terminal_host_runtime)` added).
 - `scripts/test-provision-centos.sh` — the x86_64 Linux release gate boots a systemd CentOS Stream 9 container and makes
   the helm provision it over ssh, which is the only coverage of a helm installing onto a distribution other than its
-  own. Needs docker and `musl-tools`: the payloads it pushes are the release's musl-static `farhelm` and static tmux,
-  because the workspace's glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the
-  container image and the tmux build are both cached after the first run.
+  own. Needs docker and `musl-tools`: the payload it pushes is the release's musl-static `farhelm`, because the
+  workspace's glibc debug binary cannot exec on CentOS 9. A few minutes, most of it the musl build; the container image
+  is cached after the first run.
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh` and
   `shellcheck scripts/devbuild-mac.sh scripts/test-provision-centos.sh` — syntax and shell checks for the build scripts
   that add purpose-specific Rust targets. Target selection uses the checkout's pin even when invoked from elsewhere;

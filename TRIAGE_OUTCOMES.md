@@ -494,17 +494,6 @@
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: `pending`.
 
-## offline-uninstall-live-tmux-history-unresolved.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: The
-  offline uninstall retry can skip the session check, but the state it needs (unit file gone, unit stopped, supervisor
-  absent, private tmux still alive) has no established supported history. The file says AMBIGUOUS.
-- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
-  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## older-direct-bun-omp-reporter-gap.md
 
 - Outcome: `discard`.

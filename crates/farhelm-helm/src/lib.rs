@@ -336,9 +336,9 @@ pub struct HelmArgs {
     #[arg(long)]
     pub ensure_hosts: Option<PathBuf>,
 
-    /// Directory holding published release files (`farhelm-<target>.tar.gz`,
-    /// `tmux-<target>`) to use as "add host" provisioning payloads instead
-    /// of downloading them. For air-gapped installs and mirrors, and for
+    /// Directory holding published release files (`farhelm-<target>.tar.gz`)
+    /// to use as "add host" provisioning payloads instead of downloading
+    /// them. For air-gapped installs and mirrors, and for
     /// tests that would rather not reach get.farhelm.io. Only read, so it may be
     /// read-only or shared: the materialized binaries go to a cache in the
     /// helm's own state directory. Farhelm does not verify files placed here —

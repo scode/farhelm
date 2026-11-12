@@ -18,17 +18,17 @@
 # user manager, and its own `/etc/os-release`. Nothing about the transport is
 # simulated.
 #
-# ## Why the payloads are the release's static ones
+# ## Why the payload is the release's static one
 #
 # The workspace's ordinary debug `farhelm` is linked against this machine's
-# glibc and would fail to exec on CentOS Stream 9, whose glibc is older. Both
-# payloads pushed here are therefore the ones a real release ships: the
-# musl-static `farhelm` for `x86_64-unknown-linux-musl`, and the pinned static
-# tmux. That makes this leg a test of the artifacts users actually receive,
-# not of a build only this machine can run. `scripts/check-static-elf.sh`
-# refuses either payload if it is not in fact a static ELF for the right
-# machine, because a dynamic one would fail on first exec inside the container
-# with nothing nearby to explain it.
+# glibc and would fail to exec on CentOS Stream 9, whose glibc is older. The
+# payload pushed here, the only one provisioning pushes to a Linux host, is
+# therefore the one a real release ships: the musl-static `farhelm` for
+# `x86_64-unknown-linux-musl`. That makes this leg a test of the artifact users
+# actually receive, not of a build only this machine can run.
+# `scripts/check-static-elf.sh` refuses the payload if it is not in fact a
+# static ELF for the right machine, because a dynamic one would fail on first
+# exec inside the container with nothing nearby to explain it.
 #
 # ## Known limit
 #
@@ -268,16 +268,6 @@ echo "== building the musl-static farhelm payload"
 )
 "$repo/scripts/check-static-elf.sh" "$farhelm_payload" "$target_triple"
 
-# `build-tmux-assets.sh` is the release's producer and builds BOTH published
-# architectures; half of that is aarch64 this leg would never push. Its
-# single-architecture sibling below builds the same binary from the same
-# checksummed pins for the host's own architecture, asserts the pinned tmux
-# version, caches under `.ci-tmux/`, and is already a CI dependency — so it is
-# what this uses. It prints the containing directory and nothing else.
-echo "== building the static tmux payload"
-tmux_payload="$("$repo/scripts/build-pinned-tmux-ci.sh")/tmux"
-"$repo/scripts/check-static-elf.sh" "$tmux_payload" "$target_triple"
-
 # --------------------------------------------------------------------------
 # The target host
 # --------------------------------------------------------------------------
@@ -502,11 +492,10 @@ set +e
   cd "$repo" &&
     FARHELM_TEST_SSH_DESTINATION="$ssh_alias" \
       FARHELM_TEST_BINARY="$farhelm_payload" \
-      FARHELM_TEST_TMUX="$tmux_payload" \
       python3 scripts/record-test-run.py --runner nextest --require-complete-console "${record_args[@]}" \
         --selection 'CentOS provisioning over ssh' --concurrency '4 nextest slots; one selected test' \
         --tmux none --keep-farhelm-env FARHELM_TEST_SSH_DESTINATION \
-        --keep-farhelm-env FARHELM_TEST_BINARY --keep-farhelm-env FARHELM_TEST_TMUX \
+        --keep-farhelm-env FARHELM_TEST_BINARY \
         -- cargo nextest run --workspace --exclude farhelm-desktop \
         -E "package(farhelm-helm) & kind(lib) & test(=$test_filter)"
 ) 2>&1 | tee "$output"
