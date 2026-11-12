@@ -19,8 +19,7 @@
 //! concern: `assets` serves the embedded UI to the window,
 //! `window_state` saves and restores the window frame, `state` owns the
 //! credential file and the atomic write both state files share,
-//! `tmux_preflight` picks the supervisor's tmux and refuses an unusable
-//! one, `bundle` finds the pieces installed beside the app, and `updater`
+//! `bundle` finds the pieces installed beside the app, and `updater`
 //! keeps an installed app up to date. `menu` preserves native Mac menu actions
 //! while leaving Cmd-W available for deleting the open session.
 
@@ -50,16 +49,12 @@ mod menu;
 #[cfg(target_os = "linux")]
 mod startup;
 mod state;
-mod tmux_preflight;
 mod updater;
 mod window_state;
 
 pub(crate) use assets::use_embedded_asset_handler;
 use bundle::{bundled_farhelm, desktop_state_dir, helm_payload_dir};
 use state::{APP_STATE_FILE, update_state};
-use tmux_preflight::{
-    is_executable_file, macos_tmux_prefixes, resolve_supervisor_tmux, run_tmux_preflight_or_exit,
-};
 pub(crate) use updater::{UpdaterHandle, UpdaterState, readout};
 use window_state::{WINDOW_STATE_FILE, WindowTracker};
 
@@ -137,15 +132,9 @@ pub fn run() -> anyhow::Result<()> {
     // every failure this can actually produce, an operator-facing startup
     // refusal rather than a programming bug. Someone staring at a GUI app
     // that just quit needs one plain sentence and, on macOS, a native
-    // surface (`refuse_and_exit`). ONLY the two specialized
-    // tmux refusals (missing, below floor) print their own exact message
-    // and exit inside `start`'s preflight (see `run_tmux_preflight_or_exit`)
-    // without ever returning an `Err`; every other tmux-probe failure this
-    // preflight cannot make sense of (permission denied, a nonzero `-V`, an
-    // unparseable version) returns `Err` same as any other bootstrap
-    // failure — state directory unreadable, port already bound, the
-    // sibling `farhelm` missing — and lands right here. None of those
-    // deserve a crash report either, so they get the same plain treatment.
+    // surface (`refuse_and_exit`). Every bootstrap failure — state
+    // directory unreadable, port already bound, the sibling `farhelm`
+    // missing — lands right here, and none of them deserves a crash report.
     let desktop = match DesktopBootstrap::start() {
         Ok(desktop) => desktop,
         Err(error) => {
@@ -449,18 +438,6 @@ impl DesktopBootstrap {
     /// A supervisor this launch starts is detached and outlives the app; it
     /// is monitored only until startup is done.
     pub fn start() -> anyhow::Result<Self> {
-        // Resolved here, unconditionally, because the plans that start a
-        // supervisor (a plain start, or replacing the app's own) run the
-        // preflight with it and hand its choice to the child as
-        // `FARHELM_TMUX`, and computing it needs no spawn or probe — `resolve_supervisor_tmux`
-        // only stats candidate paths (`is_executable_file`), which is silent
-        // on stderr regardless of the tracing filter `init_tracing` already
-        // installed in `run`.
-        let ambient_tmux = std::env::var_os(farhelm_supervisor::tmux::TMUX_PROGRAM_ENV);
-        let tmux_prefixes = macos_tmux_prefixes();
-        let supervisor_tmux =
-            resolve_supervisor_tmux(ambient_tmux.clone(), tmux_prefixes, is_executable_file);
-
         let state_dir = desktop_state_dir()?;
         let runtime =
             tokio::runtime::Runtime::new().context("starting desktop bootstrap runtime")?;
@@ -470,32 +447,6 @@ impl DesktopBootstrap {
         // it must come before discovery probes anything or a supervisor is
         // spawned from it (see `bundle::supervisor_farhelm`).
         let farhelm = bundled_farhelm()?;
-        // Discovery MUST run before the tmux preflight, not after: an
-        // answering supervisor is an ownership boundary (this type's own
-        // doc comment) that has to be reused exactly as it stands, tmux
-        // included — it was started with whatever `FARHELM_TMUX` or
-        // login-shell `PATH` it had, which this Finder-launched process
-        // never sees. Running the preflight
-        // first would refuse startup over a dependency this process is not
-        // about to need, for a supervisor it does not own and must not
-        // reconfigure. Only the branches where THIS process is about to
-        // start a supervisor and hand down its own tmux choice (a plain
-        // start, or replacing its own outdated or wedged one) run the
-        // preflight, before anything is started or stopped.
-        //
-        // Nothing between here and that preflight call reaches stderr on
-        // the paths the preflight legs exercise, which is what keeps "the
-        // refusal is the ONLY thing printed" true on the missing/below-floor
-        // path: `ensure_private_dir`, `bundled_farhelm` and `ProgramFile`
-        // do no logging, `own_supervisor` logs only when a record exists
-        // (unreadable, or naming a process that is unreadable or still
-        // exiting; the legs start from an empty state directory), and
-        // `discover_local_supervisor`'s probe pipes its own probe child's
-        // stderr and drains it internally rather than inheriting this
-        // process's — verified by the exact stderr assertion in
-        // `scripts/desktop-smoke.sh`'s tmux-preflight legs, which is the
-        // oracle for this ordering claim.
-        //
         // The program this launch would start is read before anything is
         // spawned from it: the record of a supervisor started from it must
         // name the file it was started from, not one put at that path later
@@ -530,9 +481,6 @@ impl DesktopBootstrap {
             absolute: &absolute,
             program: &program,
             state_dir: &state_dir,
-            supervisor_tmux: supervisor_tmux.as_deref(),
-            ambient_tmux: ambient_tmux.as_deref(),
-            tmux_prefixes,
         };
         let plan = plan_local_supervisor(
             own.map(|own| {
@@ -866,10 +814,10 @@ enum OwnSupervisorWait {
 ///
 /// A supervisor can be legitimately silent for a while: waiting for the
 /// state directory a just-quit predecessor held (`STATE_DIR_CLAIM_WAIT`),
-/// or a slow first start after an update (a database migration, starting
-/// tmux). Stopping it then, and killing it if it does not stop within the
-/// grace, could interrupt a migration, and a user who relaunches during
-/// that window would loop. `answers` is the probe (startup passes the same
+/// or a slow first start after an update (a database migration). Stopping it
+/// then, and killing it if it does not stop within the grace, could
+/// interrupt a migration, and a user who relaunches during that window
+/// would loop. `answers` is the probe (startup passes the same
 /// hello-based discovery); a probe error counts as not answering yet.
 async fn await_own_supervisor_answering<P, F>(
     own: &ManagedSupervisor,
@@ -1151,9 +1099,6 @@ struct SpawnInputs<'a> {
     /// `absolute`'s file, read before the spawn, for the record.
     program: &'a ProgramFile,
     state_dir: &'a Path,
-    supervisor_tmux: Option<&'a std::ffi::OsStr>,
-    ambient_tmux: Option<&'a std::ffi::OsStr>,
-    tmux_prefixes: &'a [&'a str],
 }
 
 impl SpawnInputs<'_> {
@@ -1200,8 +1145,7 @@ impl SpawnInputs<'_> {
     }
 
     /// Refuse before anything is started or stopped when the supervisor
-    /// could not run: a session program path the shell cannot use, or no
-    /// usable tmux (the preflight exits the app with its own message).
+    /// could not run: a session program path the shell cannot use.
     fn check_prerequisites(&self) -> anyhow::Result<()> {
         // Resolve a relative developer override before checking the
         // session PATH folder: its working directory can supply a colon.
@@ -1210,7 +1154,6 @@ impl SpawnInputs<'_> {
         let session_program = farhelm_supervisor::app_bundle::versioned_program(self.absolute)
             .map_or_else(|| self.absolute.to_path_buf(), |program| program.forwarder);
         farhelm_supervisor::launch::validate_session_program_path(&session_program)?;
-        run_tmux_preflight_or_exit(self.supervisor_tmux, self.ambient_tmux, self.tmux_prefixes)?;
         Ok(())
     }
 
@@ -1236,20 +1179,16 @@ impl SpawnInputs<'_> {
         command
             .args(["supervisor", "run", "--state-dir"])
             .arg(self.state_dir)
-            // The supervisor inherits this process's PATH unchanged. The
-            // bundle's own directory used to be prepended so a bundled tmux
-            // would win; there is no bundled tmux any more (SPEC_impl.md,
-            // "Terminal substrate: private tmux server") — the
-            // `FARHELM_TMUX` below is what names the substrate — and the
-            // supervisor is launched by absolute path while the launch shim
-            // prepends the directory the supervisor names for the spawn CLI
-            // inside sessions, so nothing else needed it.
+            // The supervisor inherits this process's PATH unchanged: it is
+            // launched by absolute path, and the launch shim prepends the
+            // directory the supervisor names for the spawn CLI inside
+            // sessions, so nothing else needs the bundle's directory there.
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(log)
             // The payload directory is this app's embedded helm's setting
-            // alone. Inherited, it would reach the supervisor's tmux server
-            // and every session shell in it, so a `farhelm helm run` typed
+            // alone. Inherited, it would reach every session shell the
+            // supervisor starts, so a `farhelm helm run` typed
             // in a session would silently push this launch's payloads,
             // possibly long after the app that set it has quit.
             .env_remove("FARHELM_HELM_PAYLOAD_DIR")
@@ -1259,9 +1198,6 @@ impl SpawnInputs<'_> {
             // own: refusing as "replaced by another installation", or never
             // reopening itself.
             .env_remove(bundle::REOPENED_ENV);
-        if let Some(tmux) = self.supervisor_tmux {
-            command.env(farhelm_supervisor::tmux::TMUX_PROGRAM_ENV, tmux);
-        }
         // SAFETY: setsid is async-signal-safe and touches no memory; nothing
         // else runs between fork and exec here.
         unsafe {
@@ -1480,9 +1416,9 @@ fn ensure_managed_supervisor_running(supervisor: &mut Option<Child>) -> anyhow::
 ///
 /// The child itself may spend up to [`STATE_DIR_CLAIM_WAIT`] waiting for a
 /// Farhelm that was just quit to release the state directory, and then has
-/// its own startup to do (opening its database, starting tmux). The margin
-/// covers that startup on a slow machine; a child that is still not serving
-/// after it is reported rather than waited for.
+/// its own startup to do (opening its database). The margin covers that
+/// startup on a slow machine; a child that is still not serving after it is
+/// reported rather than waited for.
 const MANAGED_SUPERVISOR_SERVING_WAIT: Duration =
     STATE_DIR_CLAIM_WAIT.saturating_add(Duration::from_secs(15));
 
@@ -1781,9 +1717,9 @@ fn loopback_client() -> anyhow::Result<reqwest::Client> {
 /// fire-and-forget: the alert must remain visible after this process exits,
 /// and neither helper's completion can affect the refusal. Their standard
 /// streams are null so helper diagnostics can never alter this process's
-/// stderr. The exact stderr output (several lines, for the tmux refusals)
-/// remains the primary contract because `scripts/desktop-smoke.sh` compares
-/// it byte-for-byte.
+/// stderr. The stderr line (`farhelm-desktop: <error>`) and exit status 1
+/// remain the primary contract; `scripts/desktop-smoke.sh` checks that
+/// shape.
 fn refuse_and_exit(message: &str) -> ! {
     eprintln!("{message}");
 
@@ -2859,9 +2795,6 @@ mod tests {
                 absolute: farhelm,
                 program: &program,
                 state_dir: &state,
-                supervisor_tmux: None,
-                ambient_tmux: None,
-                tmux_prefixes: &[],
             }
             .check_program_runs()
         };

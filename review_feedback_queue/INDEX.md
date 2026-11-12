@@ -1805,10 +1805,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`bulk-screenshot-test-expects-wrong-local-alias.md`](bulk-screenshot-test-expects-wrong-local-alias.md) — The
   bulk-action screenshot regression expects a local-host alias that its own fixture does not provide.
 
-- [`no-tmux-lifecycle-witness.md`](no-tmux-lifecycle-witness.md) — The desktop smoke can pass if creating or restarting
-  a new terminal unnecessarily starts tmux. Its new no-tmux check has already finished before it exercises any sessions.
-  This weakens evidence for the requirement that a host with only new terminals never runs tmux.
-
 - [`pending-test-host-start-cleanup.md`](pending-test-host-start-cleanup.md) — After a supervisor crashes during a
   terminal launch, browser-test cleanup can report success and delete its state while a terminal host finishes starting.
   That leaves an owned test process running without its socket or retained run directory. This concerns maintainer

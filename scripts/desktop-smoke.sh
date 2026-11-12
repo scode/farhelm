@@ -94,24 +94,6 @@ case "$APPEARANCE_MODE" in
   *) echo "FAIL: invalid DESKTOP_SMOKE_APPEARANCE selection" >&2; exit 1 ;;
 esac
 
-# The tmux-preflight legs below assert the exact stderr farhelm-desktop
-# renders for a below-floor tmux, and that message quotes `TMUX_FLOOR`.
-# Sourced from the same pin file the release build and
-# `scripts/build-pinned-tmux-ci.sh` read, rather than hardcoded here a
-# second time, so a coordinated floor-and-pin bump can never leave this
-# script's expectation stale — see `farhelm_supervisor::tmux::TMUX_FLOOR`'s
-# own doc comment for why the two are bumped together. `unset` first
-# because the file is SOURCED, not read structurally: a caller's own
-# ambient `TMUX_VERSION` must never silently win over the pinned one.
-unset TMUX_VERSION
-# shellcheck source=../.github/release/source-pins.env
-. "$REPO/.github/release/source-pins.env"
-[ -n "${TMUX_VERSION:-}" ] || {
-  echo "FAIL: source-pins.env did not define TMUX_VERSION" >&2
-  exit 1
-}
-TMUX_FLOOR="$TMUX_VERSION"
-
 # Preflight, before anything is created or spawned: every external binary
 # the phases below shell out to. Local optional runs skip cleanly; CI must
 # fail because a green integration gate that exercised nothing is false.
@@ -522,16 +504,6 @@ hosts_left_unscanned() {
   echo "the supervisor in $1 was not confirmed stopped, so its terminal hosts were not stopped either" >&2
 }
 
-# Whether state directory $1 holds nothing but an empty `helm-token.lock` (or
-# nothing at all): what a launch that refused before writing any state
-# leaves behind.
-only_the_lock_file() {
-  local entries
-  entries=$(ls -A "$1") || return 1
-  [ -z "$entries" ] && return 0
-  [ "$entries" = "helm-token.lock" ] && [ ! -s "$1/helm-token.lock" ]
-}
-
 # Stops the supervisor a desktop app started in state directory $1, by the
 # record the app keeps there (`desktop-supervisor.json`), which is the only
 # handle on it: the app starts it detached and it outlives the app. The pid is
@@ -717,219 +689,32 @@ APP="$TARGET_DIR/dx/farhelm-ui/debug/linux/app/farhelm-ui"
 # bundle any more, just two bare binaries that a release installs side by side
 # — and relocating the dx output would only reintroduce the asset-resolution
 # trap that staging existed to work around.
-#
-# There is no bundled tmux (SPEC_impl.md, "Terminal substrate: private tmux
-# server" — it records the version floor, the `FARHELM_TMUX` override taking
-# precedence over the fixed-prefix probe, and the decision that the Mac app
-# ships none and requires Homebrew's);
-# the sentinel below wraps the preflighted host binary and is named only
-# through that variable, so the marker proves the override reached the managed
-# supervisor and that it ran this exact program rather than whatever `tmux`
-# the app's deliberately small PATH would have found.
 BUILT_FARHELM="$TARGET_DIR/debug/farhelm"
 [ -x "$BUILT_FARHELM" ] || fail "farhelm CLI missing at $BUILT_FARHELM"
 
-# A sibling `farhelm` that logs every argv it is exec'd with before handing
-# off to the real binary unchanged — used by the two tmux-preflight refusal
-# legs below (F3) to prove that discovery ran (`internal stdio`, the only
-# thing `discover_local_supervisor`'s local-transport probe ever invokes a
-# sibling farhelm for — see `SystemBackend::spawn_probe` in
-# crates/farhelm-helm/src/provisioning/backend.rs) but the managed
-# supervisor never got as far as `supervisor run`. Exit status, stderr text,
-# and an empty state directory (already asserted below) prove the refusal
-# was clean; none of them alone rules out a spawn-then-kill implementation
-# that started the supervisor and tore it down again before it wrote
-# anything — this wrapper is what turns "no evidence of a spawn" into "an
-# instrumented process that would have logged one did not see one at all".
-# Reused by both refusal legs with a fresh log path per invocation, the same
-# way `resolve_sibling_farhelm`'s own `FARHELM_DESKTOP_FARHELM` override is
-# reused for the un-instrumented sibling elsewhere in this script.
-INSTRUMENTED_FARHELM="$X/instrumented-farhelm/farhelm"
-mkdir -p "$(dirname "$INSTRUMENTED_FARHELM")"
-printf '%s\n' \
-  '#!/bin/sh' \
-  'printf "%s\n" "$*" >>"$FARHELM_SMOKE_SIBLING_LOG"' \
-  "exec \"$BUILT_FARHELM\" \"\$@\"" >"$INSTRUMENTED_FARHELM"
-chmod 700 "$INSTRUMENTED_FARHELM"
-
-HOST_TMUX=$(command -v tmux)
-SENTINEL_TMUX="$X/sentinel-tmux/tmux"
-mkdir -p "$(dirname "$SENTINEL_TMUX")"
-# Logs the COMPLETE argv of every invocation, one per line, rather than
-# writing a single fixed marker: the desktop's own tmux preflight calls
-# this wrapper with a plain `-V` (immediately before the managed
-# supervisor it is about to spawn). The supervisor runs no tmux at all (it keeps only the version
-# policy in crates/farhelm-supervisor/src/tmux.rs); the later assertion
-# requires every logged line to be the preflight's plain `-V`.
-printf '%s\n' \
-  '#!/bin/sh' \
-  'printf "%s\n" "$*" >>"$FARHELM_SMOKE_TMUX_MARKER"' \
-  "exec \"$HOST_TMUX\" \"\$@\"" >"$SENTINEL_TMUX"
-chmod 700 "$SENTINEL_TMUX"
-
-# One plain stderr message and exit status 1 — never a panic, never the
-# supervisor's own "Error:"/`Caused by` chain — is this app's whole
-# contract for a missing or below-floor tmux (SPEC_impl.md's "Terminal
-# substrate: private tmux server"). These two legs are the only assertions
-# in this whole script that need NEITHER Xvfb NOR the pixel-driven
-# interaction phase: `DesktopBootstrap::start`'s preflight runs right
-# before spawning the managed supervisor, once discovery has confirmed no
-# supervisor already answers — well before any window, display, or web
-# asset is ever requested, so exercising the entry point headless here
-# proves the SAME refusal path a Finder launch would hit.
+if [ -z "$APPEARANCE_MODE" ]; then
+# One plain stderr line and exit status 1, never a panic, is the desktop
+# app's whole contract for a bootstrap failure. This leg needs neither Xvfb
+# nor the interaction phase: `ensure_private_dir` is the very first fallible
+# step `DesktopBootstrap::start` takes, well before any window, display or web
+# asset is requested, so exercising the entry point headless proves the SAME
+# refusal path a Finder launch would hit. A state "directory" that is actually
+# a plain file is the cheapest way to reach it: `DirBuilder::create` fails at
+# once with the OS's own error text, which is why this leg checks the shape of
+# the message rather than its exact wording.
 #
 # The binary under test is the dx-built `farhelm-ui` desktop app the rest of
-# this script drives (see `BUILT_FARHELM_DESKTOP` below for why not a
-# separate build of the `farhelm-desktop` wrapper crate). Both binaries
-# share one entry point (`farhelm_ui::desktop::run`), and refusal happens
-# before any asset is ever requested, so which of the two runs it makes no
-# difference to what these legs check.
-#
-# Both legs use the SAME kind of isolation the main app launch further
-# down uses — a private state directory, the shared smoke port, and the
-# built `farhelm` sibling — rather than leaving any of them unset: an
-# unset state directory would let `desktop_state_dir()` fall back to
-# `~/.local/state/farhelm`, the MAINTAINER's real, live Farhelm state, and
-# an unset sibling would leave `bundled_farhelm()` resolving against
-# whatever happens to sit next to `farhelm-desktop` on this machine.
-# Discovery now runs before the preflight (see `DesktopBootstrap::start`'s
-# own doc comment on that ordering), so a WORKING sibling `farhelm` is
-# required for these legs to even reach the preflight at all — it is what
-# proves "no supervisor answers here" quickly and silently. Each leg's
-# guaranteed-absent or below-floor tmux path also lives inside this run's
-# own private directory ($X) rather than a global path like
-# `/nonexistent/tmux`: on a machine where that literal path happened to
-# exist and answer as a supported tmux, the missing-tmux leg would prove
-# nothing, and bootstrap would proceed into whatever state or sibling
-# `desktop_state_dir()`/`bundled_farhelm()` fell back to.
-if [ -z "$APPEARANCE_MODE" ]; then
-echo "== tmux preflight: a missing tmux refuses with one plain message"
-# The refusal legs run the dx-built `farhelm-ui` desktop app rather than a
-# separately Cargo-built `farhelm-desktop`: the shipped `farhelm-desktop`
-# crate is a one-line wrapper whose `main` calls the very same
-# `farhelm_ui::desktop::run()` this app runs, so the preflight under test is
-# byte-for-byte the same code, while a second WebKit build of the wrapper
-# crate on top of the dx build is what pushed CI's runner out of disk
-# (PR #276's first run: "No space left on device" inside `dx build`).
+# this script drives rather than a separately Cargo-built `farhelm-desktop`:
+# the shipped `farhelm-desktop` crate is a one-line wrapper whose `main` calls
+# the very same `farhelm_ui::desktop::run()`, while a second WebKit build of
+# the wrapper crate on top of the dx build is what pushed CI's runner out of
+# disk (PR #276's first run: "No space left on device" inside `dx build`).
+# The sibling `farhelm` is named explicitly, and the state directory is this
+# run's own, so nothing falls back to the maintainer's live Farhelm state.
 BUILT_FARHELM_DESKTOP="$APP"
 [ -x "$BUILT_FARHELM_DESKTOP" ] || fail "desktop app missing at $BUILT_FARHELM_DESKTOP"
 
-PREFLIGHT_MISSING_STATE="$X/pf-missing"
-MISSING_TMUX="$X/pf-missing-tmux/tmux"
-TMUX_PREFLIGHT_STDERR="$X/tmux-preflight-missing.stderr"
-SIBLING_LOG_MISSING="$X/farhelm-sibling-missing.log"
-: >"$SIBLING_LOG_MISSING"
-FARHELM_TMUX="$MISSING_TMUX" \
-  FARHELM_DESKTOP_STATE_DIR="$PREFLIGHT_MISSING_STATE" \
-  FARHELM_DESKTOP_FARHELM="$INSTRUMENTED_FARHELM" \
-  FARHELM_SMOKE_SIBLING_LOG="$SIBLING_LOG_MISSING" \
-  "$BUILT_FARHELM_DESKTOP" >/dev/null 2>"$TMUX_PREFLIGHT_STDERR"
-TMUX_PREFLIGHT_STATUS=$?
-[ "$TMUX_PREFLIGHT_STATUS" -eq 1 ] ||
-  fail "farhelm-desktop exited $TMUX_PREFLIGHT_STATUS with no tmux on FARHELM_TMUX (expected exactly 1)"
-# The exact text `tmux_refusal_message` (desktop/tmux_preflight.rs) renders for this case:
-# an ambient `FARHELM_TMUX` override is probed ALONE (resolve_supervisor_tmux
-# skips every other probe once one is set) and is what selected this missing
-# program, so the override-remedy clause applies; the program never existed
-# so the outcome is NotFound; and this box is Linux so the Linux
-# install-guidance line applies. `$TMUX_FLOOR` was sourced from
-# `.github/release/source-pins.env` above — the same pin
-# `farhelm_supervisor`'s own `floor_and_release_pin_cannot_drift` test
-# checks the floor constant against — so a coordinated bump of both cannot
-# leave this expectation stale.
-EXPECTED_TMUX_PREFLIGHT_STDERR="$X/tmux-preflight-missing.expected"
-printf '%s\n' \
-  "farhelm-desktop needs tmux $TMUX_FLOOR or newer, and none could be run (looked at: $MISSING_TMUX). Each one was either not found, or is missing its interpreter or loader." \
-  "Install tmux $TMUX_FLOOR or newer with your package manager or Linuxbrew (\`brew install tmux\`). FARHELM_TMUX is set and overrides where farhelm-desktop looks, so update it to point at a supported tmux, or unset it, before starting farhelm-desktop again." \
-  >"$EXPECTED_TMUX_PREFLIGHT_STDERR"
-# `cmp` compares raw bytes, including the final newline `printf` above put
-# on the expected side — a `$(...)`-based comparison would strip every
-# trailing newline from BOTH sides and could not tell an exact match from
-# one with extra blank diagnostic lines appended.
-cmp -s "$TMUX_PREFLIGHT_STDERR" "$EXPECTED_TMUX_PREFLIGHT_STDERR" ||
-  fail "tmux preflight stderr did not match exactly (see $TMUX_PREFLIGHT_STDERR)"
-# `ensure_private_dir` runs before discovery, so the directory itself is
-# expected to exist — but the preflight refuses immediately after
-# discovery and before any state is written into it: no
-# desktop-client.json, no supervisor socket, no supervisor record or log.
-# The one thing allowed is the helm's empty lock file, which the launch
-# takes before it looks at anything, so two launches cannot act on what
-# each saw before the other changed it (the helm itself creates the same
-# file on every run).
-[ -d "$PREFLIGHT_MISSING_STATE" ] ||
-  fail "expected the preflight's own private state directory to exist ($PREFLIGHT_MISSING_STATE)"
-only_the_lock_file "$PREFLIGHT_MISSING_STATE" ||
-  fail "the missing-tmux preflight must refuse before writing any state into its state directory"
-# An empty state directory proves nothing spawned SURVIVED, but a
-# spawn-then-kill implementation (start the managed supervisor, run the
-# preflight right after, tear the child down on refusal before it wrote a
-# socket) would satisfy every assertion above too. The instrumented sibling
-# is what tells those apart: discovery must have run (`internal stdio`,
-# logged by the wrapper before it execs the real binary), and no
-# `supervisor run` invocation may appear anywhere in that same log.
-grep -q '^internal stdio' "$SIBLING_LOG_MISSING" ||
-  fail "expected discovery's 'internal stdio' invocation in the sibling log (see $SIBLING_LOG_MISSING)"
-if grep -q 'supervisor run' "$SIBLING_LOG_MISSING"; then
-  fail "the missing-tmux preflight must refuse before spawning 'supervisor run' (see $SIBLING_LOG_MISSING)"
-fi
-
-echo "== tmux preflight: a below-floor tmux refuses with one plain message"
-PREFLIGHT_BELOWFLOOR_STATE="$X/pf-belowfloor"
-BELOWFLOOR_TMUX="$X/pf-belowfloor-tmux/tmux"
-mkdir -p "$(dirname "$BELOWFLOOR_TMUX")"
-# A tiny stand-in that answers `-V` with a version below the floor and
-# refuses anything else — real enough to prove this is a PROCESS-level
-# refusal (stderr ownership, exact wording, exit status), not merely
-# something the pure formatter tests already cover.
-printf '%s\n' \
-  '#!/bin/sh' \
-  'if [ "$1" = -V ]; then echo "tmux 3.4"; exit 0; fi' \
-  'echo "unexpected invocation: $*" >&2' \
-  'exit 2' >"$BELOWFLOOR_TMUX"
-chmod 700 "$BELOWFLOOR_TMUX"
-TMUX_PREFLIGHT_BELOWFLOOR_STDERR="$X/tmux-preflight-belowfloor.stderr"
-SIBLING_LOG_BELOWFLOOR="$X/farhelm-sibling-belowfloor.log"
-: >"$SIBLING_LOG_BELOWFLOOR"
-FARHELM_TMUX="$BELOWFLOOR_TMUX" \
-  FARHELM_DESKTOP_STATE_DIR="$PREFLIGHT_BELOWFLOOR_STATE" \
-  FARHELM_DESKTOP_FARHELM="$INSTRUMENTED_FARHELM" \
-  FARHELM_SMOKE_SIBLING_LOG="$SIBLING_LOG_BELOWFLOOR" \
-  "$BUILT_FARHELM_DESKTOP" >/dev/null 2>"$TMUX_PREFLIGHT_BELOWFLOOR_STDERR"
-TMUX_PREFLIGHT_BELOWFLOOR_STATUS=$?
-[ "$TMUX_PREFLIGHT_BELOWFLOOR_STATUS" -eq 1 ] ||
-  fail "farhelm-desktop exited $TMUX_PREFLIGHT_BELOWFLOOR_STATUS against a 3.4 tmux (expected exactly 1)"
-EXPECTED_TMUX_PREFLIGHT_BELOWFLOOR_STDERR="$X/tmux-preflight-belowfloor.expected"
-printf '%s\n' \
-  "found tmux 3.4 at $BELOWFLOOR_TMUX, which is below the $TMUX_FLOOR farhelm needs." \
-  "Install tmux $TMUX_FLOOR or newer with your package manager or Linuxbrew (\`brew install tmux\`). FARHELM_TMUX is set and overrides where farhelm-desktop looks, so update it to point at a supported tmux, or unset it, before starting farhelm-desktop again." \
-  >"$EXPECTED_TMUX_PREFLIGHT_BELOWFLOOR_STDERR"
-cmp -s "$TMUX_PREFLIGHT_BELOWFLOOR_STDERR" "$EXPECTED_TMUX_PREFLIGHT_BELOWFLOOR_STDERR" ||
-  fail "below-floor tmux preflight stderr did not match exactly (see $TMUX_PREFLIGHT_BELOWFLOOR_STDERR)"
-[ -d "$PREFLIGHT_BELOWFLOOR_STATE" ] ||
-  fail "expected the preflight's own private state directory to exist ($PREFLIGHT_BELOWFLOOR_STATE)"
-only_the_lock_file "$PREFLIGHT_BELOWFLOOR_STATE" ||
-  fail "the below-floor preflight must refuse before writing any state into its state directory"
-# See the missing-tmux leg's comment above: the empty state directory does
-# not distinguish "never spawned" from "spawned and killed before it wrote
-# anything", so this checks the instrumented sibling's log directly.
-grep -q '^internal stdio' "$SIBLING_LOG_BELOWFLOOR" ||
-  fail "expected discovery's 'internal stdio' invocation in the sibling log (see $SIBLING_LOG_BELOWFLOOR)"
-if grep -q 'supervisor run' "$SIBLING_LOG_BELOWFLOOR"; then
-  fail "the below-floor preflight must refuse before spawning 'supervisor run' (see $SIBLING_LOG_BELOWFLOOR)"
-fi
-
-# The two legs above exercise the SPECIALIZED tmux refusal; this one proves
-# `desktop::run`'s FALLBACK path — every bootstrap failure the preflight has
-# no tailored wording for — is equally plain: one `farhelm-desktop: ...`
-# line and exit status 1, never a panic. `ensure_private_dir` is the very
-# first fallible step `DesktopBootstrap::start` takes, well before the tmux
-# preflight or the sibling `farhelm` are ever consulted, so a state
-# "directory" that is actually a plain file is the cheapest way to reach
-# this path: `DirBuilder::create` fails immediately with the OS's own
-# error text, which is why this leg cannot pin an exact message the way the
-# two tmux legs above do — the text is `ENOENT`/`EEXIST`-shaped OS prose,
-# not one this project renders itself.
-echo "== a non-tmux bootstrap failure exits 1 with a plain message, no panic"
+echo "== a bootstrap failure exits 1 with a plain message, no panic"
 BOGUS_STATE="$X/pf-bogus-state"
 : >"$BOGUS_STATE"
 BOGUS_STATE_STDERR="$X/pf-bogus-state.stderr"
@@ -943,7 +728,7 @@ grep -q "^farhelm-desktop: " "$BOGUS_STATE_STDERR" ||
   fail "expected a plain 'farhelm-desktop: ...' line (see $BOGUS_STATE_STDERR)"
 for banned in panicked RUST_BACKTRACE; do
   if grep -qF "$banned" "$BOGUS_STATE_STDERR"; then
-    fail "non-tmux bootstrap failure must never contain $banned (see $BOGUS_STATE_STDERR)"
+    fail "a bootstrap failure must never contain $banned (see $BOGUS_STATE_STDERR)"
   fi
 done
 fi
@@ -985,7 +770,7 @@ if [ "$APPEARANCE_MODE" = no-initialize ]; then
   python3 -c 'import os, signal; fd=os.pidfd_open(os.getpid()); os.close(fd); assert hasattr(signal, "pidfd_send_signal")' || fail "missing-initialize smoke requires Linux pidfd support"
   rm -f "$DESKTOP_READY"
   DISPLAY="$DISP" GTK_THEME="Adwaita:dark" NO_COLOR=1 PATH="/usr/bin:/bin" \
-    FARHELM_TMUX="$HOST_TMUX" FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+    FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
     FARHELM_DESKTOP_STATE_DIR="$appearance_state" FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
     FARHELM_SMOKE_APPEARANCE=no-initialize FARHELM_SMOKE_WEBVIEW_DATA_DIR="$profile" \
     RUST_LOG="info,farhelm_ui::desktop=debug,desktop_startup=debug" \
@@ -1206,7 +991,7 @@ if [ "$APPEARANCE_MODE" = 1 ]; then
 
       rm -f "$DESKTOP_READY"
       DISPLAY="$DISP" GTK_THEME="$gtk_theme" PATH="/usr/bin:/bin" \
-        FARHELM_TMUX="$HOST_TMUX" FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+        FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
         FARHELM_DESKTOP_STATE_DIR="$appearance_state" FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
         FARHELM_SMOKE_APPEARANCE="$selection" FARHELM_SMOKE_WEBVIEW_DATA_DIR="$profile" \
         RUST_LOG="info,farhelm_ui::desktop=debug,desktop_startup=debug" \
@@ -1306,8 +1091,6 @@ fi
 rm -f "$DESKTOP_READY"
 DISPLAY=$DISP \
   PATH="/usr/bin:/bin" \
-  FARHELM_TMUX="$SENTINEL_TMUX" \
-  FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
   RUST_LOG="info,farhelm_ui::desktop=debug,farhelm_helm::terminal_attachments=debug" \
   FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
@@ -1406,22 +1189,6 @@ PY_SECOND
 rm -f -- "$X/other-farhelm"
 kill -0 "$OPEN_SUPERVISOR_PID" 2>/dev/null || fail "the other-program launch stopped the open app's supervisor"
 curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null || fail "the other-program launch disturbed the incumbent helm"
-[ -s "$X/tmux-override-used" ] || fail "the desktop's tmux preflight did not run the tmux named by FARHELM_TMUX"
-# A supervisor whose sessions are all new terminals runs no tmux server and
-# no tmux command (SPEC.md, "Terminal experience"), so the only lines the
-# sentinel may have logged are the desktop preflight's plain `-V`: any other
-# line is the managed supervisor running tmux (all of its invocations carry
-# the private `-u -S <socket> -f <config>` prefix), and a socket in the state
-# directory is a server it started. The override must still REACH the
-# supervisor, for the day it has an old terminal to serve, and nothing it
-# runs can show that now, so its environment is read instead.
-if grep -vx -- '-V' "$X/tmux-override-used" >"$X/tmux-supervisor-invocations"; then
-  fail "the managed supervisor ran tmux with only new terminals: $(head -3 "$X/tmux-supervisor-invocations")"
-fi
-[ ! -e "$X/state/tmux.sock" ] || fail "a tmux server socket exists in the app's state directory"
-tr '\0' '\n' <"/proc/$OPEN_SUPERVISOR_PID/environ" | grep -qxF "FARHELM_TMUX=$SENTINEL_TMUX" ||
-  fail "the managed supervisor's environment does not name the tmux the app chose (FARHELM_TMUX)"
-[ ! -e "$(dirname "$APP")/tmux" ] || fail "the app directory must not carry a tmux of its own"
 
 # Wait for the client-log marker to land in $1 (a log file), proving the
 # shim -> /api/client-log -> tracing pipeline for the process writing it.
@@ -1579,8 +1346,6 @@ done
 rm -f "$DESKTOP_READY"
 DISPLAY=$DISP \
   PATH="/usr/bin:/bin" \
-  FARHELM_TMUX="$SENTINEL_TMUX" \
-  FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
   FARHELM_SMOKE_CLIENT_LOG_MARKER="$CLIENT_LOG_MARKER" \
   RUST_LOG="info,farhelm_ui::desktop=debug,farhelm_helm::terminal_attachments=debug" \
   FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
@@ -1903,27 +1668,29 @@ if [ "${DESKTOP_SMOKE_LEGACY_INTERACTION:-}" != 1 ]; then
   cp "$BUILT_FARHELM" "$BUILT_FARHELM.new" && mv -f "$BUILT_FARHELM.new" "$BUILT_FARHELM" ||
     fail "replacing the program file"
   # A replacement checks the new supervisor's prerequisites before it stops
-  # anything: with a tmux that does not exist, the launch refuses and the old
-  # supervisor keeps serving, its record unchanged.
-  echo "== a replacement that would fail its tmux preflight stops nothing"
+  # anything. A program reached through a directory whose name holds ':' is
+  # one the supervisor cannot put on a session's PATH, so the launch must
+  # refuse while the old supervisor keeps serving, its record unchanged. The
+  # program itself is the real one (a symlink to it), so discovery runs as
+  # usual and only the prerequisite check can refuse.
+  echo "== a replacement that would fail its prerequisites stops nothing"
+  mkdir -p "$X/replace:refused" || fail "creating the refused replacement's directory"
+  ln -s "$BUILT_FARHELM" "$X/replace:refused/farhelm" || fail "linking the refused replacement's program"
   DISPLAY=$DISP \
     PATH="/usr/bin:/bin" \
-    FARHELM_TMUX="$X/replace-bad-tmux/tmux" \
     FARHELM_DESKTOP_STATE_DIR="$X/state" \
-    FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
+    FARHELM_DESKTOP_FARHELM="$X/replace:refused/farhelm" \
     timeout 120 "$APP" >"$X/desktop-replace-refused.log" 2>&1
   REFUSED_STATUS=$?
-  [ "$REFUSED_STATUS" -eq 1 ] || fail "a replacement with a missing tmux exited $REFUSED_STATUS, not 1 (see $X/desktop-replace-refused.log)"
-  grep -q 'needs tmux' "$X/desktop-replace-refused.log" ||
-    fail "the refused replacement did not report its tmux preflight (see $X/desktop-replace-refused.log)"
-  kill -0 "$SUPERVISOR_PID" 2>/dev/null || fail "a replacement that refused over tmux stopped the old supervisor"
+  [ "$REFUSED_STATUS" -eq 1 ] || fail "a replacement that cannot run sessions exited $REFUSED_STATUS, not 1 (see $X/desktop-replace-refused.log)"
+  grep -q 'cannot be used as one PATH entry' "$X/desktop-replace-refused.log" ||
+    fail "the refused replacement did not report its prerequisite check (see $X/desktop-replace-refused.log)"
+  kill -0 "$SUPERVISOR_PID" 2>/dev/null || fail "a replacement that refused stopped the old supervisor"
   [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$X/state/desktop-supervisor.json")" = "$SUPERVISOR_PID" ] ||
-    fail "a replacement that refused over tmux changed the record"
+    fail "a replacement that refused changed the record"
   rm -f "$DESKTOP_READY"
   DISPLAY=$DISP \
     PATH="/usr/bin:/bin" \
-    FARHELM_TMUX="$SENTINEL_TMUX" \
-    FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
     RUST_LOG="info,farhelm_ui::desktop=debug" \
     FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
     FARHELM_DESKTOP_STATE_DIR="$X/state" \
@@ -1994,8 +1761,6 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
   rm -f "$DESKTOP_READY"
   DISPLAY=$DISP \
     PATH="/usr/bin:/bin" \
-    FARHELM_TMUX="$SENTINEL_TMUX" \
-    FARHELM_SMOKE_TMUX_MARKER="$X/tmux-override-used" \
     RUST_LOG="info,farhelm_ui::desktop=debug" \
     FARHELM_DESKTOP_SMOKE_READY="$DESKTOP_READY" \
     FARHELM_DESKTOP_STATE_DIR="$X/state" \
@@ -2026,25 +1791,18 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
   wait "$(cat "$X/desktop.pid")" 2>/dev/null
   rm -f "$X/desktop.pid"
 
-  # Every tmux-preflight leg so far starts from an EMPTY state directory and
-  # so only ever exercises `DesktopBootstrap::start`'s `Absent` branch — a
-  # missing or below-floor `FARHELM_TMUX` refuses because there was no
-  # supervisor around to make that irrelevant. `start`'s own doc comment
-  # claims a stronger rule: an ANSWERING supervisor is an ownership boundary
-  # reused exactly as it stands, so its tmux is authoritative regardless of
-  # what this process's own `FARHELM_TMUX` says — the preflight must not
-  # even run. Proving that needs a real existing supervisor, which is what
-  # this leg spins up by hand: a bare `farhelm supervisor run` (it runs no
-  # tmux), then a fresh desktop process pointed at that SAME state directory
-  # with a `FARHELM_TMUX` that names a path nothing occupies. If the
-  # preflight ever moved ahead of discovery (or discovery stopped being
-  # tried first), this candidate would be exactly what makes it refuse.
+  # An ANSWERING supervisor the app did not start is an ownership boundary:
+  # `DesktopBootstrap::start` reuses it exactly as it stands. Proving that
+  # needs a real existing supervisor, which is what this leg spins up by
+  # hand: a bare `farhelm supervisor run`, then a fresh desktop process
+  # pointed at that SAME state directory, which must come up beside it
+  # without starting or recording a supervisor of its own.
   #
   # Reuses the Xvfb/openbox display already up for the main launch above —
   # dioxus-desktop still needs one to reach this supervisor at all, even
   # though this leg drives no window and clicks nothing. The readiness file
   # and authenticated API request prove the embedded helm started.
-  echo "== an answering supervisor bypasses the desktop's own tmux preflight"
+  echo "== an answering supervisor the app did not start is reused"
   ANSWERING_STATE="$X/answering-state"
   mkdir -m 0700 "$ANSWERING_STATE"
   ANSWERING_SUPERVISOR_LOG="$X/answering-supervisor.log"
@@ -2079,17 +1837,12 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
     *) fail "the planted terminal host is not running as one: $ANSWERING_HOST" ;;
   esac
 
-  # A path inside this run's own private directory, deliberately never
-  # created — the same reasoning as the missing-tmux preflight leg above
-  # applies here: a global path like `/nonexistent/tmux` could exist on
-  # some machine and defeat the point. The embedded helm chooses its own
-  # fresh loopback port, published through the debug-only readiness seam.
-  ANSWERING_BAD_TMUX="$X/answering-bad-tmux/tmux"
+  # The embedded helm chooses its own fresh loopback port, published through
+  # the debug-only readiness seam.
   ANSWERING_READY_PATH="$X/answering-ready.json"
   rm -f "$ANSWERING_READY_PATH"
   ANSWERING_DESKTOP_LOG="$X/answering-desktop.log"
   DISPLAY=$DISP \
-    FARHELM_TMUX="$ANSWERING_BAD_TMUX" \
     FARHELM_DESKTOP_SMOKE_READY="$ANSWERING_READY_PATH" \
     FARHELM_DESKTOP_STATE_DIR="$ANSWERING_STATE" \
     FARHELM_DESKTOP_FARHELM="$BUILT_FARHELM" \
@@ -2110,14 +1863,13 @@ assert any(h["kind"] == "local" and h["state"]["phase"] == "connected" for h in 
   read_desktop_ready "$ANSWERING_READY_PATH"
   curl_auth -sf --max-time 5 "$API/api/hosts" >/dev/null ||
     fail "desktop against an answering supervisor could not authenticate its native API"
-  # The preflight's refusal text ("needs tmux ...") naming the bad
-  # candidate would be definitive proof it ran; its absence plus the
-  # candidate never existing (checked next) is what proves it did not.
-  if grep -q "needs tmux" "$ANSWERING_DESKTOP_LOG"; then
-    fail "desktop against an answering supervisor ran its own tmux preflight and refused (see $ANSWERING_DESKTOP_LOG)"
-  fi
-  [ ! -e "$ANSWERING_BAD_TMUX" ] ||
-    fail "the bad FARHELM_TMUX candidate must never be invoked when a supervisor already answers"
+  # Reused, not replaced: the hand-started supervisor still runs, and the app
+  # wrote no record of a supervisor of its own, which it does for every one
+  # it starts.
+  kill -0 "$ANSWERING_SUPERVISOR_PID" 2>/dev/null ||
+    fail "desktop against an answering supervisor stopped it (see $ANSWERING_DESKTOP_LOG)"
+  [ ! -e "$ANSWERING_STATE/desktop-supervisor.json" ] ||
+    fail "desktop against an answering supervisor started one of its own (see $ANSWERING_DESKTOP_LOG)"
 
   stop_answering
   [ "${#HOSTS_NOT_STOPPED[@]}" -eq 0 ] ||

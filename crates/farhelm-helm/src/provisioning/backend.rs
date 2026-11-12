@@ -161,13 +161,8 @@ pub(crate) struct Reach {
     /// The host's OWN tmux executable, absolute, when it cleared the
     /// floor — `None` whenever `needs_tmux` is set, and always on a Mac.
     ///
-    /// The whole executable, not just its directory, because the plan has
-    /// to be able to name it: an accepted host tmux is pinned into the
-    /// unit as `FARHELM_TMUX`, so a leftover private tmux in Farhelm's own
-    /// lib directory cannot shadow the binary provisioning approved. The
-    /// directory this used to carry is still derived from it for the
-    /// unit's PATH, which serves the different purpose of letting a
-    /// user-manager process find tmux at all.
+    /// The whole executable, not just its directory, because uninstall's
+    /// stop runs it by name to end the private tmux server.
     pub(super) host_tmux: Option<PathBuf>,
 }
 

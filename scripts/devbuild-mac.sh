@@ -408,17 +408,6 @@ cargo-zigbuild --version >/dev/null 2>&1 \
   || need "cargo-zigbuild" "cargo install --locked cargo-zigbuild"
 command -v zig >/dev/null 2>&1 || need "zig" "brew install zig"
 
-# Not a build tool: the app refuses to start without tmux, which its local
-# supervisor still requires for the sessions it started in tmux before new
-# terminals moved to terminal hosts. Checked here so that a build is not
-# wasted on a machine that cannot run it. The directories are the ones the
-# app itself searches besides PATH (`MACOS_TMUX_PREFIXES`), since an app
-# started from Finder has no shell PATH.
-if ! command -v tmux >/dev/null 2>&1 \
-  && ! [ -x /opt/homebrew/bin/tmux ] && ! [ -x /usr/local/bin/tmux ] && ! [ -x /opt/local/bin/tmux ]; then
-  need "tmux" "brew install tmux"
-fi
-
 if [ "${#missing_names[@]}" -gt 0 ]; then
   echo "missing prerequisites:" >&2
   for item in "${missing_names[@]}"; do

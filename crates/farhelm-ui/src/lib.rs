@@ -101,12 +101,6 @@
 //!   web_bug_triage.md) — a pure three-state health machine plus one
 //!   desktop-only probe loop that turns a dead bridge (MT-5 class) into a
 //!   single loud log line instead of a silent brick.
-//! - `tmux_probe`: the pure search order behind macOS's tmux discovery
-//!   (TODO.md's 2026-08-22 tmux floor decision, part 2) — GUI apps do not
-//!   inherit the shell PATH, so `desktop/tmux_preflight.rs` locates a Homebrew/MacPorts tmux
-//!   by checking known prefixes itself; this module is only the ordered
-//!   search, kept free of any filesystem or platform check so it is tested
-//!   on Linux CI rather than only on a Mac nobody runs in CI.
 //! - `rename`: `RenameDialog` around `RenameForm` — the list-owned modal
 //!   rename editor (PLAN_M5.md item 6's rename field, moved into the
 //!   dialog SPEC.md specifies; the ONE rename surface since the sidebar
@@ -203,14 +197,6 @@ mod window_chrome;
 mod workspace_trust;
 /// The loud confirmation a YOLO launch asks for on a host that asks first.
 mod yolo_confirm;
-// Same reasoning as `webview_watchdog` below: declared for every non-wasm
-// build so its search-order tests run under the plain `cargo test` that is
-// the suite's main gate, not only under the separate desktop-feature test
-// job. Its only caller is desktop.rs, hence the dead-code allowance when
-// that feature is off.
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg_attr(not(feature = "desktop"), allow(dead_code))]
-mod tmux_probe;
 // Declared for every non-wasm build, not just desktop, so the pure
 // state-machine core and its tests run under plain `cargo test` — the
 // command CI actually executes (the desktop feature only gets a `cargo

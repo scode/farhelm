@@ -2785,12 +2785,11 @@ journal cap and `MAX_SNAPSHOT`.
 
 This section covers the old terminals: the private tmux server releases before terminal hosts ran every terminal in,
 which later releases kept running beside terminal hosts. This release ends them at startup (below); every terminal runs
-in a terminal host ("Terminal host"). Installation keeps requiring, installing and version-checking tmux exactly as
-below for now (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`). Remote Mac
-provisioning is the exception: it supports only terminal hosts and has no tmux inspection, payload, installation,
-version check or uninstall action. This does not change the desktop app's local tmux preflight. The running supervisor
+in a terminal host ("Terminal host"). Neither the desktop app nor `farhelm helm setup` requires, looks for or names a
+tmux, and neither does the installer. Linux provisioning still checks for one and installs one, as below; remote Mac
+provisioning has no tmux inspection, payload, installation, version check or uninstall action. The running supervisor
 runs no tmux at all, and its driver of the old terminals is gone: what remains is the startup step that ends them
-(below), and the installation's tmux policy after it.
+(below), and the version policy Linux provisioning applies after it.
 
 Ending the old terminals (`service::core::old_terminals`) is the one tmux-related step the running supervisor keeps, and
 works whether or not any tmux program exists. A supervisor that holds its state directory's claim runs it after the
@@ -2830,7 +2829,8 @@ start anyway and treat old sessions as ended, accepting that a Restart could the
 running), and the step's own work, the server's end and the sweeps (not the reload's host discovery between them), has
 one 15-second budget (`OLD_TERMINALS_DEADLINE`), half the 30 seconds the helm allows a supervisor it restarted during
 Update to come back (`farhelm-helm`'s provisioning `ATTACH_TIMEOUT`). `FARHELM_TMUX` is no longer passed to a terminal
-host's child (`host_launch`'s `NOT_INHERITED`); installed units keep setting it until their next setup or Update.
+host's child (`host_launch`'s `NOT_INHERITED`). Nothing this release starts or renders sets it, but a supervisor unit an
+earlier release wrote keeps setting it until its next setup or Update; the supervisor ignores it.
 
 The native desktop stores a versioned physical-pixel outer-frame rectangle and maximized flag separately from client
 credentials. Bootstrap's already resolved state directory is reused, so persistence cannot silently move to the current
@@ -2846,52 +2846,33 @@ state. The final state is written through a private sibling file and rename on c
 event-loop teardown; the rename is atomic for readers but parent-directory durability across a machine crash is best
 effort. Failures warn without preventing startup.
 
-Farhelm requires tmux at or above a version FLOOR that is, by policy, the exact release the release gate's tmux tests
-run against — 3.7c as of this writing, pinned in `.github/release/source-pins.env`, with the supervisor's floor constant
-tested to equal that pin so the two cannot drift. This replaced the original "any tmux ≥ 3.3" policy on 2026-08-22 (the
-decision record lived in TODO.md until the floor shipped). The original policy treated versions above 3.3 as
-interchangeable, and experience said otherwise: the supervisor's driver is full of behavior audited per version (3.3a,
-3.4, and 3.7b each differ in ways that shaped real code), a production distro 3.4 server died in BUGS.md's `fatal()`
-abort shape on 2026-08-19, and BUGS.md records the same abort class reproduced on distro 3.6. The floor is therefore
-DESIGNED to exclude many current distro packages (Ubuntu 24.04 ships 3.4, 26.04 about 3.6, Debian 13 3.5a; some Fedora
-releases already ship 3.7c): on Linux this is close to always-bundled in practice. Always bundling was considered and
-rejected all the same: it loses distro security patching of tmux and libevent (where the 2026-08-16 3.7b segfault
-lived), concentrates a bad build's blast radius on every host at once, needs a static build per platform (the darwin one
-has never completed), and a from-source install has no bundle anyway — so the version check is the policy and the bundle
-is one way of meeting it. Versions above the floor are accepted in tmux's own release spelling (`major.minor` plus at
-most one patch letter); a version newer than the pinned one earns a one-time warning that it is unaudited, never a
-refusal. Anything the parser cannot read exactly — `next-3.8`, release candidates, distro-decorated strings — is refused
-rather than guessed about: a version Farhelm cannot name is one nobody audited it against.
+Linux provisioning requires a host's tmux at or above a version FLOOR that is, by policy, the exact release the release
+gate's tmux tests run against — 3.7c as of this writing, pinned in `.github/release/source-pins.env`, with the
+supervisor's floor constant tested to equal that pin so the two cannot drift. This replaced the original "any tmux ≥
+3.3" policy on 2026-08-22 (the decision record lived in TODO.md until the floor shipped). The original policy treated
+versions above 3.3 as interchangeable, and experience said otherwise: the supervisor's driver is full of behavior
+audited per version (3.3a, 3.4, and 3.7b each differ in ways that shaped real code), a production distro 3.4 server died
+in BUGS.md's `fatal()` abort shape on 2026-08-19, and BUGS.md records the same abort class reproduced on distro 3.6. The
+floor is therefore DESIGNED to exclude many current distro packages (Ubuntu 24.04 ships 3.4, 26.04 about 3.6, Debian 13
+3.5a; some Fedora releases already ship 3.7c): on Linux this is close to always-bundled in practice. Always bundling was
+considered and rejected all the same: it loses distro security patching of tmux and libevent (where the 2026-08-16 3.7b
+segfault lived), concentrates a bad build's blast radius on every host at once, needs a static build per platform (the
+darwin one has never completed), and a from-source install has no bundle anyway — so the version check is the policy and
+the bundle is one way of meeting it. Versions above the floor are accepted in tmux's own release spelling (`major.minor`
+plus at most one patch letter); a version newer than the pinned one is accepted, never refused, although nobody has
+audited Farhelm against it. Anything the parser cannot read exactly — `next-3.8`, release candidates, distro-decorated
+strings — is refused rather than guessed about: a version Farhelm cannot name is one nobody audited it against.
 
-How the binary is chosen: `FARHELM_TMUX`, else the bare name `tmux` off `PATH` (`farhelm helm setup` also takes
-`--tmux <path>` above both). The supervisor runs no tmux, and `farhelm supervisor run` no longer takes a `--tmux` of its
-own; the floor stays the installation's requirement, checked by the installer, the desktop app's preflight below, Linux
-provisioning and `farhelm helm setup`, each refusing by name (binary path, version found, floor). The override is "you
-own the substrate": a way to run something newer or differently built, not a supported configuration. Linux releases
-bundle a private musl tmux build per architecture, which provisioning installs only when the host has nothing acceptable
-(Linuxbrew's tmux is the documented alternative); either way the unit provisioning writes names the accepted binary
-through `FARHELM_TMUX`, so a private build left behind by an earlier installation cannot shadow a host tmux that was
-accepted later. The Mac app bundles none: the desktop app takes an ambient `FARHELM_TMUX` as given, otherwise probes
-`/opt/homebrew/bin`, `/usr/local/bin` (Homebrew on the two architectures) and `/opt/local/bin` (MacPorts) in that order
-— because GUI apps do not inherit the shell `PATH` — and hands a hit to its managed supervisor through `FARHELM_TMUX`;
-with no hit it sets nothing and the supervisor's ordinary `PATH` lookup applies. Homebrew's tmux is the recommended way
-to meet the floor on a Mac, not the only one the code accepts.
+The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`. Linux
+provisioning checks the host's own tmux against the floor. Linux releases bundle a private musl tmux build per
+architecture, which provisioning installs only when the host has nothing acceptable (Linuxbrew's tmux is the documented
+alternative). The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no
+tmux directory on `PATH`: its `PATH` is the directory of the Farhelm program it runs, then
+`/usr/local/bin:/usr/bin:/bin` (`farhelm_helm::units::render_supervisor_unit`). The Mac app bundles none and needs none,
+and hands its managed supervisor no tmux.
 
-The desktop app additionally owns a PREFLIGHT of its own: before it spawns its managed supervisor — never before, and
-never for a supervisor it merely discovers already answering — it probes the SAME candidate it is about to hand that
-child through `FARHELM_TMUX` and applies the version floor itself (`farhelm_ui::desktop::run_tmux_preflight_or_exit`). A
-missing or below-floor result prints one plain stderr message naming what was tried and how to fix it, then exits 1,
-before the state directory holds anything beyond the bare private directory itself (created up front so discovery's own
-probe has a valid path to operate against), before the embedded helm starts, and before the managed supervisor is ever
-spawned. Any OTHER probe failure this preflight has no tailored wording for (a permission-denied spawn, a nonzero `-V`,
-unparseable `-V` output) falls through to the desktop's ordinary bootstrap-error path instead. Discovery runs FIRST
-specifically because an answering supervisor is an ownership boundary: it was started with whatever `FARHELM_TMUX` or
-login-shell `PATH` it had, which this Finder-launched process never sees, and refusing startup over a dependency this
-process does not need would reject a supported setup. The preflight is how the installation's tmux requirement holds on
-the Mac, although the supervisor it starts runs no tmux.
-
-Every pre-window desktop refusal keeps that exact stderr message and exit status, and on macOS also sends it to Console
-and a critical native alert so a Finder or Spotlight launch has a visible diagnostic.
+Every pre-window desktop refusal prints one plain `farhelm-desktop: ...` stderr line and exits 1, and on macOS also
+sends it to Console and a critical native alert so a Finder or Spotlight launch has a visible diagnostic.
 
 ## Helm ↔ supervisor transport: system ssh + stdio protocol
 
@@ -7119,7 +7100,7 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   live on as per-host registry fields, and creation is `POST /api/sessions`, which is where the host selection belongs.
   A release build compiles its own web UI in (`FARHELM_UI_DIST` at build time); `--ui-dist` still overrides it at
   runtime, and an ordinary developer build with neither serves the API alone.
-- `farhelm helm setup [--state-dir DIR] [--port N] [--tmux PATH] [--no-supervisor] [--dry-run]`, and
+- `farhelm helm setup [--state-dir DIR] [--port N] [--no-supervisor] [--dry-run]`, and
   `farhelm helm setup --uninstall [--dry-run]` — write, enable, and remove this machine's systemd user units for the
   helm and its supervisor. Linux only (it exits 2 elsewhere, pointing macOS at the desktop app). One state directory is
   resolved from setup's own environment and pinned into both units, so a shell-only `XDG_STATE_HOME` cannot leave the
@@ -7127,11 +7108,12 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   from a different directory than the one this environment selects. The units are rendered from the templates in
   `crates/farhelm-helm/units/`, the same ones remote provisioning fills in, and every file setup writes starts with
   `# managed-by: farhelm helm setup`: setup overwrites or removes only files carrying that marker, and refuses anything
-  else rather than replacing it. It never installs tmux — a tmux below the floor, or none at all, is a refusal naming
-  what it found. The matching rule on the helm side is that the hosts panel never installs or updates a supervisor on
-  the helm's own machine at all: an absent one is answered with "run `farhelm helm setup` here", a unit already running
-  that same binary is named as setup's or its author's and left alone, and a supervisor that ANSWERS is discovered and
-  registered exactly as a remote one is.
+  else rather than replacing it. It neither needs nor looks for tmux: the supervisor unit names none and its `PATH` is
+  the installed `farhelm`'s directory plus a fixed base ("Terminal substrate: private tmux server"). The matching rule
+  on the helm side is that the hosts panel never installs or updates a supervisor on the helm's own machine at all: an
+  absent one is answered with "run `farhelm helm setup` here", a unit already running that same binary is named as
+  setup's or its author's and left alone, and a supervisor that ANSWERS is discovered and registered exactly as a remote
+  one is.
 - `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
@@ -7538,31 +7520,31 @@ reused. The whole decision, and any stop or start, happens under the helm's `hel
 is read or anything is discovered (waiting up to five seconds for a brief holder, as the helm does) and released just
 before the launch's own embedded helm takes it: a launch beside an open app refuses without touching anything, and two
 launches cannot act on what they saw before the other changed it. Every writer and remover of the record holds that
-lock, uninstall included. A replacement does everything that could refuse first: the new supervisor's prerequisites (the
-session program path and the tmux preflight), a `--version` run of the program it would start (a file that cannot run
-would otherwise look like a predecessor that does not answer), and opening its log. A discovery that fails outright
-counts as not answering only for the app's own supervisor. One that runs the current program and does not answer,
-whether nothing listens or its hello fails, may still be starting: before binding its socket it waits for the state
-directory or migrates its database, and after binding it runs startup sweeps (the launch directory, the repository
-cache, attachment reconciliation) before it accepts. So the app first gives it `MANAGED_SUPERVISOR_SERVING_WAIT` to
-answer, reuses it if it does, and only then treats it as wedged. Interrupting it after the wait is acceptable because
-those sweeps survive interruption (the repository-cache sweep renames before it removes); post-bind startup work that
-could not survive a kill would change that. Then the app stops the old one with SIGTERM, waits `ORDERLY_STOP_GRACE` (the
-output-client shutdown budget plus five seconds), kills it only after that, removes its record once it is confirmed
-gone, and starts the new one, with `STATE_DIR_CLAIM_WAIT` covering the handover. Confirmed gone means that no thread of
-it can run any more, not that its main thread reads as exited: on Linux an exiting process's main thread can read as a
-zombie while its other threads are still exiting, after a kill or an orderly exit alike, and until the last of them has
-finished the process holds the state directory's lock and its socket (connections to which the kernel then resets
-unanswered); a successor started in that window came up read-only and never served. A stop that finds the process
-already gone, or that sees it go on its own, waits for that too, and a launch whose record names a process that reads as
-gone waits a few seconds for it to finish before it looks for a supervisor; a supervisor still exiting after a stop's
-few seconds refuses the launch. The new supervisor's claim also treats a connection dropped before the hello as a holder
-on its way out, not as one serving, for whatever else starts a supervisor without that wait. The log is rotated only
-then, when a supervisor is about to start, and a rotation that fails falls back to appending. A supervisor started by
-hand in that window races the new one for the state directory; if it wins, this launch fails to start, and the next
-launch reuses it. The record is written right after the spawn, so a crash in between leaves a supervisor the app treats
-as not its own: reused while it answers, and not replaced on an update until it exits. A long-lived supervisor keeps its
-version's lock, so pruning keeps that version until the supervisor is replaced.
+lock, uninstall included. A replacement does everything that could refuse first: the new supervisor's prerequisites (a
+session program path the shell can use), a `--version` run of the program it would start (a file that cannot run would
+otherwise look like a predecessor that does not answer), and opening its log. A discovery that fails outright counts as
+not answering only for the app's own supervisor. One that runs the current program and does not answer, whether nothing
+listens or its hello fails, may still be starting: before binding its socket it waits for the state directory or
+migrates its database, and after binding it runs startup sweeps (the launch directory, the repository cache, attachment
+reconciliation) before it accepts. So the app first gives it `MANAGED_SUPERVISOR_SERVING_WAIT` to answer, reuses it if
+it does, and only then treats it as wedged. Interrupting it after the wait is acceptable because those sweeps survive
+interruption (the repository-cache sweep renames before it removes); post-bind startup work that could not survive a
+kill would change that. Then the app stops the old one with SIGTERM, waits `ORDERLY_STOP_GRACE` (the output-client
+shutdown budget plus five seconds), kills it only after that, removes its record once it is confirmed gone, and starts
+the new one, with `STATE_DIR_CLAIM_WAIT` covering the handover. Confirmed gone means that no thread of it can run any
+more, not that its main thread reads as exited: on Linux an exiting process's main thread can read as a zombie while its
+other threads are still exiting, after a kill or an orderly exit alike, and until the last of them has finished the
+process holds the state directory's lock and its socket (connections to which the kernel then resets unanswered); a
+successor started in that window came up read-only and never served. A stop that finds the process already gone, or that
+sees it go on its own, waits for that too, and a launch whose record names a process that reads as gone waits a few
+seconds for it to finish before it looks for a supervisor; a supervisor still exiting after a stop's few seconds refuses
+the launch. The new supervisor's claim also treats a connection dropped before the hello as a holder on its way out, not
+as one serving, for whatever else starts a supervisor without that wait. The log is rotated only then, when a supervisor
+is about to start, and a rotation that fails falls back to appending. A supervisor started by hand in that window races
+the new one for the state directory; if it wins, this launch fails to start, and the next launch reuses it. The record
+is written right after the spawn, so a crash in between leaves a supervisor the app treats as not its own: reused while
+it answers, and not replaced on an update until it exits. A long-lived supervisor keeps its version's lock, so pruning
+keeps that version until the supervisor is replaced.
 
 A session's window, or a terminal host's child for an agent in a host, runs the supervisor's own versioned `farhelm`,
 not the forwarder, so in this layout the supervisor starts it as `<farhelm> internal hold <spec> -- <shell argv>`
@@ -7685,11 +7667,10 @@ would see. The installer's interface to the updater is a permanent contract, par
 `FARHELM_INSTALL_SUMS_FILE`, and with a checksum file that may list more entries than the installer needs. A later
 installer that renames or drops either variable, or rejects extra entries, breaks every installed app's updates. The
 install step is one function that takes the downloader and the runner (`install_release`), which is the seam its tests
-drive with signed fixtures. Its output goes to the app's log. A Finder-launched app has no tmux on its `PATH`, so that
-log shows the installer's tmux advice, harmlessly. Success is judged only by `Contents/Versions/installed` naming the
-target version once the installer has exited, never by its exit status alone. The installer runs in its own process
-group, with stdin from `/dev/null` and its output written to a file beside the script rather than to a pipe the app
-reads, so that quitting the app mid-install neither kills nor signals it: an installer killed by a broken pipe would
+drive with signed fixtures. Its output goes to the app's log. Success is judged only by `Contents/Versions/installed`
+naming the target version once the installer has exited, never by its exit status alone. The installer runs in its own
+process group, with stdin from `/dev/null` and its output written to a file beside the script rather than to a pipe the
+app reads, so that quitting the app mid-install neither kills nor signals it: an installer killed by a broken pipe would
 skip its own cleanup and leave its lock behind, and every later install, automatic or by hand, would refuse until
 someone removed it. The worker copies that file into the app's log once the installer exits.
 

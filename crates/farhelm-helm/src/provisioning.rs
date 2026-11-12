@@ -3926,74 +3926,6 @@ mod tests {
         assert_eq!(row.host_identity, None);
     }
 
-    /// An accepted HOST tmux must survive a stale private one sitting in
-    /// Farhelm's own lib directory.
-    ///
-    /// This is the exact shape of a live shadowing bug. When the host's
-    /// tmux clears the floor, provisioning deliberately skips installing
-    /// the private payload — but the unit still puts Farhelm's lib
-    /// directory first on PATH, so an obsolete `tmux` left there by an
-    /// earlier install would win the name lookup. Provisioning would then
-    /// report success, decline to replace that binary, and restart the
-    /// supervisor straight onto it: a below-floor substrate reached
-    /// through the ordinary upgrade path, with nothing in the run record
-    /// suggesting anything went wrong.
-    ///
-    /// So the plan is required to NAME the accepted executable
-    /// (`FARHELM_TMUX`) rather than describe where to look for one, and
-    /// to still install no tmux payload. The stale file on disk is a
-    /// fixture, not an input — the fix must hold whether or not planning
-    /// ever looks at the lib directory, which is why the assertion is on
-    /// the frozen unit text.
-    #[farhelm_testtrace::test]
-    async fn update_pins_the_accepted_host_tmux_over_a_stale_private_one() {
-        let harness = harness().await;
-        let root = tempfile::tempdir().unwrap();
-        let lib_dir = root.path().join(".local/lib/farhelm");
-        tokio::fs::create_dir_all(&lib_dir).await.unwrap();
-        tokio::fs::write(lib_dir.join("tmux"), b"an obsolete private tmux")
-            .await
-            .unwrap();
-
-        let host = harness
-            .store
-            .add_ssh_host("stale-tmux.example", None, None)
-            .await
-            .unwrap();
-        harness.manager.sync_registry().await.unwrap();
-        // FakeBackend::absent reports a host tmux at /usr/bin/tmux that
-        // already cleared the floor, which is what makes the payload
-        // unnecessary and the shadow possible.
-        let backend = FakeBackend::absent(root.path().to_path_buf());
-        let service = service(&harness, backend.clone(), root.path());
-
-        let preview = service.plan_update(host).await.unwrap();
-
-        let unit = preview
-            .plan
-            .actions
-            .iter()
-            .find_map(|action| match action {
-                ProvisioningAction::WriteUnit { content, .. } => Some(content.clone()),
-                _ => None,
-            })
-            .expect("every plan writes the supervisor unit");
-        assert!(
-            unit.contains("Environment=\"FARHELM_TMUX=/usr/bin/tmux\""),
-            "the unit must drive the accepted host tmux, not whatever PATH finds: {unit}"
-        );
-        assert!(
-            !preview.plan.actions.iter().any(|action| matches!(
-                action,
-                ProvisioningAction::InstallPayload {
-                    payload: PayloadKind::Tmux,
-                    ..
-                }
-            )),
-            "an accepted host tmux must still skip the private payload"
-        );
-    }
-
     /// Manual and backend planning failures retain no UPDATE claim; once
     /// inspection recovers, the same host can immediately produce a plan.
     #[farhelm_testtrace::test]
@@ -8010,9 +7942,8 @@ mod tests {
             panic!("x86_64 Ubuntu with a user manager is supported")
         };
         assert!(!usable_tmux.needs_tmux);
-        // The EXECUTABLE, not its directory: the plan pins it into the
-        // unit as FARHELM_TMUX so a leftover private tmux cannot shadow
-        // the binary accepted here.
+        // The EXECUTABLE, not its directory: uninstall runs it to end the
+        // private tmux server.
         assert_eq!(usable_tmux.host_tmux, Some(PathBuf::from("/usr/bin/tmux")));
         // The version clears the floor here, so a relative tmux path is
         // the only thing left that can force the payload.
@@ -10409,18 +10340,6 @@ mod tests {
             panic!("the unit follows both payloads")
         };
         assert!(content.contains(&format!("PATH={}", root.path().join("lib").display())));
-        // The installed payload is named outright, not merely reachable:
-        // the same PATH-shadowing hazard that can hide an accepted host
-        // tmux (see `update_pins_the_accepted_host_tmux_over_a_stale_
-        // private_one`) applies in reverse to anything else called `tmux`
-        // that lands earlier in the search.
-        assert!(
-            content.contains(&format!(
-                "Environment=\"FARHELM_TMUX={}\"",
-                root.path().join("lib/tmux").display()
-            )),
-            "{content}"
-        );
     }
 
     /// The confirmation's host line names whichever distro the reach probe
@@ -11004,7 +10923,6 @@ mod tests {
             let unit = crate::units::render_supervisor_unit(&crate::units::SupervisorUnitInputs {
                 farhelm: &farhelm,
                 state_dir: &root.path().join("state"),
-                tmux: Path::new("/usr/bin/tmux"),
             })
             .unwrap();
             let backend = FakeBackend::absent(root.path().to_path_buf());
@@ -11087,7 +11005,6 @@ mod tests {
                 crate::units::render_supervisor_unit(&crate::units::SupervisorUnitInputs {
                     farhelm: &other,
                     state_dir: &root.path().join("state"),
-                    tmux: Path::new("/usr/bin/tmux"),
                 })
                 .unwrap(),
             )),
@@ -11372,7 +11289,6 @@ mod tests {
             crate::units::render_supervisor_unit(&crate::units::SupervisorUnitInputs {
                 farhelm: &farhelm,
                 state_dir: &root.path().join("state"),
-                tmux: Path::new("/usr/bin/tmux"),
             })
             .unwrap(),
         )));
@@ -11467,12 +11383,7 @@ mod tests {
     /// `crate::units`, which owns them.
     #[farhelm_testtrace::test]
     fn the_provisioned_unit_carries_policy_and_no_ownership_marker() {
-        let unit = supervisor_unit(
-            Path::new("/tmp/%h/farhelm"),
-            Path::new("/tmp/state"),
-            Path::new("/tmp/%h/tmux"),
-        )
-        .unwrap();
+        let unit = supervisor_unit(Path::new("/tmp/%h/farhelm"), Path::new("/tmp/state")).unwrap();
         assert!(unit.contains("/tmp/%%h/farhelm"));
         assert!(unit.contains("PATH=/tmp/%%h:"));
         assert!(unit.contains("KillMode=process"));
@@ -11480,12 +11391,7 @@ mod tests {
         assert!(!unit.contains('@'), "{unit}");
         assert!(!crate::units::is_managed(&unit), "{unit}");
         assert!(
-            supervisor_unit(
-                Path::new("/tmp/farhelm"),
-                Path::new("/tmp/state\nother"),
-                Path::new("/tmp/tmux"),
-            )
-            .is_err()
+            supervisor_unit(Path::new("/tmp/farhelm"), Path::new("/tmp/state\nother")).is_err()
         );
     }
 

@@ -683,27 +683,25 @@ that its required systemd or SSH substrate ran.
   remain product assets while only the body renderer module and WASM are excluded.
 - `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the x86_64 Linux release gate runs this
   in the job's shared target tree with `DESKTOP_SMOKE_WEB_DIST` naming the release's own web bundle, so it embeds the
-  bundle that ships instead of building one; before any of it needs Xvfb, four pre-display process legs drive
-  `farhelm-desktop`'s own entry point directly: a missing tmux and a below-floor tmux each refuse with one exact plain
-  stderr line and exit status 1 (the app's own preflight, run before it would spawn its managed supervisor), and a
-  non-tmux bootstrap failure (an unusable state directory) exits 1 through the ordinary fallback path with no panic. The
-  non-pixel Xvfb integration gate that follows covers the embedded helm, managed supervisor, desktop authentication, the
-  tmux override reaching the managed supervisor (read from its environment) while it runs no tmux and starts no tmux
-  server, since its sessions are all new terminals (the sentinel tmux logs only the preflight's `-V`), the supervisor
-  outliving a hard exit and an ordinary quit (reused, then replaced by a launch whose program file changed, with a
-  session surviving the replacement), a second launch with another program refusing beside the open app without stopping
-  its supervisor, a replacement that would fail its tmux preflight stopping nothing, a frozen (SIGSTOP) supervisor being
-  replaced with a kill after the grace, restart persistence, that every asset the window requested went through the
-  desktop asset handler, and that the teardown's terminal-host stop ends a real host planted in the answering-supervisor
-  leg's state directory. The app's supervisor creates its sessions in terminal hosts, as every shipped one does, and the
-  smoke requires every session it creates to be a host row; a session's terminal counts as alive by its database row
-  (`terminal_kind` and `terminal_address`: a listening host socket in the kernel's socket table, or a tmux session for a
-  tmux row, named from the session's id). Which session the relaunched window holds open, and that a token rotation left
-  that attachment open, are read from the embedded helm's attachment trace (the `farhelm_helm::terminal_attachments`
-  debug events, turned on through the launches' `RUST_LOG`), and after the supervisor replacement the kept session is
-  attached as a grid viewer through the replacement and a typed command must write its file. API checks retain
-  host-qualified session references; row and scope checks use their local session IDs. The optional coordinate-driven
-  leg is not part of CI; it checks typed input through a file the typed command writes.
+  bundle that ships instead of building one; before any of it needs Xvfb, one pre-display process leg drives
+  `farhelm-desktop`'s own entry point directly: a bootstrap failure (an unusable state directory) exits 1 with one plain
+  `farhelm-desktop: ...` line and no panic. The non-pixel Xvfb integration gate that follows covers the embedded helm,
+  managed supervisor, desktop authentication, the supervisor outliving a hard exit and an ordinary quit (reused, then
+  replaced by a launch whose program file changed, with a session surviving the replacement), a second launch with
+  another program refusing beside the open app without stopping its supervisor, a replacement that would fail its
+  prerequisites (a program reached through a directory whose name holds `:`) stopping nothing, a frozen (SIGSTOP)
+  supervisor being replaced with a kill after the grace, a supervisor the app did not start reused rather than replaced,
+  restart persistence, that every asset the window requested went through the desktop asset handler, and that the
+  teardown's terminal-host stop ends a real host planted in the answering-supervisor leg's state directory. The app's
+  supervisor creates its sessions in terminal hosts, as every shipped one does, and the smoke requires every session it
+  creates to be a host row; a session's terminal counts as alive by its database row (`terminal_kind` and
+  `terminal_address`: a listening host socket in the kernel's socket table, or a tmux session for a tmux row, named from
+  the session's id). Which session the relaunched window holds open, and that a token rotation left that attachment
+  open, are read from the embedded helm's attachment trace (the `farhelm_helm::terminal_attachments` debug events,
+  turned on through the launches' `RUST_LOG`), and after the supervisor replacement the kept session is attached as a
+  grid viewer through the replacement and a typed command must write its file. API checks retain host-qualified session
+  references; row and scope checks use their local session IDs. The optional coordinate-driven leg is not part of CI; it
+  checks typed input through a file the typed command writes.
 - `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` — optional Linux native appearance integration using the
   ordinary owned Xvfb/openbox setup. Four fresh/stored dark/light cases check native media-query premises, palette
   before renderer content, real Settings choices, private WebKit profile persistence, Inter, embedded assets and the
@@ -734,13 +732,13 @@ that its required systemd or SSH substrate ran.
   passed through the shell, updates side by side and interrupted updates finished by a Terminal run or an older app's
   updater (the write order stopped after each step is covered by the Rust module tests of
   `farhelm_supervisor::installation::install`), the forwarder, 404, checksums, malformed archives, version
-  normalization, missing prerequisites, exact closing messages and tmux advice, terminal styling/progress and plain
-  redirected output, app layout and ownership/recovery. Linux refuses before downloading or writing; old releases
-  (without app resources, or from before the side-by-side layout) refuse before anything changes. Nothing outside
-  `~/.local/bin` and `~/Applications/Farhelm.app` changes, and no service manager runs. Every invocation uses `env -i`
-  with an explicit environment, never the harness process's own. Refused `/latest` cases attribute requests by their
-  scenario's origin path and report unexpected request lines, so delayed requests from another fixture cannot silently
-  become this install's request count.
+  normalization, missing prerequisites, exact closing messages, terminal styling/progress and plain redirected output,
+  app layout and ownership/recovery. Linux refuses before downloading or writing; old releases (without app resources,
+  or from before the side-by-side layout) refuse before anything changes. Nothing outside `~/.local/bin` and
+  `~/Applications/Farhelm.app` changes, and no service manager runs. Every invocation uses `env -i` with an explicit
+  environment, never the harness process's own. Refused `/latest` cases attribute requests by their scenario's origin
+  path and report unexpected request lines, so delayed requests from another fixture cannot silently become this
+  install's request count.
 - `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' --tmux none -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
   — macOS-only, after building the CLI: runs the actual installer and installed uninstaller against private fixture
   homes and release archives. Covers updates, legacy upgrade-floor refusal with the old installation preserved,

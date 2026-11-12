@@ -31,13 +31,6 @@ desktop app exists; on a Linux machine the helm is a user service and the UI is 
 Linux" below).
 
 - Install with the curl command above; on macOS it puts both `farhelm` and `farhelm-desktop` into `~/.local/bin`.
-- `brew install tmux`. Neither binary bundles tmux. Homebrew's (3.7c at the time of writing) is the recommended way to
-  meet the version floor, and `farhelm-desktop` looks for a tmux in the Homebrew and MacPorts prefixes itself, since GUI
-  apps do not see your shell's `PATH`; `FARHELM_TMUX` in its environment names one explicitly. Before starting its own
-  managed supervisor, `farhelm-desktop` checks the tmux it finds against the version floor; without an acceptable one it
-  refuses immediately with one plain message on its own stderr and quits — see the tmux NOTE below. Launched from a
-  terminal, that message is right there; launched from Finder or Spotlight, where there is no terminal, the same text
-  also appears in a critical alert and lands in Console under the `farhelm-desktop` tag.
 - Start `farhelm-desktop` (double-click it in Finder, or run `~/.local/bin/farhelm-desktop` from a terminal). It starts
   its embedded helm and a managed local supervisor, so the Mac itself is already a host; both stop when the app exits.
   The window is the app's only interface: its helm picks a fresh loopback port at each launch and serves no browser
@@ -75,11 +68,10 @@ network interface), and "add host" is discovery-first: if a supervisor is alread
 registered as-is and never restarted or replaced.
 
 NOTE on tmux: sessions run in Farhelm's own terminal hosts, not in tmux; the supervisor runs no tmux, and at startup
-ends the private tmux server earlier releases ran sessions in. The installation still checks for a tmux at or above
-3.7c, in tmux's own release spelling (`3.7c`, `3.8`; development builds such as `next-3.8` and distro-decorated versions
-are refused rather than guessed about): automatic setup checks the host's tmux and installs Farhelm's pinned static
-build when the host has nothing acceptable, and the desktop app checks the tmux it finds before starting its managed
-supervisor. `FARHELM_TMUX=/path/to/tmux` (or `farhelm helm setup --tmux`) names the binary those checks use.
+ends the private tmux server earlier releases ran sessions in. Neither the desktop app nor `farhelm helm setup` needs
+tmux. Automatic setup of a remote Linux host still checks the host's tmux against 3.7c, in tmux's own release spelling
+(`3.7c`, `3.8`; development builds such as `next-3.8` and distro-decorated versions are refused rather than guessed
+about), and installs Farhelm's pinned static build when the host has nothing acceptable.
 
 ### Linux hosts
 
@@ -146,10 +138,10 @@ AGENTS.md forbids agents from running them — or from restarting the helm's uni
 - Run `farhelm helm setup`. It writes the helm and supervisor systemd user units, enables and starts both, and prints
   the two hints below. `--dry-run` prints the units it would write and the commands it would run, and changes nothing;
   `--uninstall` removes the units it wrote. It owns only the files it wrote — a unit you wrote yourself makes it refuse
-  rather than replace it — and it never installs tmux. The helm unit it writes serves the web UI out of the binary, so
-  it expects a release build with the UI embedded. Beside the units it keeps two dot-files systemd ignores: a lock, so
-  two setups cannot run at once, and a short-lived `.<unit>.restart-pending` marker that makes a rerun finish a restart
-  an interrupted run still owed.
+  rather than replace it — and it neither needs nor installs tmux. The helm unit it writes serves the web UI out of the
+  binary, so it expects a release build with the UI embedded. Beside the units it keeps two dot-files systemd ignores: a
+  lock, so two setups cannot run at once, and a short-lived `.<unit>.restart-pending` marker that makes a rerun finish a
+  restart an interrupted run still owed.
 - Run `loginctl enable-linger "$USER"` so the helm can start at boot and survive logout, where the machine allows it.
 - Open `http://127.0.0.1:7433/` and paste the token printed by `farhelm helm token show`.
 - In the hosts panel, remote hosts are added exactly as in the quickstart above. The panel never installs a supervisor
