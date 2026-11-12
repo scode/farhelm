@@ -1,9 +1,8 @@
 This file carries the license notices for code that Farhelm ported from
 xterm.js and from Visual Studio Code into its own grid terminal and its
 supervisor's input encoder. The ports are Farhelm source, not vendored
-copies, so this notice stands on its own: it does not rely on the vendored
-xterm.js bundle (or its xterm-LICENSES.txt) shipping, and it stays when
-that bundle is removed.
+copies, so this notice stands on its own; xterm.js itself no longer
+ships with Farhelm.
 
 The code was ported from @xterm/xterm 6.0.0, its @xterm/addon-fit 0.11.0
 and @xterm/addon-web-links 0.12.0 add-ons, and the part of Visual Studio

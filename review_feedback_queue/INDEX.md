@@ -106,11 +106,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Releasing a held catalog or finishing a pending key mint during cleanup may start an untracked fake test session;
   adverse scheduling is unmeasured.
 
-- [`classic-mouse-snapshot-copy-blocks-later-links.md`](classic-mouse-snapshot-copy-blocks-later-links.md) — Copying in
-  a classic mouse-report snapshot may leave web clicks inert; native behavior is unverified. Additional reviewed scope:
-  After copying a forced local selection from a frozen terminal snapshot whose program enabled mouse reporting, ordinary
-  file-link clicks can keep doing nothing until the selection is explicitly cleared.
-
 - [`delayed-refusal-reopens-cancelled-replace-question.md`](delayed-refusal-reopens-cancelled-replace-question.md) — A
   delayed refusal may reopen a cancelled Replace question; a further affirmative answer is still required.
 
@@ -138,9 +133,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`removal-destination-collapses-distinguishing-spaces.md`](removal-destination-collapses-distinguishing-spaces.md) —
   Removal/refusal destinations and manual startup paths collapse distinguishing spaces; live SSH examples, clipboard
   serialization and harmful startup reliance remain unverified.
-
-- [`secondary-press-suppresses-primary-selection-copy.md`](secondary-press-suppresses-primary-selection-copy.md) — A
-  second mouse button may suppress primary-selection copying; physical browser behavior is unverified.
 
 - [`selection-saves-omit-intermediate-visits.md`](selection-saves-omit-intermediate-visits.md) — Successful selection
   saves can omit intermediate visits from shared session history.
@@ -552,14 +544,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`steel-visual-delivery-omits-required-states.md`](steel-visual-delivery-omits-required-states.md) — The redesign
   report reaches delivery with some changed states reviewed only from code, although its plan requires visual captures
   of every changed screen and state. An external waiver remains unverified.
-
-- [`terminal-skin-tone-width-parity-source-gap.md`](terminal-skin-tone-width-parity-source-gap.md) — A newer hand emoji
-  with a skin-tone modifier may use fewer browser cells than tmux, displacing later output or the replayed cursor. Its
-  exact shipped add-on classifications remain unverified.
-
-- [`terminal-narrow-base-zwj-width-source-gap.md`](terminal-narrow-base-zwj-width-source-gap.md) — A one-cell base
-  followed by ZWJ and a two-cell pictograph may leave tmux and the browser disagreeing about following cells. The
-  shipped trie classification of a concrete failing sequence remains unestablished.
 
 - [`claude-unread-parent-report-displacement-source-gap.md`](claude-unread-parent-report-displacement-source-gap.md) — A
   hooked, unmarked nested Claude could overwrite an unread parent conversation-switch report before admission refuses
@@ -1161,13 +1145,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`input-test-comments-overstate-termination-coverage.md`](input-test-comments-overstate-termination-coverage.md) — The
   test comments claim stronger coverage and transport guarantees than the tests establish.
 
-- [`replay-order-comments-confuse-caller-scheduling.md`](replay-order-comments-confuse-caller-scheduling.md) — The
-  implementation notes misstate the acknowledgement/replay ordering that protects healthy terminal attachments from
-  false stalls.
-
-- [`stream-stall-test-lacks-blocked-send-witness.md`](stream-stall-test-lacks-blocked-send-witness.md) — The
-  byte-terminal regression can pass without testing teardown during a blocked browser send.
-
 - [`steady-block-cursor-contract-conflict.md`](steady-block-cursor-contract-conflict.md) — Grid terminals deliberately
   blink a block cursor even when the program requests it steady, while the wire contract says blinking is the default
   unless the program says otherwise.
@@ -1238,14 +1215,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`grid-input-omits-x10-only-mouse-reporting.md`](grid-input-omits-x10-only-mouse-reporting.md) — Programs that request
   only classic X10 mouse tracking lose clicks in terminal-host terminals, unlike the live raw-stream browser terminal.
-
-- [`migration-note-dismissal-loses-terminal-focus.md`](migration-note-dismissal-loses-terminal-focus.md) — After closing
-  the old-terminal note from the keyboard, ordinary typing no longer reaches the already-revealed terminal until the
-  user refocuses it.
-
-- [`tab-kind-projection-repeats-quadratic-scans.md`](tab-kind-projection-repeats-quadratic-scans.md) — Opening or
-  refreshing a session with many shell tabs repeatedly scans the entire tab list just to obtain each tab's old/new
-  terminal label.
 
 - [`refused-input-test-can-credit-earlier-bytes.md`](refused-input-test-can-credit-earlier-bytes.md) — The terminal
   input-backpressure regression's claim that rejected input never reaches the host is stronger than what it observes.
@@ -1375,9 +1344,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   wrapping from the final column leaves a default-background hole where the terminal actually holds a styled blank; both
   screen and history use the conversion.
 
-- [`initial-oversized-grid-cannot-attach.md`](initial-oversized-grid-cannot-attach.md) — A terminal fitted to over1000
-  cells can fail to open repeatedly because its initial dimensions exceed the grid stream's bound. The inherited-size
-  handoff no longer sends a corrective clamp at unchanged geometry; a distinct incremental failure remains unproved.
+- [`initial-oversized-grid-cannot-attach.md`](initial-oversized-grid-cannot-attach.md) — The supervisor accepts an
+  attach size above the grid stream's 1000-cell bound and then ends the attachment at its first `hello`; the page no
+  longer sends one, but any client that does gets a terminal that fails to open.
 
 - [`program-selected-cursor-color-never-reaches-viewer.md`](program-selected-cursor-color-never-reaches-viewer.md) — A
   program that changes its text cursor color continues to show the theme's fixed cursor color, even though Farhelm's
@@ -1435,10 +1404,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`agent-text-helper-removes-wrap-boundary-spaces.md`](agent-text-helper-removes-wrap-boundary-spaces.md) — Browser
   agent checks can fail to recognize text that is present when a space lands at a soft-wrap boundary.
-
-- [`brick-test-requires-hidden-terminal-kind-details.md`](brick-test-requires-hidden-terminal-kind-details.md) — A
-  healthy candidate that creates only tmux terminals cannot satisfy the brick test because the test requires a
-  terminal-kind detail that the product intentionally hides.
 
 - [`growing-final-output-omits-trimming-notice.md`](growing-final-output-omits-trimming-notice.md) — Final buffered
   output can grow the old terminal's history between Restart's count and capture, making the replacement omit older
@@ -1880,23 +1845,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   directory needed to retry the supported stop command. Continued agent execution after the deletion has not been
   demonstrated.
 
-- [`selection-cleanup-after-grid-adoption.md`](selection-cleanup-after-grid-adoption.md) — A queued selection-cleanup
-  callback can throw if the compatibility terminal switches to the grid before that callback runs. Actual occurrence in
-  a supported browser has not been observed. No lasting input failure, lost work or wider disruption is established.
-
-- [`asset-wait-bypasses-pending-kind.md`](asset-wait-bypasses-pending-kind.md) — A terminal still waiting for
-  fonts/helpers can construct the old component and open a socket while Restart tells it to wait. The established l1
-  consequence remains unnecessary component/socket work; successful grid adoption leaves no established lasting defect.
-  A separate known pre-notice input-format hazard must not be treated as safe by this limited conclusion.
-
-- [`pending-kind-font-premise.md`](pending-kind-font-premise.md) — The test intended to prove that an unresolved
-  terminal kind blocks mounting can pass because its fonts are still loading instead. A pass does not establish the
-  stated reason that no socket opened during the measured interval.
-
-- [`direct-grid-test-bootstrap-order.md`](direct-grid-test-bootstrap-order.md) — A healthy grid terminal can fail its
-  integration test when the unrelated xterm asset loads slowly, because the test asserts the asset is loaded before
-  establishing that premise.
-
 - [`stopped-reader-output-witness.md`](stopped-reader-output-witness.md) — The browser flood test checks retained output
   precisely, but a pass does not establish that the flood ran while the page stopped consuming frames. It can therefore
   leave the intended slow-viewer case unproved while appearing to cover it.
@@ -1956,9 +1904,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`kicked-input-test-local-filter.md`](kicked-input-test-local-filter.md) — A takeover regression assertion lets the
   client discard the displaced viewer's attempted keystrokes before the supervisor sees them. Passing therefore does not
   establish the supervisor's input ownership enforcement.
-
-- [`channel-zero-missing-capability.md`](channel-zero-missing-capability.md) — The reserved-channel regression assertion
-  can pass for a separate missing-capability refusal, even with a valid real session.
 
 - [`argv-grid-wrap-witness.md`](argv-grid-wrap-witness.md) — The structured-launch test can decode arguments the fake
   process never received if attachment catches a wrapped hex witness partway through a continuation row. That can reject

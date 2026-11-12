@@ -3,7 +3,6 @@
   "sessions": [
     {
       "agent_kind": "codex",
-      "agent_terminal": "host",
       "annotation": "left a note",
       "canonical_cwd": "/home/user/src/widgets",
       "created_at": 1700000000,
@@ -71,11 +70,9 @@
         "exit_code": 3,
         "state": "exited"
       },
-      "supervisor_creates_host_terminals": true,
       "tabs": [
         {
-          "id": "tab-1",
-          "kind": "tmux"
+          "id": "tab-1"
         }
       ],
       "title": "Fix the widget",

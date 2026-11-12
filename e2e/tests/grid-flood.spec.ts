@@ -9,7 +9,7 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { cleanupSession, createSession } from "./helpers/fleet";
-import { attachSession, terminalKind, waitForTermText } from "./helpers/term";
+import { attachSession, waitForTermText } from "./helpers/term";
 
 /**
  * The `flood_gated` fake agent (crates/farhelm-fixtures/src/fake_agent.rs):
@@ -163,8 +163,6 @@ test("a flood's scrollback arrives whole and in order, through a viewer that sto
     await page.goto("/");
     await attachSession(page, session.id);
     await waitForTermText(page, "FAKE-AGENT READY");
-    // Premise: this session's terminal is a host terminal drawn as a grid.
-    expect(await terminalKind(page)).toBe("grid");
     // The first stall starts with the gate, so output is owed to the page
     // throughout it (see `openGateAndStopReading`).
     await openGateAndStopReading(page, 3_000);

@@ -1,4 +1,4 @@
-// Real two-host reads, xterm hover admission and browser saves. The request
+// Real two-host reads, terminal hover admission and browser saves. The request
 // gate deliberately holds only the stat reply; bytes and routing remain real.
 // Once a session exists, its cleanup scope also owns fallible browser setup.
 // Failed cleanup accompanies the original test error. A working directory
@@ -15,7 +15,7 @@ import { routeGate } from './helpers/route-gate';
 
 /** Locate live terminal cells after the test's gated invocation emits bytes.
  * The fixtures use ASCII labels; Unicode cell mapping has its own JS proof.
- * A blank in-grid cell clears xterm’s retained coordinate before re-entry.
+ * A blank in-grid cell clears any earlier hover before re-entry.
  */
 async function hoverPath(page: Page, needle: string) {
   let cell: { x: number; y: number } | null = null;
@@ -34,8 +34,8 @@ async function hoverPath(page: Page, needle: string) {
     return cell !== null;
   }, { timeout: 10000, message: `live output must contain ${needle}` }).toBe(true);
   const box = (await terminalScreen(page).boundingBox())!;
-  // xterm retains the last buffer cell across mouseleave. Visit a known
-  // blank in-grid cell before departing, so re-entry actually starts hover.
+  // Visit a known blank in-grid cell before departing, so that re-entry is a
+  // fresh hover of the path rather than the continuation of an earlier one.
   await page.mouse.move(box.x + box.width - 2, cell!.y);
   await page.mouse.move(box.x + box.width - 2, box.y - 2);
   await expect(terminalLinkPointer(page)).toHaveCount(0);
@@ -242,7 +242,7 @@ for (const kind of ['local', 'ssh']) {
       const notice = page.locator('#terminal .terminal-file-message');
       await expect(notice).toContainText(`Downloaded ${basename}`);
       await expect(notice).toHaveClass(/showing/);
-      const terminalBox = (await page.locator('#terminal :is(.xterm, .grid-terminal)').boundingBox())!;
+      const terminalBox = (await page.locator('#terminal .grid-terminal').boundingBox())!;
       const noticeBox = (await notice.boundingBox())!;
       expect(noticeBox.y - terminalBox.y).toBeCloseTo(4, 0);
       await expect(notice).toHaveCSS('opacity', '0', { timeout: 8000 });

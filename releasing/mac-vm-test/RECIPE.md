@@ -110,17 +110,17 @@ not successful agent execution.
    relaunches; observe that transition rather than requiring an extra Update click. If the product offers a local Update
    action, exercise it and verify the result. A stranded local host with an unusable Update action is a failure. Launch
    one genuine authenticated agent through Farhelm on the local host, send a small prompt, and require a meaningful
-   reply and responsive terminal; read the new session's terminal kind (`host` or `tmux`) in its session details and
-   check it against the terminal-host observation (`local-supervisor-agent`), and leave that session running: the
-   old-session check samples its terminal. Then check the old local session from step 3 (`local-old-session`). First,
-   before the session is touched, the fixed survival comparison checks that it survived the upgrade (same session, same
-   launch generation) and settles the branch from its observed terminal kind:
+   reply and responsive terminal; take the fixed terminal-host sample, which the import checks against the session's
+   stored terminal kind (`local-supervisor-agent`; the candidate's session details name no kind), and leave that session
+   running: the old-session check samples its terminal. Then check the old local session from step 3
+   (`local-old-session`). First, before the session is touched, the fixed survival comparison checks that it survived
+   the upgrade (same session, same launch generation) and settles the branch from its observed terminal kind:
    - **tmux:** it answers a new typed question whose answer (48) differs from the earlier turn's 42 still on screen. If
      the candidate creates terminal hosts (a host the old fixture did not have is running for the new session), the
-     migration band shows on it and offers Restart (only Clone or Replace would be a failure for a captured
-     conversation); Restart moves it to a host terminal, as its session details then say, and the resumed agent names
-     the word from the earlier turn, which proves the resumed conversation rather than just any reply. If the candidate
-     creates no terminal hosts, no band or restart is expected and the session keeps its launch generation.
+     session offers Restart (only Clone or Replace would be a failure for a captured conversation); Restart moves it to
+     a host terminal, as the final sample checks, and the resumed agent names the word from the earlier turn, which
+     proves the resumed conversation rather than just any reply. If the candidate creates no terminal hosts, no restart
+     is expected and the session keeps its launch generation.
    - **host:** the host and its child are the same processes as at step 3 (pid and start identity), the rediscovered
      terminal still shows its earlier screen and answers the new question; only then Restart, which must land on a new
      terminal host (not tmux) with the old host gone, and the resumed agent names the earlier turn's word.
@@ -132,11 +132,11 @@ not successful agent execution.
 5. **Remote supervisor upgrade, one successful agent and the old session.** On that same fixture, use the app's remote
    **Update** action. Require the formerly old remote supervisor to return connected at the candidate version and
    independently verify its running service. Launch one genuine authenticated agent through Farhelm on that remote host,
-   send a small prompt, require a meaningful reply and responsive terminal, and read its terminal kind as in step 4
-   (`remote-supervisor-agent`). A plain shell command does not count as an agent. Then check the old remote session from
-   step 3 with the same branches as step 4 (`remote-old-session`); it runs after the remote Update because only then
-   does that host create terminal hosts and show the band. Save version, service and GUI/command evidence. The counter
-   workload's process survival and final quit/reopen belong to bonus coverage.
+   send a small prompt, require a meaningful reply and responsive terminal, and take its terminal-host sample as in step
+   4 (`remote-supervisor-agent`). A plain shell command does not count as an agent. Then check the old remote session
+   from step 3 with the same branches as step 4 (`remote-old-session`); it runs after the remote Update because only
+   then does that host create terminal hosts. Save version, service and GUI/command evidence. The counter workload's
+   process survival and final quit/reopen belong to bonus coverage.
 
 6. **Remove and re-add the remote host.** Keep both remote sessions from step 5 alive and record their identities. Call
    `remote_host_before`, then select the remote host menu's **Remove**, handling its ordinary confirmation if offered.

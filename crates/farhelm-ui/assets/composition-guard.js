@@ -45,16 +45,16 @@
 
   /** Install once per page, before other capture-phase shortcut listeners.
    * Only the event's presentation to existing guards changes: propagation and
-   * default behavior remain theirs. The terminals own their input proxies'
-   * input-method handling (xterm.js's textarea, and the grid terminal's
-   * input, which mirrors xterm.js) and must never receive this normalization.
+   * default behavior remain theirs. The terminal owns its input proxy's
+   * input-method handling (the grid terminal's hidden input field) and must
+   * never receive this normalization.
    */
   function installCompositionGuard() {
     if (root.__farhelmCompositionGuard) return;
     root.__farhelmCompositionGuard = true;
     const tracker = createCompositionTracker();
     const terminalInput = target => target instanceof Element &&
-      target.matches(".xterm-helper-textarea, .grid-terminal-input");
+      target.matches(".grid-terminal-input");
     root.addEventListener("compositionend", event => {
       if (!terminalInput(event.target)) tracker.end(event.target, performance.now());
     }, true);

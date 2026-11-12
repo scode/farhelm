@@ -2,13 +2,11 @@
 // hover evidence and explicit-click transfers for exactly one terminal.
 // Nothing here consults the shell's current directory or opens a file URI.
 //
-// Both kinds of terminal share this code: it reads a terminal through a
-// "view" (`element`, `lines()` giving terminal-links.js's link lines, and
-// `hasSelection()`) and speaks link-lines ranges. A new terminal's grid
-// hosts `FileLinks` directly (terminal.js's `createGridLinks`); an old
-// terminal's xterm.js loads `XtermFileLinksAddon`, the adapter that registers
-// an xterm.js link provider and converts its ranges. Native OSC 8 links keep
-// xterm.js's ordinary provider; every supervisor owns its actual filesystem.
+// It reads a terminal through a "view" (`element`, `lines()` giving
+// terminal-links.js's link lines, and `hasSelection()`) and speaks
+// link-lines ranges. The grid component hosts `FileLinks` directly
+// (terminal.js's `createGridLinks`); every supervisor owns its actual
+// filesystem.
 (function () {
   const MAX_BYTES = 100000000;
 
@@ -122,8 +120,8 @@
     return found;
   }
 
-  /** OSC 8 has its own explicit allowlist because the terminal passes every scheme
-   * (xterm.js does with `allowNonHttpProtocols`; the grid passes the program's target).
+  /** OSC 8 has its own explicit allowlist because the terminal passes every
+   * scheme (the grid passes the program's target as it is).
    * The URI authority never selects a host: files belong to the session host.
    * File targets must be absolute, decode once, and carry no query or fragment.
    */
@@ -261,7 +259,7 @@
   /** Whether two link-lines ranges name the same cells (both present). */
   function sameRange(a, b) {
     const fields = range => [range?.start?.abs, range?.start?.col, range?.end?.abs, range?.end?.col];
-    // A range that is not a link-lines one (an xterm.js range, a missing
+    // A range that is not a link-lines one (a missing one, a malformed
     // one) fails closed rather than comparing equal on undefined fields.
     if (![...fields(a), ...fields(b)].every(Number.isInteger)) return false;
     return a.start.abs === b.start.abs && a.start.col === b.start.col &&
@@ -290,9 +288,8 @@
   }
 
   /** File links for one terminal, read through its `view` (see this file's
-   * header), which the host sets before any link is asked for: the grid
-   * passes it at construction, and the old terminal's add-on sets it on
-   * activation (see this file's header).
+   * header), which the host passes at construction, before any link is
+   * asked for.
    * This has the terminal's lifetime, including retained reconnects.
    * Lookup evidence belongs to a single hover, never to a path cache. A click
    * reopens the disclosed canonical path; that still is not a file snapshot.
@@ -389,10 +386,11 @@
         previous.leaving = false;
         previous.link = link;
         if (link) {
-          // The terminal snapshots decorations before hover(), then replaces
-          // them with cursor setters after it returns (xterm.js does; the
-          // grid's link decorations imitate it). Wait for that installation;
-          // a retired link's setter would target whatever link is current.
+          // Write the cursor through the link's decoration setters only
+          // once the hover callback has returned and the terminal has
+          // settled which link is current (grid-terminal.js's `setHover`),
+          // and only while this link is still the hovered one: the cursor
+          // belongs to whichever link is current.
           await Promise.resolve();
           if (this.hovered === previous && !previous.leaving && previous.link === link) {
             link.decorations.pointerCursor = previous.info?.status === 'ready';
@@ -441,10 +439,10 @@
     }
 
     /** Withdraw click/cursor admission now, but allow the terminal's
-     * synchronous redraw re-hover (xterm.js's, which the grid imitates) to
+     * synchronous redraw re-hover (grid-terminal.js's `refreshHover`) to
      * reclaim the lookup before the next task tears it down. Cursor setters
-     * must run here: the terminal redirects them to its current link,
-     * so a deferred write could switch off an unrelated link's hand cursor.
+     * run here, while this link is still the one being left: a deferred
+     * write could land after another link became current.
      */
     leave() {
       const state = this.hovered;
@@ -550,8 +548,8 @@
         message.className = 'terminal-file-message peer-value';
         message.setAttribute('role', 'status');
         this.view.element.appendChild(message);
-        // A terminal can hand over its view before its DOM exists (xterm.js
-        // activates add-ons before open() creates it). The first
+        // A terminal can hand over its view before its DOM exists (the
+        // grid's links are created before the component they read). The first
         // notice is necessarily later, so listener ownership starts here.
         this.view.element.addEventListener('click', this.dismissFailure);
       }
@@ -650,57 +648,9 @@
     }
   }
 
-  // ------------------------------------------------------------------
-  // Old terminals: the xterm.js add-on
-  // ------------------------------------------------------------------
-
-  /** `FileLinks` as an xterm.js add-on, for old terminals only: activation
-   * reads the terminal through terminal-links.js's `xtermLines` and registers
-   * a link provider below OSC 8 and web links, preserving their existing
-   * precedence, with xterm.js's 1-based ranges converted at this boundary.
-   */
-  class XtermFileLinksAddon extends FileLinks {
-    activate(term) {
-      this.term = term;
-      this.view = {
-        get element() {
-          return term.element;
-        },
-        lines: () => window.farhelmTerminalLinks.xtermLines(term),
-        hasSelection: () => !!term.getSelection(),
-      };
-      this.provider = term.registerLinkProvider({
-        provideLinks: (row, callback) => {
-          const abs = row - 1;
-          callback(pathLinks(this.view.lines(), abs).map(candidate => this.fileLink(candidate)));
-        },
-      });
-    }
-
-    /** An xterm.js link for a printed path: xterm.js's range, with the usual
-     * fresh-hover and click checks after provider admission.
-     */
-    fileLink({ path, range }) {
-      const link = {
-        text: path,
-        range: window.farhelmTerminalLinks.toXtermRange(range),
-        decorations: { underline: true, pointerCursor: false },
-        hover: event => this.hover(event, path, link, range),
-        leave: () => this.leave(),
-        activate: event => this.download(path, event),
-      };
-      return link;
-    }
-
-    dispose() {
-      super.dispose();
-      this.provider?.dispose();
-    }
-  }
-
   const api = {
     pathTokens, oscTarget, pathLinks, boundedBlob, formatSize, sizeTier, fileIcon, disclosureFits, markedCoverRects,
-    LINK_COVER_SELECTOR, FileLinks, XtermFileLinksAddon, MAX_BYTES, NUMERIC_VERSION,
+    LINK_COVER_SELECTOR, FileLinks, MAX_BYTES, NUMERIC_VERSION,
   };
   if (typeof window !== 'undefined') window.farhelmTerminalFiles = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

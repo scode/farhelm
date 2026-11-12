@@ -68,7 +68,7 @@
 // batch slicing, the loopback check, and the per-capture-site formatting —
 // is exported under CommonJS for `js-tests/client-log-shim.test.js`. The
 // stateful controller (arming, timers, `fetch`) is exercised there too, via
-// the same `node:vm` fabricated-window pattern `term-bytes.test.js` uses,
+// the same `node:vm` fabricated-window pattern `paste-sanitizer.test.js` uses,
 // with a scripted `fetch` and manual timer control; the true end-to-end
 // integration (shim through to a `tracing` line) is
 // `scripts/desktop-smoke.sh`'s assertion leg (a later PR in this stack).

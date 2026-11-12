@@ -383,11 +383,9 @@ impl TunnelController {
         if matches!(source, Source::Terminal { session, generation }
             if self.view.peek().as_ref().is_some_and(|(active, epoch)| active == session && epoch == generation))
         {
-            // Either terminal component's input: xterm.js's helper textarea,
-            // or a grid terminal's input field (terminal.js mounts one or the
-            // other per attachment).
+            // The selected terminal's input field.
             document::eval(
-                "requestAnimationFrame(() => document.querySelector('.terminal-pane.selected .xterm-helper-textarea, .terminal-pane.selected .grid-terminal-input')?.focus({preventScroll:true}))",
+                "requestAnimationFrame(() => document.querySelector('.terminal-pane.selected .grid-terminal-input')?.focus({preventScroll:true}))",
             );
         } else if let Source::Card(card) = source {
             let id = serde_json::to_string(&card.id).unwrap();

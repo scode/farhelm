@@ -37,8 +37,7 @@
 // What it deliberately does not do: check the window-inactive pause (one
 // universal `animation-play-state` rule in app.css covers every animation,
 // present and future, so there is nothing per-animation to check), detect
-// long non-infinite animations (none exist), or read the vendored
-// xterm.css, which is not ours to lint.
+// long non-infinite animations (none exist).
 //
 // Like app-css-tokens.test.js, the checker is a pure function over a CSS
 // string so the negative cases can feed it small synthetic snippets. It is

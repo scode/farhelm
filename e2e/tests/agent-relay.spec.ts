@@ -145,7 +145,7 @@ function requireFleet() {
 /**
  * The terminal buffer with its row breaks removed.
  *
- * xterm stores a wrapped line as several buffer rows, and every one of
+ * The terminal stores a wrapped line as several rows, and every one of
  * this fixture's interesting outputs — a refusal quoting a long path, a
  * hosts table folded into one line — is longer than the terminal is wide.
  * A `toContain` against the raw buffer therefore fails on exactly the

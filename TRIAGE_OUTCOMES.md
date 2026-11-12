@@ -398,29 +398,6 @@
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: `pending`.
 
-## classic-mouse-snapshot-copy-blocks-later-links.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: After
-  copying from a restored frozen terminal in classic (non-SGR) mouse mode, the leftover selection may block clicks on
-  web links (`crates/farhelm-ui/assets/terminal.js`). The finding rates this "likely": restored-screen behavior was
-  never run, and it rests on reading xterm vendor code.
-- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
-  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## secondary-press-suppresses-primary-selection-copy.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: A
-  secondary mousedown overwrites the primary press record, so the primary-only copy check later rejects the drag.
-  Overlapping-button event delivery and an actual missing copy are unverified, according to the finding itself.
-- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
-  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## menu-close-dismisses-new-notifications.md
 
 - Outcome: `discard`.
@@ -743,29 +720,6 @@
   the app (`installation/install.rs` cleanup, `crates/farhelm/src/uninstall.rs`). What remains is the skip branch for
   unclassifiable or unreadable stage entries, with no supported history in which such a stage survives a successful
   uninstall and is later restored.
-- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
-  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## terminal-skin-tone-width-parity-source-gap.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: The
-  claim is that a skin-tone-modified newer hand emoji may get different cell widths in the vendored grapheme add-on and
-  in tmux 3.7c. The add-on's compressed-trie classification of that pair was never decoded, and no rendering failure was
-  measured.
-- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
-  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## terminal-narrow-base-zwj-width-source-gap.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: There
-  is a structural width disagreement for a narrow base + ZWJ + wide pictograph between the vendored add-on and tmux. No
-  concrete sequence's classification in the shipped trie was established, and no rendered failure exists.
 - Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
   is carried by `removal-destination-collapses-distinguishing-spaces.md`.
 - Completion criteria: Remove the feedback file and its index entry.

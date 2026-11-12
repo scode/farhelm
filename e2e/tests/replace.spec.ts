@@ -860,13 +860,11 @@ test("replacing a live session creates a fresh row in its place, selected, with 
 
     // A test-only SENTINEL on the source's own terminal component, the same
     // stale-singleton guard `terminal.spec.ts`'s own session-switch test
-    // uses: the READY banner (and, for an old terminal, `__farhelmTermReady`;
-    // a grid terminal never sets it) is already true for THIS instance, so
-    // neither can tell the replacement's terminal apart from the source's —
+    // uses: the READY banner is already on screen for THIS instance, so it
+    // cannot tell the replacement's terminal apart from the source's —
     // only a marker that a fresh mount could not possibly carry can.
     await page.evaluate(() => {
-      // The component, whichever kind: xterm.js or the grid.
-      ((window as any).__farhelmTerm ?? (window as any).__farhelmGrid).__testMarker = "pre-replace";
+      (window as any).__farhelmGrid.__testMarker = "pre-replace";
     });
 
     await openRowMenu(sourceRow);
@@ -915,23 +913,20 @@ test("replacing a live session creates a fresh row in its place, selected, with 
     // reused the old terminal (or the old session's id under a new label)
     // would leave the marker right there.
     //
-    // The READY text (and, for an old terminal, `__farhelmTermReady`) is
-    // already TRUE for the source's own instance before any of this runs,
-    // so neither one can
-    // prove the replacement's terminal has actually been published by the
-    // time this test inspects it — a correct implementation and one that
-    // left the stale source instance mounted a moment too long would both
-    // satisfy them. The sentinel closes that gap instead (the same
-    // stale-singleton fix `terminal.spec.ts`'s session-switch test uses):
-    // poll until the component (`__farhelmTerm`, or `__farhelmGrid` for a
-    // new terminal) is DEFINED (not merely absent during an unmount), no
-    // longer carries the marker stamped on the source's
-    // instance above, and its socket has actually reached OPEN — only THEN
-    // is it safe to wait for READY and read the buffer.
+    // The READY text is already there for the source's own instance before any
+    // of this runs, so it cannot prove the replacement's terminal has actually
+    // been published by the time this test inspects it — a correct
+    // implementation and one that left the stale source instance mounted a
+    // moment too long would both satisfy them. The sentinel closes that gap
+    // instead (the same stale-singleton fix `terminal.spec.ts`'s session-switch
+    // test uses): poll until the grid (`__farhelmGrid`) is DEFINED (not merely
+    // absent during an unmount), no longer carries the marker stamped on the
+    // source's instance above, and its socket has actually reached OPEN — only
+    // THEN is it safe to wait for READY and read the buffer.
     await expect
       .poll(() =>
         page.evaluate(() => {
-          const term = (window as any).__farhelmTerm ?? (window as any).__farhelmGrid;
+          const term = (window as any).__farhelmGrid;
           const ws = (window as any).__farhelmWs;
           return (
             Boolean(term)

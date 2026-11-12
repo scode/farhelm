@@ -1,7 +1,7 @@
 //! Terminal tabs (PLAN_M4.md item 6): the tab-domain half of the feature —
 //! renderer-free derivations plus the strip's one presentational piece.
 //!
-//! `session_view::SessionView` holds one xterm.js island per terminal —
+//! `session_view::SessionView` holds one terminal island per terminal —
 //! the agent's plus one per open tab — all attached CONCURRENTLY. Most of
 //! this module needs no renderer to reason about: which tabs to show
 //! (`visible_tabs`'s optimistic-rendering
@@ -35,12 +35,12 @@ pub(crate) const AGENT_BANNER_ELEMENT_ID: &str = "term-banner";
 /// that stands in front of a terminal while its attach catches up
 /// (PLAN_M5.md item 5).
 ///
-/// New in M5, unlike the two ids above: an empty xterm used to mount
-/// visible and the only overlay a pane had was its detach banner, so there
-/// was nothing standing in front of the catch-up to reuse. Rendered empty
-/// by `SessionView`; terminal.js owns its content, for the same reason it
-/// owns the banner's — the reveal happens inside a `term.write()`
-/// completion callback, which nothing on the Dioxus side can be driven
+/// New in M5, unlike the two ids above: until then an empty terminal
+/// mounted visible and the only overlay a pane had was its detach banner, so
+/// there was nothing standing in front of the catch-up to reuse. Rendered
+/// empty by `SessionView`; terminal.js owns its content, for the same reason
+/// it owns the banner's — the reveal follows the terminal component's own
+/// handling of the catch-up, which nothing on the Dioxus side can be driven
 /// from.
 pub(crate) const AGENT_CONNECTING_ELEMENT_ID: &str = "term-connecting";
 
@@ -53,9 +53,9 @@ pub(crate) const AGENT_CONNECTING_ELEMENT_ID: &str = "term-connecting";
 /// user opening them by hand" — is a statement about a healthy supervisor,
 /// and the tab list arrives over a connection that under `--ssh` reaches a
 /// different machine. A supervisor that is compromised, or merely wrong
-/// (a rediscovery bug adopting every window on a shared tmux server),
-/// could list thousands, and this view would answer by constructing
-/// thousands of xterm.js instances and opening thousands of WebSockets —
+/// (a rediscovery bug adopting every terminal host it can find), could list
+/// thousands, and this view would answer by constructing thousands of
+/// terminal components and opening thousands of WebSockets —
 /// wedging the browser, and with it the user's only way to see what
 /// happened. A trust boundary needs a bound even where the cooperative
 /// case does not.
@@ -166,54 +166,6 @@ pub(crate) fn visible_tabs(
     }
     ids.retain(|id| !closed.contains(id));
     ids
-}
-
-/// The tabs the strip shows, in its order, each with its kind (old or new
-/// terminal): what the surfaces that name tabs by their strip labels take
-/// (the migration band and the session details' terminal kinds,
-/// `migration`).
-///
-/// A type of its own, built only by [`visible_tab_infos`], so that those
-/// surfaces cannot be handed the server's list (`Session::tabs`) by
-/// mistake: the server's list numbers tabs differently from the strip for a
-/// moment after a close or an open, and the band would then name the wrong
-/// shell. Going back to the server's list is a compile error, not a test
-/// failure.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct VisibleTabs(Vec<Tab>);
-
-impl VisibleTabs {
-    /// The tabs, in the strip's order: index 0 is "Terminal 1".
-    pub(crate) fn as_slice(&self) -> &[Tab] {
-        &self.0
-    }
-}
-
-/// [`visible_tabs`] with each tab's kind, as [`VisibleTabs`].
-///
-/// The same list in the same order as the strip, so a label here is the
-/// label on screen. A tab the server lists keeps the kind the server gave
-/// it; an optimistically opened one takes the kind its open reply gave
-/// (`opened_kinds`, by tab id), and none if that reply named none.
-pub(crate) fn visible_tab_infos(
-    server: &[Tab],
-    opened: &[(String, u64)],
-    opened_kinds: &HashMap<String, farhelm_proto::TerminalKind>,
-    closed: &HashSet<String>,
-) -> VisibleTabs {
-    VisibleTabs(
-        visible_tabs(server, opened, closed)
-            .into_iter()
-            .map(|id| {
-                let kind = server
-                    .iter()
-                    .find(|tab| tab.id == id)
-                    .map(|tab| tab.kind)
-                    .unwrap_or_else(|| opened_kinds.get(&id).copied());
-                Tab { id, kind }
-            })
-            .collect(),
-    )
 }
 
 /// The helm WebSocket path one terminal of a session attaches on.
@@ -360,10 +312,7 @@ mod tests {
     /// A tab with the given id — the whole of `Tab`, which is why this is
     /// a one-liner rather than a builder.
     fn tab(id: &str) -> Tab {
-        Tab {
-            id: id.into(),
-            kind: None,
-        }
+        Tab { id: id.into() }
     }
 
     /// The server's list is the spine of the rendered order, and the two

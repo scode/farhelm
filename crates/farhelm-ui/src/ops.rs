@@ -166,17 +166,6 @@ impl ReadGate {
         self.started
     }
 
-    /// The newest generation handed out so far: every read in flight right
-    /// now carries this number or a lower one, and every read started later
-    /// carries a higher one.
-    ///
-    /// For callers that remember something until a read made AFTER a given
-    /// moment confirms it, without fencing off the reads already in flight
-    /// (which `fence` does to everything).
-    pub(crate) fn latest_started(&self) -> u64 {
-        self.started
-    }
-
     /// Supersede every read that started before a locally confirmed mutation.
     ///
     /// A mutation is newer evidence than any request already in flight, even

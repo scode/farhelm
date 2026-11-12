@@ -16,17 +16,9 @@ website's vendored Inter fonts. Copyright 2016 The Inter Project Authors
 ([`rsms/inter`](https://github.com/rsms/inter)). They are licensed under the SIL Open Font License, Version 1.1; the
 complete notice is in `crates/farhelm-ui/assets/fonts/OFL-Inter.txt` and ships in the app as `/assets/OFL-Inter.txt`.
 
-## xterm.js and its add-ons
-
-The web UI and the desktop app ship unmodified npm bundles of xterm.js (`@xterm/xterm` 6.0.0, which compiles in part of
-Visual Studio Code's `vs/base`) and its fit, clipboard, web-links and unicode-graphemes add-ons, in
-`crates/farhelm-ui/assets/vendor/`. They are MIT-licensed; the clipboard add-on also bundles `js-base64` under the
-BSD-3-Clause license. Each bundle's complete notices are in the matching `*-LICENSES.txt` file beside it
-(`xterm-LICENSES.txt` covers `xterm.js` and `xterm.css`) and ship in the app under `/assets/`.
-
 ## Code ported from xterm.js
 
-Parts of new terminals' input, selection, sizing and link handling are Farhelm ports of code from `@xterm/xterm` 6.0.0,
+Parts of the terminal's input, selection, sizing and link handling are Farhelm ports of code from `@xterm/xterm` 6.0.0,
 its `@xterm/addon-fit` 0.11.0 and `@xterm/addon-web-links` 0.12.0 add-ons, and the part of Visual Studio Code's
 `vs/base` that xterm.js compiles in. The ports keep behavior that programs and users already rely on, such as the bytes
 each key sends and the cell a click lands on, so they were carried over rather than rewritten. They live in:
@@ -49,9 +41,8 @@ Each ported function names its origin in a source comment. The code is MIT-licen
 SourceLair Private Company and Christopher Jeffrey for xterm.js, the xterm.js authors for the add-ons, and Microsoft
 Corporation for Visual Studio Code. The complete notices are in
 `crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt`, which ships in the app as
-`/assets/grid-ported-code-LICENSES.txt` independently of the vendored xterm.js bundle, so it stays when that bundle is
-removed. Release builds of `farhelm`, which run the supervisor, embed the same web bundle and so carry the notice beside
-the ported Rust code.
+`/assets/grid-ported-code-LICENSES.txt`; xterm.js itself no longer ships. Release builds of `farhelm`, which run the
+supervisor, embed the same web bundle and so carry the notice beside the ported Rust code.
 
 ## Harness marks
 

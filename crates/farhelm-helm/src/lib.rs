@@ -97,7 +97,7 @@ mod environment;
 pub use client::{
     CreateExtras, Detach, DownloadGuard, ErrorOrigin, PeerHello, SessionListing, SupervisorClient,
     SupervisorError, SupervisorTransportError, TcpTunnelAccepted, TermDetachSignal, TermEvent,
-    TermStream, ViewerStreams,
+    TermStream,
 };
 
 /// The merged multi-host session list, served whole — what

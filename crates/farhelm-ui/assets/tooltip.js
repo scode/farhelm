@@ -108,7 +108,7 @@
 // The pure decisions (`placeTooltip`, `placeSessionCard`, `instantFollowOn`, `scrollMovesTarget`,
 // `diagnosticPreviewHeights`)
 // and the list-local `followCurrentStep` helper are exported under CommonJS
-// as well as installed on `window`, the same dual install term-bytes.js uses.
+// as well as installed on `window`, the same dual install paste-sanitizer.js uses.
 // The unit harness also exercises menu hover's synchronous focus provenance
 // and rest timers. The browser suite
 // (e2e/tests/tooltip.spec.ts) observes real pointer, focus and scroll wiring.

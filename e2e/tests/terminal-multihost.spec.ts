@@ -3095,9 +3095,8 @@ test.describe("multi-host", () => {
       await waitForTermText(page, "FAKE-AGENT READY");
       await page.evaluate(() => {
         const win = window as any;
-        // The terminal component on screen: the grid for a new terminal (what
-        // this stack's remote creates), xterm.js for an old one.
-        win.__outageOriginal = win.__farhelmGrid ?? win.__farhelmTerm;
+        // The terminal component on screen.
+        win.__outageOriginal = win.__farhelmGrid;
         const banners: string[] = [];
         const observer = new MutationObserver(() => {
           for (const node of document.querySelectorAll(".terminal-pane > .banner")) {

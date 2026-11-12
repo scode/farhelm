@@ -36,7 +36,7 @@ pub(crate) const DIALOG: DialogHandle =
 /// Both entry paths capture their own opener before the dialog takes focus.
 pub(crate) const OPENER: SavedFocus = SavedFocus::new("__farhelmKeyboardShortcutsFocus");
 
-/// Reserve only the overview chord, before xterm and after composition fencing.
+/// Reserve only the overview chord, before the terminal and after composition fencing.
 /// The relay exists only in the authenticated, preference-seeded tree. A modal
 /// retains the keyboard; repeat is swallowed without opening another dialog.
 pub(crate) fn install_shortcut() {

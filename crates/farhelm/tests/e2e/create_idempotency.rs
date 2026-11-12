@@ -258,15 +258,6 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
         replay.id, first.id,
         "the retry must replay the session the first attempt created"
     );
-    // A replay is the same answer, terminal kinds included: both replies
-    // name the live agent's terminal host and report the switch on.
-    for reply in [&first, &replay] {
-        assert_eq!(
-            reply.agent_terminal,
-            Some(farhelm_proto::TerminalKind::Host)
-        );
-        assert!(reply.supervisor_creates_host_terminals);
-    }
 
     let sup2 = handoff_to_new_supervisor(state.path(), sup1, client1).await;
     let client2 = connect_client(&sup2).await;
@@ -276,11 +267,6 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
     assert_eq!(
         after_restart.id, first.id,
         "the reservation is durable, so a restart cannot forget which session an intent made"
-    );
-    assert_eq!(
-        after_restart.agent_terminal,
-        Some(farhelm_proto::TerminalKind::Host),
-        "a replay after a restart names the terminal the reloaded entry holds"
     );
     // Dimensions are deliberately NOT part of the fingerprint — they shape
     // the attachment, not the session — so the same intent retried from a
@@ -310,73 +296,6 @@ async fn a_retried_create_returns_the_same_session_across_a_supervisor_restart()
         1,
         "and exactly one agent process behind it"
     );
-    drop(slot);
-}
-
-/// A keyed create replayed after a reboot took the session's terminal
-/// reports no terminal kind, though the session's row still records the
-/// kind its last terminal was.
-///
-/// Why: a replay must describe the terminal the session holds now, as every
-/// listing does; read from the row instead, it would tell a client that an
-/// interrupted session still runs in an old terminal, and the migration
-/// band would ask the user to move a terminal that no longer exists.
-/// Spec: after a reboot (every host gone, the next supervisor reading
-/// another boot id), the session lists as interrupted with no kind, its row
-/// still says host, and the keyed retry replays the same session with
-/// `agent_terminal: None` and the switch reported off.
-#[farhelm_testtrace::test]
-async fn a_replay_after_a_reboot_reports_no_terminal_kind() {
-    let slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = farhelm_teststate::tempdir().expect("tempdir");
-    let work = farhelm_teststate::tempdir().expect("workdir");
-    let sup1 = supervisor_believing_boot(state.path(), Some("boot-a")).await;
-    let client1 = connect_client(&sup1).await;
-    let first = create_keyed(&client1, work.path(), "intent-reboot")
-        .await
-        .expect("create");
-    assert_eq!(
-        first.agent_terminal,
-        Some(farhelm_proto::TerminalKind::Host),
-        "premise: the first reply names the live terminal host"
-    );
-
-    end_all_terminals(state.path()).await;
-    let sup2 = handoff_to_new_supervisor_with_seams(
-        state.path(),
-        sup1,
-        client1,
-        SupervisorSeams {
-            boot_id: Arc::new(|| Ok::<_, anyhow::Error>(Some("boot-b".to_string()))),
-            ..SupervisorSeams::default()
-        },
-    )
-    .await;
-    let client2 = connect_client(&sup2).await;
-    let interrupted = listed(&client2, &first.id).await;
-    assert_eq!(
-        interrupted.status,
-        SessionStatus::Interrupted,
-        "premise: the reboot took the session's terminal"
-    );
-    assert_eq!(interrupted.agent_terminal, None);
-    let rows = stored_sessions(state.path()).await;
-    let row = rows
-        .iter()
-        .find(|row| row.id == first.id)
-        .expect("the session's row");
-    assert_eq!(
-        row.terminal_kind,
-        farhelm_supervisor::store::TerminalKind::Host,
-        "premise: the row still names the kind its last terminal was"
-    );
-
-    let replay = create_keyed(&client2, work.path(), "intent-reboot")
-        .await
-        .expect("the keyed retry replays");
-    assert_eq!(replay.id, first.id, "premise: the same session is replayed");
-    assert_eq!(replay.agent_terminal, None);
-    assert!(replay.supervisor_creates_host_terminals);
     drop(slot);
 }
 

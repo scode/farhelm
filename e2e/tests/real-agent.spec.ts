@@ -371,17 +371,17 @@ test("waitForReplyMarker rejects a marker that is already present in the buffer"
   );
 });
 
-// Coverage for a wrapped-line finding: xterm splits a paragraph into
-// several buffer ROWS purely because of the terminal's column width, and
-// an earlier version of `termText` joined every row with a bare `\n`,
-// turning each wrap point into an invisible line break that could slice a
-// marker in half. The fix reconstructs logical lines using each buffer
-// row's `isWrapped` flag before joining (see `helpers/real-agent.ts`'s
-// `bufferText`). This drives that fix for real: `term.cols` (read live,
-// not assumed) sizes a padded line so the marker straddles the screen's
+// Coverage for a wrapped-line finding: the terminal splits a paragraph into
+// several ROWS purely because of its column width, and an earlier version
+// of `termText` joined every row with a bare `\n`, turning each wrap point
+// into an invisible line break that could slice a marker in half. The fix
+// reconstructs logical lines using each row's `wrapped` flag before joining
+// (see `helpers/real-agent.ts`'s `bufferText`). This drives that fix for
+// real: the terminal's columns (read live, not assumed) size a padded line
+// so the marker straddles the screen's
 // right edge, meaning roughly half its characters land on one wrapped row
 // and half on the next.
-test("termText reconstructs a reply marker that xterm wrapped across the screen edge", async ({ page, request }) => {
+test("termText reconstructs a reply marker that the terminal wrapped across the screen edge", async ({ page, request }) => {
   const title = `real-agent-wrap-${Date.now()}`;
   let id: string | undefined;
   await runWithCleanup(

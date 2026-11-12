@@ -58,27 +58,31 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 use std::sync::Arc;
 
-/// Most text one request may place on the clipboard: 256 KiB.
+/// Most text one request may place on the clipboard: the grid stream's own
+/// bound on a program's clipboard write,
+/// `farhelm_proto::grid::GRID_MAX_CLIPBOARD_BYTES` (8 MiB).
 ///
 /// The cap exists to bound what an arbitrary page script can make the
-/// native side allocate. Its size was chosen for programs' OSC 52 writes:
-/// the original sizing assumed an old terminal's OSC 52 payloads stay well
-/// under 100 KiB, a bound the xterm.js clipboard add-on does not itself
-/// enforce.
+/// native side allocate. It is the grid's bound so that every program
+/// clipboard write (OSC 52) a terminal can deliver also reaches the native
+/// clipboard: the supervisor already drops a larger write before it leaves
+/// the host, so a smaller cap here would only drop, in the desktop app alone,
+/// writes a browser page copies without trouble. (It used to be 256 KiB,
+/// sized for an earlier terminal component's OSC 52 handling, which dropped
+/// grid copies between that and 8 MiB.)
 ///
-/// Larger copies exist. A new terminal's grid stream carries an OSC 52
-/// write of up to `farhelm_proto::grid::GRID_MAX_CLIPBOARD_BYTES` (8 MiB),
-/// and a selection over a long scrollback, in either kind of terminal, can
-/// pass the cap too. In the desktop app such text is refused here with 413
-/// and is lost like any failed clipboard write: silently, as SPEC.md's
-/// best-effort clipboard contract has every failure be. A browser page,
-/// which writes the clipboard itself, has no such limit.
-pub(crate) const MAX_TEXT_BYTES: usize = 256 * 1024;
+/// A selection over a very wide, full scrollback can still pass it. In the
+/// desktop app such text is refused here with 413 and is lost like any
+/// failed clipboard write: silently, as SPEC.md's best-effort clipboard
+/// contract has every failure be. A browser page, which writes the
+/// clipboard itself, has no such limit.
+pub(crate) const MAX_TEXT_BYTES: usize = farhelm_proto::grid::GRID_MAX_CLIPBOARD_BYTES;
 
 /// The route's whole-body cap (enforced as the axum body limit in
 /// `lib.rs`): [`MAX_TEXT_BYTES`] of payload plus generous headroom for JSON
 /// string escaping — every clipboard byte can cost up to six (`\u00XX`) on
-/// the wire — and the envelope.
+/// the wire — and the envelope. That is about 48 MiB, held only while one
+/// authenticated request from the desktop app's own page is read.
 pub(crate) const MAX_BODY_BYTES: usize = 6 * MAX_TEXT_BYTES + 1024;
 
 /// How many native clipboard writes may run at once.
@@ -346,6 +350,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    /// Why: the cap used to be 256 KiB, so a program's clipboard write
+    /// between that and the grid's own 8 MiB bound reached the page and was
+    /// then dropped in the desktop app alone.
+    ///
+    /// What: the largest text a grid clipboard write can carry, made entirely
+    /// of characters JSON must escape as `\u00XX` (the most bytes it can take
+    /// on the wire), is admitted by the route's body limit and reaches the
+    /// sink whole.
+    #[farhelm_testtrace::test]
+    async fn the_largest_grid_clipboard_write_reaches_the_sink() {
+        let written: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_written = Arc::clone(&written);
+        let harness = rest_harness::idle_helm_with_clipboard_sink(Arc::new(move |text: &str| {
+            sink_written.lock().unwrap().push(text.len());
+            Ok(())
+        }))
+        .await;
+        let largest = "\u{1}".repeat(farhelm_proto::grid::GRID_MAX_CLIPBOARD_BYTES);
+        let response = harness
+            .router()
+            .oneshot(post(serde_json::json!({"text": largest})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            *written.lock().unwrap(),
+            [farhelm_proto::grid::GRID_MAX_CLIPBOARD_BYTES]
+        );
     }
 
     /// Text over the cap is the caller's bug and gets told so; the sink must

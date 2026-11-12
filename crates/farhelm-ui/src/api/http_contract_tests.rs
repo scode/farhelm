@@ -114,9 +114,6 @@ fn the_helm_session_list_fixture_decodes_with_every_mirrored_field() {
     assert_eq!(row.last_activity_at, 1_700_000_100);
     assert_eq!(row.tabs.len(), 1);
     assert_eq!(row.tabs[0].id, "tab-1");
-    assert_eq!(row.tabs[0].kind, Some(farhelm_proto::TerminalKind::Tmux));
-    assert_eq!(row.agent_terminal, Some(farhelm_proto::TerminalKind::Host));
-    assert!(row.supervisor_creates_host_terminals);
     assert_eq!(row.host, Some(2));
     assert_eq!(row.host_identity, Some(Some("install-identity".into())));
     assert_eq!(

@@ -1,6 +1,6 @@
 /**
  * The shortcut overview must describe this client's actual listeners, take its
- * opening chord before xterm, and return keyboard ownership when it closes.
+ * opening chord before the terminal, and return keyboard ownership when it closes.
  * Real owned template bindings distinguish a fresh overview from startup hints.
  */
 import type { APIRequestContext, Locator, Page } from "@playwright/test";

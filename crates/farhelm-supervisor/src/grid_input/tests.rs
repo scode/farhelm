@@ -1,7 +1,7 @@
 //! Tests of the grid input encoder: keys and mouse reports against
 //! Farhelm's checked-in key and mouse tables, and pastes, the cases the
 //! mouse table leaves out, focus reports and `Input` framing against the
-//! bytes the module docs specify (the same bytes old terminals send).
+//! bytes the module docs specify (the same bytes xterm.js sends).
 
 use super::*;
 use farhelm_proto::grid::{GRID_MAX_PASTE_PART_BYTES, GRID_MAX_TEXT_INPUT_BYTES};
@@ -94,8 +94,8 @@ fn hex(text: &str) -> Vec<u8> {
 /// codes the rules read), every modifier set, both platforms and both
 /// cursor-key modes. Every row must match: a difference is a key that types
 /// something other than what shells and agents expect, and other than what
-/// an old terminal types. The table was first computed by the vendored
-/// xterm.js's own `evaluateKeyboardEvent`, and the JS harness holds the
+/// Farhelm's terminals have always typed. The table was first computed by the
+/// xterm.js Farhelm then vendored (its own `evaluateKeyboardEvent`), and the JS harness holds the
 /// page's half of the rules to the same table. Which keydowns are sent at
 /// all is the grid client's to decide and test, so the table covers
 /// keydowns it would drop too.

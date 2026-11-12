@@ -11,9 +11,9 @@ branch, and whether a Restart was due and moved the session, are decided by
 samples the fixed operations take themselves at moments they can check
 (`host_survival` before the old session is touched, `old_session_after` after
 it), compared with the old fixture's digest-bound receipts. The UI model's
-reading of session details is a further check, never the decision, and the
-order in which it calls observations can turn a pass into a refusal but never
-a refusal into a pass.
+observations are further checks, never the decision (the candidate's session
+details name no terminal kind), and the order in which it calls observations
+can turn a pass into a refusal but never a refusal into a pass.
 """
 
 import json

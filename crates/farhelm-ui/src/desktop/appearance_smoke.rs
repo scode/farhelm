@@ -104,17 +104,6 @@ pub(super) const HEAD_OBSERVER: &str = r#"<script id="farhelm-appearance-smoke">
       tag: node.tagName, id: node.id, src: node.getAttribute('src'),
     })),
   };
-  // Whether an xterm.js surface was ever added to the page, by a separate
-  // observer that runs until it sees one: a new terminal built with xterm.js
-  // first and then swapped for the grid leaves no xterm.js element behind,
-  // so only a record of the insertion can show it happened.
-  state.xtermMounted = false;
-  const xtermWatch = new MutationObserver(() => {
-    if (!document.querySelector('.xterm')) return;
-    state.xtermMounted = true;
-    xtermWatch.disconnect();
-  });
-  xtermWatch.observe(document.documentElement, {subtree: true, childList: true});
   const observer = new MutationObserver(() => {
     if (!document.querySelector('#main')?.textContent.trim()) return;
     state.firstContent = snapshot();
@@ -225,14 +214,12 @@ return await (async () => {
     const sessionId = row.closest('[data-session-id]')?.dataset.sessionId;
     check(sessionId, 'owned terminal row has no session identity');
     row.click();
-    // The app's sessions run in terminal hosts, which the page draws with the
-    // grid component and nothing of xterm.js.
+    // The page draws every terminal with the grid component.
     await wait(() => window.__farhelmGrid, 'mounted grid terminal');
     // The grid paints its theme's background at its first frame, which the
     // reveal flushes; every snapshot below measures that paint.
     await wait(() => window.__farhelmIslands?.terminal?.test?.replay?.revealed, 'revealed grid terminal');
     check(getComputedStyle(window.__farhelmGrid.element).backgroundColor !== 'rgba(0, 0, 0, 0)', 'grid terminal never painted');
-    check(!early.xtermMounted && !window.__farhelmTerm, 'xterm.js was mounted for a new terminal');
     const open = async () => {
       document.querySelector('.app-settings-toggle').click();
       await wait(() => document.querySelector('.app-settings-dialog'), 'Settings dialog');
@@ -303,9 +290,6 @@ return await (async () => {
         && !url.searchParams.has('tab');
       return matches ? current : null;
     }, 'live revealed terminal for the owned session');
-    // What the helm announced on the attachment, not what the probe expects.
-    evidence.terminalKind = island.test.stream;
-    check(island.test.stream === 'grid', 'the helm did not serve a grid stream');
     const grid = island.grid, socket = island.ws;
     const sameAttachment = () => {
       check(window.__farhelmIslands?.terminal === island && island.grid === grid && island.ws === socket

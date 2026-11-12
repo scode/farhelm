@@ -169,7 +169,7 @@ class Element {
     return this.editable === undefined ? !!this.parent?.isContentEditable : this.editable;
   }
   matches(selector) {
-    if (selector === ".xterm-helper-textarea, .grid-terminal-input") return this.terminal;
+    if (selector === ".grid-terminal-input") return this.terminal;
     if (selector === "input, textarea") return ["input", "textarea"].includes(this.tag);
     if (selector === ".launch-sequence-trigger") return this.action !== undefined;
     if (selector === '[role="dialog"][aria-modal="true"]') return this.modal;
@@ -415,7 +415,7 @@ test("unrelated input cancels before passing through to later listeners", () => 
   }
 });
 
-test("text fields keep their prefix while xterm's textarea can begin", () => {
+test("text fields keep their prefix while the terminal's input can begin", () => {
   const editable = new Element({ editable: true });
   const targets = [new Element({ tag: "input" }), new Element({ tag: "textarea" }),
     editable, new Element({ parent: editable }), new Element({ parent: new Element({ tag: "input" }) })];
@@ -664,7 +664,7 @@ for (const client of clients) {
   });
 }
 
-/** A pending launch disables its relays without handing the chord to xterm.
+/** A pending launch disables its relays without handing the chord to the terminal.
  * An unmounted list has no such claim, including on repeat keydown events.
  */
 test("direct shortcuts reserve disabled and repeated chords, but not missing relays", () => {

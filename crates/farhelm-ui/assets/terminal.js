@@ -2,61 +2,37 @@
 // file owns their content path: WebSocket frames go straight into the
 // terminal component and keystrokes go straight back, bypassing the
 // reactive layer entirely (SPEC_impl.md: the bypass is load-bearing —
-// PTY-rate output through a vdom would be a performance disaster).
+// terminal-rate output through a vdom would be a performance disaster).
 //
-// Loaded as plain scripts (xterm.js, addon-fit.js, term-bytes.js,
-// clipboard-name.js, shift-enter-key.js, clipboard-writer.js, the grid-*.js
-// files, this — that is REGISTRATION order; Dioxus injects scripts
-// asynchronously, so mountWhenReady gates on the globals themselves, never
-// on order) — no bundler, no CDN: the UI must be fully self-contained.
+// Loaded as plain scripts (paste-sanitizer.js, clipboard-name.js,
+// clipboard-writer.js, the grid-*.js files, this — that is REGISTRATION
+// order; Dioxus injects scripts asynchronously, so mountWhenReady gates on
+// the globals themselves, never on order) — no bundler, no CDN: the UI must
+// be fully self-contained.
 //
-// ## Two kinds of stream, one island
+// ## The grid component
 //
-// Terminals that run in tmux send BYTES, which xterm.js parses and draws.
-// Terminals that run in a terminal host send a GRID: the supervisor runs
-// the emulator and sends rows of styled runs, which the grid component
-// (grid-terminal.js and its pure helpers) draws, and input goes back as
-// small JSON messages the supervisor encodes. Which one an attachment
-// carries is the terminal's, so the page asks for either (`grid=1` on the
-// socket URL) and the helm says which it got in a
-// `{"type":"stream","kind":...}` text frame before any data. No notice at
-// all is an older helm, which only has byte streams.
+// Every terminal runs in a terminal host on its session's host, and the
+// supervisor runs the terminal emulator: what an attachment carries is a
+// GRID stream (farhelm-proto's `grid` module), rows of styled runs that the
+// grid component (grid-terminal.js and its pure helpers) draws, and input
+// goes back as small JSON messages the supervisor encodes. The page measures
+// the component before the socket exists, because the socket URL carries the
+// size its first fit gives.
 //
-// Everything about the CONNECTION is shared by both kinds and lives in
-// `mount()`: the catch-up and its reveal, the heartbeat, detaches, banners,
-// the reconnect ladder, resize. Only the surface differs, and the page
-// picks it before the socket exists, because the socket URL carries the
-// surface's measured size. The session listing says which kind each
-// terminal is (`spec.kind`, see `sync`):
-//
-// - A new terminal (`host`) mounts the grid component directly. Nothing of
-//   xterm.js is built, measured, waited for or published for it: the grid's
-//   own fit gives the size, and its island record and test hooks are the
-//   grid's (`__farhelmGrid`, never `__farhelmTerm`). A byte stream for it
-//   is a broken contract that ends the attachment (`noteStreamKind`).
-// - An old terminal (`tmux`), or one whose kind the page does not know,
-//   builds the xterm.js surface first, exactly as it always has. A grid
-//   notice then disposes it (nothing has been written to it yet: the notice
-//   precedes all data) and mounts the grid component in its place
-//   (`adoptGrid`). That swap is the compatibility path for a kind the page
-//   did not know or had stale (another client's Restart moving an old agent
-//   into a new terminal, before this view's listing caught up); this view's
-//   own Restart names the new kind from its reply instead. Byte streams
-//   never see a difference.
-//
-// Loading xterm.js's scripts stays for old terminals; only using them is
-// tied to the kind.
-//
-// A grid island gets the shared paste and drop interception, selection
-// copying through the page's clipboard queue, today's links
-// (web links, the hyperlink mismatch warning, file-path hovers and
-// downloads, the desktop app's tunnels; see `createGridLinks`), and the
-// frozen screen kept across a reconnect or a takeover. Both surfaces show
-// guidance after a program-owned drag that copied nothing. Showing an input
-// method's composition at the cursor is not built for grid terminals. Flow
-// control's pause and resume are never sent for a grid stream: the component
-// applies every frame as it arrives and draws once per animation frame, so no backlog builds up on
-// this side to measure (the supervisor coalesces screen frames itself).
+// Everything about the CONNECTION lives in `mount()`: the catch-up and its
+// reveal, the heartbeat, detaches, banners, the reconnect ladder, resize.
+// Around the component the page adds the shared paste and drop
+// interception, selection copying through the page's clipboard queue, the
+// links (web links, the hyperlink mismatch warning, file-path hovers and
+// downloads, the desktop app's tunnels; see `createGridLinks`), guidance
+// after a program-owned drag that copied nothing, and the frozen screen kept
+// across a reconnect or a takeover. Showing an input method's composition at
+// the cursor is not built. The page sends no flow control of its own: the
+// component applies every frame as it arrives and draws once per animation
+// frame, so no backlog builds up on this side to measure. A backlog builds
+// up in the helm instead, which pauses and resumes the supervisor from its
+// own queue, and the supervisor coalesces screen frames itself.
 //
 // ## One island per terminal, reconciled declaratively (PLAN_M4.md item 6)
 //
@@ -65,11 +41,11 @@
 // terminal tabs make a session view hold N terminals at once — the agent's
 // plus one per open tab — every one of them ATTACHED CONCURRENTLY, because
 // switching tabs is a CSS visibility change rather than an attach cutover
-// (per-terminal flow control is what makes background tabs safe to leave
-// consuming). So the singleton became two maps keyed by the island's DOM
-// element id: `islands` (mounted) and `pendings` (still waiting for the
-// scripts a mount needs). Every invariant the singleton carried is now a per-key
-// invariant; nothing about the byte path itself changed.
+// (each terminal's own stream and its bounds are what make background tabs
+// safe to leave consuming). So the singleton became two maps keyed by the
+// island's DOM element id: `islands` (mounted) and `pendings` (still waiting
+// for the scripts a mount needs). Every invariant the singleton carried is
+// now a per-key invariant.
 //
 // The Rust side does not drive mounts and unmounts individually. It hands
 // this file the FULL SET of terminals the session view currently wants —
@@ -106,24 +82,24 @@
 // same visible, deliberate takeover the other client performed, not an
 // accident.
 //
-// ## The catch-up buffer (PLAN_M5.md item 5)
+// ## The catch-up (PLAN_M5.md item 5)
 //
-// An attach starts with a REPLAY: every byte the supervisor retained for
-// this terminal, written before the live stream begins. Through M4 those
-// bytes went into xterm.js as they arrived, so reopening a session made
-// the user watch their whole history scroll past — the cost that grows
-// with retained size and that M5 exists to remove.
+// An attach starts with a REPLAY: the terminal's current screen, then its
+// whole scrollback, before the live stream begins. Shown as it arrived,
+// reopening a session would make the user watch their history fill in, the
+// cost that grows with retained size and that M5 exists to remove.
 //
-// So the bytes of the catch-up phase are BUFFERED here instead, the
-// terminal element is hidden behind a connecting placeholder, and the
-// whole buffer lands as ONE `term.write()` whose completion callback is
-// what reveals the terminal — at the tail, with no intermediate frame
-// ever painted. That is the entire feature: the marker is a PRESENTATION
-// signal and nothing in this file (or anywhere else) may branch anything
-// else on it (`ControlMsg::ReplayComplete`'s own docs).
+// So the terminal element is hidden behind a connecting placeholder for the
+// catch-up phase, and revealed once the replay has landed, at the tail, with
+// no intermediate frame ever painted: the component applies each frame as it
+// arrives (history in slices; grid-terminal.js, "Scrollback"), and the
+// reveal draws the current screen while still hidden before showing it. That
+// is the entire feature: the marker is a PRESENTATION signal and nothing in
+// this file (or anywhere else) may branch anything else on it
+// (`ControlMsg::ReplayComplete`'s own docs).
 //
 // The phase ends on whichever of these comes first, and every one of them
-// WRITES the buffer rather than dropping it:
+// reveals what the terminal has received rather than throwing it away:
 //
 // - `{"type":"replay_complete"}`, the normal end.
 // - A detach notice, or the socket closing or erroring: the catch-up was
@@ -131,32 +107,25 @@
 //   mid-replay (again `ControlMsg::ReplayComplete`'s docs — a
 //   presentation that waits for the marker alone hides those terminals
 //   forever).
-// - Any of the three graceful-degradation bounds below
-//   (`REPLAY_BUFFER_LIMIT`, `REPLAY_CHUNK_LIMIT`,
-//   `REPLAY_IDLE_TIMEOUT_MS`), which fall back to today's
-//   batched-but-visible catch-up rather than to an error — with ONE
-//   exception, the socket that never finished connecting, which ends the
-//   phase into the reconnect ladder when recovery can run and into the
-//   detach banner only when it cannot (see `armIdleTimer`).
+// - The idle bound below (`REPLAY_IDLE_TIMEOUT_MS`), which falls back to a
+//   visible, live terminal rather than to an error — with ONE exception,
+//   the socket that never finished connecting, which ends the phase into
+//   the reconnect ladder when recovery can run and into the detach banner
+//   only when it cannot (see `armIdleTimer`).
 //
-// The bounds are also a TRUST boundary, not only a robustness one. Under
-// `--ssh` the supervisor is a different machine, and this phase is the one
-// place this file accumulates its bytes instead of handing them straight
-// to xterm.js — so "hold until the peer says stop" has to be bounded in
-// bytes, in frames, AND in time, or a hostile or broken peer decides how
-// much memory this page uses and how long its terminal stays hidden.
+// The bound is also a TRUST boundary, not only a robustness one. Under
+// `--ssh` the supervisor is a different machine, and "hold until the peer
+// says stop" must be bounded in time, or a hostile or broken peer decides
+// how long its terminal stays hidden. What the page holds meanwhile is
+// bounded by the grid format itself (the history cap the `hello` announces,
+// and the component's own limits), not by this phase.
 //
-// One catch-up phase per ATTACH, never re-entered: a tmux `%pause`
-// recovery replays retained history into the SAME attachment mid-stream
-// with no marker of its own, and treating that as a second catch-up would
-// hide a live terminal for as long as the recovery took. A reconnect is a
-// new socket and therefore a new mount, which buffers again by
+// One catch-up phase per ATTACH, never re-entered. A reconnect is a new
+// socket and therefore a new mount, which hides and reveals again by
 // construction.
 //
-// Nothing this phase schedules may outlive its mount. `term.write()`'s
-// completion callback still runs after `dispose()` (probed directly
-// against the vendored xterm.js), and the idle timer is a plain
-// `setTimeout`, so both can fire into a torn-down island whose DOM nodes
+// Nothing this phase schedules may outlive its mount. The idle timer is a
+// plain `setTimeout`, so it can fire into a torn-down island whose DOM nodes
 // a REPLACEMENT mount is already using — revealing a terminal that is
 // mid-catch-up, or throwing inside a callback nobody is watching. Every
 // deferred path therefore checks this mount's own `alive` token, which
@@ -271,67 +240,42 @@
 // carry it is dead). What is left here is genuinely thin: read the
 // payload, look the answer up, upload, insert.
 //
-// Insertion goes through the terminal's paste path: `term.paste()` for
-// xterm.js, or grid paste messages bracketed by the supervisor. The code
-// that already handles the terminal's modes frames the input, and the path
-// lands at whatever cursor position is current when the transfer finishes.
-// Nothing here ever calls `focus()`: an upload
-// completing must not steal the caret from wherever the user has since put
-// it.
+// Insertion goes through the terminal's paste path: the grid component's
+// `paste` messages, which the supervisor brackets when the program has
+// asked for bracketed paste. The path lands at whatever cursor position is
+// current when the transfer finishes. Nothing here ever calls `focus()`: an
+// upload completing must not steal the caret from wherever the user has
+// since put it.
 //
 // ## Copy to the system clipboard: two selections, two mechanisms
 //
-// A user selecting text in a session terminal used to show "copied" (an
-// agent TUI's own on-screen toast) while pasting elsewhere produced STALE
-// content — the TUI had reported a copy to itself, over an escape sequence
-// this file silently dropped, while nothing here ever touched the real
-// system clipboard for the drag the user actually made. Closing that gap
-// took two independent mechanisms, because a session terminal's "selected
-// text" is really two different things depending on whether the agent
-// program running in it has turned mouse reporting on — confirmed directly
-// against the vendored xterm.js, not assumed:
+// A session terminal's "selected text" is two different things depending on
+// whether the program running in it has turned mouse reporting on, and each
+// needs its own route to the system clipboard:
 //
 // - With mouse reporting ON (Claude Code, Codex, most full-screen TUIs), a
-//   PLAIN drag is handled by the TUI itself: xterm's own `SelectionService`
-//   is disabled for as long as an app has mouse events on
-//   (`CoreBrowserTerminal.bindMouse`'s `onProtocolChange` handler), so no
-//   LOCAL xterm selection is ever made and none of this file's selection
-//   handlers fire — the mouse events go to the pty instead. The only way
-//   for such a copy to reach the real clipboard is the program's own OSC 52
-//   write, which is why `mount()` loads the vendored `@xterm/addon-clipboard`
-//   (see its wiring comment there for the addon itself, and its silent-
-//   failure contract). OSC 52 is WRITE-only here: the addon's own read/query
-//   path would hand a program the real system clipboard on request, which
-//   this file refuses unconditionally (`clipboardProvider`'s own header
-//   covers why that is a security boundary, not an oversight).
-// - Holding SHIFT while dragging forces a local xterm selection even with
-//   mouse reporting on (`SelectionService.shouldForceSelection` keys
-//   directly off `event.shiftKey` — except on macOS, where it reads Option
-//   instead, per `macOptionClickForcesSelection` above), and so does every
-//   ordinary drag/double-click/triple-click whenever mouse reporting is off
-//   at all (a plain shell prompt, an editor that never grabbed the mouse).
-//   THIS is the selection herdr-style copy-on-select covers: a
-//   document-level `mouseup`, gated to gestures that started on this
-//   island's own element, pushes a completed LOCAL selection's text to the
-//   clipboard once it ends — including a drag released outside the
-//   terminal entirely (see that listener's own comment for the document-
-//   level reasoning, why its real work runs one macrotask later rather
-//   than inline, and copy-on-select.js's header for the full duality again
-//   from the pure decision's point of view). Every gesture that ends with
-//   a non-empty selection copies; there is no "already copied this" cache
-//   to suppress a re-copy (copy-on-select.js's header covers why an
-//   earlier version of that was a real bug).
+//   PLAIN drag goes to the program, and no local selection is made. The only
+//   way such a copy reaches the clipboard is the program's own OSC 52 write,
+//   which the supervisor's emulator turns into grid clipboard messages and
+//   the component hands to `onClipboard` (see `createGridSurface`). OSC 52
+//   is WRITE-only: the supervisor's emulator never answers a program's
+//   clipboard READ (SPEC.md, "Terminal experience").
+// - Holding SHIFT while dragging (Option on a Mac) forces a local selection
+//   even with mouse reporting on, and so does every ordinary drag, double
+//   click and triple click whenever mouse reporting is off. The grid
+//   component copies such a selection when the gesture ends (its `onCopy`,
+//   through copy-on-select.js's decision), even when it reselects the same
+//   text.
 //
 // Neither mechanism can stand in for the other: OSC 52 says nothing about a
-// Shift-forced or mouse-reporting-off selection (the TUI never sees it, so
-// it never reports it), and a local-selection copy never fires for a plain
-// drag the TUI intercepted before xterm's own selection code could run.
-// Both are needed, and both fail silently in the same direction — no
-// clipboard change, no UI — because neither a webview's clipboard
-// permission policy nor an agent program's own OSC 52 support is something
-// this file can do anything about beyond trying. That silence is a
-// documented SPEC.md exception to the surface-every-error rule, not an
-// oversight (SPEC.md's Terminal experience section).
+// forced or mouse-reporting-off selection (the program never sees it), and
+// a local-selection copy never fires for a plain drag the program took.
+// Both fail silently in the same direction — no clipboard change, no UI —
+// because neither a webview's clipboard permission policy nor a program's
+// own OSC 52 support is something this file can do anything about beyond
+// trying. That silence is a documented SPEC.md exception to the
+// surface-every-error rule, not an oversight (SPEC.md's Terminal experience
+// section).
 //
 // ## Font settling before mount
 //
@@ -339,24 +283,20 @@
 // (lib.rs registers both WOFF2 files), so failing to load it is a broken
 // deployment, not something to survive — the same contract the gate below
 // applies to every other bundled file. The font must be loaded BEFORE any
-// terminal is constructed: xterm.js measures its character CELL METRICS
-// when `term.open()` runs, using whatever `fontFamily`/`fontSize` are
-// configured at that point, and while re-measuring happens automatically
-// when an option CHANGES, nothing recomputes `cols`/`rows` or notifies
-// the pty on its own — only an explicit re-fit (`fit.fit()`) does that,
-// which resizes the terminal and makes tmux reflow the pane it is
-// attached to. A family swapped in after construction therefore still
-// needs a `fit.fit()`, and that reflow is not cosmetic: a session's FIRST
-// attach can race real pty output against it, landing a transient blank
-// frame or a marker that scrolled out from under a text-wait mid-redraw
-// — real failures the browser suite caught across both engines under
-// load, not a hypothetical.
+// terminal is constructed: the grid component measures its character cell
+// from the font when it fits, and the size that fit gives is the size the
+// socket URL tells the program. A family arriving after the first fit would
+// change the cell, and the refit that follows resizes the program's
+// terminal, which is not cosmetic: a session's FIRST attach can race real
+// output against that resize, landing a transient blank frame or a marker
+// that scrolled out from under a text-wait mid-redraw (failures the browser
+// suite caught across both engines under load).
 //
 // So the font is a mount precondition, enforced through the SAME gate
 // `mountWhenReady` uses for every other mount precondition (its own docs
 // cover the mechanism) — never an `await` inside `mount()` itself, whose
-// synchronous, no-yield-points shape is load-bearing (see the font-family
-// wiring inside `mount()` for why).
+// synchronous, no-yield-points shape is load-bearing (see `islands` for
+// why).
 //
 // `ensureFontSettling` drives that gate condition. It is kicked from the
 // FIRST `mountWhenReady` attempt, not from script evaluation, so a page
@@ -424,8 +364,8 @@
   // digits, so not "", "1e1" or "0x10") means the default; a number outside
   // the range is clamped into it, so an old or hand-edited value can never
   // produce an unreadable terminal.
-  // The terminal font, the same for both kinds of terminal (see "Font
-  // settling before mount" for why it is a mount precondition).
+  // The terminal font (see "Font settling before mount" for why it is a
+  // mount precondition).
   const TERMINAL_FONT_FAMILY = '"JetBrains Mono", monospace';
 
   const FONT_SIZE_KEY = "farhelm.terminal-font-size";
@@ -453,10 +393,10 @@
   let terminalFontSize = storedFontSize();
 
   // Whether this is a Mac, read off the platform string. On every real
-  // platform string it agrees with the exact list of Mac platform names both
-  // terminals use (grid-input.js's `platformOf`, and old terminals'
-  // xterm.js), so the page's shortcut and link-click modifiers agree with
-  // the platform the terminal treats this page as running on.
+  // platform string it agrees with the exact list of Mac platform names the
+  // grid component uses (grid-input.js's `platformOf`), so the page's
+  // shortcut and link-click modifiers agree with the platform the terminal
+  // treats this page as running on.
   const IS_MAC = /Mac/.test(
     (typeof navigator !== "undefined" && navigator.platform) || "",
   );
@@ -553,113 +493,20 @@
     tryFontLoad();
   }
 
-  // Watermark backpressure (PLAN_M2_5.md step 4): term.write() buffers
-  // asynchronously up to a hard ~50MB cap, then silently discards, so
-  // the unwritten-byte counter below (driven by write callbacks) is the
-  // only honest signal of how far behind the renderer has fallen.
-  // Crossing HIGH_WATER sends `{"type":"pause"}`, which the helm
-  // forwards to the supervisor as `ControlMsg::PauseOutput`
-  // (crates/farhelm-helm/src/lib.rs, `term_ws`'s docs); the supervisor
-  // stops reading that attachment's tmux control client until
-  // `{"type":"resume"}` arrives, or — if the pause outlives the
-  // supervisor's stall timeout — detaches the attachment as stalled
-  // instead (PLAN_M2_5.md, "Stall detach").
-  //
-  // Per ISLAND, not per page: the marks are constants, but the counters
-  // they gate live inside each `mount()` closure, so one wedged tab pauses
-  // only its own stream. That isolation is the whole reason each terminal
-  // gets its own channel and its own tmux control client (PLAN_M4.md item
-  // 3) — a shared counter here would have quietly undone it.
-  const HIGH_WATER = 4 * 1024 * 1024;
-
-  /**
-   * This island's pause mark, with the browser suite allowed to LOWER it.
-   *
-   * The same argument `replayControls` makes for the replay bounds, for the
-   * same reason: no fixture can push four megabytes of real output through a
-   * real socket on demand, and one that tries is racing something else. The
-   * something else here is the supervisor's own stall detach — a viewer that
-   * stops consuming is cut loose with a visible reason, and on a loaded
-   * machine that lands at about four seconds, before a stalled tab has
-   * accumulated anything like four megabytes. Measured: three failures in
-   * twenty loaded WebKit executions sat at 1.4-2.2 MB undrained when the
-   * socket closed with "terminal stopped consuming output (stalled)", so the
-   * crossing this mark exists to make was unreachable, not merely late.
-   * Lowering the mark makes it reachable in milliseconds, which is what lets
-   * a test observe the pause rather than a race between two bounds.
-   *
-   * LOWER only. A test that could raise it would be able to disable the
-   * pause entirely and call the resulting silence a pass — the same
-   * one-way rule `commit_focus_destination`'s browser budget follows.
-   *
-   * Read per mount, like the replay limits: nothing here is shared between
-   * islands, and a production page never defines the global.
-   */
-  function pauseMark() {
-    const override = window.__farhelmTestFlowControl?.highWater;
-    return typeof override === "number" && override > 0 && override < HIGH_WATER
-      ? override
-      : HIGH_WATER;
-  }
-
-  // A quarter of HIGH_WATER, not just "some smaller number": the gap
-  // between the two marks is what stops a producer hovering right at the
-  // boundary from flapping pause/resume/pause on every few bytes drained.
-  // A resume this close behind the pause still recovers in well under a
-  // second even at xterm.js's slowest realistic parse rate (PLAN_M2_5.md:
-  // 5-35 MB/s), so nothing is given up by not waiting for a fuller drain.
-  // Derived from the pause mark, not a second duplicated literal — a future
-  // edit to one mark must not silently un-derive the ratio this comment
-  // describes. Both are resolved per mount (see `pauseMark`), so a test that
-  // lowers the pause mark carries this ratio down with it rather than
-  // leaving the resume mark stranded above the new pause point.
-
-  // How many buffered replay bytes this file will hold before giving up on
-  // the no-intermediate-paint presentation and going live (PLAN_M5.md item
-  // 5's first graceful-degradation bound).
-  //
-  // The number is the helm's own worst-case-replay arithmetic, not a round
-  // guess (`BYTE_STREAM_EVENT_QUEUE` in farhelm-helm/src/client.rs, which
-  // sizes its queue from the same two constants): tmux retains at most
-  // `HISTORY_LIMIT` = 12,000 lines, and a captured line is a terminal row
-  // plus its `capture-pane -e` escapes, generously bounded at 256 bytes —
-  // 12,000 × 256 B ≈ 3 MiB. A legitimately wide or heavily styled history
-  // CAN exceed that, which is exactly why crossing it degrades to a
-  // batched-but-visible catch-up instead of erroring; the buffer is
-  // written, never dropped, so no byte is ever lost to this bound.
-  //
-  // It also sits below HIGH_WATER by design: the single flush write can
-  // therefore never, on its own, push the unwritten-byte counter past the
-  // pause mark, so buffering cannot manufacture a flow-control pause that
-  // the same bytes arriving live would not have caused.
-  const REPLAY_BUFFER_LIMIT = 3 * 1024 * 1024;
-
-  // How many buffered FRAMES a catch-up may hold, alongside the byte bound
-  // above.
-  //
-  // Bytes alone do not bound this: each frame is kept as its own
-  // `Uint8Array` until the flush, and a peer sending millions of one-byte
-  // frames stays far below 3 MiB of payload while costing a per-object
-  // overhead this page has no bound on at all. The supervisor chunks a
-  // replay at 32 KiB, so even a full 3 MiB history is ~96 frames — 1024
-  // leaves an order of magnitude for a peer that chunks differently while
-  // still refusing the pathological case.
-  const REPLAY_CHUNK_LIMIT = 1024;
-
-  // How long a catch-up may go with NO bytes and NO marker before the same
-  // degradation applies (PLAN_M5.md item 5's second bound).
+  // How long a catch-up may go with NO data and NO marker before it ends
+  // into a visible, live terminal (PLAN_M5.md item 5's bound).
   //
   // Idle-based rather than total-duration, deliberately: a slow but
   // PROGRESSING replay — a deep history over `--ssh`, a loaded host — is
-  // the case the buffering exists for, and a total-duration cap would
+  // the case the hidden catch-up exists for, and a total-duration cap would
   // abandon it precisely when it is working. What must not persist is a
   // stream that has gone quiet without a marker. A lost marker is a
   // protocol violation, but the containment cannot be allowed to depend on
   // never having one, because the failure it would otherwise produce is a
   // terminal hidden forever.
   //
-  // Five seconds is far longer than any gap inside a chunked replay (the
-  // supervisor writes 32 KiB frames back to back) or than an attach
+  // Five seconds is far longer than any gap inside a replay (the
+  // supervisor sends its messages back to back) or than an attach
   // cutover, and short enough that a lost marker costs a blink of
   // "connecting…" rather than a wedged view.
   //
@@ -778,97 +625,9 @@
     "Not connected: this terminal never finished connecting, so nothing typed here would "
     + "reach the session — reopen the session to try again.";
 
-  // The clipboard provider handed to every mount's `ClipboardAddon`
-  // (`mount()`, below) in place of the addon's own default
-  // `BrowserClipboardProvider`. One shared, stateless object rather than
-  // one per mount — nothing here differs between islands, so there is
-  // nothing to gain from a fresh closure every time one attaches.
-  //
-  // ## Reads are refused outright — this is a security boundary, not a
-  //    missing feature
-  //
-  // An OSC 52 QUERY (`\x1b]52;c;?\x07`) asks the addon to hand the SYSTEM
-  // CLIPBOARD'S CONTENTS to whatever program is running in this pane. The
-  // default provider answers it with `navigator.clipboard.readText()` —
-  // which would let any agent TUI, or anything it shells out to, read
-  // whatever the user last copied ANYWHERE on their system, including
-  // content that has nothing to do with this session at all, and exfiltrate
-  // it however it likes (print it, write it to a file, send it over the
-  // network the agent already has). Nothing about "a terminal program can
-  // read escape sequences its own pty carries" implies it should be handed
-  // the clipboard on request, and this addon exists to make WRITES real,
-  // not to open a read channel nobody asked for.
-  //
-  // `readText` below therefore never calls `navigator.clipboard.readText`
-  // at all — not "catches whatever it returns and discards it", which would
-  // still trigger a real permission prompt and a real read on every query,
-  // but never invokes the browser API in the first place. Returning `""`
-  // synchronously (never a `Promise`) is what the addon's own source treats
-  // as "nothing to report" (`ClipboardAddon.ts`'s `_setOrReportClipboard`:
-  // a non-Promise result is used immediately as the report body), so a
-  // querying program sees an empty clipboard rather than an error or a
-  // hang — indistinguishable, from inside the pane, from a real clipboard
-  // that happens to be empty.
-  //
-  // ## Writes are fire-and-forget — the parser must never wait on browser
-  //    policy
-  //
-  // The addon's default `writeText` returns the raw
-  // `navigator.clipboard.writeText()` promise, and that promise becomes
-  // what xterm's OWN write buffer awaits before it resumes parsing any
-  // FURTHER bytes from this pty (`WriteBuffer`'s handling of a Promise-
-  // returning OSC handler result, confirmed against the vendored xterm.js).
-  // Two browser behaviors turn that into a real problem: a clipboard
-  // permission prompt the user has not yet answered leaves the promise
-  // PENDING indefinitely, and a policy refusal REJECTS it, which surfaces
-  // as an uncaught throw the write buffer turns into a `queueMicrotask`
-  // throw — neither of which this file may allow to stall a terminal's
-  // rendering or blow up the page over a clipboard write nobody asked to
-  // wait for.
-  //
-  // So `writeText` below starts the real write, attaches its own local
-  // `.catch(() => {})` so a rejection never escapes as an unhandled promise
-  // anywhere, and returns `undefined` — not the promise — synchronously.
-  // The addon's `_setOrReportClipboard` only awaits a RETURNED `Promise`
-  // (`result instanceof Promise`); handing back a plain value makes the OSC
-  // handler resolve on the spot, so parsing continues immediately no matter
-  // how long the real write takes or how it resolves. This is the same
-  // silent-failure contract `mount()`'s own OSC 52 comment describes for
-  // the addon's default behavior — restated here because this provider is
-  // now the one actually implementing it.
-  const clipboardProvider = {
-    /** Never answers a query with real clipboard contents — see this
-     * constant's own header for why that is a security boundary, not an
-     * oversight. `selection` is ignored: every kind of query gets the same
-     * empty, no-questions-asked refusal. */
-    readText() {
-      return "";
-    },
-    /** Fire off a real clipboard write without ever handing xterm's parser
-     * a promise to wait on — see this constant's own header. Only the `c`
-     * (system clipboard) selection is honored, matching the addon's own
-     * default provider; `p`/`q` (primary/secondary X selections) are
-     * silently ignored, exactly as upstream does.
-     *
-     * The native route comes first because on the desktop it is the ONLY
-     * route: WKWebView gives this page no `navigator.clipboard` at all
-     * (`dioxus://` is not a secure context — farhelm-helm's clipboard.rs
-     * has the diagnosis), so the `?.` below made every OSC 52 write a
-     * silent no-op while the program in the pane reported success.
-     * `__farhelmNativeClipboardWrite` exists only after desktop
-     * authentication armed it (auth.rs's `arm_native_clipboard`); a browser
-     * tab never has it and keeps the web API path, working where the engine
-     * allows (Chromium) and silently refused where it does not (WebKit),
-     * per SPEC.md's best-effort clipboard contract. */
-    writeText(selection, text) {
-      if (selection !== "c") return;
-      enqueueClipboardWrite(text);
-    },
-  };
-
   /**
-   * This mount's catch-up controls, seeded from the three constants above
-   * and then overridden by `window.__farhelmTestReplay` if the page
+   * This mount's catch-up controls, seeded from the constant above and
+   * then overridden by `window.__farhelmTestReplay` if the page
    * defines one.
    *
    * TEST-ONLY, and the one place in this file where a test hook feeds
@@ -876,13 +635,13 @@
    * to be good. It is: the contracts this phase exists for are exactly the
    * ones a real supervisor will not produce on demand. It always sends its
    * marker, promptly; it never withholds one; and no fixture in the suite
-   * can make it replay 3 MiB or go quiet for five seconds mid-catch-up.
+   * can make it go quiet for five seconds mid-catch-up.
    * `holdMarker` keeps the phase open so a test can assert what is on
-   * screen DURING it, and the three limits let the degradation bounds be
-   * crossed in milliseconds instead of not at all.
+   * screen DURING it, and the idle limit lets the bound be crossed in
+   * milliseconds instead of not at all.
    *
-   * A production page never defines the global, so the constants above are
-   * the operative values everywhere but the browser suite. Read once per
+   * A production page never defines the global, so the constant above is
+   * the operative value everywhere but the browser suite. Read once per
    * mount into that mount's own object: nothing here is shared between
    * islands, and a test that forgets to clear the global still only
    * affects the page it set it on.
@@ -910,8 +669,6 @@
       holdMarker: ownsHold,
       heldReason: null,
       limits: {
-        bufferBytes: overrides.bufferBytes || REPLAY_BUFFER_LIMIT,
-        bufferChunks: overrides.bufferChunks || REPLAY_CHUNK_LIMIT,
         idleMs: overrides.idleMs || REPLAY_IDLE_TIMEOUT_MS,
       },
     };
@@ -928,7 +685,7 @@
   // reflect reality.
   //
   // Each value carries what `unmount()` needs to reach — the socket, the
-  // xterm instance, the window resize listener registered at mount time,
+  // grid component, the window resize listener registered at mount time,
   // this mount's own test hook — plus the `path`/`gen` pair `sync()`
   // compares against to decide whether a still-wanted island is the SAME
   // attachment or a different one that has to be torn down and rebuilt.
@@ -976,27 +733,18 @@
 
   const islands = new Map();
 
-  /**
-   * The DOM element of an island's terminal, whichever component it holds:
-   * the grid component (a new terminal's, or one a grid stream swapped in),
-   * else xterm.js's.
-   * Everything outside `mount()` that reaches an island's surface goes
-   * through these two, so a grid island never has a disposed xterm.js
-   * instance touched on its behalf.
-   */
+  /** The DOM element of an island's terminal: its grid component's. */
   function surfaceElement(island) {
-    return island.grid ? island.grid.element : island.term.element;
+    return island.grid.element;
   }
 
-  /** Put keyboard focus in an island's terminal (see `surfaceElement`). */
+  /** Put keyboard focus in an island's terminal. */
   function focusSurface(island) {
-    if (island.grid) island.grid.focus();
-    else island.term.focus();
+    island.grid.focus();
   }
 
-  // `mountWhenReady()` calls still waiting for the scripts their kind of
-  // terminal needs and their target DOM element to exist (or held until
-  // their kind is named), keyed the same way. At most one per
+  // `mountWhenReady()` calls still waiting for the scripts a terminal needs
+  // and their target DOM element to exist, keyed the same way. At most one per
   // element id: starting a new one, or unmounting that id, cancels
   // whatever was still pending for it. Islands wait independently, so a
   // tab whose element has not rendered yet cannot hold up the agent
@@ -1141,8 +889,8 @@
   // mounts. Everything that IS a user asking — take control, leaving and
   // reopening the session — clears them explicitly.
   //
-  // They also own a live surface each (an xterm instance, or a frozen grid
-  // component), so whoever buries one disposes it; a departed terminal
+  // They also own a live surface each (a frozen grid component), so whoever
+  // buries one disposes it; a departed terminal
   // takes its tombstone with it rather than leaving it for the view's
   // teardown.
   const tombstones = new Map();
@@ -1157,24 +905,22 @@
     if (!tomb) return;
     tombstones.delete(el);
     publishTombstones();
-    tomb.stopCopyOnSelect();
     tomb.surface.dispose();
   }
 
   // ------------------------------------------------------------------
-  // Grid terminal links: today's link behavior hosted on a grid terminal
+  // Grid terminal links
   // ------------------------------------------------------------------
   //
   // grid-terminal.js finds the links on a line through a provider and
   // decides the gestures (hover, leave, the admitted click, the withheld
-  // press); what each link DOES is today's code, here: the OSC 8 target
+  // press); what each link DOES is decided here: the OSC 8 target
   // display with its mismatch warning (`showLinkTarget` with
   // `linkHoverText`), the tunnel hint and Cmd-click tunnel, the opening
   // rules (`activateWebLink`), and file paths through `FileLinks`
   // (detection, the checking hover, refusals, downloads, the desktop app's
   // opening). Those helpers read a terminal as link lines (terminal-links.js,
-  // "Link lines"), which the grid offers directly (`linkLines`); the
-  // xterm.js surface is the one that reads them through an adapter.
+  // "Link lines"), which the grid offers directly (`linkLines`).
   //
   // Module-level rather than inside `mount()`, and reading nothing of a
   // mount but what is passed in: a grid kept as a takeover's snapshot
@@ -1186,10 +932,10 @@
   }
 
   /**
-   * Today's links for one grid terminal: `{provider, dispose}`, the
-   * provider being grid-terminal.js's `links` option. `getGrid()` returns
-   * the component (created after this, so read at use); `report(message)`
-   * shows a tunnel failure where the xterm.js path shows it.
+   * The links for one grid terminal: `{provider, dispose}`, the provider
+   * being grid-terminal.js's `links` option. `getGrid()` returns the
+   * component (created after this, so read at use); `report(message)`
+   * shows a tunnel failure (the attachment status line, else the banner).
    */
   function createGridLinks({ getGrid, spec, baseUrl, report }) {
     const links = window.farhelmTerminalLinks;
@@ -1221,7 +967,12 @@
         : null;
     };
     // The web hover's identity, so a refusal raised for it is lowered when
-    // the pointer really leaves it (the xterm.js path's `noteWebHover`).
+    // the pointer really leaves it. The grid leaves a hovered link and asks
+    // for it afresh, synchronously, whenever the link's rows are redrawn
+    // (grid-terminal.js, "## Links" in `create`), so the lowering waits one
+    // task: only a re-hover of the same target, cells and displayed text in
+    // that same task keeps a raised refusal, and a real departure or
+    // replacement returns it to ordinary stacking.
     let webHoverIdentity = null;
     let webLeaveTimer = null;
     const noteWebHover = (uri, range, text) => {
@@ -1299,8 +1050,8 @@
           if (getGrid().isLinkClick(event) && !getGrid().hasSelection()) fileLinks.download(target.path, event);
         };
       } else {
-        // xterm.js underlines any OSC 8 link; a scheme outside the
-        // allowlist does nothing on hover or click.
+        // Every OSC 8 link is underlined; a scheme outside the allowlist
+        // does nothing on hover or click.
         link.hover = () => noteWebHover(null, null, null);
         link.leave = () => links.hideLinkTarget(view.element);
         link.activate = () => {};
@@ -1371,60 +1122,6 @@
         webLeaveTimer = null;
         fileLinks.dispose();
       },
-    };
-  }
-
-  /**
-   * Restore local selection copying and link gestures on a frozen screen.
-   *
-   * The old island's listeners are gone. This lifetime belongs to the
-   * tombstone instead, with no input, resize or transport callbacks. Keep
-   * the live terminal's press-time policy, but omit program-copy guidance
-   * and OSC 52 grace: there is no attached program to answer the gesture.
-   * Link providers belong to the retained terminal and need their original
-   * gesture observer back. Input and transport listeners remain detached.
-   * The gesture arrives clean: the live island's teardown reset it, so a
-   * press held when the socket died cannot complete as a click here.
-   */
-  function installSnapshotCopyOnSelect(el, term, linkGesture) {
-    let pressed = null;
-    const observeLink = event => linkGesture.observe(event,
-      !!event.target?.closest?.('.xterm-screen') && term.element.contains(event.target));
-    const mouseDown = (event) => {
-      pressed = {
-        button: event.button,
-        trackingAtPress: !!(term.modes && term.modes.mouseTrackingMode !== "none"),
-        forced: window.farhelmCopyOnSelect.pressForcesSelection(event, navigator.platform),
-      };
-    };
-    const mouseUp = () => {
-      if (!pressed) return;
-      const press = pressed;
-      pressed = null;
-      // xterm finalizes selection after mouseup dispatch. Burial can happen
-      // before this callback, so never inspect a disposed or replaced screen.
-      setTimeout(() => {
-        if (tombstones.get(el)?.surface !== term) return;
-        const hasSelection = term.hasSelection();
-        const selectionText = hasSelection ? term.getSelection() : "";
-        if (window.farhelmCopyOnSelect.copySelectionOnMouseUp({
-          hasSelection,
-          selectionText,
-          ...press,
-        })) enqueueClipboardWrite(selectionText);
-      }, 0);
-    };
-    for (const type of ['mousedown', 'mousemove', 'mouseup']) document.addEventListener(type, observeLink, true);
-    term.element.addEventListener("mousedown", mouseDown);
-    document.addEventListener("mouseup", mouseUp);
-    return () => {
-      pressed = null;
-      for (const type of ['mousedown', 'mousemove', 'mouseup']) document.removeEventListener(type, observeLink, true);
-      // Same rule as the live island's teardown: no held press outlives
-      // its observer (`createLinkGesture`).
-      linkGesture.reset();
-      term.element.removeEventListener("mousedown", mouseDown);
-      document.removeEventListener("mouseup", mouseUp);
     };
   }
 
@@ -1776,19 +1473,9 @@
       controller.failures += 1;
       controller.attempting = false;
     } else {
-      // The dying mount's own spec predates anything synced since it
-      // mounted, and the kind can change in between: a Restart of this view
-      // syncs `pending` while the old island is still live, and it is the
-      // Restart's teardown that ends this socket. `sync` refreshes a
-      // controller's spec only from its next call, so the recovery starts
-      // from the latest synced spec for this element when that still names
-      // the same attachment; otherwise its first attempt would mount the
-      // stale kind (xterm.js for what may already be a new terminal).
-      const latest = lastSync?.specs.find((candidate) => candidate.el === spec.el);
-      const current = latest && latest.path === spec.path && latest.gen === spec.gen ? latest : spec;
       controller = {
         el: spec.el,
-        spec: current,
+        spec,
         baseUrl,
         attach,
         path: spec.path,
@@ -1796,12 +1483,10 @@
         failures: 0,
         timer: null,
         attempting: false,
-        // The rendered screen this recovery is trying to get back, held
-        // aside by the first attempt — see `runReconnect`.
+        // The rendered screen this recovery is trying to get back (a frozen
+        // grid component), held aside by the first attempt — see
+        // `runReconnect`.
         snapshot: null,
-        // Whether `snapshot` is a grid component rather than xterm.js.
-        snapshotIsGrid: false,
-        snapshotLinkGesture: null,
       };
       reconnects.set(spec.el, controller);
     }
@@ -1871,14 +1556,11 @@
   function runReconnect(controller, manual) {
     controller.attempting = true;
     const island = islands.get(controller.el);
-    // The held screen is whichever surface the island has: xterm.js, or the
-    // grid component, which `unmount` freezes (it keeps its own selection
-    // copying and links; xterm.js's need `installSnapshotCopyOnSelect`).
+    // The held screen is the island's grid component, which `unmount`
+    // freezes; a frozen grid keeps its own selection copying and links.
     if (island && !controller.snapshot) {
-      island.keepTerm = true;
-      controller.snapshot = island.grid || island.term;
-      controller.snapshotIsGrid = !!island.grid;
-      controller.snapshotLinkGesture = island.grid ? null : island.linkGesture;
+      island.keepScreen = true;
+      controller.snapshot = island.grid;
     }
     farhelmTerm.unmount(controller.el);
     paintReconnect(controller);
@@ -1928,11 +1610,7 @@
     if (controller.timer !== null) clearTimeout(controller.timer);
     reconnects.delete(el);
     const held = controller.snapshot;
-    const heldIsGrid = controller.snapshotIsGrid;
-    const heldLinkGesture = controller.snapshotLinkGesture;
     controller.snapshot = null;
-    controller.snapshotIsGrid = false;
-    controller.snapshotLinkGesture = null;
     if (outcome === "restore" && held) {
       // The unproven replacement goes first, so the element holds only the
       // screen being put back — which then becomes a TOMBSTONE, since the
@@ -1942,12 +1620,12 @@
       farhelmTerm.unmount(el);
       document.getElementById(el)?.appendChild(held.element);
       held.element.classList.remove("terminal-snapshot");
+      // A frozen grid copies selections and opens links by itself, so the
+      // tombstone needs nothing installed around it.
       tombstones.set(el, {
         surface: held,
         path: controller.path,
         gen: controller.gen,
-        // A frozen grid copies selections and opens links by itself.
-        stopCopyOnSelect: heldIsGrid ? () => {} : installSnapshotCopyOnSelect(el, held, heldLinkGesture),
       });
       publishTombstones();
     } else if (held) {
@@ -1980,8 +1658,8 @@
   }
 
   // Test-only registry (the e2e terminal spec family), keyed by element id:
-  // the per-island term/ws/test-hook triple, so the suite can read a
-  // SPECIFIC terminal's buffer and socket rather than only whichever one
+  // the per-island grid/ws/test-hook triple, so the suite can read a
+  // SPECIFIC terminal's model and socket rather than only whichever one
   // happens to own the legacy singletons below. Published and deleted in
   // lockstep with `islands` itself. Never read by production code.
   function publishIsland(el, entry) {
@@ -2063,12 +1741,11 @@
    *
    * `spec.status` names the DOM node this writes progress and failures
    * into; `policy` is `attachments::attachment_policy`'s JSON;
-   * `pasteText(text)` hands text to the terminal as a paste (xterm.js's
-   * `term.paste`, or the grid component's `paste`, which sends `paste`
-   * messages); `isConnected` reports whether this island's socket is open
-   * right now. Both terminal kinds use the same payload classification and
-   * uploads, so a drop and a paste differ only in how the engine supplies
-   * their files and text.
+   * `pasteText(text)` hands text to the terminal as a paste (the grid
+   * component's `paste`, which sends `paste` messages); `isConnected`
+   * reports whether this island's socket is open right now. A drop and a
+   * paste share the payload classification and uploads, and differ only in
+   * how the engine supplies their files and text.
    * Everything below is scoped to this one island: its own listeners, its
    * own in-flight and queued uploads, its own `AbortController`, its own
    * readers. The one exception is the list of messages on the status line,
@@ -2085,20 +1762,20 @@
    *   passes through as ordinary terminal input") and, unlike a paste, has
    *   no existing handler to fall through to.
    * - A PASTE with text is intercepted too, so an embedded end-of-paste
-   *   marker cannot escape xterm's bracketed-paste framing. Classification
+   *   marker cannot escape the bracketed-paste framing (`insert`
+   *   sanitizes it). Classification
    *   still depends only on the payload's kinds: text that looks like a
    *   path stays text, and files or images retain their precedence.
-   * - The listeners are CAPTURE-phase, for the reason the selection
-   *   listener above already documents: xterm registers its paste handler
-   *   on its hidden helper textarea and calls `stopPropagation()`, so a
-   *   bubble-phase listener on any ancestor never runs.
+   * - The listeners are CAPTURE-phase: the grid component handles paste
+   *   events on its own hidden input field, and an interception that
+   *   decides what a paste inserts has to run before it does.
    * - Uploads within one payload run SEQUENTIALLY. The contract is paths
    *   inserted in completion order, which sequential satisfies while also
    *   bounding what one drop can do — dropping fifty files must not open
    *   fifty concurrent uploads.
    * - Nothing is uploaded into a terminal that cannot receive the path.
    *   The whole point of an attachment is the path that lands at the
-   *   cursor, and `term.paste()` on a closed socket drops it silently, so
+   *   cursor, and a paste on a closed socket is dropped silently, so
    *   a payload offered to a detached terminal is refused with a visible
    *   message and an upload that OUTLIVES its socket reports the published
    *   path instead of pasting into the void.
@@ -2122,7 +1799,7 @@
 
     // Aborts every in-flight upload when the island goes away, so a
     // transfer cannot outlive the terminal it was meant to land in and
-    // then try to paste into a disposed xterm instance.
+    // then try to paste into a disposed grid component.
     const controller = typeof AbortController === "function" ? new AbortController() : null;
     // The uploads this island has in flight, keyed by a token minted per
     // FILE rather than counted. Each value is `{ name, sent }`: `sent` turns
@@ -2217,11 +1894,10 @@
     }
 
     /**
-     * Insert text into this terminal through the same call xterm's own
-     * paste handler makes, so bracketed paste and the pane's other modes
-     * are handled by the code that already handles them (for a grid
-     * terminal, the supervisor's emulator handles them for its `paste`
-     * messages). Sanitizing here also covers dropped text and paths inserted
+     * Insert text into this terminal as a paste, so bracketed paste and the
+     * pane's other modes are handled where they always are: by the
+     * supervisor, which encodes `paste` messages for the program's current
+     * modes. Sanitizing here also covers dropped text and paths inserted
      * after an upload.
      *
      * The selection sweep rides along because an intercepted paste never
@@ -2231,7 +1907,7 @@
      */
     function insert(text) {
       if (disposed || !text) return;
-      pasteText(window.farhelmTermBytes.sanitizePastedText(text));
+      pasteText(window.farhelmPasteSanitizer.sanitizePastedText(text));
       dismissSelectionSoon();
     }
 
@@ -2576,7 +2252,7 @@
      * bad file in a drop of five must not cost the user the other four,
      * and a path that was never published must never appear. An upload
      * that lands after the SOCKET died reports its path rather than
-     * pasting it, for the same reason: `term.paste()` would drop it.
+     * pasting it, for the same reason: the paste would be dropped.
      */
     async function send(queue) {
       const entries = queue.map((item) => ({ name: item.name, sent: false }));
@@ -2664,7 +2340,8 @@
       // so it never shows an earlier paste's facts as the latest one's.
       window.farhelmLastClipboardFacts = facts;
       // Empty or unsupported payloads still belong to the engine. Text
-      // goes through our insertion path before xterm adds its paste frame.
+      // goes through our insertion path rather than the component's own
+      // paste handling, so it is sanitized and classified here.
       if (flavor === "none") return;
       ev.preventDefault();
       ev.stopPropagation();
@@ -2782,13 +2459,13 @@
    * attachment is rebuilt, while this says the ordinary thing every
    * reattach does and disappears on its own. The element itself is
    * rendered (empty) by Dioxus, like the banner and the attachment status
-   * line, and its CONTENT is this file's — the reveal has to happen from
-   * inside a `term.write()` completion callback, which is not something
-   * the reactive layer can be driven from.
+   * line, and its CONTENT is this file's — the reveal happens on a
+   * socket message inside `mount()`, which is not something the reactive
+   * layer can be driven from.
    *
    * Tolerates a missing element rather than throwing: a caller that
    * predates the field (or a future one that renders no placeholder) must
-   * still get a working, buffered terminal — the no-intermediate-paint
+   * still get a working terminal — the no-intermediate-paint
    * contract is carried by hiding the TERMINAL, and this is what explains
    * that state to the user.
    */
@@ -2960,9 +2637,9 @@
   // character Shift produces does not matter; that ties the shortcut to the
   // US-layout positions of those two keys (on a German layout it is the
   // keys there, not the ones labelled + and -). Registered on
-  // `window` in the CAPTURE phase, which runs before xterm's own key
-  // handler on its hidden textarea, so the keys never reach the program in
-  // the terminal; preventDefault keeps the browser from acting on them too.
+  // `window` in the CAPTURE phase, which runs before the grid component's
+  // key handler on its hidden input field, so the keys never reach the
+  // program in the terminal; preventDefault keeps the browser from acting on them too.
   // Cmd/Ctrl with = or - and no Shift is left alone: that is the browser's
   // own page zoom, which the user may still want. (Cmd/Ctrl+Shift+= is also
   // a zoom-in chord in some browsers; it is the text-size shortcut here.)
@@ -3016,8 +2693,8 @@
      * Change every terminal's text size by `delta` points, within the
      * supported range, remember it for this device, and refit every
      * mounted terminal so the program inside sees the new rows and
-     * columns (the refit is what sends the resize to the pty; setting the
-     * option alone only re-measures the font). Hidden tabs are mounted
+     * columns (the grid component's refit reports the new size, which
+     * `mount()` sends as a resize). Hidden tabs are mounted
      * and sized like visible ones, so they change too. Terminals that
      * mount later are constructed at the new size. At either end of the
      * range the size stays unchanged, but a clicked button still hands
@@ -3035,16 +2712,9 @@
           // Unavailable storage costs only the memory across reloads; the
           // size still applies to this page.
         }
-        for (const island of islands.values()) {
-          // The grid component re-measures, redraws and refits itself, and
-          // reports its new size the same way a refit xterm.js does.
-          if (island.grid) {
-            island.grid.setFontSize(next);
-            continue;
-          }
-          island.term.options.fontSize = next;
-          island.fit.fit();
-        }
+        // The grid component re-measures, redraws and refits itself, and
+        // reports its new size through its `onResize`.
+        for (const island of islands.values()) island.grid.setFontSize(next);
       }
       window.farhelmTerm.paintFontSize();
       // A click on the zoom buttons leaves focus on the button, and
@@ -3078,20 +2748,6 @@
      * keyboard focus, and whether its host is currently unavailable. The
      * availability edge nudges recovery and completes a reveal whose focus
      * was blocked by the stale pane's inert ancestor.
-     *
-     * Each spec also carries `kind`, which kind of terminal the session
-     * listing says it is: `host` for a new terminal (a terminal host, drawn
-     * by the grid component alone), `tmux` for an old one, `pending` while
-     * this view's own Restart may be moving the agent into a new terminal
-     * (nothing mounts until a later sync names the kind; the Restart's
-     * reply does, see session_view.rs's `agent_spec_kind`), and null when
-     * the page does not know (an older helm, no terminal yet). Only `host`
-     * changes how a mount is built (see `mount`); everything else keeps
-     * the xterm.js-first path that old terminals have always had. The kind
-     * is not part of the identity below: a terminal never changes kind
-     * while it lives, so a different kind is a different attachment only
-     * through a `gen` or `path` change, except that a held `pending` mount
-     * is rebuilt once the kind is known.
      *
      * `attach` is the paste/drop policy every island of this view shares
      * (farhelm-ui/src/attachments.rs) — one object rather than a copy per
@@ -3191,7 +2847,7 @@
       // Tombstones are in this set too: a tombstoned terminal whose tab
       // closes, or whose session view empties under a stale host, has to
       // be buried here like any other departure. Left out, it kept its
-      // xterm alive for the life of the view, and when the same terminal
+      // frozen screen alive for the life of the view, and when the same terminal
       // came back `tombstoned()` skipped it before anything was painted,
       // leaving a blank pane with no way to take control.
       for (const el of new Set([
@@ -3204,12 +2860,7 @@
         const held =
           islands.get(el) ?? pendings.get(el) ?? reconnects.get(el) ?? tombstones.get(el);
         const departed = !spec;
-        // A mount held for an unnamed kind (see `mountWhenReady`) is
-        // rebuilt as soon as the kind is named, generation or not.
-        const changed = spec && (
-          spec.path !== held.path || spec.gen !== held.gen ||
-          (held.kindPending === true && spec.kind !== "pending")
-        );
+        const changed = spec && (spec.path !== held.path || spec.gen !== held.gen);
         if (departed || (changed && !takeover)) {
           cancelReconnect(el, "discard");
           buryTombstone(el);
@@ -3466,16 +3117,13 @@
     },
 
     /**
-     * Wait for xterm's globals (`Terminal`, `FitAddon`, the vendored
-     * OSC 52 addon's `ClipboardAddon`, and the vendored plain-text link
-     * addon's `WebLinksAddon`, and `UnicodeGraphemesAddon`; for an old
-     * terminal or one of unknown kind only, see below), the term-bytes helper
-     * (`window.farhelmTermBytes`), the clipboard-naming helper
-     * (`window.farhelmClipboardNames`), the Shift+Enter key decision
-     * (`window.farhelmShiftEnterKey`), the copy-on-select decision
-     * (`window.farhelmCopyOnSelect`), the terminal-links helper
-     * (`window.farhelmTerminalLinks`), `fontSettled`, and `spec.el` to
-     * exist, then mount — owning the ENTIRE retry loop that used to live
+     * Wait for the grid component's scripts (`window.farhelmGrid*`), the
+     * paste sanitizer (`window.farhelmPasteSanitizer`), the
+     * clipboard-naming helper (`window.farhelmClipboardNames`), the
+     * copy-on-select decision (`window.farhelmCopyOnSelect`), the
+     * terminal-links and terminal-files helpers, the theme, tooltip and
+     * clipboard-writer helpers, `fontSettled`, and `spec.el` to exist, then
+     * mount — owning the ENTIRE retry loop that used to live
      * in the `document::eval` snippet calling this (lib.rs).
      *
      * `fontSettled` is the same kind of condition as the globals beside
@@ -3496,35 +3144,20 @@
      * this gate has no say over that, only over whether a terminal mounts
      * before the font is ready.
      *
-     * The term-bytes check belongs here for the same reason session_view.rs
+     * The script checks belong here for the same reason session_view.rs
      * documents for `window.farhelmTerm` itself (see its "sync-generation
      * token" section): Dioxus injects `document::Script` assets
      * asynchronously, so source order in lib.rs's `rsx!` is a request, not
-     * a guarantee — term-bytes.js's tag coming before terminal.js's says
-     * nothing about which one's script actually finishes executing first.
-     * Mounting before the helper has landed would leave `onBinary` calling
-     * into an undefined global the first time the agent sends a mouse
-     * report, silently dropping that input rather than throwing somewhere
-     * visible. Gating the mount on it — exactly like the `Terminal` and
-     * `FitAddon` globals already are — makes term-bytes.js's own loading a
-     * mount PRECONDITION instead of a hopeful ordering. `farhelmShiftEnterKey`
-     * joins the same gate for the same reason: mounting before it lands
-     * would attach a key handler that calls into an undefined global on the
-     * first Shift+Enter a user presses, rather than failing to attach at
-     * all in a way that degrades to xterm's ordinary Enter-submits
-     * behavior. `ClipboardAddon` and `farhelmCopyOnSelect` join it for the
-     * same reason again, one per half of the copy-to-system-clipboard fix
-     * (see `mount()`'s own comments at each wiring site): mounting before
-     * either landed would silently drop OSC 52 writes or leave the mouseup
-     * listener calling into an undefined decision function, rather than
-     * failing the mount outright the way every other precondition here
-     * does. `WebLinksAddon` and `farhelmTerminalLinks` join it for the
-     * same reason one final time, as a pair: mounting before either
-     * landed would construct a terminal whose plain-text links either
-     * throw at `loadAddon` time or activate into an undefined opener —
-     * and there is deliberately no mount-without-links fallback, because
-     * a terminal that silently drops a whole link class is worse than a
-     * mount that waits for its own deployment to finish arriving.
+     * a guarantee — a helper's tag coming before terminal.js's says nothing
+     * about which one's script actually finishes executing first. Mounting
+     * before a helper has landed would leave a callback calling into an
+     * undefined global the first time it runs (a paste, a mouseup, a link
+     * hover), silently dropping that input or link rather than failing the
+     * mount outright. Gating the mount on every helper makes each one's
+     * loading a mount PRECONDITION instead of a hopeful ordering, and there
+     * is deliberately no mount-without-links (or without copying) fallback:
+     * a terminal that silently drops a whole feature is worse than a mount
+     * that waits for its own deployment to finish arriving.
      *
      * That move closes a real bug (the "stale mount retry" finding): the
      * old loop was a bare `setTimeout` chain with no handle anything
@@ -3554,16 +3187,6 @@
      * terminal — and, because the agent terminal's element id is stable
      * across session views, still gives the cross-session cancellation
      * above exactly the same key it had when there was only one island.
-     *
-     * The terminal's kind (`spec.kind`, see `sync`) narrows the gate. A new
-     * terminal (`host`) waits for none of xterm.js's globals nor the
-     * Shift+Enter merge, which exists only for xterm.js's input: nothing of
-     * xterm.js runs for it, so its readiness must not hang on xterm.js's
-     * scripts either. The globals the grid path still uses (the paste
-     * sanitizer in term-bytes.js, clipboard naming, copy-on-select,
-     * links, the grid's own scripts) are waited for as before. A spec of
-     * kind `pending` (this view's own Restart may be moving the agent into
-     * a new terminal) mounts nothing at all until a sync names the kind.
      */
     mountWhenReady(spec, baseUrl, attach, ifUnowned) {
       // Idempotent (see its own docs) — every attempt calls it, only the
@@ -3573,29 +3196,12 @@
       if (previous) clearTimeout(previous.timer);
       // `spec` is kept so a takeover that cancels this attempt can paint the
       // Detached notice on its banner (see `latchTakeover`).
-      const attempt = { timer: null, path: spec.path, gen: spec.gen, spec, kindPending: spec.kind === "pending" };
+      const attempt = { timer: null, path: spec.path, gen: spec.gen, spec };
       pendings.set(spec.el, attempt);
-      // Held, not polled: the next `sync()` either names the kind (and
-      // replaces this attempt, see `sync`'s teardown) or drops the
-      // terminal. Nothing else can change what this attempt would mount.
-      if (attempt.kindPending) return;
-      // A new terminal is drawn by the grid component alone, so its mount
-      // waits for nothing of xterm.js: not its scripts, not its add-ons, not
-      // the Shift+Enter merge that only exists for xterm.js's input. An old
-      // terminal, or one whose kind is unknown, builds xterm.js and may swap
-      // to the grid, so it waits for both.
-      const xtermReady = () =>
-        window.Terminal &&
-        window.FitAddon &&
-        window.ClipboardAddon &&
-        window.WebLinksAddon &&
-        window.UnicodeGraphemesAddon &&
-        window.farhelmShiftEnterKey;
       const tryMount = () => {
         if (pendings.get(spec.el) !== attempt) return;
         if (
-          (spec.kind === "host" || xtermReady()) &&
-          window.farhelmTermBytes &&
+          window.farhelmPasteSanitizer &&
           window.farhelmTerminalTheme &&
           window.farhelmClipboardNames &&
           window.farhelmCopyOnSelect &&
@@ -3603,9 +3209,6 @@
           window.farhelmClipboardWriter &&
           window.farhelmTerminalLinks &&
           window.farhelmTerminalFiles &&
-          // The grid component: a new terminal's surface, and the one an
-          // attachment that turns out to carry a grid stream adopts
-          // without waiting on a script.
           window.farhelmGridModel &&
           window.farhelmGridStyle &&
           window.farhelmGridInput &&
@@ -3662,30 +3265,16 @@
       // user's own (take control, reopening the session).
       buryTombstone(spec.el);
 
-
       // Declared before the try/catch, not inside it: the rollback path
       // below needs to reach whatever got created before the exception,
       // and `bannered`/`showBanner` need to be visible from both the
       // happy path and the catch (a `let` inside a `try` block is not
       // visible to its `catch`).
-      // The surface this mount holds: xterm.js (`term`, with its fit add-on
-      // and link gesture, all three set by `buildXtermSurface`) or the grid
-      // component (`grid`), never both once a swap has finished. A spec of
-      // kind `host` gets the grid from the start; any other spec gets
-      // xterm.js, which a grid notice can replace (`adoptGrid`). Hoisted so
-      // every path that tears this mount down can dispose whichever surface
-      // it holds.
-      let term = null;
-      let fit = null;
-      let linkGesture = null;
+      // The grid component this mount draws into, hoisted so every path
+      // that tears this mount down can dispose it.
       let grid = null;
       let ws = null;
-      // The xterm.js surface's deferred lowering of a web link's refusal
-      // (see its `hideWebLinkTarget`); hoisted because the swap and
-      // `disposeDeferred` must cancel it. A grid's links keep their own
-      // (`createGridLinks`).
-      let webLeaveTimer = null;
-      // Declared out here with `term`/`ws` for the same reason, and it is
+      // Declared out here with `grid`/`ws` for the same reason, and it is
       // not cosmetic: both of these REGISTER something with the browser
       // that outlives a throw, so the catch block has to be able to reach
       // them. A mount that failed after registering either would otherwise
@@ -3714,14 +3303,13 @@
       // nothing to stop it, and it would then flush a replay into (or
       // close the socket of) the terminal this catch block just disposed.
       let disposeDeferred = null;
-      // Herdr-style copy-on-select registers a DOCUMENT-level listener (see
-      // its own wiring comment below for why it must be document-level
-      // rather than only on the terminal element), which outlives this
-      // mount exactly like the window resize listener above — so a mount
-      // that throws after registering it must be able to remove it from
-      // the catch block too, or a failed mount leaks a listener that keeps
-      // firing into a disposed `term` forever.
-      let stopCopyOnSelect = null;
+      // The drag-copy notice's driver registers a DOCUMENT-level mouseup
+      // listener (a drag can end anywhere on the page; see
+      // `createGridSurface`), which outlives this mount exactly like the
+      // window resize listener above — so a mount that throws after
+      // registering it must be able to remove it from the catch block too,
+      // or a failed mount leaks a listener that keeps firing forever.
+      let stopDragNotice = null;
       let bannered = false;
       // A banner held back while this session's delete is in flight, and the
       // observer waiting for that delete to fail (see `showBanner`). Both
@@ -3775,13 +3363,13 @@
 
       try {
         el = document.getElementById(spec.el);
-        // Hidden from before either surface is even constructed, and
+        // Hidden from before the grid component is even created, and
         // revealed only once this attach's catch-up has landed (PLAN_M5.md
-        // item 5). Before M5 an empty xterm mounted VISIBLE and the replay
-        // scrolled through it, which is the intermediate state that
-        // milestone removed — so the hiding has to precede `term.open()`
-        // (or the grid's creation) rather than follow it, or the empty
-        // surface is itself a frame the user sees.
+        // item 5). A terminal visible during its replay shows the history
+        // filling in, which is the intermediate state that milestone
+        // removed — so the hiding has to precede the grid's creation rather
+        // than follow it, or the empty surface is itself a frame the user
+        // sees.
         //
         // `visibility`, not `display`, for the reason `.terminal-pane`
         // documents in app.css: a `display: none` element has no layout
@@ -3796,874 +3384,13 @@
         // read, and take the control they might want to press with it.
         if (!reconnecting(spec.el)) paintConnecting(spec.connecting, true);
 
-        /**
-         * Build the xterm.js surface: the old terminal's component, for a
-         * spec whose kind is `tmux` or unknown (see "Two kinds of stream,
-         * one island" in this file's header). Sets `term`, `fit` and
-         * `linkGesture`, and installs everything that only exists for
-         * xterm.js: its add-ons and links, its parser handlers, its input,
-         * selection and copy-on-select listeners, and the paste and drop
-         * interception that inserts through `term.paste`.
-         *
-         * Runs before the socket exists, because the socket URL carries the
-         * size xterm.js measures. Everything it registers that reaches the
-         * socket reads `ws` when it fires, never at registration.
-         * `adoptGrid` undoes all of it when a grid notice replaces the
-         * surface.
-         */
-        function buildXtermSurface() {
-          // The addon owns file lookups/transfers for the retained terminal,
-          // not for a particular WebSocket attachment or tab render.
-          linkGesture = window.farhelmTerminalLinks.createLinkGesture();
-          // Every surface that can draw over a destination preview marks itself
-          // as a link cover (app.css's z-index ladder states the rule), and both
-          // providers recheck all of them at activation. A cover can leave its
-          // link clickable beside it (an approval card, a persistent tunnel
-          // failure, the quick-launch pill, a tooltip) while hiding part of the
-          // destination, so hover-time evidence cannot stand in for this check.
-          const linkCoveringRects = () => window.farhelmTerminalFiles.markedCoverRects(document);
-          // The xterm.js add-on form of the shared file links: it reads this
-          // terminal through the adapter to link lines (terminal-files.js).
-          const fileLinks = new window.farhelmTerminalFiles.XtermFileLinksAddon({
-            endpoint: baseUrl + spec.path.split('/term')[0] + '/files',
-            secret: deviceSecret,
-            native: typeof window[WEBVIEW_DEVICE_SECRET] === 'string',
-            isMac: IS_MAC,
-            isClick: event => linkGesture.isClick(event),
-            coveringRects: linkCoveringRects,
-          });
-          // Both link providers identify the web target currently under the pointer.
-          // A file hover never qualifies for withholding program input.
-          let hoveredWebLink = false;
-          let webHoverIdentity = null;
-          // xterm leaves and synchronously re-enters links on row redraw. Only
-          // the same target, cells and displayed text may keep a raised refusal;
-          // a real departure or replacement returns it to ordinary stacking.
-          const noteWebHover = (uri, range, text) => {
-            // File hovers own their own reclaim logic; leave it intact when
-            // there is no preceding web hover to retire.
-            if (!uri && webHoverIdentity === null && webLeaveTimer === null) return;
-            const identity = uri && range && text !== null ? JSON.stringify([uri, range, text]) : null;
-            if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
-            webLeaveTimer = null;
-            if (identity === null || identity !== webHoverIdentity) fileLinks.lowerRefusal();
-            webHoverIdentity = identity;
-          };
-          const linkClickMode = () => window.farhelmTerminalLinkClickMode || 'intercept';
-          const nativeLinks = typeof window[WEBVIEW_DEVICE_SECRET] === 'string';
-          const tunnelState = () => nativeLinks ? window.farhelmTunnelSessions?.[spec.sessionId] : null;
-          const tunnelHint = uri => {
-            const state = tunnelState();
-            const target = window.farhelmTerminalLinks.tunnelTarget(uri);
-            return state?.available && target && linkClickMode() !== 'program'
-              ? { port: target.port, host: state.host_name } : null;
-          };
-          // OSC links always disclose their target; prose URLs do so only for a
-          // tunnel hint. Recheck the latter at activation, since availability may
-          // have changed since hover. Ignore rules still run before this gate.
-          const webDisclosureAdmits = (uri, osc) => !(osc || tunnelHint(uri)) ||
-            fileLinks.admitDisclosure(term.element.querySelector(':scope > .terminal-link-target:not(.terminal-file-target)'), true);
-          const hideWebLinkTarget = () => {
-            window.farhelmTerminalLinks.hideLinkTarget(term.element);
-            if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
-            webLeaveTimer = setTimeout(() => {
-              webLeaveTimer = null;
-              webHoverIdentity = null;
-              fileLinks.lowerRefusal();
-            }, 0);
-          };
-          // OSC and prose links share all policy, including the exact release
-          // token. Peer data crosses the Rust channel as values, never source.
-          const activateWebLink = (event, uri, validated = false) => window.farhelmTerminalLinks.activateWebLink({
-            validated,
-            uri, native: nativeLinks, remote: !!tunnelState()?.available,
-            button: event.button, metaKey: event.metaKey, ctrlKey: event.ctrlKey,
-            shiftKey: event.shiftKey, altKey: event.altKey,
-            click: linkGesture.isClick(event), selection: !!term.getSelection(), mode: linkClickMode(),
-          }, target => {
-            if (webDisclosureAdmits(target, validated)) window.farhelmTerminalLinks.openTerminalUrl(target);
-          }, target => {
-            if (!webDisclosureAdmits(target, validated)) return;
-            if (typeof window.farhelmTunnelOpen === 'function') {
-              try {
-                window.farhelmTunnelOpen({ session_id: spec.sessionId, url: target, generation: tunnelState().generation });
-                return;
-              } catch {
-                // A channel that disappeared after the function check has the
-                // same visible failure as an absent bridge, never a raw open.
-              }
-            }
-            const message = 'Tunneling is unavailable in this window. Reopen Farhelm and try again.';
-            if (attachments) attachments.reportError(message);
-            else paintBanner(spec.banner, message, false);
-          });
-          term = new Terminal({
-            // The grapheme width provider uses xterm's proposed Unicode API.
-            // Its width model must be selected before even replay prefill arrives.
-            allowProposedApi: true,
-            // At most the tmux history floor (`HISTORY_LIMIT`,
-            // farhelm-supervisor/src/tmux.rs), never more: PLAN_M2_5.md
-            // holds this browser-side cap at or below that floor so that
-            // when tmux ITSELF pauses a stalled control client (its own
-            // `pause-after`, distinct from the supervisor's stall-detach
-            // timeout — a stall-detach just ends the attachment, no replay
-            // involved) the reset-then-replay catch-up that follows is
-            // observably equivalent to lossless slow delivery — a bigger
-            // buffer here would let a user watch history they already had
-            // get truncated by the very recovery meant to save it (and, on
-            // the other end, SPEC.md's own 10,000-line minimum). Pinned
-            // cross-language by farhelm/tests/e2e.rs's
-            // `browser_scrollback_stays_within_the_product_floor_and_the_tmux_history_ceiling`,
-            // which reads this literal.
-            scrollback: 12000,
-            // The user's remembered size (see "Terminal text size" above);
-            // `stepFontSize` changes it for terminals already mounted.
-            fontSize: terminalFontSize,
-            cursorBlink: true,
-            theme: window.farhelmTerminalTheme,
-            // xterm's forced-selection gesture — the modifier that wins a
-            // local xterm selection even while an app has mouse reporting on
-            // (copy-on-select.js's header has the full duality) — is NOT the
-            // same key on every platform. Checked directly against the
-            // vendored xterm.js: `SelectionService.shouldForceSelection`
-            // reads `event.shiftKey` everywhere EXCEPT when `Browser.isMac`
-            // is true, where it instead reads `event.altKey` (Option) and
-            // only when this option says so — the default is `false`, which
-            // on a real Mac build (wry's WKWebView, or Safari) would leave
-            // Shift+drag doing nothing under mouse reporting and no forced-
-            // selection gesture at all. Enabling it is a no-op everywhere
-            // this suite's own engines run (`Browser.isMac` is false there),
-            // so this only ever changes behavior on an actual Mac.
-            macOptionClickForcesSelection: true,
-            // The bundled font is a mount precondition (see "## Font
-            // settling before mount"), so it is always loaded by the time
-            // this constructor runs — the family is unconditional. xterm
-            // measures its character cell when `term.open()` runs, using
-            // whatever `fontFamily`/`fontSize` are configured at that point
-            // (the header has the exact mechanism, including why "measured
-            // once at construction" undersells it), so a family present from
-            // the start means the metrics are correct from the FIRST frame:
-            // no later re-fit, no resize, no tmux reflow, no blank redraw.
-            fontFamily: TERMINAL_FONT_FAMILY,
-            // OSC 8 file targets need all-scheme dispatch. That makes this
-            // handler the security boundary: only http(s) reaches the existing
-            // opener; files go through host lookup, and other schemes do nothing.
-            // OSC spans still take precedence over plain web/path providers.
-            linkHandler: {
-              allowNonHttpProtocols: true,
-              activate(event, uri) {
-                // The gesture gate also covers mouse-reporting programs, which
-                // can consume a drag without creating any local selection.
-                if (!linkGesture.isClick(event) || term.getSelection()) return;
-                const target = window.farhelmTerminalFiles.oscTarget(uri);
-                if (target?.kind === 'web') activateWebLink(event, uri, true);
-                // Both OSC and prose paths use the addon's native modifier rule.
-                else if (target?.kind === 'file') fileLinks.download(target.path, event);
-              },
-              hover(event, uri, range) {
-                const target = window.farhelmTerminalFiles.oscTarget(uri);
-                hoveredWebLink = target?.kind === 'web';
-                const links = window.farhelmTerminalLinks;
-                // The shared link code reads link lines and their ranges;
-                // xterm.js hands its buffer and a 1-based range.
-                const lines = links.xtermLines(term);
-                const at = links.fromXtermRange(range);
-                noteWebHover(target?.kind === 'web' ? uri : null, range, links.linkRangeText(lines, at));
-                // OSC labels can change without changing target or cell range.
-                // Keep evidence only while the same displayed text remains there.
-                if (target?.kind === 'file') fileLinks.hover(event, target.path, null, at, links.linkRowText(lines, at));
-                else if (target?.kind === 'web') {
-                  const hoverText = links.linkHoverText(lines, at, uri);
-                  links.showLinkTarget(event, uri, term.element, hoverText.text, hoverText.kind === 'fragment', tunnelHint(uri));
-                }
-              },
-              leave() {
-                // File and web refusals both defer lowering so a synchronous
-                // redraw can reclaim the same hover before the next task.
-                const web = hoveredWebLink;
-                hoveredWebLink = false;
-                fileLinks.leave();
-                if (web) hideWebLinkTarget();
-                else window.farhelmTerminalLinks.hideLinkTarget(term.element);
-              },
-            },
-          });
-          // Agent cursor addressing and tmux count emoji as two cells. The
-          // default Unicode 6 table counts one, clipping glyphs and shifting
-          // later redraws. Activation selects 15-graphemes before open or write;
-          // changing widths after prefill would leave already-parsed cells wrong.
-          term.loadAddon(new UnicodeGraphemesAddon.UnicodeGraphemesAddon());
-          fit = new FitAddon.FitAddon();
-          term.loadAddon(fit);
-          // OSC 52 support (the vendored `@xterm/addon-clipboard`; see
-          // `VENDOR_CLIPBOARD_JS`'s provenance comment in lib.rs for the
-          // exact version). This is the half of the copy-to-system-clipboard
-          // fix that covers a selection this page's own DOM never sees: an
-          // agent TUI with mouse reporting on (Claude Code, Codex) handles a
-          // plain drag itself and reports what it put on ITS clipboard via
-          // this escape sequence rather than through any DOM selection —
-          // confirmed against the vendored xterm.js, whose
-          // `CoreBrowserTerminal.bindMouse` disables the local
-          // `SelectionService` for exactly as long as an app has mouse
-          // events on (copy-on-select.js's header has the full duality, the
-          // other half of which is wired further down this function). Without
-          // this addon xterm.js parses OSC 52 as a no-op — the diagnosis this
-          // half of the fix closes.
-          //
-          // Constructed with `clipboardProvider` (declared above, module
-          // scope) in place of the addon's own default
-          // `BrowserClipboardProvider` — NEVER the default. That default
-          // answers an OSC 52 READ query with the real system clipboard,
-          // which is a data-exfiltration channel this file must not open
-          // (see `clipboardProvider`'s own header for the full reasoning) and
-          // also returns its write's raw promise into xterm's parser, which
-          // can stall rendering on a pending permission prompt. The addon's
-          // default `Base64` codec is kept — only the provider changes — via
-          // the SECOND constructor argument the addon documents for exactly
-          // this override.
-          term.loadAddon(
-            new ClipboardAddon.ClipboardAddon(new ClipboardAddon.Base64(), clipboardProvider),
-          );
-          // Plain-text URL links (the vendored `@xterm/addon-web-links`; see
-          // `VENDOR_WEB_LINKS_JS`'s provenance comment in lib.rs for the
-          // exact version). One addon per constructed terminal, loaded here
-          // — after construction, before `open()` — alongside Fit and
-          // Clipboard, so every island gets links and no island gets two
-          // providers. The addon's `activate` registers its provider through
-          // xterm's `registerLinkProvider`, AFTER the `OscLinkProvider` the
-          // constructor installed, so an OSC 8 span keeps precedence over a
-          // plain-text match under it (the core resolves providers in order
-          // and drops overlapped lower-priority links). Disposal is xterm's:
-          // `loadAddon` hands the instance to the terminal's `AddonManager`,
-          // which disposes it with `term.dispose()` — nothing here disposes
-          // it on unmount, because the `keepTerm` reconnect path retains the
-          // terminal and the addon must live exactly as long.
-          //
-          // The verified upstream default matcher is the whole
-          // detection boundary (explicit http(s) text in lowercase or
-          // UPPERCASE schemes only — the upstream regex has no `i` flag —
-          // absolute-URL-with-host validation, wrapped-line reconstruction),
-          // and this file keeps it rather than substituting a custom regex.
-          // The callback below is
-          // the activation-time half — gesture/selection guards plus the shared
-          // opener's allowlist — and it runs synchronously inside the click,
-          // with no fetch, lookup, or confirmation.
-          term.loadAddon(
-            new WebLinksAddon.WebLinksAddon((event, uri) => {
-              // xterm checks link identity at press/release, not movement. Keep
-              // both guards: mouse reporting suppresses local selection, while
-              // a plain click clears an old selection before this release.
-              // The second boundary (the addon's default matcher is the
-              // first): http(s) with a host, or nothing opens — printed
-              // `javascript:`/`data:`/`file:` text is never clickable (see
-              // terminal-links.js for the full four-check rationale).
-              activateWebLink(event, uri);
-            }, {
-              hover(event, uri, range) {
-                hoveredWebLink = window.farhelmTerminalLinks.isPlainWebUrl(uri);
-                const links = window.farhelmTerminalLinks;
-                noteWebHover(uri, range, links.linkRangeText(links.xtermLines(term), links.fromXtermRange(range)));
-                const hint = tunnelHint(uri);
-                if (hint) window.farhelmTerminalLinks.showLinkTarget(event, uri, term.element, null, false, hint);
-              },
-              leave() { hoveredWebLink = false; hideWebLinkTarget(); },
-            }),
-          );
-          term.loadAddon(fileLinks);
-          term.open(el);
-          fit.fit();
-
-          // Opt xterm's hidden input textarea out of macOS inline predictive
-          // text. That textarea is where keystrokes land before xterm turns
-          // them into terminal input, and it is not cleared between keys:
-          // uppercase letters typed on a line stay in it until Enter, Ctrl-C,
-          // or blur (xterm.js issue #6078; the vendored core's keydown path
-          // lets capitals through and clears only on those three). WebKit can
-          // therefore offer a completion for what looks like an ordinary word
-          // there, and when the textarea's value grows, xterm's composition
-          // handling forwards the difference as typed input. The suspected
-          // result is the Codex input corruption recorded in
-          // docs/codex-input-investigation.md: `SPE` typed, `SPECIALLY`
-          // submitted, with no keystroke for the extra letters. That cause is
-          // a hypothesis, not a confirmed diagnosis; the doc tracks it.
-          //
-          // xterm already sets `autocorrect`, `autocapitalize` and
-          // `spellcheck` off on this element but not `writingsuggestions`,
-          // the HTML attribute WebKit honors for inline predictions. Engines
-          // that do not know the attribute ignore it, so this is inert outside
-          // WebKit and on WebKit builds too old to support it. It does NOT
-          // address the other two xterm composition defects the investigation
-          // doc cites (the doubled dead key, or the accumulated textarea being
-          // re-sent by some other composition event); those need xterm itself
-          // to change.
-          term.textarea?.setAttribute("writingsuggestions", "false");
-
-          const enc = new TextEncoder();
-          // Swallow DECRQM mode queries (CSI Pm $ p and CSI ? Pm $ p, e.g.
-          // vim's cursor-blink probe ESC[?12$p) at the PARSER, so xterm.js
-          // never mints a DECRPM reply for them at all. The reply is the
-          // problem: it would take a full render-batch-plus-websocket round
-          // trip and land as pane input long after the asking application
-          // stopped waiting — and unlike the color/DA/cursor reports (which
-          // vim and friends keep accepting late), a late DECRPM reply parses
-          // as KEYSTROKES: '$' is a silent motion and 'y' becomes a pending
-          // operator, observed as a stray 'y' on every vim launch. Nothing
-          // is lost by not answering: tmux answers DECRQM for its panes
-          // itself, instantly (verified by probing — the pane sees tmux's
-          // reply long before ours could arrive), so xterm's late duplicate
-          // was the only copy that ever did harm. Intercepting the QUERY on
-          // the output side — rather than filtering reply-shaped chunks out
-          // of the input side, as an earlier version of this fix did — means
-          // user input is never inspected at all: even a pasted look-alike
-          // of a DECRPM reply passes through untouched. Both handlers return
-          // true ("handled"), which stops xterm's built-in responder.
-          const swallowDecrqm = () => true;
-          term.parser.registerCsiHandler(
-            { prefix: "?", intermediates: "$", final: "p" },
-            swallowDecrqm,
-          );
-          term.parser.registerCsiHandler(
-            { intermediates: "$", final: "p" },
-            swallowDecrqm,
-          );
-          // Same treatment for DECRQSS (DCS $ q <spec> ST, "report the
-          // current setting of X"). The pinned tmux (3.7c; Farhelm ships its
-          // own build, and the guarantee rests on that pin) answers every
-          // DECRQSS itself inside the pane — including a `DCS 0 $ r ST` "not
-          // recognized" reply for specs it does not implement, so there is
-          // no spelling it stays silent on — and xterm.js's built-in
-          // responder would answer a
-          // second time, with a reply that begins with ESC and lands in the
-          // pane as keystrokes (Escape, then `P`, `1`, `$`, `r` ...), exactly
-          // the stray-input shape the DECRQM swallow above exists to prevent.
-          // This family cannot be stripped supervisor-side: the query
-          // carries a variable-length payload terminated by ST, so no
-          // literal table can hold it, and the supervisor's old query strip
-          // was deliberately not a VT parser. The browser is the one place that can decline
-          // to answer it. Returning true stops xterm's responder.
-          term.parser.registerDcsHandler(
-            { intermediates: "$", final: "q" },
-            () => true,
-          );
-          // Named (rather than inlined into the `term.onData` wrapper below)
-          // so every outbound TEXT-input chunk — ordinary keystrokes, pastes,
-          // and the merged Shift+Enter sequence alike — leaves through one
-          // path: same encoder, same open-check, same socket. (The
-          // `onBinary` route is deliberately separate: its payloads are raw
-          // bytes that must not pass through `TextEncoder`.) Two independent text-send
-          // call sites here would be a standing risk that one of them drifts
-          // (a forgotten `readyState` guard, a different encoding) in a way
-          // that only shows up as a keystroke silently eaten during a
-          // reconnect race.
-          const sendData = (d) => {
-            if (ws.readyState === WebSocket.OPEN) ws.send(enc.encode(d));
-          };
-          // Shift+Enter: make agent TUIs (Claude Code, Codex) treat it as
-          // "insert a newline" instead of "submit". xterm has no notion of
-          // Shift+Enter on its own — it encodes Enter as `\r` regardless of
-          // the Shift key — so left alone this key would submit the
-          // in-progress prompt every time a user meant to add a line. The
-          // chord becomes ESC CR in ONE websocket message: a message this
-          // small is one `send-keys` command and one pty write (larger input
-          // is chunked — the guarantee is scoped to this two-byte sequence,
-          // see shift-enter-key.js's header), and a SPLIT pair (ESC in its
-          // own message, as an earlier revision sent it) reads as
-          // Escape-then-Enter to any pane program that disambiguates a lone
-          // ESC by read boundary — Codex submitted instead of inserting a
-          // newline. shift-enter-key.js owns the pure decisions and the full
-          // rationale: `shiftEnterKeyAction` recognizes the chord on keydown
-          // and ARMS the merge (returning `true` keeps xterm's own Enter
-          // path — scroll-to-bottom, selection dismissal, hidden-textarea
-          // cleanup, accessibility — fully intact), and `mergeArmedPrefix`
-          // joins the ESC onto the `\r` xterm emits synchronously for that
-          // same keystroke. The microtask below is the arm's whole lifetime:
-          // queued at arm time, it runs when the synchronous keydown
-          // dispatch — the only window in which the chord's own `\r` can
-          // arrive — has finished, so a fizzled chord cannot leave a stale
-          // arm that would ESC-prefix some later unrelated Enter. Ordinary
-          // input is untouched: unarmed chunks pass through byte-for-byte.
-          let shiftEnterArmed = false;
-          // Link ownership survives other button presses and preference changes
-          // until the primary release. The captured event bounds output filtering
-          // to its synchronous dispatch; no timer can swallow subsequent input.
-          let withheldPrimary = false;
-          let linkMouseDispatch = null;
-          term.onData((d) => {
-            if (window.farhelmTerminalLinks.suppressMouseReport(d, linkMouseDispatch)) return;
-            const merged = window.farhelmShiftEnterKey.mergeArmedPrefix(shiftEnterArmed, d);
-            shiftEnterArmed = merged.armed;
-            sendData(merged.send);
-          });
-          term.attachCustomKeyEventHandler((ev) => {
-            if (window.farhelmShiftEnterKey.shiftEnterKeyAction(ev) === "arm") {
-              shiftEnterArmed = true;
-              queueMicrotask(() => {
-                shiftEnterArmed = false;
-              });
-            }
-            return true;
-          });
-          // MT-6: xterm.js anchors a selection to buffer COORDINATES, not
-          // to the text under it. Any input that reaches the pty can move
-          // the cursor, scroll the viewport, or overwrite cells, so a
-          // selection made before that input stays highlighted over
-          // whatever now occupies those coordinates — most visibly,
-          // select-and-copy followed by a paste (or by just resuming
-          // typing) leaves a stale highlight painted over unrelated
-          // content. Cleared on USER-ORIGIN input only: keyboard via
-          // `onKey`, paste via a DOM listener on xterm's own element (which
-          // dies with the terminal on dispose, so no unmount bookkeeping).
-          //
-          // The paste listener must be a CAPTURE-phase one, and that is not
-          // a style choice: xterm registers its own paste handler on the
-          // hidden helper TEXTAREA and that handler calls
-          // `stopPropagation()`, so a bubble-phase listener anywhere above
-          // the textarea — including on the terminal element — never runs
-          // at all. Capture travels downward before the target's handler,
-          // so it fires first and is unaffected. Manual testing on macOS
-          // caught this: typing cleared the highlight (the `onKey` path)
-          // while a real paste left it painted over the pasted text.
-          //
-          // Deliberately NOT cleared in `onData`: that funnel also carries
-          // xterm's auto-generated replies (color/DA/cursor reports a
-          // background TUI can provoke at any moment), and clearing there
-          // would erase a selection the user just made because an
-          // application happened to query the palette. Mouse reports
-          // (`onBinary`) are likewise left alone — a shift-selection
-          // legitimately coexists with mouse reporting, and clearing on
-          // every report would erase it the instant the mouse moved.
-          // Output the PTY sends us never touches selection either, so
-          // watching a selection while output streams in still works,
-          // exactly as it does in a native terminal.
-          //
-          // Clearing xterm's own selection is not enough on WebKit (both
-          // Safari and the desktop app's WKWebView): the highlight survives
-          // on screen over rows whose model no longer claims any selection,
-          // and it even survived subsequent typing — which is what sent this
-          // looking for a second selection rather than a missed clear. The
-          // second one is the NATIVE document selection, and `removeAllRanges`
-          // in `dismissSelection` below is what actually drops it; an earlier
-          // shape of this fix reached for `term.refresh()` on the theory that
-          // it was a repaint problem, which it was not. The whole body is
-          // guarded by "is anything selected at all", so the common case
-          // (input with nothing selected) stays free.
-          const dismissSelection = () => {
-            // TWO selections have to go, and forgetting the second one is
-            // what made this bug look unfixable during manual testing on
-            // macOS: the highlight survived the paste, then survived
-            // typing, then survived a full repaint. xterm's own
-            // selection (its `.xterm-selection` overlay) is only half the
-            // story — a mouse drag over the DOM renderer's real text nodes
-            // ALSO leaves a native document selection behind, and that one
-            // is what stays painted, because `clearSelection` never touches
-            // it. Confirmed by probing both engines after a real drag: the
-            // xterm overlay clears itself, `window.getSelection()` does
-            // not.
-            //
-            // Detected by `rangeCount`, NOT by `isCollapsed`: WebKit
-            // reports a drag-made selection as collapsed while its ranges
-            // still exist and stay painted (probed directly — `isCollapsed`
-            // true, `toString()` still returning the selected text). A
-            // guard on `isCollapsed` therefore skips exactly the case this
-            // exists for. Scoped by the selection's anchor so input here
-            // never wipes a selection the user made elsewhere on the page
-            // (the banner text, say) — and, with several terminals on one
-            // page, never wipes a selection made in a DIFFERENT island's
-            // terminal either, since the anchor test is against THIS
-            // island's own element.
-            const native = window.getSelection && window.getSelection();
-            const nativeAnchor = native && (native.anchorNode || native.focusNode);
-            const nativeInTerm = native
-              && String(native) !== ""
-              && (!nativeAnchor || term.element.contains(nativeAnchor));
-            if (!term.hasSelection() && !nativeInTerm) return;
-            term.clearSelection();
-            if (nativeInTerm) native.removeAllRanges();
-          };
-          // Run once now and once after the current event finishes. The
-          // second pass is not paranoia: while xterm is handling a
-          // keystroke the document selection briefly belongs to its hidden
-          // helper textarea, so the row selection is invisible to the
-          // synchronous pass and reappears immediately afterwards
-          // (observed on Chromium; WebKit clears on the first pass). One
-          // deferred sweep catches that without leaving a timer running.
-          const dismissSelectionSoon = () => {
-            dismissSelection();
-            setTimeout(dismissSelection, 0);
-          };
-          term.onKey(dismissSelectionSoon);
-          term.element.addEventListener("paste", dismissSelectionSoon, true);
-          // Registered after the selection sweep exists, because an
-          // intercepted paste has to run it by hand — the interception
-          // stops the event before it can reach the listener just above
-          // (see `installAttachments`).
-
-          // Herdr-style copy-on-select: the OTHER half of the
-          // copy-to-system-clipboard fix, covering a LOCAL xterm selection —
-          // Shift+drag under mouse reporting (Option+drag on macOS — see
-          // `macOptionClickForcesSelection` above), or an ordinary drag/
-          // double-click/triple-click whenever nothing has mouse reporting on
-          // (see the OSC 52 wiring above, and copy-on-select.js's header, for
-          // the full duality between the two paths a "selection" can take
-          // here).
-          //
-          // ## DOCUMENT-level mouseup, not just `term.element`
-          //
-          // A drag that ENDS outside the terminal — the mouse released over
-          // the sidebar, or outside the browser viewport entirely — never
-          // fires a `mouseup` on `term.element` at all; the event's target is
-          // wherever the pointer physically is. xterm.js itself handles this
-          // correctly for its OWN selection bookkeeping by listening on
-          // `document` rather than the element (`SelectionService`'s
-          // `_addMouseDownListeners`, armed at mousedown and torn down at
-          // mouseup) — a real selection is still finalized wherever the
-          // button comes up. A listener scoped to `term.element` alone would
-          // miss exactly that gesture and never copy it.
-          //
-          // So this listens on `document`, gated by a flag this island's own
-          // `mousedown` on `term.element` sets: only a mouseup whose matching
-          // mousedown started INSIDE this terminal counts, so one island's
-          // drag-release does not trigger a copy check for every OTHER
-          // island's listener on the same page (each mount registers its own
-          // document listener; see `stopCopyOnSelect`, below, for why it must
-          // also be individually removable).
-          //
-          // Reading `term.hasSelection()`/`term.getSelection()` from a
-          // document-level handler is NOT a race against xterm's own
-          // finalization: xterm updates its selection model LIVE on every
-          // `mousemove` during the drag (`SelectionService._handleMouseMove`
-          // writes `_model.selectionEnd` directly, which
-          // `hasSelection`/`getSelection` read straight through), so the
-          // model already reflects the drag's final extent by the time ANY
-          // mouseup fires — nothing here depends on the RELATIVE order of
-          // this listener and xterm's own document-level one.
-          //
-          // Neither listener needs capture phase. Checked directly against
-          // the vendored xterm.js: `Terminal`'s `cancelEvents` option
-          // defaults to `false`, and every vendored mousedown/mouseup path
-          // that could otherwise race these (`SelectionService`'s own
-          // listeners, `CoreBrowserTerminal`'s mouse-reporting listeners, the
-          // link hover handler) either never calls `stopPropagation()` at all
-          // or only does so through `cancel()`, which is a no-op while
-          // `cancelEvents` is off — unlike the paste listener above, whose
-          // capture phase is genuinely load-bearing because xterm's hidden
-          // helper textarea calls `stopPropagation()` on its own paste event
-          // UNCONDITIONALLY.
-          //
-          // No "did this change since last copied" cache any more (see
-          // copy-on-select.js's header for why an earlier version of that was
-          // a real bug, not a simplification worth keeping): every gesture
-          // that can select locally and ends with a non-empty selection
-          // copies, even when it reselects the same text. An unforced press
-          // under mouse tracking belongs to the program and may leave an old
-          // selection visible; that retained text is not a copy request.
-          //
-          // ## Why the real work is DEFERRED past the mouseup dispatch itself
-          //
-          // A cross-engine flake surfaced under repeat-each stress
-          // (mouse-modes.spec.ts's reattach test: a real click occasionally
-          // produced no SGR mouse report at all — see that test's own docs).
-          // Bisection pinned it to this PR; ablating the ClipboardAddon load
-          // and ablating this file's own copy-on-select listeners each ran
-          // clean across sizeable samples taken in isolation, but so did an
-          // UNABLATED build across a comparably sized sample gathered the
-          // same way — every visible failure across all three, traced
-          // through its own trace.zip, turned out to be a SEPARATE,
-          // pre-existing race (the shared test helper's session-listing
-          // lookup racing the helm's own cache) that also reproduces on
-          // origin/main, with the mouse-report assertions themselves having
-          // already passed earlier in the same run. That makes the live
-          // failure this fix targets rarer than what direct repetition
-          // reliably reproduces outside CI's own conditions — this is
-          // therefore a REASONED mitigation of the one concrete difference
-          // code-reading turned up, not a change validated by a captured
-          // failing trace of the report itself going missing.
-          //
-          // What that reading found: this listener's SHAPE is unlike every
-          // other one in this file. It is registered ONCE at mount time and
-          // left on `document` for the terminal's entire lifetime, where
-          // xterm's own mouse-reporting mouseup listener
-          // (`CoreBrowserTerminal.bindMouse`'s `requestedEvents.mouseup`) is
-          // instead added to `document` FRESH on every single mousedown and
-          // removed again inside its own mouseup handler — the two are never
-          // simultaneously "old", and ours is the only listener in this file
-          // whose registration predates the gesture it reacts to by an
-          // arbitrary amount of page lifetime. Nothing in the DOM Events spec
-          // names a hazard from that shape on its own (`cancelEvents` is off,
-          // so no vendored path here ever calls `stopPropagation`, and
-          // `stopImmediatePropagation` — used exactly once in the vendored
-          // source, in `SelectionService._handleMouseMove` — never runs on
-          // this path at all, since mouse-tracking mode disables
-          // `SelectionService` for a plain click in the first place, per
-          // `CoreBrowserTerminal.bindMouse`'s `onProtocolChange` handler).
-          // But a long-lived listener sharing a target and an event type with
-          // one that is added and removed on every gesture is exactly the
-          // shape where an engine-specific ordering or bookkeeping quirk
-          // could produce single-digit-percent, cross-engine,
-          // load-sensitive intermittency without leaving behind a
-          // reproducible trace of its own — which is consistent with what
-          // was observed, even though it was not directly witnessed.
-          //
-          // So this handler does the absolute minimum SYNCHRONOUSLY (consult
-          // and reset the gesture flag — no xterm API touched, no clipboard
-          // API touched) and pushes everything else onto its own macrotask
-          // via `setTimeout(..., 0)`, which cannot run until the CURRENT
-          // event's entire dispatch — every listener for this mouseup,
-          // xterm's own report-sending one very much included — has already
-          // finished. That removes this listener's unusual lifetime as a
-          // variable in xterm's own mouse-report dispatch ENTIRELY: whatever
-          // xterm does for this event finishes completely before this code
-          // ever reads `term` or calls `navigator.clipboard`, regardless of
-          // registration order or engine bookkeeping. The delay is
-          // imperceptible and invisible to both feature's own specs
-          // (terminal-clipboard.spec.ts polls for the clipboard to settle
-          // rather than asserting on synchronous timing), and OSC 52 writes
-          // — the addon's own parser-driven path, never routed through this
-          // listener at all — are untouched by this change.
-          let gestureStartedHere = false;
-          // The mount stays alive when it swaps xterm for a grid. This
-          // driver's deferred copy and grace callbacks must stop there too.
-          let copyOnSelectActive = true;
-          // The copy decision and drag-copy notice's view of the gesture
-          // (copy-on-select.js's "The drag that copies nothing"): where the
-          // press was, whether the
-          // program had mouse tracking on at that moment, and how many OSC 52
-          // writes this pane had seen by then. Recorded at the press because
-          // the release is too late: a program can turn tracking off, or copy,
-          // in between.
-          let pressed = null;
-          // OSC 52 writes this pane's program has sent, counted by a
-          // fall-through handler. The page-wide clipboard provider cannot tell
-          // panes apart, so the count lives here. Registered AFTER the
-          // clipboard addon on purpose: xterm calls the newest handler first
-          // and moves on when it returns false, so this one only counts and
-          // the addon still performs the copy. Disposed with the terminal.
-          let osc52Writes = 0;
-          term.parser.registerOscHandler(52, (data) => {
-            if (window.farhelmCopyOnSelect.isOsc52Write(data)) osc52Writes += 1;
-            return false;
-          });
-          // The live region is rendered by Rust; this mount owns its timer and
-          // listeners. Cancel a pending grace check on the next press as well:
-          // an older drag must not raise a notice after that dismissal boundary.
-          const noticeElement = spec.notice ? document.getElementById(spec.notice) : null;
-          const dragNotice = noticeElement
-            ? window.farhelmCopyOnSelect.createDragCopyNotice(noticeElement, {
-              place: window.farhelmTooltip.placeTooltip,
-              viewport: () => ({ width: window.innerWidth, height: window.innerHeight }),
-              geometry: () => ({
-                rowHeight: term.element.querySelector(".xterm-screen").getBoundingClientRect().height / term.rows,
-                pane: term.element.closest(".terminal-pane").getBoundingClientRect(),
-              }),
-              setTimeout: window.setTimeout.bind(window),
-              clearTimeout: window.clearTimeout.bind(window),
-            })
-            : null;
-          let noticeGraceTimer = null;
-          let pressSequence = 0;
-          const handleTerminalMouseDown = (ev) => {
-            pressSequence += 1;
-            if (noticeGraceTimer !== null) clearTimeout(noticeGraceTimer);
-            noticeGraceTimer = null;
-            if (dragNotice) dragNotice.hide();
-            gestureStartedHere = true;
-            pressed = {
-              sequence: pressSequence,
-              x: ev.clientX,
-              y: ev.clientY,
-              button: ev.button,
-              onScreen: !!(ev.target && ev.target.closest && ev.target.closest(".xterm-screen")),
-              trackingAtPress: !!(term.modes && term.modes.mouseTrackingMode !== "none"),
-              forced: window.farhelmCopyOnSelect.pressForcesSelection(ev, navigator.platform),
-              osc52AtPress: osc52Writes,
-            };
-          };
-          // The OSC 52 grace and wording are unchanged. Only a selected pane
-          // shows guidance; a pane switched away during the wait stays silent.
-          const showDragCopyNotice = (press, release) => {
-            noticeGraceTimer = null;
-            if (!copyOnSelectActive || !alive || press.sequence !== pressSequence || osc52Writes !== press.osc52AtPress) return;
-            if (!dragNotice || noticeElement.closest(".terminal-pane:not(.selected)")) return;
-            const text = window.farhelmCopyOnSelect.dragCopyNoticeText({
-              platform: navigator.platform,
-              appHint: spec.copyHint,
-            });
-            dragNotice.show(text, release);
-          };
-          const handleCopyOnSelectMouseUp = (ev) => {
-            if (!gestureStartedHere) return;
-            gestureStartedHere = false;
-            const press = pressed;
-            pressed = null;
-            setTimeout(() => {
-              // This callback outlives its dispatch. Mount teardown clears
-              // `alive`; the xterm-to-grid swap clears this driver's private
-              // token while keeping the mount alive. Either ending makes
-              // touching the old terminal unsafe.
-              if (!copyOnSelectActive || !alive) return;
-              const hasSelection = term.hasSelection();
-              const selectionText = hasSelection ? term.getSelection() : "";
-              if (
-                press &&
-                !press.withheld &&
-                press.sequence === pressSequence &&
-                window.farhelmCopyOnSelect.dragMayHaveCopiedNothing({
-                  button: press.button,
-                  moved: Math.hypot(ev.clientX - press.x, ev.clientY - press.y),
-                  onScreen: press.onScreen,
-                  trackingAtPress: press.trackingAtPress,
-                  forced: press.forced,
-                  hasSelection,
-                  osc52SincePress: osc52Writes !== press.osc52AtPress,
-                })
-              ) {
-                noticeGraceTimer = setTimeout(
-                  () => showDragCopyNotice(press, { x: ev.clientX, y: ev.clientY }),
-                  window.farhelmCopyOnSelect.OSC52_GRACE_MS,
-                );
-              }
-              if (
-                !window.farhelmCopyOnSelect.copySelectionOnMouseUp({
-                  button: press?.button,
-                  hasSelection,
-                  selectionText,
-                  trackingAtPress: press && press.trackingAtPress,
-                  forced: press && press.forced,
-                })
-              ) {
-                return;
-              }
-              // The same page-wide queue as OSC 52 owns admission here. The
-              // selection itself remains in place; copying must not visibly
-              // disturb what the user just selected.
-              enqueueClipboardWrite(selectionText);
-            }, 0);
-          };
-          term.element.addEventListener("mousedown", handleTerminalMouseDown);
-          // xterm's link listener on the screen must see the press first: it
-          // remembers which link owns the eventual release. A capture listener
-          // would hide that press and could activate a stale link instead. Stop
-          // only before bindMouse on the enclosing terminal: skipping its press
-          // usually also skips installing document release/drag reporters. Another
-          // button may have installed them already, so their output is gated below
-          // without preventing xterm's all-buttons-up cleanup from running.
-          const linkScreen = term.element.querySelector('.xterm-screen');
-          const withholdLinkPress = (event) => {
-            if (!window.farhelmTerminalLinks.interceptLinkPress({
-              button: event.button,
-              tracking: term.modes.mouseTrackingMode !== 'none',
-              forced: window.farhelmCopyOnSelect.pressForcesSelection(event, navigator.platform),
-              webLink: hoveredWebLink,
-              mode: linkClickMode(),
-            })) return;
-            // The ordinary terminal listener is above this stop. Dismiss its
-            // previous notice explicitly, but this gesture never reaches the
-            // program and must never produce the program-copy guidance itself.
-            handleTerminalMouseDown(event);
-            pressed.withheld = true;
-            withheldPrimary = true;
-            term.clearSelection();
-            event.preventDefault();
-            term.focus();
-            event.stopPropagation();
-          };
-          linkScreen.addEventListener('mousedown', withholdLinkPress);
-          // Observe without stopping propagation: screen-level link activation and
-          // document-level reporter cleanup both need the release. xterm's public
-          // output callbacks run synchronously inside these mouse dispatches. DOM
-          // resets eventPhase after dispatch, whereas a capture-listener microtask
-          // can run before the later bubble listener and is too early a boundary.
-          const captureLinkMouseEvent = (event) => {
-            linkGesture.observe(event, !!event.target?.closest?.('.xterm-screen') && term.element.contains(event.target));
-            const withheld = withheldPrimary && (event.type === 'mouseup'
-              ? event.button === 0
-              : event.type === 'mousemove' && !!(event.buttons & 1));
-            linkMouseDispatch = { event, withheld };
-            if ((event.type === 'mouseup' || event.type === 'mousedown') && event.button === 0) {
-              withheldPrimary = false;
-            }
-          };
-          for (const type of ['mousedown', 'mousemove', 'mouseup']) {
-            document.addEventListener(type, captureLinkMouseEvent, true);
-          }
-          document.addEventListener("mouseup", handleCopyOnSelectMouseUp);
-          if (dragNotice) window.addEventListener("resize", dragNotice.reposition);
-          // Removable independently of every other per-mount listener (see
-          // this hoisted variable's own declaration above): a DOCUMENT
-          // listener outlives the element it was conceptually "for", so
-          // nothing else in this file's teardown would ever take it down on
-          // its own.
-          stopCopyOnSelect = () => {
-            copyOnSelectActive = false;
-            pressSequence += 1;
-            gestureStartedHere = false;
-            pressed = null;
-            term.element.removeEventListener("mousedown", handleTerminalMouseDown);
-            linkScreen.removeEventListener('mousedown', withholdLinkPress);
-            for (const type of ['mousedown', 'mousemove', 'mouseup']) {
-              document.removeEventListener(type, captureLinkMouseEvent, true);
-            }
-            // A reconnect keeps this gesture for the screen it may restore
-            // (`runReconnect`), so a press held now must not survive the
-            // stretch where nothing observes it (`createLinkGesture`).
-            linkGesture.reset();
-            linkMouseDispatch = null;
-            withheldPrimary = false;
-            document.removeEventListener("mouseup", handleCopyOnSelectMouseUp);
-            if (noticeGraceTimer !== null) clearTimeout(noticeGraceTimer);
-            if (dragNotice) {
-              window.removeEventListener("resize", dragNotice.reposition);
-              dragNotice.dispose();
-            }
-          };
-          // `baseUrl`, not the `base` the socket was built from: uploads are
-          // ordinary HTTP to the same origin the rest of this UI's API calls
-          // go to, and an empty base (origin lookup failed) leaves a
-          // relative URL, which resolves against the page itself.
-          // The liveness callback closes over THIS mount's socket, which is
-          // what makes it honest: an island whose socket the supervisor
-          // detached (a takeover, a stall, a dead terminal) still has a live
-          // xterm instance, and `term.paste()` into it would swallow the
-          // path with nothing to show for it.
-          attachments = installAttachments(
-            spec,
-            baseUrl,
-            attach,
-            (text) => term.paste(text),
-            dismissSelectionSoon,
-            () => ws.readyState === WebSocket.OPEN,
-          );
-          // onBinary carries mouse reports and other non-UTF8 input as a
-          // binary string; encode byte-for-byte. The conversion itself lives
-          // in term-bytes.js — a required global that mountWhenReady waits
-          // for, so it is guaranteed present here — letting `node --test`
-          // pin the byte-domain contract against the exact file the page
-          // runs, rather than a copy.
-          term.onBinary((d) => {
-            if (window.farhelmTerminalLinks.suppressMouseReport(d, linkMouseDispatch)) return;
-            if (ws.readyState !== WebSocket.OPEN) return;
-            ws.send(window.farhelmTermBytes.binaryStringToBytes(d));
-          });
-          term.onResize(sendResize);
-        }
-
-        // Which surface this mount builds follows what the page knows of
-        // the terminal (`spec.kind`, from the session listing; see `sync`):
-        // a new terminal (`host`) gets the grid component and nothing of
-        // xterm.js, sized by the grid's own fit; an old one (`tmux`), or one
-        // whose kind the page does not know, gets xterm.js first, and a grid
-        // notice may still swap the grid in (`adoptGrid`). Either way the
-        // surface is measured before the socket exists, because the socket
-        // URL carries its size.
-        if (spec.kind === "host") {
-          const surface = createGridSurface(undefined);
-          grid = surface.component;
-          surface.install();
-          grid.fit();
-        } else {
-          buildXtermSurface();
-        }
-        const size = grid ? grid.size() : { cols: term.cols, rows: term.rows };
+        // The grid component, measured before the socket exists, because the
+        // socket URL carries the size its first fit gives.
+        const surface = createGridSurface();
+        grid = surface.component;
+        surface.install();
+        grid.fit();
+        const size = grid.size();
 
         const base = baseUrl
           ? baseUrl.replace(/^http/, "ws")
@@ -4694,71 +3421,31 @@
         // on capability.
         const path = (ifUnowned && spec.pathUnowned) || spec.path;
         const sep = path.indexOf("?") === -1 ? "?" : "&";
-        // `grid=1`: this page can draw a grid stream, so a terminal that
-        // runs in a terminal host can be attached at all (the supervisor
-        // refuses a client that cannot). A tmux terminal still sends bytes,
-        // and an older helm ignores the parameter. See "Two kinds of
-        // stream, one island" in this file's header.
         ws = new WebSocket(
-          `${base}${path}${sep}cols=${size.cols}&rows=${size.rows}&grid=1`,
+          `${base}${path}${sep}cols=${size.cols}&rows=${size.rows}`,
           deviceProtocols(),
         );
         ws.binaryType = "arraybuffer";
         // The catch-up's idle watchdog is armed further down, the moment
         // the state it guards exists — at CONSTRUCTION rather than at
         // `onopen`, since a socket that never finishes connecting
-        // produces no bytes, no marker, and no close to end the phase on.
+        // produces no data, no marker, and no close to end the phase on.
 
-        // Watermark state for THIS attachment only. Declared inside
-        // mount() (not module scope) so every fresh WS — a reload, a
-        // back-then-reopen, or simply a SIBLING terminal in the same
-        // session view — starts from pendingWrite 0 / unpaused,
-        // regardless of what any other socket last sent: there is no way
-        // for a stale pause/resume to leak across attachments when the
-        // counters themselves do not survive the old closure's death, and
-        // no way for one tab's backlog to pause another's stream.
-        let pendingWrite = 0;
-        let paused = false;
-        // Both marks resolved once, here, so the documented 4:1 ratio
-        // survives a test lowering the pause mark — see `pauseMark`.
-        const highWater = pauseMark();
-        const lowWater = highWater / 4;
-
-        // Test-only observability (e2e/tests/terminal-flood.spec.ts): the
-        // watermark state machine lives entirely inside this closure, so
-        // the suite has no way to see it crossed a mark or which way
-        // without a hook. Never read by production code.
+        // Test-only observability: the catch-up's state lives entirely
+        // inside this closure, so the suite has no way to see it without a
+        // hook. Never read by production code.
         //
         // Captured in a LOCAL (`testHook`) rather than written straight
         // to the published globals, and published only once mount
-        // finishes successfully (see the bottom of this function) — a
-        // real hazard closed here: `term.write()`'s completion callback
-        // below is queued asynchronously and can still fire AFTER
-        // `unmount()` has deleted `window.__farhelmTest`, or after a
-        // LATER mount has replaced it with a different attachment's
-        // object. Either way, a callback that wrote through the global
-        // would throw (deleted) or corrupt a stranger's counts (replaced)
-        // instead of harmlessly updating an object nobody reads anymore.
-        // Every update below goes through `testHook` directly, so a
-        // late-firing callback from a torn-down mount only ever touches
-        // its OWN already-orphaned object.
+        // finishes successfully (see the bottom of this function): a timer
+        // this mount armed can still fire AFTER `unmount()` has deleted
+        // `window.__farhelmTest`, or after a LATER mount has replaced it
+        // with a different attachment's object. Either way, a callback that
+        // wrote through the global would throw (deleted) or corrupt a
+        // stranger's record (replaced). Every update below goes through
+        // `testHook` directly, so a late-firing callback from a torn-down
+        // mount only ever touches its OWN already-orphaned object.
         const testHook = {
-          // Which kind of stream this attachment carries: null until the
-          // helm's notice (or the first frame of an older helm, which means
-          // "bytes"), then "bytes" or "grid". A test waits on it before
-          // reaching for the surface in `window.__farhelmIslands`.
-          stream: null,
-          paused: false,
-          pauseCount: 0,
-          resumeCount: 0,
-          // How many times `refreshIfScrolledBack` actually issued a
-          // `term.refresh()` (not merely how many times it was called —
-          // the throttle and the tail guard both skip most calls). A
-          // regression test for the scroll-freeze workaround can assert
-          // this advances instead of only asserting on its OUTCOME, since
-          // "the viewport happened to stay correct" and "the workaround
-          // engaged" are different claims.
-          scrolledRefreshCount: 0,
           // The catch-up phase's own observability (PLAN_M5.md's testing
           // decisions). The acceptance is deliberately NOT "sample the
           // scroll position and hope" — sampling can miss frames between
@@ -4766,48 +3453,30 @@
           // test needs are RECORDED here as they happen, by the code that
           // is the only witness to them:
           //
-          // - `buffering`: still holding bytes back.
-          // - `bufferedBytes`/`bufferedChunks`: how much is held RIGHT
-          //   NOW, in each of the two currencies the bounds are counted
-          //   in. Both drop back to zero at the flush, since they describe
-          //   current holdings rather than running totals — and a test
-          //   crossing either bound needs the baseline a REAL replay
-          //   already put there, which is not a number this suite can
-          //   predict.
-          // - `writesWhileHidden`: how many `term.write()` calls this
-          //   island made before the terminal was revealed. The whole
-          //   milestone is that this is ONE for a replay of any depth.
-          // - `revealReason`: which of the phase's NINE endings fired —
-          //   `marker`, `detached`, `closed`, `error`, `size`, `chunks`,
-          //   `idle`, `unconnected`, `protocol` — and `null` until one
-          //   does. `unconnected` ends the phase WITHOUT presenting a
-          //   usable terminal (see `armIdleTimer`), and so does
-          //   `protocol`, a grid stream that broke the format (see
-          //   `streamFailed`). A grid stream never ends on `size` or
-          //   `chunks`: it buffers nothing.
+          // - `buffering`: still in the catch-up phase, hidden (the name
+          //   predates grid streams, which hold nothing back).
+          // - `revealReason`: which of the phase's SEVEN endings fired —
+          //   `marker`, `detached`, `closed`, `error`, `idle`,
+          //   `unconnected`, `protocol` — and `null` until one does.
+          //   `unconnected` ends the phase WITHOUT presenting a usable
+          //   terminal (see `armIdleTimer`), and so does `protocol`, a grid
+          //   stream that broke the format (see `streamFailed`).
           // - `revealed`: set INSIDE the reveal, so a test that waits on
-          //   it is guaranteed the two fields below have been written.
-          //   `revealReason` is not that signal: it is recorded when the
-          //   phase ends, which is one asynchronous write-completion
-          //   ahead of the reveal itself.
-          // - `revealedInWriteCallback`: whether the reveal came from the
-          //   flush write's completion callback, i.e. after xterm.js had
-          //   consumed the whole replay, rather than optimistically. A grid
-          //   stream applies every frame as it arrives, so its reveal is
-          //   always after the whole replay and reports true.
+          //   it is guaranteed the field below has been written.
+          //   `revealReason` is not that signal: an ending that proved no
+          //   attachment during a recovery records its reason without
+          //   revealing (see `reveal`).
           // - `viewportAtTailOnReveal`: whether the FIRST VISIBLE FRAME
-          //   was at the tail, captured at the instant of the reveal.
+          //   was at the tail, captured at the instant of the reveal (the
+          //   reveal scrolls the grid to the bottom first, so a false here
+          //   is a broken reveal).
           //
           // `holdMarker`/`heldReason`/`limits` come from `replayControls`
           // — test CONTROLS rather than observations; see that function.
           replay: {
             buffering: true,
-            bufferedBytes: 0,
-            bufferedChunks: 0,
-            writesWhileHidden: 0,
             revealReason: null,
             revealed: false,
-            revealedInWriteCallback: false,
             viewportAtTailOnReveal: null,
             // How many watchdog expiries re-armed instead of ending the
             // phase because the main thread stalled during their window
@@ -4824,129 +3493,20 @@
           }
         }
 
-        // Sanity backstop, NOT part of the flow-control contract itself:
-        // pause/resume in `writeBytes` below should keep the backlog
-        // within a few MiB of HIGH_WATER. Landing here means flow control
-        // is not doing its job (a pause message that never reached the
-        // supervisor, a socket the browser thinks is open but isn't) and
-        // the backlog is now within striking distance of term.write()'s
-        // ~50MB silent-discard cliff (this file's own docs, above) —
-        // worth one log line, not a spammy one per byte past the mark.
-        const BACKLOG_SANITY_BOUND = 32 * 1024 * 1024;
-        let sanityWarned = false;
-
-        // Workaround for an observed, reproduced defect in vendored
-        // xterm.js 6.0.0. The vendored bundle stays byte-identical to
-        // upstream (SPEC_impl.md, "Terminal widget: xterm.js island",
-        // records this as the one deliberate constraint on it), so this
-        // compensates from the outside instead. A real terminal
-        // scrolled back mid-flood showed the painted DOM going stale
-        // — rendered rows disagree with `term.buffer.active` and stay
-        // that way — for two shapes: a plain flood once scrollback is
-        // already full, and output confined to a DECSTBM scroll region
-        // (a browser spec reproduced both while the suite could still
-        // create old terminals).
-        //
-        // What is established, read directly from the bundle: once
-        // scrollback is full and the user is scrolled back,
-        // `BufferService.scroll` decrements `buffer.ydisp` by one for
-        // EVERY evicted line (its `isUserScrolling && isFull` branch);
-        // separately, the parser's per-write repaint
-        // (`InputHandler.parse`'s epilogue) maps each dirty screen row
-        // into a viewport row by adding `(ybase - ydisp)` and stops
-        // requesting a refresh once that offset reaches `rows` — so a
-        // row whose offset from the active screen exceeds the viewport
-        // height is never asked to repaint by that path. A throttled,
-        // unconditional full-row `term.refresh()` while scrolled away
-        // from the tail makes the reproduction pass. The exact
-        // xterm-internal step that actually leaves the DOM holding stale
-        // content — as opposed to merely not being told to repaint it —
-        // is NOT established from source; do not treat the mechanism
-        // above as a complete explanation, and do not replace it with a
-        // different invented one without new evidence.
-        //
-        // Throttled (rather than once per write) because a fast producer
-        // calls this on every completed `term.write()` — checking on the
-        // hot path is cheap, but actually issuing a refresh is not free,
-        // and nothing is gained by repainting far faster than a human
-        // eye or the display's own refresh rate could show anyway. 50ms
-        // itself is a judgment call, not a measurement: about three
-        // display frames of worst-case staleness on a viewport whose
-        // buffer content is static, weighed against a full-row DOM
-        // rebuild per refresh.
-        // Gated on actually being scrolled away from the tail so a
-        // terminal following live output (the overwhelming common case)
-        // pays nothing beyond the guard check itself. A write landing
-        // inside an already-open window is not simply dropped — see
-        // `armTrailingScrolledRefresh` below — so the worst case is one
-        // throttle window of staleness, not "until the next write or a
-        // user scroll".
-        const SCROLLED_REFRESH_THROTTLE_MS = 50;
-        let lastScrolledRefreshAt = 0;
-        // The one deferred repaint a throttle-window write can still owe
-        // once the window ends; see `armTrailingScrolledRefresh`.
-        let trailingScrolledRefreshTimer = null;
-
-        /**
-         * Guarantee the write that got skipped by the leading-edge
-         * throttle above still gets its repaint once the current window
-         * ends, rather than waiting for the NEXT write (which may never
-         * come if output stops) or a user scroll. At most one timer is
-         * armed at a time: a write that lands while one is already
-         * pending changes nothing — the existing timer already promises
-         * a repaint no later than the window this write itself falls
-         * inside, so a second timer would only repeat that promise.
-         *
-         * Re-checks "still away from the tail" and `alive` at FIRE time,
-         * not at arm time: the viewport can return to the tail (or the
-         * island can be torn down) during the deferred window, and
-         * refreshing a terminal that is no longer scrolled back — or no
-         * longer exists — would be wasted or unsafe work for no benefit.
-         */
-        function armTrailingScrolledRefresh() {
-          if (trailingScrolledRefreshTimer !== null) return;
-          const remaining = SCROLLED_REFRESH_THROTTLE_MS - (performance.now() - lastScrolledRefreshAt);
-          trailingScrolledRefreshTimer = setTimeout(() => {
-            trailingScrolledRefreshTimer = null;
-            if (!alive) return;
-            const buffer = term.buffer.active;
-            if (buffer.viewportY === buffer.baseY) return;
-            lastScrolledRefreshAt = performance.now();
-            term.refresh(0, term.rows - 1);
-            testHook.scrolledRefreshCount++;
-          }, Math.max(0, remaining));
-        }
-
-        function refreshIfScrolledBack() {
-          const buffer = term.buffer.active;
-          if (buffer.viewportY === buffer.baseY) return;
-          const now = performance.now();
-          if (now - lastScrolledRefreshAt < SCROLLED_REFRESH_THROTTLE_MS) {
-            armTrailingScrolledRefresh();
-            return;
-          }
-          lastScrolledRefreshAt = now;
-          term.refresh(0, term.rows - 1);
-          testHook.scrolledRefreshCount++;
-        }
-
         // ------------------------------------------------------------
-        // Catch-up buffering (PLAN_M5.md item 5; this file's header
-        // carries the design). State for THIS attachment only, in
-        // `mount()`'s closure with the watermark counters above and for
-        // the same reason: a reconnect is a new mount, and a new mount
-        // buffers its own replay from scratch.
+        // The catch-up (PLAN_M5.md item 5; this file's header carries the
+        // design). State for THIS attachment only, in `mount()`'s closure:
+        // a reconnect is a new mount, and a new mount catches up from
+        // scratch.
         // ------------------------------------------------------------
         //
-        // `catchingUp` is one-way. It turns false at the end of the
-        // phase and never comes back, which is what keeps a `%pause`
-        // flow-control recovery — history replayed into the SAME
-        // attachment, deliberately markerless — flowing straight to the
-        // screen as ordinary live output.
+        // `catchingUp` is one-way. It turns false at the end of the phase
+        // and never comes back, which is what keeps everything later on the
+        // SAME attachment — a whole history sent again after a resize or a
+        // pause, with no marker of its own — flowing straight to the screen
+        // as ordinary live output rather than hiding a live terminal again.
         let catchingUp = true;
         let revealed = false;
-        let replayChunks = [];
-        let replayBytes = 0;
         let idleTimer = null;
         // When the current idle window was armed, on the monotonic clock,
         // so an expiry can tell a window the page actually sat through
@@ -4964,12 +3524,11 @@
         let focusOnReveal = true;
         // This mount's liveness token, cleared by `unmount()` (and by the
         // rollback below) BEFORE anything is disposed. Every deferred path
-        // here — write-completion callbacks, the idle timer — checks it,
-        // because both outlive their island: xterm.js runs a queued write
-        // callback even after `dispose()`, and a stale reveal would then
-        // scroll a disposed terminal, clear a placeholder element by id,
-        // and un-hide a DOM node a REPLACEMENT mount is already using for
-        // its own catch-up.
+        // here — the idle timer, the heartbeat, the drag-copy grace —
+        // checks it, because each can outlive its island: a stale reveal
+        // would scroll a disposed terminal, clear a placeholder element by
+        // id, and un-hide a DOM node a REPLACEMENT mount is already using
+        // for its own catch-up.
         let alive = true;
 
         // ------------------------------------------------------------
@@ -5044,13 +3603,13 @@
         let recoveryConfirmed = false;
 
         /**
-         * Record that this attach is REAL — a replay byte or the marker —
+         * Record that this attach is REAL — a replay frame or the marker —
          * and, if the catch-up already ended without that evidence, finish
          * the job it could not finish then.
          *
          * The late path matters because the evidence-free idle ending
          * deliberately leaves the terminal hidden and the recovery running:
-         * bytes arriving afterwards (a helm that stalled and then found its
+         * frames arriving afterwards (a helm that stalled and then found its
          * voice) must make that harmless rather than permanent, so they
          * confirm the recovery and reveal here instead of accumulating
          * behind a placeholder nobody is going to take down.
@@ -5070,7 +3629,7 @@
           attachProved = true;
           if (catchingUp) return;
           recoveryConfirmed = true;
-          reveal(false);
+          reveal();
         }
 
         function clearIdleTimer() {
@@ -5079,7 +3638,7 @@
           unwatchStalls(stallToken);
         }
 
-        // Re-armed on every buffered chunk, so the window measures
+        // Re-armed on every received frame, so the window measures
         // SILENCE rather than elapsed time (see REPLAY_IDLE_TIMEOUT_MS).
         // The interval is read at ARM time, not captured once, so a test
         // that retunes `limits.idleMs` mid-attach is honored by the next
@@ -5089,10 +3648,10 @@
         // here rather than by whoever reads the reason afterwards:
         //
         // - The socket opened and the stream went quiet. This is the
-        //   graceful degradation the bound exists for: flush, reveal, go
-        //   live. Input works, because the socket is there to carry it.
+        //   graceful degradation the bound exists for: reveal and go live.
+        //   Input works, because the socket is there to carry it.
         // - The socket is still CONNECTING. Nothing has been received
-        //   because nothing has been connected, and `term.onData` drops
+        //   because nothing has been connected, and `sendGridInput` drops
         //   keystrokes on a socket that is not OPEN — so revealing a
         //   normal-looking terminal would leave the user typing into a
         //   void with nothing on screen to explain it, which is precisely
@@ -5176,15 +3735,10 @@
          * on a torn-down mount — see `alive`, whose whole purpose is this
          * function not running late.
          *
-         * `fromWriteCallback` is true when this ran inside the flush
-         * write's completion callback — the only path on which xterm.js
-         * has provably consumed the whole replay before anything became
-         * visible.
-         *
-         * `scrollToBottom()` makes "lands at the tail" a guarantee
-         * rather than a dependency on xterm's auto-scroll heuristics:
-         * nothing could have scrolled this buffer (it has been hidden
-         * since mount), but the contract is worth stating in code.
+         * `scrollToBottom()` makes "lands at the tail" a guarantee rather
+         * than a dependency on the component's following state: nothing
+         * could have scrolled this terminal (it has been hidden since
+         * mount), but the contract is worth stating in code.
          *
          * Focus is (re)placed here rather than only at mount, and that is
          * a fix rather than a belt: both engines refuse `focus()` on an
@@ -5199,7 +3753,7 @@
          * time the user did not choose, and by then they may be typing
          * somewhere else entirely.
          */
-        function reveal(fromWriteCallback) {
+        function reveal() {
           if (revealed || !alive) return;
           // An attach that produced NOTHING has nothing to reveal, and
           // revealing it during a recovery would be actively wrong: it
@@ -5209,35 +3763,21 @@
           // that gets here (see `armIdleTimer`); it is treated as a failed
           // attempt, and `noteAttachProved` is what un-sticks the terminal
           // if evidence turns up late after all.
-          // A marker can queue this callback just before the socket dies.
-          // That death has already advanced recovery; the old flush must
-          // neither retire its controller nor hide its new outage card.
+          // A socket whose ending was already committed has advanced the
+          // recovery; a reveal reached late must neither retire its
+          // controller nor hide its new outage card.
           if (reconnecting(spec.el) && (!attachProved || ended)) return;
           // Keep the last screen until replacement replay is actually
           // painted, rather than disposing it when the marker only arrives.
           if (recoveryConfirmed) cancelReconnect(spec.el, "confirmed");
           revealed = true;
-          if (grid) {
-            // Draw now, while still hidden, so the first visible frame is
-            // the current screen, at the tail. History may still be being
-            // applied (grid-terminal.js, "Scrollback"); the screen does not
-            // wait for it.
-            grid.scrollToBottom();
-            grid.flush();
-            testHook.replay.revealed = true;
-            testHook.replay.revealedInWriteCallback = !!fromWriteCallback;
-            // True by construction for a grid: the reveal itself puts the
-            // view at the bottom and paints before showing it, so this
-            // observation, which tests xterm.js's write-then-scroll, has
-            // nothing to catch here.
-            testHook.replay.viewportAtTailOnReveal = grid.viewport().following;
-          } else {
-            term.scrollToBottom();
-            const buffer = term.buffer.active;
-            testHook.replay.revealed = true;
-            testHook.replay.revealedInWriteCallback = !!fromWriteCallback;
-            testHook.replay.viewportAtTailOnReveal = buffer.viewportY === buffer.baseY;
-          }
+          // Draw now, while still hidden, so the first visible frame is the
+          // current screen, at the tail. History may still be being applied
+          // (grid-terminal.js, "Scrollback"); the screen does not wait for it.
+          grid.scrollToBottom();
+          grid.flush();
+          testHook.replay.revealed = true;
+          testHook.replay.viewportAtTailOnReveal = grid.viewport().following;
           showTerminal(el, spec.connecting);
           clearDropRefusals(spec.status);
           if (takesFocus()) {
@@ -5245,10 +3785,9 @@
           }
         }
 
-        /** Focus whichever surface this mount holds (see `adoptGrid`). */
+        /** Put keyboard focus in this mount's grid component. */
         function focusTerminal() {
-          if (grid) grid.focus();
-          else term.focus();
+          grid.focus();
         }
 
         /**
@@ -5324,81 +3863,17 @@
         }
 
         /**
-         * Write one chunk of terminal bytes, carrying the watermark
-         * accounting that used to live inline in `ws.onmessage`.
-         *
-         * Shared by the live path and by the catch-up flush precisely so
-         * the flush is not a second, unaccounted write path: a 3 MiB
-         * batched write moves the unwritten-byte counter exactly as the
-         * same bytes arriving live would have.
-         */
-        function writeBytes(bytes, onWritten) {
-          pendingWrite += bytes.length;
-          if (!revealed) testHook.replay.writesWhileHidden++;
-          term.write(bytes, () => {
-            // xterm.js runs this even after `dispose()`, so a mount torn
-            // down with writes in flight lands here on a dead island: no
-            // flow control to answer for (the socket is closed), and no
-            // reveal to perform (see `alive`).
-            if (!alive) return;
-            pendingWrite -= bytes.length;
-            // Resume only out of an ACTUAL prior pause: this is the other
-            // half of exactly-once semantics (see the pause check below)
-            // — without the `paused` guard, a producer whose backlog
-            // merely dips below the resume mark before ever crossing the
-            // pause mark would send a resume the supervisor never asked to
-            // answer.
-            if (paused && pendingWrite <= lowWater) {
-              paused = false;
-              testHook.paused = false;
-              testHook.resumeCount++;
-              sendControl("resume");
-            }
-            // See `refreshIfScrolledBack`'s own docs: each completed
-            // write is exactly the moment new content may have landed
-            // without the DOM having been asked to repaint it, so this
-            // is where the compensating refresh belongs.
-            refreshIfScrolledBack();
-            if (onWritten) onWritten();
-          });
-          // Exactly once per crossing: `paused` blocks every repeat check
-          // while the backlog stays above HIGH_WATER, so one crossing
-          // sends one pause, not a flood of them.
-          if (!paused && pendingWrite > highWater) {
-            paused = true;
-            testHook.paused = true;
-            testHook.pauseCount++;
-            sendControl("pause");
-          }
-          if (pendingWrite > BACKLOG_SANITY_BOUND && !sanityWarned) {
-            sanityWarned = true;
-            console.warn(
-              "farhelm: terminal write backlog far past high-water",
-              pendingWrite,
-            );
-          }
-        }
-
-        /**
-         * End the catch-up phase: write everything held back as ONE
-         * write, reveal at its completion, and let every later byte go
-         * straight to the screen.
+         * End the catch-up phase: reveal the terminal, whose component has
+         * applied every frame as it arrived, and let everything later show
+         * as it comes.
          *
          * Every ending comes through here — the marker, a detach, the
-         * socket closing, and all three degradation bounds — because the
-         * one thing none of them may do is drop the buffer. A terminal
-         * that lost its attachment mid-replay still shows what it had
-         * received, under whatever banner explains the loss.
+         * socket closing, a broken stream and the idle bound — because the
+         * one thing none of them may do is leave the terminal hidden. A
+         * terminal that lost its attachment mid-replay still shows what it
+         * had received, under whatever banner explains the loss.
          *
-         * A no-op after the first call, since the endings can race, and
-         * a straight reveal when there is nothing buffered (a fresh
-         * terminal's marker arrives immediately, with no history at all)
-         * — there is no write to hang the reveal on in that case.
-         *
-         * The buffer is joined into ONE `Uint8Array` for one
-         * `term.write()`: writing the chunks back to back would restore
-         * exactly the progressive rendering this whole feature removes,
-         * since xterm.js renders between them.
+         * A no-op after the first call, since the endings can race.
          */
         function endCatchUp(reason) {
           if (!catchingUp || !alive) return;
@@ -5430,35 +3905,14 @@
           // there would leave a terminal looking recovered until the next
           // heartbeat expiry noticed it was not.
           //
-          // So: only the four endings that leave a terminal LIVE can
-          // confirm at all (`closed`, `error`, `detached` and `unconnected`
-          // are the phase being ended BY the failure, not by success), and
-          // among those the marker stands alone while the three
-          // degradations need bytes to have actually arrived.
-          const live = ["marker", "size", "chunks", "idle"].includes(reason);
+          // So: only the two endings that leave a terminal LIVE can
+          // confirm at all (`closed`, `error`, `detached`, `unconnected`
+          // and `protocol` are the phase being ended BY the failure, not
+          // by success), and of those the marker stands alone while the
+          // idle bound needs frames to have actually arrived.
+          const live = reason === "marker" || reason === "idle";
           recoveryConfirmed = live && (reason === "marker" || attachProved);
-          const chunks = replayChunks;
-          const total = replayBytes;
-          replayChunks = [];
-          replayBytes = 0;
-          // Current holdings, not running totals: nothing is held once
-          // the flush below has taken them.
-          testHook.replay.bufferedBytes = 0;
-          testHook.replay.bufferedChunks = 0;
-          if (total === 0) {
-            // A grid stream never buffers: every frame it received is
-            // already applied, which is what a write callback proves for
-            // bytes.
-            reveal(grid !== null);
-            return;
-          }
-          const joined = new Uint8Array(total);
-          let offset = 0;
-          for (const chunk of chunks) {
-            joined.set(chunk, offset);
-            offset += chunk.length;
-          }
-          writeBytes(joined, () => reveal(true));
+          reveal();
         }
 
         // ------------------------------------------------------------
@@ -5561,9 +4015,9 @@
         // Armed now, not at `onopen`: the watchdog's job is to bound how
         // long this terminal can stay hidden, and the socket failing to
         // connect at all is one of the ways that can happen (see
-        // REPLAY_IDLE_TIMEOUT_MS). Every buffered chunk re-arms it, so
-        // once bytes are flowing the window only ever expires on genuine
-        // silence.
+        // REPLAY_IDLE_TIMEOUT_MS). Every received frame re-arms it, so
+        // once the replay is flowing the window only ever expires on
+        // genuine silence.
         armIdleTimer();
 
         // From here on this mount can be invalidated — by `unmount()`, or
@@ -5572,7 +4026,6 @@
         // stop deferred work from reaching a disposed instance.
         disposeDeferred = () => {
           alive = false;
-          if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
           clearIdleTimer();
           clearHeartbeat();
           // A held banner and its observer die with the mount; see their
@@ -5582,13 +4035,6 @@
           if (heldBannerWatch) {
             heldBannerWatch.disconnect();
             heldBannerWatch = null;
-          }
-          // The trailing scrolled-refresh timer's own callback checks
-          // `alive` first, so a late fire is already a no-op; clearing it
-          // here only stops a dead island from holding a pending timer.
-          if (trailingScrolledRefreshTimer !== null) {
-            clearTimeout(trailingScrolledRefreshTimer);
-            trailingScrolledRefreshTimer = null;
           }
         };
         // Test-only (e2e/tests/terminal-replay-rename.spec.ts): resume a catch-up phase
@@ -5607,7 +4053,7 @@
           // demonstrably alive and the heartbeat's window starts over. Any
           // frame is proof of life — the pong is not special, and
           // deliberately so: a busy terminal proves its own liveness with
-          // the bytes it is already carrying, and treating only the pong as
+          // the frames it is already carrying, and treating only the pong as
           // an answer would make a healthy socket depend on a message that
           // is only ever sent when nothing else is. An EMPTY binary frame
           // counts too, even though it is dropped below: it still crossed a
@@ -5624,19 +4070,7 @@
             // is deliberately no session-wide takeover message), so each
             // island banners its own, independently.
             const msg = JSON.parse(ev.data);
-            if (msg.type === "stream") {
-              noteStreamKind(msg.kind);
-              return;
-            }
             if (msg.type === "replay_complete") {
-              // The end of a replay with no notice before it is an older
-              // helm (see `noteStreamKind` for the ordering contract), which
-              // for a new terminal is a broken contract: the refusal has
-              // ended the attachment, and the marker means nothing.
-              if (streamKind === null) {
-                noteStreamKind("bytes");
-                if (streamKind === null) return;
-              }
               // Evidence in its own right, recorded before the phase is
               // ended so a marker that arrives LATE — after an
               // evidence-free idle gave up on this attach — still confirms
@@ -5715,52 +4149,20 @@
             }
             return;
           }
-          // Data with no notice before it is an older helm, which only has
-          // byte streams (see `noteStreamKind`); for a new terminal that
-          // refusal ends the attachment, and nothing of the frame is drawn.
-          if (streamKind === null) {
-            noteStreamKind("bytes");
-            if (streamKind === null) return;
-          }
           const bytes = new Uint8Array(ev.data);
-          // An empty frame is nothing to write and, during a catch-up,
+          // An empty frame is nothing to apply and, during a catch-up,
           // nothing to count: letting one re-arm the idle watchdog would
           // hand a hostile or broken peer a way to keep this terminal
           // hidden indefinitely at no cost — silence it cannot be caught
           // out on, because the stream never actually goes quiet.
           if (bytes.length === 0) return;
-          // Real bytes for this attachment: the evidence `endCatchUp` uses
+          // A real frame for this attachment: the evidence `endCatchUp` uses
           // to tell a working attach from a socket that opened and then sat
           // there. An empty frame is deliberately excluded, for the same
           // reason the catch-up watchdog excludes it — a peer must not be
           // able to manufacture proof of an attachment at no cost.
           noteAttachProved();
-          if (grid) {
-            receiveGrid(bytes);
-            return;
-          }
-          if (catchingUp) {
-            // Held, not written: this is the whole no-visible-re-scroll
-            // feature (see this file's header). Both bounds are checked
-            // AFTER appending, so the chunk that crosses one is flushed
-            // WITH the rest rather than left behind — and the buffer is
-            // bounded in frames as well as bytes, because each frame
-            // costs an object regardless of how little it carries.
-            replayChunks.push(bytes);
-            replayBytes += bytes.length;
-            testHook.replay.bufferedBytes = replayBytes;
-            testHook.replay.bufferedChunks = replayChunks.length;
-            const limits = testHook.replay.limits;
-            if (replayBytes > limits.bufferBytes) {
-              endCatchUp("size");
-            } else if (replayChunks.length > limits.bufferChunks) {
-              endCatchUp("chunks");
-            } else {
-              armIdleTimer();
-            }
-            return;
-          }
-          writeBytes(bytes);
+          receiveGrid(bytes);
         };
         // A detach notice is immediately followed by the server closing
         // the socket; the close handler must not clobber the more
@@ -5772,7 +4174,7 @@
         // belt-and-braces: a client-initiated detach gets no notice at
         // all, and an attach that fails server-side closes the socket —
         // so the socket dying is, on those paths, the only signal this
-        // island will ever get that no more bytes are coming.
+        // island will ever get that no more frames are coming.
         /**
          * Whether this socket dying is something to RECOVER from — the one
          * condition PLAN_M6.md item 7 acts on, gathered in one place so
@@ -5868,97 +4270,35 @@
         }
 
         // ------------------------------------------------------------
-        // The stream kind, and the grid surface (this file's header,
-        // "Two kinds of stream, one island")
+        // The grid surface
         // ------------------------------------------------------------
 
-        // "bytes" or "grid" once known, null before the first frame.
-        let streamKind = null;
-        // This mount's record in `islands`, once the mount has finished;
-        // `adoptGrid` updates it in place.
-        let islandEntry = null;
         // What the banner says when a grid stream broke the format and
         // recovery cannot run (see `streamFailed`).
         let streamFailure = "Terminal stream error";
 
         /**
-         * Settle which kind of stream this attachment carries.
-         *
-         * The ordering contract with the helm: on every attachment, the
-         * `{"type":"stream"}` notice is sent before the first binary data
-         * frame and before `replay_complete`. Other text frames (`pong`, a
-         * `detached` notice for a refused attach) may come before or after
-         * it and settle nothing. An older helm sends no notice, so the
-         * first binary frame or `replay_complete` without one means bytes.
-         *
-         * A grid mounted directly (a spec of kind `host`) needs a grid
-         * notice and nothing else: a new terminal never becomes an old one,
-         * so a byte stream for it is the helm or supervisor breaking that
-         * contract, which ends the attachment like any other stream nothing
-         * can draw. On the xterm.js surface (kind `tmux` or unknown) a grid
-         * notice finds that surface untouched (nothing has been written to
-         * it) and replaces it (`adoptGrid`); that swap is the compatibility
-         * path for a spec whose kind the page did not know or had stale. A
-         * notice that contradicts the kind already settled means the helm
-         * broke the ordering contract, and nothing can draw the stream.
-         */
-        function noteStreamKind(kind) {
-          if (streamKind !== null) {
-            if (kind !== streamKind) streamFailed(new Error("the stream kind changed mid-attachment"));
-            return;
-          }
-          if (kind === "bytes") {
-            if (grid) {
-              streamFailed(new Error("a new terminal's attachment carried a byte stream"));
-              return;
-            }
-            streamKind = "bytes";
-          } else if (kind === "grid") {
-            streamKind = "grid";
-            if (!grid) {
-              try {
-                adoptGrid();
-              } catch (err) {
-                streamFailed(err);
-                return;
-              }
-            }
-          } else {
-            streamFailed(new Error("the helm sent a stream kind this page cannot draw"));
-            return;
-          }
-          testHook.stream = streamKind;
-        }
-
-        /**
-         * Create the grid component in `el`, with today's links on it, and
+         * Create the grid component in `el`, with its links on it, and
          * return it with `install()`, which wires the page-side drivers
          * around it: paste and drop interception (inserting through the
          * grid's `paste` messages), and the drag-copy notice for a drag the
          * program owned. `install()` sets `attachments` and
-         * `stopCopyOnSelect`, so whatever held them before must be disposed
-         * first.
+         * `stopDragNotice`.
          *
          * Split in two so that a component that fails to build throws before
-         * anything is installed or torn down: the swap (`adoptGrid`) then
-         * leaves the untouched xterm.js surface in place for the failure's
-         * ending to reveal, and a direct mount rolls back through `mount()`'s
-         * catch block. `size` is the size the program already has. The
-         * grid keeps it through its first usable fit and unchanged input
-         * notifications; later effective input changes use the grid's own
-         * deterministic rule (grid-terminal.js's `create`);
-         * a direct mount passes none, and its first fit gives the size the
-         * socket URL carries. The links the component hosts are disposed
-         * with it, or here if it never was.
+         * anything is installed, and the mount rolls back through `mount()`'s
+         * catch block. The component's first fit gives the size the socket
+         * URL carries. The links the component hosts are disposed with it,
+         * or here if it never was.
          */
-        function createGridSurface(size) {
+        function createGridSurface() {
           // Guidance counts completed writes from this program, including
           // primary-selection writes the browser does not put on its own
           // clipboard. Local selection copies are the grid's separate path.
           let gridOsc52Writes = 0;
           let gridPressed = null;
-          // Today's links on the grid (`createGridLinks`); a tunnel that
-          // cannot open explains itself where the xterm.js path's does.
+          // The grid's links (`createGridLinks`); a tunnel that cannot open
+          // explains itself on the attachment status line, else the banner.
           const gridLinks = createGridLinks({
             getGrid: () => created,
             spec,
@@ -5975,13 +4315,14 @@
               fontFamily: TERMINAL_FONT_FAMILY,
               theme: window.farhelmTerminalTheme,
               platform: navigator.platform,
-              size,
               send: sendGridInput,
               onResize: sendResize,
-              // A program's OSC 52 write, honored as the xterm.js path's
-              // `clipboardProvider` honors it: the system clipboard only (the
+              // A program's OSC 52 write: the system clipboard only (the
               // browser has no primary selection), through the page's one
-              // clipboard queue, silently best-effort.
+              // clipboard queue (native bridge first on the desktop, where
+              // the webview has no `navigator.clipboard`), silently
+              // best-effort and never awaited, so a pending permission
+              // prompt or a refusal cannot stall anything here.
               onClipboard: (text, target) => {
                 // Primary writes still mean the program handled its drag,
                 // even though only clipboard writes reach the browser sink.
@@ -5992,11 +4333,11 @@
               // file's header, "Copy to the system clipboard").
               onCopy: enqueueClipboardWrite,
               links: gridLinks.provider,
+              // The component asks only about a press under mouse reporting
+              // without the forcing modifier (grid-terminal.js, "Links").
               linkPress: (event, link) => {
                 const withheld = window.farhelmTerminalLinks.interceptLinkPress({
                   button: event.button,
-                  tracking: true,
-                  forced: false,
                   webLink: link.web,
                   mode: currentLinkClickMode(),
                 });
@@ -6010,7 +4351,7 @@
               // A bad history row found while history is applied after the
               // frame that carried it: the same ending as a bad frame.
               onProtocolError: streamFailed,
-              sanitizePaste: window.farhelmTermBytes.sanitizePastedText,
+              sanitizePaste: window.farhelmPasteSanitizer.sanitizePastedText,
             });
           } catch (err) {
             gridLinks.dispose();
@@ -6019,9 +4360,8 @@
           return {
             component: created,
             install() {
-              // Paste and drop interception as for xterm.js (SPEC.md "Attachments"): the
-              // same classification, uploads and status line, inserting through
-              // the grid's `paste` messages.
+              // Paste and drop interception (SPEC.md "Attachments"),
+              // inserting through the grid's `paste` messages.
               attachments = installAttachments(
                 spec,
                 baseUrl,
@@ -6031,8 +4371,8 @@
                 () => !!ws && ws.readyState === WebSocket.OPEN,
               );
               // The grid copies its own selections. Only program-owned drags
-              // need this notice driver; sharing xterm's driver would also pull
-              // in its selection copying and mouse-report suppression gates.
+              // need this page-side driver: guidance when a plain drag under
+              // mouse reporting got no clipboard write from the program.
               const noticeElement = spec.notice ? document.getElementById(spec.notice) : null;
               const dragNotice = noticeElement
                 ? window.farhelmCopyOnSelect.createDragCopyNotice(noticeElement, {
@@ -6103,7 +4443,7 @@
                 document.addEventListener("mouseup", handleGridNoticeRelease);
                 window.addEventListener("resize", dragNotice.reposition);
               }
-              stopCopyOnSelect = () => {
+              stopDragNotice = () => {
                 // A kept grid becomes a non-live snapshot. Its own selection
                 // still works, but no queued guidance may outlive this driver.
                 gridNoticeActive = false;
@@ -6122,69 +4462,6 @@
           };
         }
 
-        /**
-         * Replace this mount's xterm.js surface with the grid component:
-         * the compatibility path for a terminal the page did not know was
-         * new (see `noteStreamKind`).
-         *
-         * Only the surface changes: the socket, the catch-up, the heartbeat
-         * and every ending keep running exactly as for bytes. What is torn
-         * down is what only makes sense for xterm.js: its terminal (which
-         * removes its element from `el`), its copy-on-select and link
-         * listeners, and its paste and drop interception, which
-         * `createGridSurface` installs again for the grid. The island's
-         * record is updated in place to the shape a directly mounted grid
-         * has, so `stepFontSize`, focus, `unmount` and the test registry
-         * reach the grid from now on, and the xterm.js test hooks go.
-         */
-        function adoptGrid() {
-          // Whether xterm.js held the keyboard: an attach that stayed silent
-          // past the catch-up's idle bound has already been revealed and
-          // focused before the notice arrives, and disposing xterm.js would
-          // drop that focus on the page.
-          const hadFocus = el.contains(document.activeElement);
-          // It starts at xterm.js's size, the one the socket URL carried and
-          // the program already has.
-          const surface = createGridSurface({ cols: term.cols, rows: term.rows });
-          if (stopCopyOnSelect) stopCopyOnSelect();
-          stopCopyOnSelect = null;
-          if (attachments) attachments.dispose();
-          attachments = null;
-          if (webLeaveTimer !== null) clearTimeout(webLeaveTimer);
-          webLeaveTimer = null;
-          term.dispose();
-          term = null;
-          fit = null;
-          linkGesture = null;
-          grid = surface.component;
-          surface.install();
-          // The notice can only arrive on a socket `mount()` has finished
-          // with, so the record exists; guarded all the same.
-          if (islandEntry) {
-            delete islandEntry.term;
-            delete islandEntry.fit;
-            delete islandEntry.linkGesture;
-            Object.assign(islandEntry, { kind: "grid", grid, attachments, stopCopyOnSelect });
-          }
-          publishIsland(spec.el, { kind: "grid", grid, ws, test: testHook });
-          if (spec.primary) {
-            delete window.__farhelmTerm;
-            delete window.__farhelmTermReady;
-            window.__farhelmGrid = grid;
-          }
-          // Establish the grid's input baseline while keeping the size
-          // already sent by xterm.js. Only a change observed after that
-          // baseline adopts the grid's deterministic sizing rule.
-          // (The resize sent at `onopen` is unchanged for both kinds.
-          // It retries an attach-time sizing
-          // that failed, and a resize to the size the terminal already has
-          // is a no-op: tmux ignores it, and the grid format requires the
-          // supervisor to neither resize, reflow, redraw nor reset history
-          // for it.)
-          grid.fit();
-          if (hadFocus || (revealed && takesFocus())) grid.focus();
-        }
-
         /** Hand one grid data frame to the component (see `onmessage`). */
         function receiveGrid(bytes) {
           try {
@@ -6193,16 +4470,14 @@
             streamFailed(err);
             return;
           }
-          // The catch-up's watchdog measures silence for grid streams too;
-          // nothing is buffered, so the size and frame-count bounds have
-          // nothing to count.
+          // The catch-up's watchdog measures silence, so every frame
+          // re-arms it.
           if (catchingUp) armIdleTimer();
         }
 
         /**
          * End this attachment over a stream nothing can draw: a grid frame
-         * that broke the format, or a stream notice this page cannot honor.
-         * The format's answer is "report a protocol error and reconnect":
+         * that broke the format. The format's answer is "report a protocol error and reconnect":
          * the ending goes through `socketEnded` like any transport failure,
          * so the ladder retries when recovery can run, and the banner names
          * the problem when it cannot. The message is this file's or the
@@ -6219,8 +4494,9 @@
 
         /**
          * Send one grid input message as a binary data frame (the helm
-         * relays it unchanged). Dropped while the socket is not open, as
-         * keystrokes to xterm.js are.
+         * relays it unchanged). Dropped while the socket is not open: a
+         * terminal that cannot carry input says so on its surface (the
+         * reconnect card, or a banner) rather than queueing keystrokes.
          */
         function sendGridInput(message) {
           if (ws.readyState !== WebSocket.OPEN) return;
@@ -6240,7 +4516,7 @@
         // belt-and-braces: a client-initiated detach gets no notice at
         // all, and an attach that fails server-side closes the socket —
         // so the socket dying is, on those paths, the only signal this
-        // island will ever get that no more bytes are coming.
+        // island will ever get that no more frames are coming.
         ws.onclose = () => socketEnded("closed");
         ws.onerror = () => socketEnded("error");
 
@@ -6275,19 +4551,16 @@
           socketEnded("closed");
         }
 
-
         /**
-         * Tell the program this pane's fitted size, read from whichever
-         * surface the mount holds. A function declaration rather than a
-         * closure because both surfaces wire it before the socket exists
-         * (the grid's `onResize`, xterm.js's `onResize`), when there is
-         * nothing to send yet; `onopen` sends it then.
+         * Tell the program this pane's fitted size, read from the grid
+         * component. A function declaration rather than a closure because
+         * the grid's `onResize` is wired before the socket exists, when
+         * there is nothing to send yet; `onopen` sends it then.
          */
         function sendResize() {
           if (!ws || ws.readyState !== WebSocket.OPEN) return;
-          // Either surface's fitted size; a grid that has not measured
-          // anything yet has none to report.
-          const size = grid ? grid.size() : { cols: term.cols, rows: term.rows };
+          // A grid that has not measured anything yet has no size to report.
+          const size = grid.size();
           if (!size.cols || !size.rows) return;
           ws.send(JSON.stringify({ type: "resize", cols: size.cols, rows: size.rows }));
         }
@@ -6330,14 +4603,12 @@
           armHeartbeat();
           sendResize();
         };
-        // Refit whichever surface this mount holds: the grid, else xterm.js
-        // through its fit addon.
-        const refit = () => (grid ? grid.fit() : fit.fit());
+        const refit = () => grid.fit();
         // Named (not inline) so unmount() can remove exactly this
         // listener: an anonymous closure captured here would be
         // unreachable later, leaking one stale listener (closing over
-        // this disposed term/fit pair) per mount/unmount cycle, each
-        // still firing on every future window resize.
+        // this disposed grid) per mount/unmount cycle, each still firing
+        // on every future window resize.
         onWindowResize = () => refit();
         window.addEventListener("resize", onWindowResize);
         // A window resize is not the only thing that changes a terminal's
@@ -6375,13 +4646,10 @@
         // then-current selection rather than the mount-time one.
         //
         // Test hooks: tests wait on them instead of sleeping, read terminal
-        // content through the surface's own model (xterm.js's buffer API,
-        // or the grid's `snapshot()`) — the DOM only materializes viewport
-        // rows, so DOM text misses scrollback — and reach the raw socket to
-        // exercise message-size limits that keyboard-driven input cannot
-        // produce. Each surface publishes its own: xterm.js's terminal and
-        // readiness flag for an old terminal, the grid component for a new
-        // one, and never the other kind's (a grid island has no `term`).
+        // content through the grid's own model (its `snapshot()`) — the DOM
+        // only materializes viewport rows, so DOM text misses scrollback —
+        // and reach the raw socket to exercise message-size limits that
+        // keyboard-driven input cannot produce.
         //
         // The singletons are the AGENT terminal's alone (`spec.primary`),
         // kept because they are what every pre-M4 test in the suite reads
@@ -6389,12 +4657,7 @@
         // a session view: its agent terminal. Per-tab access goes through
         // `window.__farhelmIslands`, keyed by element id.
         if (spec.primary) {
-          if (grid) {
-            window.__farhelmGrid = grid;
-          } else {
-            window.__farhelmTerm = term;
-            window.__farhelmTermReady = true;
-          }
+          window.__farhelmGrid = grid;
           window.__farhelmWs = ws;
           // Published only now, alongside the other readiness globals —
           // see `testHook`'s own docs above for why a callback queued
@@ -6402,25 +4665,14 @@
           // before mount succeeded.
           window.__farhelmTest = testHook;
         }
-        // The island's surface, in the shape of its kind: the grid alone,
-        // or xterm.js with the fit add-on `stepFontSize` refits it through
-        // (setting the option alone only re-measures the font) and the link
-        // gesture a reconnect keeps for the screen it may restore. A swap
-        // turns the second shape into the first (`adoptGrid`).
-        const surfaceRecord = grid
-          ? { kind: "grid", grid }
-          : { kind: "bytes", term, fit, linkGesture };
-        publishIsland(
-          spec.el,
-          grid ? { kind: "grid", grid, ws, test: testHook } : { kind: "bytes", term, ws, test: testHook },
-        );
-        islandEntry = {
-          ...surfaceRecord,
+        publishIsland(spec.el, { grid, ws, test: testHook });
+        const islandEntry = {
+          grid,
           ws,
           onWindowResize,
           paneObserver,
           attachments,
-          stopCopyOnSelect,
+          stopDragNotice,
           testHook,
           focusAfterAvailability,
           // Everything `unmount()` needs to leave the catch-up
@@ -6442,7 +4694,7 @@
           primary: !!spec.primary,
         };
         islands.set(spec.el, islandEntry);
-        return { term, grid, ws };
+        return { grid, ws };
       } catch (err) {
         // Roll back completely: `islands` is only written on the last line
         // of the happy path, so a mount that threw partway through never
@@ -6452,17 +4704,17 @@
         // the page's life (the PARTIAL-MOUNT ROLLBACK finding this
         // closes). What DOES need undoing is the real work already done:
         // a constructor throwing partway (a malformed URL, a missing
-        // element) can leave a live socket and a live xterm instance
+        // element) can leave a live socket and a live grid component
         // behind, and both are disposed here so the world looks like the
         // mount never started.
         if (onWindowResize) window.removeEventListener("resize", onWindowResize);
         if (paneObserver) paneObserver.disconnect();
         if (attachments) attachments.dispose();
-        if (stopCopyOnSelect) stopCopyOnSelect();
+        if (stopDragNotice) stopDragNotice();
         // Before the disposal below, not after: a still-armed idle timer
-        // would otherwise flush this attach's buffer into the terminal
-        // this line is about to destroy, and a still-armed heartbeat would
-        // close a socket this line already closed.
+        // would otherwise reveal the terminal this line is about to
+        // destroy, and a still-armed heartbeat would close a socket this
+        // line already closed.
         if (disposeDeferred) disposeDeferred();
         if (grid) grid.dispose();
         // A mount that failed before `disposeDeferred` existed closes its
@@ -6473,7 +4725,6 @@
           heldBannerWatch = null;
         }
         if (ws) ws.close();
-        if (term) term.dispose();
         // The catch-up presentation goes back too, so the pane shows the
         // banner below over an empty terminal rather than over a
         // "connecting…" line that will never resolve.
@@ -6498,7 +4749,7 @@
      * `mountWhenReady()` wait for the same element id, so remounting it —
      * a restart, a reopened session, a tab closed and another opened into
      * the same slot, an auto-reconnect attempt (PLAN_M6.md item 7) — gets a
-     * genuine fresh mount: a fresh xterm instance,
+     * genuine fresh mount: a fresh grid component,
      * a fresh socket, and a fresh attach/replay, rather than either
      * compounding onto the previous mount's state or losing a race to a
      * zombie retry loop. That reopen-after-close path is exactly the
@@ -6517,8 +4768,8 @@
       if (!island) return;
       window.removeEventListener("resize", island.onWindowResize);
       // The observer holds a reference to the element AND to the disposed
-      // terminal's fit addon; leaving it connected would keep firing
-      // `fit()` on a dead instance every time the (still-present, since
+      // grid component; leaving it connected would keep firing `fit()` on
+      // a dead instance every time the (still-present, since
       // Dioxus may keep the pane) element changed size.
       if (island.paneObserver) island.paneObserver.disconnect();
       // Same class of leak, plus a live one: the paste/drop listeners sit
@@ -6527,22 +4778,20 @@
       // also aborts any upload still in flight, which is what stops a
       // transfer from completing into a terminal that no longer exists.
       if (island.attachments) island.attachments.dispose();
-      // Copy-on-select's mousedown/mouseup pair (`stopCopyOnSelect`, set in
-      // `mount()`) is the same class of leak again, and a document-level
-      // one specifically: nothing else in this teardown touches `document`
-      // at all, so leaving it live would keep firing into a disposed
-      // `term` on every mouseup anywhere on the page, forever.
-      if (island.stopCopyOnSelect) island.stopCopyOnSelect();
+      // The drag-copy notice's mousedown/mouseup pair (`stopDragNotice`,
+      // set in `createGridSurface`) is the same class of leak again, and a
+      // document-level one specifically: nothing else in this teardown
+      // touches `document` at all, so leaving it live would keep firing on
+      // every mouseup anywhere on the page, forever.
+      if (island.stopDragNotice) island.stopDragNotice();
       // The island's deferred work is the same class of hazard one step
       // further along, and it has to be invalidated BEFORE the disposal
-      // below rather than merely alongside it. Three things outlive this
-      // island otherwise: the catch-up idle timer, which would flush a
-      // buffered replay into a disposed terminal; any `term.write()`
-      // completion callback still queued — xterm.js runs those after
-      // `dispose()`, so a stale reveal would un-hide a DOM node the NEXT
-      // mount is already using for its own catch-up; and the heartbeat,
-      // whose expiry would close a socket this teardown has already
-      // replaced, driving a reconnect nobody asked for.
+      // below rather than merely alongside it. Two things outlive this
+      // island otherwise: the catch-up idle timer, whose stale reveal would
+      // un-hide a DOM node the NEXT mount is already using for its own
+      // catch-up; and the heartbeat, whose expiry would close a socket
+      // this teardown has already replaced, driving a reconnect nobody
+      // asked for.
       island.disposeDeferred();
       // And the presentation itself, for the reason the attachment status
       // node is cleared above: both elements belong to the PANE, which for
@@ -6556,44 +4805,39 @@
       // "Connection closed" onto a banner element the NEXT mount reuses,
       // so a late callback here would show a stale banner over an
       // unrelated, healthy terminal. `close()` and `dispose()` are
-      // themselves tolerant of whatever state the socket/terminal are
+      // themselves tolerant of whatever state the socket and component are
       // already in, so no try/catch is needed around them here.
       island.ws.onopen = null;
       island.ws.onmessage = null;
       island.ws.onerror = null;
       island.ws.onclose = null;
       island.ws.close();
-      // `keepTerm` is a reconnect attempt asking for this island's rendered
+      // `keepScreen` is a reconnect attempt asking for this island's rendered
       // screen to OUTLIVE its teardown (`runReconnect`). Recovery owns
       // disposal or restoration from here (`cancelReconnect`); the normal
       // island teardown still closes its socket and removes its listeners.
-      if (island.keepTerm) {
+      if (island.keepScreen) {
         // Move the frozen screen beside the mount point: hiding the new
         // replay must not hide its predecessor too. The pane still owns
         // visibility, so a background tab cannot paint over the active one.
-        // A grid is frozen first: its socket is gone, and as a snapshot it
-        // sends nothing (a grid island holds no xterm.js surface: a new
-        // terminal never had one, and a swap disposed it, so the grid is the
-        // screen to keep).
-        const surface = island.grid || island.term;
-        if (island.grid) island.grid.freeze();
-        surface.element.classList.add("terminal-snapshot");
-        document.getElementById(el)?.parentElement.appendChild(surface.element);
-      } else if (island.grid) {
-        island.grid.dispose();
+        // The grid is frozen first: its socket is gone, and as a snapshot it
+        // sends nothing.
+        island.grid.freeze();
+        island.grid.element.classList.add("terminal-snapshot");
+        document.getElementById(el)?.parentElement.appendChild(island.grid.element);
       } else {
-        island.term.dispose();
+        island.grid.dispose();
       }
       islands.delete(el);
       unpublishIsland(el);
       if (!island.primary) return;
-      // Guarded, unlike the three deletes below it: comparing against
+      // Guarded, unlike the two deletes below it: comparing against
       // `island.testHook` (this mount's own object, captured at publish
       // time — see `mount()`'s docs) before deleting means this teardown
       // can only ever remove a `__farhelmTest` reference IT installed,
-      // never one a later mount already replaced it with. Every
-      // `term.write()` callback queued by THIS mount already writes to
-      // its own closed-over `testHook` object directly rather than through
+      // never one a later mount already replaced it with. Every deferred
+      // callback of THIS mount already writes to its own closed-over
+      // `testHook` object directly rather than through
       // `window.__farhelmTest` (same docs), so those callbacks firing
       // late are harmless regardless of this guard; this guard is the
       // second, independent line of defense — for `unmount()` itself
@@ -6601,10 +4845,8 @@
       if (window.__farhelmTest === island.testHook) {
         delete window.__farhelmTest;
       }
-      delete window.__farhelmTerm;
       delete window.__farhelmGrid;
       delete window.__farhelmWs;
-      delete window.__farhelmTermReady;
     },
 
     /**

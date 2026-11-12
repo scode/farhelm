@@ -394,7 +394,7 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
     h.client
         .send_keys(chan, format!("{marker}\r").into_bytes())
         .await;
-    let echoed = agent_echo(&output, marker);
+    let echoed = agent_echo(marker);
     wait_for(&mut output, &mut Vec::new(), &echoed, 20).await;
 
     // Kill generation 1's own process directly, bypassing `stop_session`,

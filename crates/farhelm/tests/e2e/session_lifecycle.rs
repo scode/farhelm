@@ -864,7 +864,6 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
-            grid: false,
         })
         .await
         .unwrap();
@@ -887,9 +886,6 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
-            // A client that can draw grids gets the stream the terminal
-            // sends, a grid for this new terminal (protocol 68).
-            grid: true,
         })
         .await
         .unwrap();
@@ -898,7 +894,6 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
         ControlMsg::Attached {
             req_id: 2,
             channel: 7,
-            stream: farhelm_proto::StreamKind::Grid,
         }
     ));
 
@@ -912,7 +907,6 @@ async fn attachment_channels_must_be_nonzero_and_unique() {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
-            grid: true,
         })
         .await
         .unwrap();
@@ -1020,7 +1014,6 @@ async fn a_peer_one_protocol_version_behind_is_refused_before_it_can_attach() {
             terminal: TerminalSelector::Agent,
             lease: "lease-from-an-old-peer".to_string(),
             if_unowned: true,
-            grid: false,
         })
         .await;
     let outcome = tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -1482,7 +1475,7 @@ async fn attach_replay_uses_the_requested_geometry() {
     h.client
         .send_keys(channel, format!("{payload}\r").into_bytes())
         .await;
-    let echoed = agent_echo(&first, &payload);
+    let echoed = agent_echo(&payload);
     wait_for(&mut first, &mut initial, &echoed, 10).await;
     h.client.detach(channel).await;
 
@@ -1495,7 +1488,7 @@ async fn attach_replay_uses_the_requested_geometry() {
     h.client
         .send_keys(channel, b"geometry-barrier\r".to_vec())
         .await;
-    let barrier = agent_echo(&second, "geometry-barrier");
+    let barrier = agent_echo("geometry-barrier");
     wait_for(&mut second, &mut replay, &barrier, 10).await;
 
     assert!(
@@ -2792,10 +2785,8 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
         .list_sessions()
         .await
         .expect("list after restart gap");
-    // The persisted row survives, but its create-time terminal descriptor
-    // must not survive the loss of the terminal it described.
-    let mut expected = with_status(session.clone(), SessionStatus::Exited { exit_code: None });
-    expected.agent_terminal = None;
+    // The persisted row survives the loss of the terminal it described.
+    let expected = with_status(session.clone(), SessionStatus::Exited { exit_code: None });
     assert_eq!(
         listed.sessions,
         vec![expected],
@@ -2885,13 +2876,11 @@ async fn restart_gap_is_decided_per_session() {
         with_status(alive_session.clone(), survivor.status.clone()),
         "and the rest of its metadata must round-trip unchanged"
     );
-    // A surviving neighbour keeps its terminal descriptor; the dead row
-    // keeps only its metadata, never a claim that a terminal still exists.
-    let mut expected_dead = with_status(
+    // The dead row keeps its metadata and lists as exited.
+    let expected_dead = with_status(
         dead_session.clone(),
         SessionStatus::Exited { exit_code: None },
     );
-    expected_dead.agent_terminal = None;
     assert_eq!(
         *find(&dead_session.id),
         expected_dead,

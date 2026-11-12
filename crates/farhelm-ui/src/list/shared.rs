@@ -901,10 +901,7 @@ pub(super) mod tests {
     /// at once; a live agent always asks.
     #[farhelm_testtrace::test]
     fn delete_confirms_whenever_an_agent_or_a_tab_is_still_alive() {
-        let tab = || crate::Tab {
-            id: "tab-1".into(),
-            kind: None,
-        };
+        let tab = || crate::Tab { id: "tab-1".into() };
         let exited_with_tabs = Session {
             tabs: vec![tab(), tab()],
             ..row_specimen("with-tabs")

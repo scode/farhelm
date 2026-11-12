@@ -183,14 +183,10 @@ test("a rejected font download leaves the terminal unmounted and logs exactly on
     expect(observed.boldRequested, "the bold face request must have been attempted").toBe(true);
 
     expect(
-      await page.evaluate(() => (window as any).__farhelmTermReady),
-      "the terminal must not be ready when the font failed",
-    ).toBeUndefined();
-    expect(
-      await page.evaluate(() => (window as any).__farhelmTerm ?? (window as any).__farhelmGrid),
+      await page.evaluate(() => (window as any).__farhelmGrid),
       "no terminal instance may exist",
     ).toBeUndefined();
-    await expect(page.locator("#terminal :is(.xterm, .grid-terminal)"), "no terminal element may exist").toHaveCount(0);
+    await expect(page.locator("#terminal .grid-terminal"), "no terminal element may exist").toHaveCount(0);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -252,14 +248,10 @@ test("a held font request keeps the terminal unmounted past the old 3 s deadline
     await page.waitForTimeout(4_000);
 
     expect(
-      await page.evaluate(() => (window as any).__farhelmTermReady),
-      "the terminal must not mount while the font request is held",
-    ).toBeUndefined();
-    expect(
-      await page.evaluate(() => (window as any).__farhelmTerm ?? (window as any).__farhelmGrid),
+      await page.evaluate(() => (window as any).__farhelmGrid),
       "no terminal instance may exist while the font request is held",
     ).toBeUndefined();
-    await expect(page.locator("#terminal :is(.xterm, .grid-terminal)"), "no terminal element may exist while the font request is held").toHaveCount(0);
+    await expect(page.locator("#terminal .grid-terminal"), "no terminal element may exist while the font request is held").toHaveCount(0);
 
     // Only bold is pending now: its completion must open the same gate.
     // The family assertion belongs here rather than in a literal-only test.

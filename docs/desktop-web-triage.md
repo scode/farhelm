@@ -22,7 +22,7 @@ comparison:
   and Safari's WebKit need not be the identical port/version the webview embeds — engine family is held roughly
   constant, not exactly.
 - **Broken in the app AND Safari, fine in Chromium** → WebKit divergence, almost always in the JS island layer
-  (terminal.js, xterm.js interplay). MT-class history says this is common enough to check before blaming shared code.
+  (terminal.js and the grid client). MT-class history says this is common enough to check before blaming shared code.
 - **Broken everywhere** → shared logic (Rust components, api layer, or the helm itself). Triage as an ordinary bug; the
   desktop app is not the interesting variable.
 

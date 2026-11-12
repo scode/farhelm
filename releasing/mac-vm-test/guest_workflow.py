@@ -179,33 +179,30 @@ session's launch generation, and if it ran in a terminal host that host's and
 its child's process identities (pid and start identity), with the old-fixture
 ones: any change is a fail (but automation-failure if you touched the old
 session before comparing). Branch host means it ran in a terminal host, branch
-tmux an old terminal; the new {side} session's terminal kind says whether this
-candidate creates hosts, and a Restart is due in the host branch or when it does.'''
+tmux an old terminal; whether a new terminal host process exists for the new
+{side} session says whether this candidate creates hosts, and a Restart is due
+in the host branch or when it does.'''
         last = '''In every branch, finish by retaining the old session's launch generation and
 the terminal hosts present now, independently.'''
         clicks = ''
     return branch + f'''
-Select the old {side} session from old-fixture and open its details: its
-terminal kind must match the branch, and with context previous_can_create_hosts
-false it must be tmux. A mismatch, or any step below not working, is a fail.
+Select the old {side} session from old-fixture. With context
+previous_can_create_hosts false the branch must be tmux. A mismatch, or any
+step below not working, is a fail.
 Branch host: the rediscovered terminal must still show the earlier 17 + 25
 answer. Branch tmux: attach it. In both, send: What is 6 times 8? Answer with
 the number only. Require the old agent's separate new answer 48.
-Branch tmux with a Restart due: require the migration band at the top of the
-session view offering Restart to move to the new terminal (a band offering only
-Clone or Replace for this captured conversation is a fail). Capture it, then
-use the band's Restart and its ordinary confirmation.
-Branch host: use the session's ordinary Restart and its ordinary confirmation.
-Either Restart is the session's own action, not the app updater: use ordinary
-native clicks{clicks}.
-Branch tmux with no Restart due: expect no band and do not restart; skip to
-the final step.
-After a Restart, session details must show terminal kind host; a Restart back
-to tmux is a fail. Ask: Which word did I ask you to remember in my first
+With a Restart due, in either branch: the session must offer Restart (offering
+only Clone or Replace for this captured conversation is a fail); use the
+session's ordinary Restart and its ordinary confirmation. It is the session's
+own action, not the app updater: use ordinary native clicks{clicks}.
+Branch tmux with no Restart due: do not restart; skip to the final step.
+After a Restart, the final sample checks that the session moved to one new
+terminal host. Ask: Which word did I ask you to remember in my first
 message? Answer with the word only. Require a separate actual reply naming
 bluebird; never supply it.
 ''' + last + '''
-Capture native images of the band, the details after restart and the answers.'''
+Capture native images of the session after any restart and of the answers.'''
 
 
 def instructions(check_id, pass_id, update_path=None):
@@ -342,9 +339,9 @@ native Farhelm GUI launch ONE genuine Codex session on local, model gpt-6.1-sol,
 low effort, yolo, per-run trust true. Send: What is 17 + 25? Explain in one short
 sentence. Require separate actual answer 42 with sensible explanation, terminal
 responsiveness and idle/completion. Retain native image and candidate running
-version evidence. Read the new session's terminal kind (host or tmux) in its
-details and retain whether a new terminal host process exists for it; either
-kind passes here. Leave the old session untouched. Leave this new session running;
+version evidence. Retain whether a new terminal host process exists for the new
+session; either way passes here. Leave the old session untouched.
+Leave this new session running;
 the old-session check samples its terminal. No
 settings/template prerequisites.''',
         'remote-supervisor-agent': '''Use native Farhelm remote Update. Require the formerly old remote supervisor
@@ -353,9 +350,9 @@ over pinned SSH. Launch ONE genuine Codex session through Farhelm on that remote
 host, gpt-6.1-sol low effort yolo/trust true where supported. Send: What is 17 +
 25? Explain in one short sentence. Require actual answer 42, explanation,
 responsive terminal and completion. A plain command is insufficient. Retain
-native image plus remote version/service evidence. Read the new session's
-terminal kind in its details and retain whether a new terminal host process
-exists for it; either kind passes here. Leave the old remote session untouched.
+native image plus remote version/service evidence. Retain whether a new
+terminal host process exists for the new session; either way passes here. Leave
+the old remote session untouched.
 Leave this new session running;
 the old-session check samples its terminal.''',
         'local-old-session': old_session_instructions('local', managed=False),
@@ -456,13 +453,11 @@ connected at previous. Then call remote_version.''',
 Through Farhelm native GUI launch one genuine local Codex session, gpt-6.1-sol
 low effort YOLO and per-run trust where offered. Send: What is 17 + 25? Explain
 in one short sentence. Require a separate actual answer 42, sensible explanation,
-responsive terminal and completion. Call versions. Then open this new session's
-details, read its terminal kind (host or tmux) and call terminal_hosts: its
-new_hosts lists one host exactly when the details say host; a mismatch is a
-fail. Either kind passes here. Leave the old session from old-fixture
+responsive terminal and completion. Call versions. Then call terminal_hosts: its
+new_hosts lists the new session's terminal host, which the import checks
+against the session's stored kind. Leave the old session from old-fixture
 untouched. Leave this new session running;
-the old-session check samples its terminal. Retain actual native images,
-including the details.''',
+the old-session check samples its terminal. Retain actual native images.''',
         'remote-supervisor-agent': '''Through Farhelm native GUI use remote Update, including Update now when offered.
 Handle an ordinary product confirmation if offered; do not require an extra
 dialog. Update now can complete directly, and absence of a confirmation is not
@@ -471,13 +466,11 @@ to obtain a dialog.
 Require connected candidate remote, then call remote_version. Launch one genuine
 remote Codex session, gpt-6.1-sol low effort YOLO and per-run trust where offered.
 Send: What is 17 + 25? Explain in one short sentence. Require a separate actual
-answer 42, explanation, responsive terminal and completion. Then open this new
-session's details, read its terminal kind and call remote_terminal_hosts: its
-new_hosts lists one host exactly when the details say host; a mismatch is a
-fail. Either kind passes here. Leave the old remote session from old-fixture
-untouched. Leave this new session running;
-the old-session check samples its terminal. Capture native images,
-including the details.''',
+answer 42, explanation, responsive terminal and completion. Then
+call remote_terminal_hosts: its new_hosts lists the new session's terminal host,
+which the import checks against the session's stored kind. Leave the old remote
+session from old-fixture untouched. Leave this new session running;
+the old-session check samples its terminal. Capture native images.''',
         'local-old-session': old_session_instructions('local'),
         'remote-old-session': old_session_instructions('remote'),
         'remote-provision': '''Add context.ssh.alias through native Add host and its ordinary confirmation.

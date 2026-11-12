@@ -257,8 +257,8 @@ test("the wheel goes to the program under mouse reporting or on the alternate sc
 test("key messages say whether the viewer is a Mac, by an exact platform list", () => {
   // The supervisor's encoder picks Mac-only encodings from this flag, and
   // the client's own decisions (Option as a third-level shift, Cmd+A) read
-  // the same list, so both sides agree on which viewers are Macs (the list
-  // old terminals' xterm.js uses): exact `navigator.platform` values, not
+  // the same list, so both sides agree on which viewers are Macs (xterm.js's
+  // list, ported): exact `navigator.platform` values, not
   // anything containing "Mac". Any other viewer leaves the flag out, the
   // format's canonical "false".
   const ev = keyEvent({ key: "a", code: "KeyA", keyCode: 65 });

@@ -1555,7 +1555,6 @@ async fn a_viewer_is_detached_and_reattaches_to_the_new_host() {
             24,
             farhelm_proto::TerminalSelector::default(),
             "",
-            farhelm_helm::ViewerStreams::BytesOrGrid,
         )
     };
     let (_channel, mut stream) = attach().await.expect("a grid attach");

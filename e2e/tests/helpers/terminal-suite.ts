@@ -10,7 +10,7 @@ import path from "node:path";
 import { requireHelmBuild } from "./helm-build";
 import { createResumableSession } from "./fleet";
 import { stackScratchDir } from "./scratch";
-import { attachSession, terminalKind, terminalText, waitForTermText, waitForTerminalText } from "./term";
+import { attachSession, terminalText, waitForTermText, waitForTerminalText } from "./term";
 import { waitForSessionRevealed } from "./terminal-readiness";
 
 export {
@@ -315,10 +315,6 @@ export async function openTerminal(page: Page) {
   // The fake agent prints this banner once its raw-mode setup is ready; its
   // prompt is deliberately later output.
   await waitForTermText(page, "FAKE-AGENT READY");
-  // The suite's premise: the shared session really is a terminal in a
-  // terminal host, drawn as a grid (a page that drew it with xterm.js would
-  // pass every product-level assertion there, never exercising the grid).
-  expect(await terminalKind(page), "the shared session must draw as a grid").toBe("grid");
 }
 
 /**
@@ -347,10 +343,10 @@ export async function cleanUpSessionsTitled(request: APIRequestContext, title: s
  * agent, `terminal-<tabId>` for a tab (`tab_terminal_element_id` in
  * farhelm-ui/src/lib.rs).
  *
- * Reads terminal.js's per-island registry rather than the legacy
- * `__farhelmTerm` singleton, which by design only ever points at the agent
- * terminal, and reads whichever component the island holds (`terminalText`
- * in term.ts). Returns "" for an island that is not mounted, so callers can
+ * Reads terminal.js's per-island registry rather than the
+ * `__farhelmGrid` singleton, which by design only ever points at the agent
+ * terminal (`terminalText` in term.ts). Returns "" for an island that is not
+ * mounted, so callers can
  * poll this while a mount is still in flight.
  */
 export async function islandText(page: Page, elementId: string): Promise<string> {
@@ -452,7 +448,7 @@ export async function selectTerminal(page: Page, terminal: string) {
  * Count every focus that enters the primary (agent) terminal once armed.
  *
  * For the modal-focus tests: a reveal or a selection change that focuses the
- * agent behind a dialog fires `focusin` on xterm's helper textarea, and the
+ * agent behind a dialog fires `focusin` on the grid's input field, and the
  * page records it at that moment whether or not a later observation happens
  * to catch focus there. Install before navigating; arm once the dialog is
  * open with [`armTerminalFocusSpy`]; read with [`terminalFocusCount`].

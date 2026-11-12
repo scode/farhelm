@@ -2,9 +2,10 @@
 //!
 //! The same components render as the web app (wasm32, real DOM, served
 //! by the helm at loopback) and the desktop app (wry webview). The
-//! terminals themselves are xterm.js islands (assets/terminal.js) whose
-//! byte paths bypass Dioxus entirely — Dioxus owns the chrome around a
-//! terminal, never its content (SPEC_impl.md, "Terminal widget"). A
+//! terminals themselves are islands of the grid client (assets/terminal.js
+//! and the grid assets) whose stream paths bypass Dioxus entirely — Dioxus
+//! owns the chrome around a terminal, never its content (SPEC_impl.md,
+//! "Terminal widget"). A
 //! session view holds SEVERAL of those islands at once, all attached
 //! concurrently (terminal tabs, PLAN_M4.md); tabs multiply the
 //! boundary's instances, never the boundary itself (see [`SessionView`]).
@@ -171,7 +172,6 @@ mod launch_progress;
 mod launch_sequence;
 mod list;
 mod menu_panel;
-mod migration;
 mod modal_dialog;
 mod modal_isolation;
 mod ntfy_settings;
@@ -511,20 +511,6 @@ pub struct Session {
     /// session with no tabs.
     #[serde(default)]
     pub tabs: Vec<Tab>,
-    /// Which kind of terminal the session's agent runs in now (old, in tmux,
-    /// or new, in a terminal host), straight off the wire
-    /// (`SessionInfo::agent_terminal`). `None` when the supervisor holds no
-    /// terminal for the agent, when the helm predates the field, or for a
-    /// kind this build does not know: decoded leniently, like
-    /// [`SessionAgentKind`], so a newer helm's word cannot fail the listing.
-    #[serde(default, deserialize_with = "farhelm_proto::lenient_terminal_kind")]
-    pub agent_terminal: Option<farhelm_proto::TerminalKind>,
-    /// Whether the session's supervisor creates new terminals in terminal
-    /// hosts (`SessionInfo::supervisor_creates_host_terminals`). The
-    /// migration band appears only while this is true (`migration` module);
-    /// false from a helm that predates the field, which shows nothing.
-    #[serde(default)]
-    pub supervisor_creates_host_terminals: bool,
     /// Which registered host this session lives on — the join key into the
     /// hosts panel, and what a create alongside it names (PLAN_M6.md item
     /// 5).
@@ -1374,134 +1360,6 @@ macro_rules! declare_assets {
 }
 
 declare_assets! {
-    // Provenance for the three xterm.js files below (none carried one before —
-    // the minified UMD bundles have no room for a header comment, so this is
-    // where it lives): `xterm.js` and `xterm.css` are the unmodified `lib/xterm.js`
-    // and `css/xterm.css` from the `@xterm/xterm` npm package, version 6.0.0
-    // (https://registry.npmjs.org/@xterm/xterm/-/xterm-6.0.0.tgz), identified by
-    // SHA-256 match against the published tarball — the bundle embeds no version
-    // string of its own. `addon-fit.js` is `lib/addon-fit.js` from
-    // `@xterm/addon-fit` 0.11.0, the add-on released with xterm 6.0.0, also
-    // matched by SHA-256 against its tarball. `addon-clipboard.js` (below) was
-    // vendored later, against this same xterm version.
-    const VENDOR_XTERM_CSS: Asset = asset!("/assets/vendor/xterm.css");
-    const VENDOR_XTERM_JS: Asset = asset!("/assets/vendor/xterm.js");
-    const VENDOR_FIT_JS: Asset = asset!("/assets/vendor/addon-fit.js");
-    // The MIT notices for the three files above, shipped as files for the
-    // reason WEB_LINKS_LICENSES gives below. The xterm.js notice also carries
-    // Visual Studio Code's, because the bundle compiles in part of VS Code's
-    // `vs/base` and the npm package ships no notice for it.
-    #[used]
-    static XTERM_LICENSES: Asset = asset!(
-        "/assets/vendor/xterm-LICENSES.txt",
-        AssetOptions::builder().with_hash_suffix(false)
-    );
-    #[used]
-    static FIT_LICENSES: Asset = asset!(
-        "/assets/vendor/addon-fit-LICENSES.txt",
-        AssetOptions::builder().with_hash_suffix(false)
-    );
-    // Unmodified lib/addon-unicode-graphemes.js from the 0.4.0 npm package,
-    // the add-on paired with xterm 6.0.0 in its upstream release. Its Unicode
-    // 15 grapheme provider makes emoji widths agree with agent cursor updates
-    // and tmux replay. Registry integrity and the retained bundle's digest are
-    // recorded with the package and bundled third-party MIT notices below.
-    const VENDOR_UNICODE_GRAPHEMES_JS: Asset = asset!("/assets/vendor/addon-unicode-graphemes.js");
-    // Ship the notices alongside the browser and embedded desktop assets,
-    // using the same retained-asset mechanism as the other vendored add-ons.
-    #[used]
-    static UNICODE_GRAPHEMES_LICENSES: Asset = asset!(
-        "/assets/vendor/addon-unicode-graphemes-LICENSES.txt",
-        AssetOptions::builder().with_hash_suffix(false)
-    );
-    // OSC 52 support: an agent TUI (Claude Code, Codex) that owns mouse
-    // reporting handles its OWN text selection and reports what it copies via
-    // the OSC 52 escape sequence rather than through any DOM selection this page
-    // can see (see terminal.js's module docs for the full plain-drag-vs-Shift-
-    // drag duality this addon exists to cover). xterm.js parses OSC 52 as a
-    // no-op unless something registers a handler for it, so without this addon
-    // that sequence was silently dropped — the diagnosis this half of the fix
-    // closes. WRITE-only in how terminal.js actually uses it: `mount()`
-    // constructs the addon with a provider that refuses every READ/query
-    // outright (never touches `navigator.clipboard.readText`) rather than
-    // handing a terminal program the system clipboard on request — that refusal
-    // is the security boundary, not an accident of the addon's own defaults.
-    //
-    // The unmodified `lib/addon-clipboard.js` UMD bundle from `@xterm/addon-clipboard`
-    // version 0.2.0 (https://registry.npmjs.org/@xterm/addon-clipboard/-/addon-clipboard-0.2.0.tgz,
-    // dist-tag `latest` at vendoring time), which declares xterm.js v4+
-    // compatibility in its own README and is confirmed against the 6.0.0 vendored
-    // above. It bundles `js-base64` internally (a webpack chunk, not a separate
-    // vendor file) so it needs nothing else loaded to register its
-    // `window.ClipboardAddon.ClipboardAddon` global, the same one-file-one-global
-    // shape as `addon-fit.js`'s `window.FitAddon.FitAddon`.
-    //
-    // License notices: MIT (the addon itself) plus BSD-3-Clause (the bundled
-    // js-base64), neither of which the minified bundle can carry inline —
-    // copied verbatim from both packages' own LICENSE files into
-    // `assets/vendor/addon-clipboard-LICENSES.txt`, alongside this asset the
-    // same way `assets/fonts/OFL.txt` sits alongside the vendored font files.
-    const VENDOR_CLIPBOARD_JS: Asset = asset!("/assets/vendor/addon-clipboard.js");
-    // Plain-text URL links: the unmodified `lib/addon-web-links.js` UMD
-    // bundle from `@xterm/addon-web-links` version 0.12.0
-    // (https://registry.npmjs.org/@xterm/addon-web-links/-/addon-web-links-0.12.0.tgz,
-    // dist-tag `latest` at vendoring time), whose README declares xterm.js
-    // v4+ compatibility and which shipped the same day as the vendored
-    // xterm 6.0.0 above. Certified before wiring (see the U6 worker
-    // report): registry integrity and shasum match, the retained 3100
-    // bytes are byte-identical to the tarball, and the bundle exposes
-    // the `window.WebLinksAddon.WebLinksAddon` global constructed with an
-    // activation callback plus optional options. Its `activate` registers
-    // through the `registerLinkProvider` generation — never the removed
-    // matcher API, never undocumented core internals, just the public
-    // buffer/wrap/cell surface — and its `dispose` drops that
-    // registration, so xterm's own addon disposal owns its lifetime (see
-    // terminal.js's `mount()` for why nothing else may dispose it). The
-    // default matcher recognizes explicit `http://`/`https://` text only —
-    // lowercase or UPPERCASE scheme spellings, never mixed case (the
-    // upstream regex is `(https?|HTTPS?)` with no `i` flag, so e.g.
-    // `Https://` never matches: an upstream matching limitation, not a
-    // reason to replace the certified matcher) — validates each candidate
-    // as an absolute URL with a host, and reconstructs wrapped logical
-    // lines through `isWrapped` traversal (whole wrapped rows accumulate
-    // while the running length tests below 2048, so discovery reaches
-    // roughly that far plus up to one row per direction — an approximate
-    // bound, not a strict cap); terminal.js keeps that default rather than
-    // substituting a custom regex, and adds its own activation-time
-    // allowlist as a second boundary.
-    //
-    // License notice: MIT only (the addon itself) — verified to bundle no
-    // third-party code, unlike the clipboard addon above, so the
-    // clipboard's js-base64 notice does not apply here. The verbatim text
-    // plus certification digests live in
-    // `assets/vendor/addon-web-links-LICENSES.txt`, declared as
-    // `WEB_LINKS_LICENSES` below so the notice ships inside the bundles
-    // rather than sitting beside the source.
-    const VENDOR_WEB_LINKS_JS: Asset = asset!("/assets/vendor/addon-web-links.js");
-    // The MIT notice for `VENDOR_WEB_LINKS_JS` above, as a shippable file.
-    // A source-side text file alone proves nothing about distributed
-    // copies, so this is declared like the fonts: an unrendered asset the
-    // web bundle and the desktop release's embedded UI tree both carry,
-    // held equal by `scripts/check-desktop-assets.sh` (a declared file the
-    // bundler ever dropped would fail parity as a requested-but-unbundled
-    // `+` line). `#[used]` plus the generated `all_assets` reference keep
-    // the linker from dropping it before the bundler's manifest scan, and
-    // the unhashed name keeps the notice at a stable, citable path — the
-    // same cache-busting tradeoff the fonts document, acceptable for the
-    // same reason (these bytes change only on a deliberate re-vendoring).
-    #[used]
-    static WEB_LINKS_LICENSES: Asset = asset!(
-        "/assets/vendor/addon-web-links-LICENSES.txt",
-        AssetOptions::builder().with_hash_suffix(false)
-    );
-    // The clipboard addon's MIT and bundled BSD notices ship with its bytes;
-    // WEB_LINKS_LICENSES explains why a source-side notice cannot
-    // establish that the web and desktop bundles carry it.
-    #[used]
-    static CLIPBOARD_LICENSES: Asset = asset!(
-        "/assets/vendor/addon-clipboard-LICENSES.txt",
-        AssetOptions::builder().with_hash_suffix(false)
-    );
     // Both interface and terminal fonts ship with the app: a page must not
     // depend on a CDN or on fonts installed on the host. Inter supplies the
     // interface; JetBrains Mono Nerd Font supplies the terminal and technical
@@ -1544,8 +1402,13 @@ declare_assets! {
         "/assets/fonts/JetBrainsMonoNerdFont-Bold.woff2",
         AssetOptions::builder().with_hash_suffix(false)
     );
-    // The OFL requires its full text with distributed fonts. Retain it at a
-    // stable path for the same distribution reason WEB_LINKS_LICENSES gives.
+    // The OFL requires its full text with distributed fonts, as a shippable
+    // file. A source-side text file alone proves nothing about distributed
+    // copies, so this is declared like the fonts: an unrendered asset the
+    // web bundle and the desktop release's embedded UI tree both carry, held
+    // equal by `scripts/check-desktop-assets.sh` (a declared file the bundler
+    // ever dropped would fail parity as a requested-but-unbundled `+` line).
+    // The unhashed name keeps the notice at a stable, citable path.
     #[used]
     static FONT_LICENSE: Asset = asset!(
         "/assets/fonts/OFL.txt",
@@ -1574,13 +1437,15 @@ declare_assets! {
         "/assets/fonts/OFL-Inter.txt",
         AssetOptions::builder().with_hash_suffix(false)
     );
-    // The `onBinary` byte-conversion helper terminal.js calls into (PLAN_M6_5.md
-    // item 1) is separate so `node --test` loads the shipped implementation.
-    // Registration order is not execution order (script injection is async);
-    // terminal.js's mount readiness gate waits for the helper's global.
-    const TERM_BYTES_JS: Asset = asset!("/assets/term-bytes.js");
-    // The Ghostty-compatible palette terminal.js passes to xterm.js. It is
-    // separate so the node tests can load the exact shipped theme object.
+    // The paste sanitizer terminal.js and the grid component call
+    // (PLAN_M6_5.md item 1) is separate so `node --test` loads the shipped
+    // implementation. Registration order is not execution order (script
+    // injection is async); terminal.js's mount readiness gate waits for the
+    // helper's global.
+    const PASTE_SANITIZER_JS: Asset = asset!("/assets/paste-sanitizer.js");
+    // The Ghostty-compatible palette terminal.js passes to the grid
+    // component. It is separate so the node tests can load the exact
+    // shipped theme object.
     const TERMINAL_THEME_JS: Asset = asset!("/assets/terminal-theme.js");
     // Clipboard fact capture, MIME-extension policy, and the pure filename
     // decision terminal.js calls. Kept as its own asset so node --test executes
@@ -1588,39 +1453,29 @@ declare_assets! {
     // this global as a mount prerequisite, so paste can never fall back to a
     // second naming rule while asynchronous scripts are still loading.
     const CLIPBOARD_NAME_JS: Asset = asset!("/assets/clipboard-name.js");
-    // The pure Shift+Enter "insert newline" decision terminal.js's
-    // `attachCustomKeyEventHandler` callback consults. Its own asset for the
-    // same reason as term-bytes.js and clipboard-name.js above: `node --test`
-    // must run the exact shipped function, and terminal.js treats this global
-    // as a mount precondition (see its `mountWhenReady` docs) so the key
-    // handler can never wire up half-loaded.
-    const SHIFT_ENTER_KEY_JS: Asset = asset!("/assets/shift-enter-key.js");
-    // The pure "does this mouseup end a LOCAL xterm selection worth copying"
-    // decision terminal.js's herdr-style copy-on-select consults — the OTHER
-    // half of the selection duality `VENDOR_CLIPBOARD_JS` above closes (a
-    // selection this page's own DOM can see, as opposed to one an agent TUI made
-    // for itself and reported over OSC 52). Its own asset for the same reason as
-    // the three helpers above: `node --test` must run the exact shipped
-    // function, and terminal.js treats this global as a mount precondition.
+    // The pure "does this mouseup end a LOCAL selection worth copying"
+    // decision the grid component's copy-on-select consults, and the
+    // drag-copy notice terminal.js drives — the half of the selection
+    // duality a program's own OSC 52 write does not cover (terminal.js's
+    // module docs). Its own asset for the same reason as the helpers above:
+    // `node --test` must run the exact shipped function, and terminal.js
+    // treats this global as a mount precondition.
     const COPY_ON_SELECT_JS: Asset = asset!("/assets/copy-on-select.js");
     // The page-wide clipboard single-flight queue. It is separate from the
     // terminal's route selection so OSC 52 and copy-on-select share one bound.
     const CLIPBOARD_WRITER_JS: Asset = asset!("/assets/clipboard-writer.js");
     // The shared link opener plus the plain-text URL allowlist terminal.js's
-    // two link adapters call — OSC 8's `linkHandler` and the WebLinks
-    // addon's activation callback. Its own asset for the same reason as the
-    // four helpers above: `node --test` must run the exact shipped
-    // functions, and terminal.js treats this global as a mount
-    // precondition so no link can activate half-loaded.
-    // File recognition and hover ownership are shared with the JS test harness.
+    // grid links call, for a program's OSC 8 hyperlinks and printed URLs. Its
+    // own asset for the same reason as the helpers above: `node --test` must
+    // run the exact shipped functions, and terminal.js treats this global as a
+    // mount precondition so no link can activate half-loaded. File recognition
+    // and hover ownership are shared with the JS test harness.
     const TERMINAL_FILES_JS: Asset = asset!("/assets/terminal-files.js");
     const TERMINAL_LINKS_JS: Asset = asset!("/assets/terminal-links.js");
-    // The grid terminal, which terminal.js mounts for an attachment whose
-    // stream is a grid (terminals that run in a terminal host) instead of
-    // xterm.js. The four pure parts are their own assets for the same
-    // reason as the helpers above, so `node --test` runs the shipped code;
-    // terminal.js treats all five globals as mount preconditions, so an
-    // attachment can switch to the grid without waiting on a script.
+    // The grid terminal, which terminal.js mounts for every terminal. The
+    // four pure parts are their own assets for the same reason as the
+    // helpers above, so `node --test` runs the shipped code; terminal.js
+    // treats all five globals as mount preconditions.
     const GRID_MODEL_JS: Asset = asset!("/assets/grid-model.js");
     const GRID_STYLE_JS: Asset = asset!("/assets/grid-style.js");
     const GRID_INPUT_JS: Asset = asset!("/assets/grid-input.js");
@@ -1629,9 +1484,8 @@ declare_assets! {
     // The MIT notices for the code grid-input.js, grid-terminal.js,
     // grid-buffer.js and the supervisor's grid input encoder port from
     // xterm.js, two of its add-ons and Visual Studio Code. Shipped as a file
-    // for the reason WEB_LINKS_LICENSES gives, and kept apart from
-    // XTERM_LICENSES: that file goes with the vendored xterm.js bundle once
-    // old terminals are dropped, while the ported code stays. The release
+    // for the reason FONT_LICENSE gives; xterm.js itself is no longer
+    // shipped, but the ported code is, so its notices are. The release
     // `farhelm` binary embeds this bundle, so the notice also travels with
     // the supervisor's ported Rust code.
     #[used]
@@ -1825,7 +1679,7 @@ pub(crate) const SESSION_RENAME_SHORTCUT: &str = if HAS_NEW_SESSION_SHORTCUT {
 
 /// Give the Mac desktop's Cmd+N the New button's current prefill and busy guard.
 ///
-/// Capture runs before xterm's input handler so the chord cannot reach the
+/// Capture runs before the terminal's input handler so the chord cannot reach the
 /// terminal program. An open modal keeps ownership of the keyboard. The
 /// listener queries the live `.new-session-button` rather than retaining a
 /// component's state; every modal must carry `role="dialog"` and `aria-modal="true"`
@@ -1852,7 +1706,7 @@ fn install_new_session_shortcut() {
     );
 }
 
-/// Reserve the quick-switcher's chord before xterm can send it to a program.
+/// Reserve the quick-switcher's chord before the terminal can send it to a program.
 ///
 /// The live trigger only exists after authentication and preferences loading.
 /// Querying it before swallowing the key lets sign-in and other modals keep
@@ -1898,7 +1752,7 @@ fn install_template_shortcuts() {
     ));
 }
 
-/// Reserve session action chords before xterm and reuse the live UI controls.
+/// Reserve session action chords before the terminal and reuse the live UI controls.
 /// The shipped asset exposes the matcher to tests for both build modes; web
 /// browser tests cannot exercise the native Mac app's Command bindings.
 fn install_session_action_shortcuts() {
@@ -1914,7 +1768,7 @@ fn install_session_action_shortcuts() {
 /// otherwise look ordinary to every Rust and JS guard. Inline eval preserves
 /// registration order with the capture listeners below; an asynchronously
 /// loaded script could install too late. The asset owns idempotence across
-/// authenticated-tree remounts and leaves terminal input to xterm.
+/// authenticated-tree remounts and leaves terminal input to the terminal.
 fn install_composition_guard() {
     document::eval(&format!(
         "{}\nwindow.installCompositionGuard();",
@@ -1949,7 +1803,7 @@ fn AppBody() -> Element {
     // component both builds mount, with every animation underneath it.
     use_hook(install_window_activity_tracking);
     // The shared listener owns consumed template keys before other command
-    // listeners and before xterm can pass a key to the terminal program.
+    // listeners and before the terminal can pass a key to its program.
     use_hook(install_template_shortcuts);
     use_hook(install_quick_switcher_shortcut);
     use_hook(keyboard_shortcuts::install_shortcut);
@@ -2057,16 +1911,9 @@ fn AppBody() -> Element {
                 if let Ok(source) = serde_json::from_str(&event.value()) { menu_focus_source.set(source); }
             },
         }
-        document::Link { rel: "stylesheet", href: VENDOR_XTERM_CSS }
-        document::Script { src: VENDOR_XTERM_JS }
-        document::Script { src: VENDOR_FIT_JS }
-        document::Script { src: VENDOR_UNICODE_GRAPHEMES_JS }
-        document::Script { src: VENDOR_CLIPBOARD_JS }
-        document::Script { src: VENDOR_WEB_LINKS_JS }
-        document::Script { src: TERM_BYTES_JS }
+        document::Script { src: PASTE_SANITIZER_JS }
         document::Script { src: TERMINAL_THEME_JS }
         document::Script { src: CLIPBOARD_NAME_JS }
-        document::Script { src: SHIFT_ENTER_KEY_JS }
         document::Script { src: COPY_ON_SELECT_JS }
         document::Script { src: CLIPBOARD_WRITER_JS }
         document::Script { src: TERMINAL_LINKS_JS }
@@ -2660,10 +2507,7 @@ mod tests {
     /// A tab with the given id — the whole of `Tab`, which is why this is
     /// a one-liner rather than a builder.
     fn tab(id: &str) -> Tab {
-        Tab {
-            id: id.into(),
-            kind: None,
-        }
+        Tab { id: id.into() }
     }
 
     /// A `Session` JSON with no `annotation` key (every session that was
@@ -3490,8 +3334,6 @@ mod tests {
             pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
 
         assert_eq!(
@@ -3562,8 +3404,6 @@ mod tests {
             pin_position: None,
             notifications: Vec::new(),
             notifications_read_through: 0,
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
 
         assert_eq!(

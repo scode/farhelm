@@ -241,7 +241,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_76` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_77` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -252,7 +252,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 76;
+pub const PROTOCOL_VERSION: u32 = 77;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -476,24 +476,12 @@ pub enum ErrorKind {
     Sealed,
 }
 
-/// Frames larger than this are rejected at decode time. Terminal output is
-/// chunked well below this by the supervisor; the cap exists so a
-/// corrupted length prefix cannot make the reader allocate gigabytes.
+/// Frames larger than this are rejected at decode time. Data frames have
+/// their own, smaller bounds (a grid message at most
+/// [`grid::GRID_MAX_MESSAGE`]); control frames, a session listing among
+/// them, have only this one, which exists so a corrupted length prefix
+/// cannot make the reader allocate gigabytes.
 pub const MAX_FRAME_LEN: u32 = 8 * 1024 * 1024;
-
-/// Maximum payload in one incoming terminal data frame.
-///
-/// The helm applies this smaller bound before admitting a frame to an
-/// attachment's `BYTE_STREAM_EVENT_QUEUE`. That queue has 256 event slots, so
-/// this limit implies roughly 16 MiB of terminal payload per attachment even
-/// when a supervisor ignores flow control. The supervisor's `REPLAY_CHUNK`
-/// must stay at or below this value: older helms enforce the limit, so
-/// raising the chunk above this value needs a `PROTOCOL_VERSION` bump,
-/// because helms from this release on enforce the limit and would detach
-/// every terminal that receives a larger frame. Never lower this below the
-/// chunk any same-version supervisor sends (32 KiB today) without the same
-/// bump.
-pub const MAX_TERMINAL_DATA_LEN: usize = 64 * 1024;
 
 /// The `reason` string a `ControlMsg::Detached` carries when a stalled
 /// viewer is given up on (PLAN_M2_5.md's stall-detach contract). Two
@@ -1138,51 +1126,20 @@ pub struct SessionInfo {
     /// claim.
     #[serde(default)]
     pub restart_offer: RestartOffer,
-    /// The session's terminal tabs, in creation order (PLAN_M4.md item
-    /// 2). Read from the terminals themselves for every reply that carries
-    /// a `SessionInfo` (the terminal hosts the supervisor holds for new
-    /// tabs, an old session's marked tmux windows) — never stored in the
-    /// session's row, exactly like the live-probed half of `status`, and
-    /// for the same reason: the terminals are the only truth for which
-    /// tabs exist, and SPEC.md makes tabs non-durable anyway.
-    /// Rides on `SessionInfo` rather than behind a dedicated list message
-    /// for `RestartOffer`'s reason (see that type's design-decision doc):
-    /// every client that could ask already holds a `SessionInfo`, so a
-    /// query pair would buy a round trip and nothing else. Empty for a
-    /// session with no tabs — and, via `#[serde(default)]`, for a sender
-    /// that predates the field, which is the same honest statement: no
-    /// tabs known.
+    /// The session's terminal tabs, in creation order (PLAN_M4.md item 2). Read
+    /// from the terminals themselves for every reply that carries a
+    /// `SessionInfo` (the terminal hosts the supervisor holds for them) — never
+    /// stored in the session's row, exactly like the live-probed half of
+    /// `status`, and for the same reason: the terminals are the only truth for
+    /// which tabs exist, and SPEC.md makes tabs non-durable anyway. Rides on
+    /// `SessionInfo` rather than behind a dedicated list message for
+    /// `RestartOffer`'s reason (see that type's design-decision doc): every
+    /// client that could ask already holds a `SessionInfo`, so a query pair
+    /// would buy a round trip and nothing else. Empty for a session with no
+    /// tabs — and, via `#[serde(default)]`, for a sender that predates the
+    /// field, which is the same honest statement: no tabs known.
     #[serde(default)]
     pub tabs: Vec<TabInfo>,
-    /// Which kind of terminal the session's agent runs in now, from the
-    /// terminal the supervisor holds for it; `None` when it holds none (a
-    /// launch not yet confirmed, a terminal lost to a reboot), when the
-    /// sender predates the field, or for a kind this build does not know
-    /// ([`lenient_terminal_kind`]).
-    ///
-    /// Live rather than the row's stored kind on purpose: a session whose
-    /// terminal is gone has nothing left to move to a new terminal, and the
-    /// migration band must not ask the user to move it.
-    ///
-    /// Additive within `PROTOCOL_VERSION` 68, for [`TabInfo::kind`]'s reason.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "lenient_terminal_kind"
-    )]
-    pub agent_terminal: Option<TerminalKind>,
-    /// Whether this session's supervisor creates new terminals in terminal
-    /// hosts. A fact about the supervisor, repeated on each of its sessions
-    /// so that a reader holding one session can decide on its own.
-    ///
-    /// The UI shows the migration band only while this is true, and the
-    /// session details' terminal kinds only while this is true or the
-    /// session already has a new terminal: before a host creates new
-    /// terminals, there is nothing to move a session to. False from a sender
-    /// that predates the field, which is the safe reading for the same
-    /// reason. Every supervisor of this build reports true.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub supervisor_creates_host_terminals: bool,
     /// The repository this session was created from by a fresh GitHub
     /// checkout — provenance, fixed at create time. `None` for every other
     /// kind of session and for any sender predating protocol 24 (the field
@@ -1715,80 +1672,10 @@ pub enum TerminalSelector {
     Tab { id: String },
 }
 
-/// What an attachment's data channel carries, as `ControlMsg::Attached`
-/// reports it.
-///
-/// The kind follows from the terminal, not from the request: tmux terminals
-/// stream bytes, terminals in terminal hosts stream grids
-/// ([`grid`]). The helm passes it to the browser as a
-/// `{"type":"stream","kind":...}` text frame before any data, and the browser
-/// picks xterm.js or its grid client from it. `#[default]` is `Bytes`, so an
-/// `Attached` that says nothing means what every attach meant before
-/// protocol 68.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum StreamKind {
-    /// Raw terminal output, replayed and then live, as tmux terminals have
-    /// always sent it.
-    #[default]
-    Bytes,
-    /// Grid messages ([`grid::GridOutput`]) out and grid input
-    /// ([`grid::GridInput`]) in, one message per data frame.
-    Grid,
-}
-
-/// Which kind of terminal one of a session's terminals is: an old one in the
-/// supervisor's private tmux server, or a new one in a terminal host of its
-/// own (SPEC_impl.md, "Terminal host").
-///
-/// A terminal never changes kind while it lives; a session moves to new
-/// terminals only by getting new ones (Restart, Clone or Replace for its
-/// agent, closing and reopening for a tab). The UI reads it for the
-/// migration band and for the kinds the session details show (SPEC.md,
-/// "Terminal experience").
-///
-/// The fields that carry it ([`SessionInfo::agent_terminal`],
-/// [`TabInfo::kind`]) decode through [`lenient_terminal_kind`], so a kind
-/// this build has never heard of reads as "not reported" rather than failing
-/// the whole session: the UI decodes these types directly, and a browser tab
-/// loaded before a helm upgrade must keep reading a newer helm's listing.
-/// A third kind would still change what a receiver does with a session and
-/// so would earn a protocol bump of its own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TerminalKind {
-    /// A pane in the supervisor's private tmux server: every terminal from
-    /// before terminal hosts, which a supervisor may still serve but no
-    /// longer creates.
-    Tmux,
-    /// A terminal host process that owns the pty and the program in it.
-    Host,
-}
-
-/// Decode an optional [`TerminalKind`] the way the session fields that carry
-/// one need: an absent field, `null` and an unrecognized kind are all `None`.
-///
-/// Used through `#[serde(deserialize_with = ...)]` together with
-/// `#[serde(default)]`, which is what covers a field the sender left out.
-/// Public because the UI's own mirror of the session JSON decodes the same
-/// field and must tolerate the same words.
-pub fn lenient_terminal_kind<'de, D>(deserializer: D) -> Result<Option<TerminalKind>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let word = Option::<String>::deserialize(deserializer)?;
-    Ok(match word.as_deref() {
-        Some("tmux") => Some(TerminalKind::Tmux),
-        Some("host") => Some(TerminalKind::Host),
-        Some(_) | None => None,
-    })
-}
-
 /// One terminal tab as the supervisor reports it (PLAN_M4.md item 2). Not
 /// durable metadata — SPEC.md says tabs are gone after a reboot or
 /// archive and nothing recreates them — so this is a live fact read from
-/// the tab's terminal (its terminal host, or an old tab's marked tmux
-/// window), never a stored row.
+/// the tab's terminal host, never a stored row.
 ///
 /// Deliberately minimal: SPEC.md gives tabs no names and close is their
 /// only operation, so an id is the whole identity. Clients derive their
@@ -1797,30 +1684,14 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TabInfo {
     /// Supervisor-assigned opaque tab identity — MINTED per tab and kept
-    /// with the tab's terminal (a new tab's terminal host and its launch
-    /// record, an old tab's tmux window marker), deliberately never a
-    /// name the terminal itself assigns, such as a tmux window index, so
-    /// it is unique across terminal lifetimes: a client holding a selector
+    /// with the tab's terminal (its terminal host and its launch record),
+    /// deliberately never a name the terminal itself assigns, so it is
+    /// unique across terminal lifetimes: a client holding a selector
     /// from before a reboot must get `NotFound`, never a recycled id that
     /// happens to name someone else's new tab. Clients echo it back
     /// (`TerminalSelector::Tab`, `ControlMsg::CloseTab`) and never parse
     /// it.
     pub id: String,
-    /// Which kind of terminal this tab is, taken from where the supervisor
-    /// found it (a tmux window, or a terminal host of its own). `None` when
-    /// the sender predates the field or names a kind this build does not
-    /// know ([`lenient_terminal_kind`]); readers treat that as "not
-    /// reported", never as either kind.
-    ///
-    /// Additive within `PROTOCOL_VERSION` 68: a receiver that ignores it only
-    /// shows no terminal kinds and no migration band for the session, which
-    /// is what a supervisor without terminal hosts would have it show anyway.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "lenient_terminal_kind"
-    )]
-    pub kind: Option<TerminalKind>,
 }
 
 /// Ceiling for one attachment-upload data frame's body (PLAN_M4.md item
@@ -3889,8 +3760,8 @@ pub enum ControlMsg {
     /// instead, never a false success.
     TabClosed { req_id: u64 },
     /// Attach to one of a session's terminals. The requester picks the
-    /// (connection-unique) data channel; the supervisor replays history
-    /// onto it and then streams live output. SPEC.md's one-attachment
+    /// (connection-unique) data channel; the supervisor sends the terminal's
+    /// grid stream on it ([`grid`]): its catch-up, then live updates. SPEC.md's one-attachment
     /// rule is enforced per SESSION across all its terminals, grouped by
     /// `lease` (PLAN_M4.md item 3): an attach under a different lease
     /// detaches EVERY channel the previous lease held on this session,
@@ -3964,35 +3835,13 @@ pub enum ControlMsg {
         /// reconnect after transport loss finds waiting for it.
         #[serde(default)]
         if_unowned: bool,
-        /// The client can render grid streams ([`grid`]).
-        /// Added with `PROTOCOL_VERSION` 68.
-        ///
-        /// Not additive despite the serde default, which is why it came with
-        /// a bump: it changes what the supervisor may answer. A terminal in a
-        /// terminal host can only be shown as a grid, so an attach to one
-        /// without this capability is refused with a clear error rather than
-        /// sent a stream the client cannot draw; that refusal is permanent
-        /// behavior. tmux terminals stream bytes whatever this says.
-        /// `#[serde(default)]` (false) is every client before version 68,
-        /// and a browser that did not ask for grids (the [`grid`] module
-        /// docs, "Attach and the stream kind").
-        #[serde(default)]
-        grid: bool,
     },
-    /// Attach accepted. Data frames on `channel` may arrive *before* this
+    /// Attach accepted; `channel` now carries the terminal's grid stream
+    /// ([`grid`]). Data frames on `channel` may arrive *before* this
     /// reply is processed — the supervisor starts the replay as soon as
     /// the attachment is installed — so a client must have the channel
     /// registered before it sends `Attach`, not after it sees `Attached`.
-    Attached {
-        req_id: u64,
-        channel: u32,
-        /// What `channel` carries (added with `PROTOCOL_VERSION` 68).
-        /// `Grid` only ever answers an `Attach` that set `grid`, and the helm
-        /// refuses one that breaks that. Absent reads as `Bytes`, the only
-        /// kind before version 68.
-        #[serde(default)]
-        stream: StreamKind,
-    },
+    Attached { req_id: u64, channel: u32 },
     /// Give up an attachment voluntarily. No reply, and no error if the
     /// channel was never attached or was already taken over: detach is
     /// idempotent so a client tearing down a closed terminal never has to
@@ -4014,16 +3863,14 @@ pub enum ControlMsg {
     ///
     /// The contract in one sentence: **exactly once per attach that
     /// completes its catch-up**, after that attach's catch-up and before
-    /// any live output. A grid stream's catch-up is its `hello`, `state`,
-    /// screen and history ([`grid`], "Attach sequence"); a byte stream's is
-    /// the old terminal's pane-mode re-synthesis and snapshot prefill. That
+    /// any live output. The catch-up is the grid stream's `hello`, `state`,
+    /// screen and history ([`grid`], "Attach sequence"). That
     /// is a consequence of the attach-cutover contract (PLAN_M5.md item
     /// 2) rather than a best-effort claim — one task writes the catch-up,
     /// this marker, and then the live stream into one ordered pipe. A
     /// terminal whose program has ended is caught up like any other (its
-    /// final screen, and on a grid stream its history), and a terminal with
-    /// no history still gets the fixed part first: nothing on a byte
-    /// stream, `hello`, `state` and the screen on a grid stream.
+    /// final screen and its history), and a terminal with no history still
+    /// gets the fixed part first: `hello`, `state` and the screen.
     ///
     /// The qualifier is load-bearing: an attach whose catch-up is ENDED
     /// early never receives one. The attachment can be torn down wherever
@@ -4048,16 +3895,13 @@ pub enum ControlMsg {
     /// takeover's incumbent never sees the replacement's.
     ///
     /// One boundary is drawn deliberately narrow: "the live stream follows"
-    /// does not promise history can never appear on this channel again. A
-    /// grid stream sends its history again after a `history_reset`: when
-    /// history changed shape (a resize, an erasure, a restored emulator or a
-    /// redefined palette entry), or when the viewer fell so far behind that
-    /// lines it was owed were evicted ([`grid`], "History" and "Flow
-    /// control"). A byte stream's flow-control recovery (M2.5's catch-up
-    /// after tmux paused an old terminal's output for this client) replays
-    /// retained history into the SAME attachment mid-stream. Neither comes
-    /// with a `ReplayComplete` of its own. The marker bounds the attach's
-    /// catch-up, not every catch-up the attachment will ever perform;
+    /// does not promise history can never appear on this channel again. A grid
+    /// stream sends its history again after a `history_reset`: when history
+    /// changed shape (a resize, an erasure, a restored emulator or a redefined
+    /// palette entry), or when the viewer fell so far behind that lines it was
+    /// owed were evicted ([`grid`], "History" and "Flow control"). That resend
+    /// comes with no `ReplayComplete` of its own. The marker bounds the
+    /// attach's catch-up, not every catch-up the attachment will ever perform;
     /// recovery presentation is explicitly outside M5's scope (PLAN_M5.md
     /// scopes REATTACH presentation), and a consumer that assumed everything
     /// after the marker is fresh would misrender exactly those paths.
@@ -4068,21 +3912,18 @@ pub enum ControlMsg {
     ///
     /// ## Why a control message, not an in-band byte sentinel
     ///
-    /// The alternative — splicing a sentinel byte sequence into the
-    /// terminal data stream itself — was rejected (PLAN_M5.md item 1):
-    /// replay bytes are arbitrary terminal history, so any sentinel can
-    /// be forged by, or collide with, content the agent itself already
-    /// printed, and this protocol's data path exists specifically to
-    /// never interpret or rewrite terminal bytes (see the module-level
-    /// docs above). A control message sidesteps both problems: it
-    /// travels its own channel-0 JSON path, never mixed into the opaque
-    /// bytes it describes. Its POSITION in the combined control-and-data
-    /// stream is its whole meaning, and that needs no new ordering
-    /// machinery anywhere — the supervisor writes replay data frames and
-    /// then this message into one pipe, the helm demultiplexes that pipe
-    /// sequentially, and one WebSocket's messages arrive in the order
-    /// they were sent, so every hop already preserves the ordering this
-    /// message depends on.
+    /// The alternative — a sentinel inside the data stream itself — was
+    /// rejected (PLAN_M5.md item 1, when attachments still carried the
+    /// program's raw bytes, where any sentinel could be forged by output the
+    /// agent printed). A control message keeps the data channel's content
+    /// purely the terminal's: it travels its own channel-0 JSON path, never
+    /// mixed into the data it describes. Its POSITION in the combined
+    /// control-and-data stream is its whole meaning, and that needs no new
+    /// ordering machinery anywhere — the supervisor writes replay data frames
+    /// and then this message into one pipe, the helm demultiplexes that pipe
+    /// sequentially, and one WebSocket's messages arrive in the order they were
+    /// sent, so every hop already preserves the ordering this message depends
+    /// on.
     ///
     /// Consumers must not branch anything but PRESENTATION on this
     /// message: it drives exactly one transition — a terminal's catch-up
@@ -4133,21 +3974,15 @@ pub enum ControlMsg {
     },
     /// The attachment's viewer cannot keep up: stop sending this
     /// attachment's output until a matching `ResumeOutput`. Watermark
-    /// flow control (PLAN_M2_5.md), with one message for both stream
-    /// kinds, whose senders and catch-up differ:
+    /// flow control (PLAN_M2_5.md). The helm sends it once its own queue for
+    /// the attachment passes a mark, since the grid client applies messages
+    /// as they arrive and sends no pause of its own. A paused grid stream is
+    /// sent no terminal output until the resume, history included, beyond
+    /// finishing an update already under way; then it sends one screen
+    /// update to the current screen and the history lines it is owed
+    /// ([`grid`], "Flow control").
     ///
-    /// - **Grid stream.** The helm sends it once its own queue for the
-    ///   attachment passes a mark, since the grid client applies messages
-    ///   as they arrive and sends no pause of its own. A paused grid stream
-    ///   is sent no terminal output until the resume, history included,
-    ///   beyond finishing an update already under way; then it sends one
-    ///   screen update to the current screen and the history lines it is
-    ///   owed ([`grid`], "Flow control").
-    /// - **Byte stream** (an old terminal). The browser's xterm.js terminal
-    ///   sends it once its unflushed `term.write()` backlog crosses its
-    ///   high-water mark, and the helm forwards it unchanged.
-    ///
-    /// Either way, an attachment that stays paused past the supervisor's
+    /// An attachment that stays paused past the supervisor's
     /// stall timeout is ended as stalled ([`DETACH_REASON_STALLED`]), which
     /// is what ends a viewer that stopped reading. Fire-and-forget like
     /// `Resize`, and `channel` exists for exactly `Resize`'s reason: see
@@ -4155,9 +3990,8 @@ pub enum ControlMsg {
     /// ignore a pause still in flight from a client that just lost this
     /// attachment's takeover.
     PauseOutput { channel: u32 },
-    /// The viewer has caught up (for a grid stream, the helm's queue for
-    /// it has drained to its resume mark; for a byte stream, the browser's
-    /// backlog is below its low-water mark); output may flow again. Pairs
+    /// The viewer has caught up (the helm's queue for it has drained to its
+    /// resume mark); output may flow again. Pairs
     /// with `PauseOutput` and shares its rationale for carrying `channel`
     /// (see `Resize`'s doc comment) and its fire-and-forget shape.
     ResumeOutput { channel: u32 },
@@ -4955,7 +4789,6 @@ mod tests {
             terminal: TerminalSelector::default(),
             lease: String::new(),
             if_unowned: false,
-            grid: false,
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(
@@ -4970,87 +4803,28 @@ mod tests {
                 "terminal": { "kind": "agent" },
                 "lease": "",
                 "if_unowned": false,
-                "grid": false,
             })
         );
     }
 
-    /// Protocol 68's two attach fields, golden-pinned in both directions, and
-    /// the shapes from before them still decoding to what they always meant.
+    /// `Attached`'s exact JSON, in both directions.
     ///
-    /// Why: `Attach::grid` decides whether a host terminal can be attached
-    /// at all, and `Attached::stream` decides which terminal component the
-    /// browser builds, so a renamed key or a default flipped the wrong way
-    /// would attach the wrong renderer or refuse every attach, while every
-    /// round-trip test kept passing. Spec: `grid` and `stream` serialize
-    /// under those keys with `stream` as `"bytes"`/`"grid"`; an `Attach`
-    /// without `grid` decodes as `grid: false`; an `Attached` without
-    /// `stream` decodes as `Bytes`.
+    /// Why: protocol 77 removed its `stream` field, since every attachment
+    /// streams a grid; a reply that grew a field again, or lost one, would
+    /// still round-trip in Rust while a peer of this protocol read it
+    /// differently. Spec: `Attached` is `type`, `req_id` and `channel` and
+    /// nothing else, and decodes from exactly that.
     #[farhelm_testtrace::test]
-    fn attach_grid_and_attached_stream_json_shapes_are_pinned() {
-        let attach = ControlMsg::Attach {
+    fn attached_json_shape_is_pinned() {
+        let attached = ControlMsg::Attached {
             req_id: 4,
-            session_id: "s1".into(),
             channel: 2,
-            cols: 100,
-            rows: 30,
-            terminal: TerminalSelector::Tab { id: "t1".into() },
-            lease: "client-abc".into(),
-            if_unowned: false,
-            grid: true,
         };
-        let attach_json = serde_json::json!({
-            "type": "attach",
-            "req_id": 4,
-            "session_id": "s1",
-            "channel": 2,
-            "cols": 100,
-            "rows": 30,
-            "terminal": { "kind": "tab", "id": "t1" },
-            "lease": "client-abc",
-            "if_unowned": false,
-            "grid": true,
-        });
-        assert_eq!(serde_json::to_value(&attach).unwrap(), attach_json);
+        let json = serde_json::json!({"type": "attached", "req_id": 4, "channel": 2});
+        assert_eq!(serde_json::to_value(&attached).unwrap(), json);
         assert_eq!(
-            serde_json::from_value::<ControlMsg>(attach_json).unwrap(),
-            attach
-        );
-
-        for (stream, wire) in [(StreamKind::Bytes, "bytes"), (StreamKind::Grid, "grid")] {
-            let attached = ControlMsg::Attached {
-                req_id: 4,
-                channel: 2,
-                stream,
-            };
-            let json = serde_json::json!({
-                "type": "attached", "req_id": 4, "channel": 2, "stream": wire,
-            });
-            assert_eq!(serde_json::to_value(&attached).unwrap(), json);
-            assert_eq!(
-                serde_json::from_value::<ControlMsg>(json).unwrap(),
-                attached
-            );
-        }
-
-        let old_attach = serde_json::json!({
-            "type": "attach", "req_id": 5, "session_id": "s1", "channel": 3,
-            "cols": 80, "rows": 24, "terminal": { "kind": "agent" }, "lease": "",
-            "if_unowned": false,
-        });
-        let ControlMsg::Attach { grid, .. } = serde_json::from_value(old_attach).unwrap() else {
-            panic!("an Attach without `grid` must still decode as an Attach");
-        };
-        assert!(!grid, "a client that does not say it can draw grids cannot");
-
-        let old_attached = serde_json::json!({"type": "attached", "req_id": 5, "channel": 3});
-        assert_eq!(
-            serde_json::from_value::<ControlMsg>(old_attached).unwrap(),
-            ControlMsg::Attached {
-                req_id: 5,
-                channel: 3,
-                stream: StreamKind::Bytes,
-            }
+            serde_json::from_value::<ControlMsg>(json).unwrap(),
+            attached
         );
     }
 
@@ -5076,7 +4850,6 @@ mod tests {
                     terminal: TerminalSelector::Agent,
                     lease: "client-abc".into(),
                     if_unowned: false,
-                    grid: false,
                 },
                 serde_json::json!({
                     "type": "attach",
@@ -5087,7 +4860,7 @@ mod tests {
                     "rows": 24,
                     "terminal": { "kind": "agent" },
                     "lease": "client-abc",
-                    "if_unowned": false, "grid": false,
+                    "if_unowned": false,
                 }),
             ),
             (
@@ -5100,7 +4873,6 @@ mod tests {
                     terminal: TerminalSelector::Tab { id: "t1".into() },
                     lease: "client-abc".into(),
                     if_unowned: true,
-                    grid: false,
                 },
                 serde_json::json!({
                     "type": "attach",
@@ -5111,7 +4883,7 @@ mod tests {
                     "rows": 24,
                     "terminal": { "kind": "tab", "id": "t1" },
                     "lease": "client-abc",
-                    "if_unowned": true, "grid": false,
+                    "if_unowned": true,
                 }),
             ),
         ] {
@@ -5519,8 +5291,6 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["created_at"],
@@ -5688,8 +5458,6 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
         info.github_repo = Some(parse_github_repo("acme/bar").expect("valid repo"));
         info.working_copy = Some(WorkingCopyInfo {
@@ -5922,8 +5690,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_76() {
-        assert_eq!(PROTOCOL_VERSION, 76);
+    fn protocol_version_is_pinned_at_77() {
+        assert_eq!(PROTOCOL_VERSION, 77);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,
@@ -7359,8 +7127,6 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
         let mut json = serde_json::to_value(&info).unwrap();
         assert_eq!(json["agent_kind"], "goose");
@@ -7421,8 +7187,6 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
         assert_eq!(
             serde_json::to_value(&bare).unwrap(),
@@ -7575,8 +7339,6 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
 
         let sampled = at(1_700_000_000, 1_700_000_600);
@@ -7622,8 +7384,6 @@ mod tests {
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
         assert_eq!(info.effective_work_started_at(), 1_700_000_000_000);
         info.last_activity_at = i64::MAX;
@@ -7671,18 +7431,14 @@ mod tests {
             tabs: vec![
                 TabInfo {
                     id: "t1".to_string(),
-                    kind: None,
                 },
                 TabInfo {
                     id: "t2".to_string(),
-                    kind: None,
                 },
             ],
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
-            agent_terminal: None,
-            supervisor_creates_host_terminals: false,
         };
         assert_eq!(
             serde_json::to_value(&info).unwrap()["tabs"],
@@ -7690,20 +7446,19 @@ mod tests {
         );
     }
 
-    /// Spec: the terminal kinds and the host terminals report travel as
+    /// Spec: a `SessionInfo` written before protocol 77, still carrying
     /// `agent_terminal`, `supervisor_creates_host_terminals` and a tab's
-    /// `kind`, spelled `tmux` and `host`; an absent field, `null` and a kind
-    /// this build does not know all decode as "not reported" (and the report
-    /// as false), and the unset values are left off the wire.
+    /// `kind`, decodes to the same session with those keys ignored, and a
+    /// session of this protocol never writes them.
     ///
-    /// Why: these fields join protocol 68 as additive, which holds only if
-    /// a receiver that lacks them, or a sender that omits them, changes
-    /// nothing but the migration guidance; and the UI decodes them directly,
-    /// so an unknown kind failing the decode would drop the whole session
-    /// from a browser tab loaded before a helm upgrade.
+    /// Why: the helm keeps the last listing of each host in `helm.db` as
+    /// `SessionInfo` JSON, so a helm upgraded past protocol 77 reads rows
+    /// that still hold the removed keys until each host lists again; the
+    /// decode must stay tolerant of them (no `deny_unknown_fields`) or every
+    /// cached session would vanish until then.
     #[test]
-    fn terminal_kinds_and_the_switch_report_round_trip_and_decode_leniently() {
-        let mut info = SessionInfo {
+    fn a_session_cached_with_terminal_kinds_still_decodes() {
+        let info = SessionInfo {
             screen_yolo: false,
             claude_trust_prompt: false,
             workspace_trust_prompt: false,
@@ -7725,44 +7480,32 @@ mod tests {
             tabs: vec![
                 TabInfo {
                     id: "t1".to_string(),
-                    kind: Some(TerminalKind::Tmux),
                 },
                 TabInfo {
                     id: "t2".to_string(),
-                    kind: None,
                 },
             ],
-            agent_terminal: Some(TerminalKind::Host),
-            supervisor_creates_host_terminals: true,
             github_repo: None,
             working_copy: None,
             notifications: Vec::new(),
         };
         let json = serde_json::to_value(&info).unwrap();
-        assert_eq!(json["agent_terminal"], "host");
-        assert_eq!(json["supervisor_creates_host_terminals"], true);
+        for removed in ["agent_terminal", "supervisor_creates_host_terminals"] {
+            assert!(json.get(removed).is_none(), "{json}");
+        }
         assert_eq!(
             json["tabs"],
-            serde_json::json!([{"id": "t1", "kind": "tmux"}, {"id": "t2"}])
-        );
-        assert_eq!(serde_json::from_value::<SessionInfo>(json).unwrap(), info);
-
-        info.agent_terminal = None;
-        info.supervisor_creates_host_terminals = false;
-        let unset = serde_json::to_value(&info).unwrap();
-        assert!(unset.get("agent_terminal").is_none(), "{unset}");
-        assert!(
-            unset.get("supervisor_creates_host_terminals").is_none(),
-            "{unset}"
+            serde_json::json!([{"id": "t1"}, {"id": "t2"}])
         );
 
-        let mut odd = unset.clone();
-        odd["agent_terminal"] = serde_json::json!("pty-of-the-future");
-        odd["tabs"] = serde_json::json!([{"id": "t1", "kind": null}, {"id": "t2", "kind": "else"}]);
-        let decoded: SessionInfo = serde_json::from_value(odd).expect("unknown kinds decode");
-        assert_eq!(decoded.agent_terminal, None);
-        assert!(decoded.tabs.iter().all(|tab| tab.kind.is_none()));
-        assert!(!decoded.supervisor_creates_host_terminals);
+        let mut cached = json;
+        cached["agent_terminal"] = serde_json::json!("host");
+        cached["supervisor_creates_host_terminals"] = serde_json::json!(true);
+        cached["tabs"] =
+            serde_json::json!([{"id": "t1", "kind": "tmux"}, {"id": "t2", "kind": "host"}]);
+        let decoded: SessionInfo =
+            serde_json::from_value(cached).expect("a cached session with terminal kinds decodes");
+        assert_eq!(decoded, info);
     }
 
     /// PLAN_M3 review batch item 23: a future field appearing INSIDE a
@@ -7967,15 +7710,12 @@ mod tests {
             vec![
                 TabInfo {
                     id: "t1".to_string(),
-                    kind: None,
                 },
                 TabInfo {
                     id: "t2".to_string(),
-                    kind: None,
                 },
                 TabInfo {
                     id: "t3".to_string(),
-                    kind: None,
                 },
             ],
             "tab identity and creation order must both survive the wire"
@@ -8396,8 +8136,6 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             },
         };
         let mut wire = Vec::new();
@@ -8611,8 +8349,6 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             },
         };
         assert_eq!(
@@ -8757,8 +8493,6 @@ mod tests {
                         github_repo: None,
                         working_copy: None,
                         notifications: Vec::new(),
-                        agent_terminal: None,
-                        supervisor_creates_host_terminals: false,
                     },
                 },
                 serde_json::json!({
@@ -8904,7 +8638,6 @@ mod tests {
                     req_id: 20,
                     tab: TabInfo {
                         id: "t1".to_string(),
-                        kind: None,
                     },
                 },
                 serde_json::json!({
@@ -8955,7 +8688,6 @@ mod tests {
                 req_id: 1,
                 tab: TabInfo {
                     id: "t1".to_string(),
-                    kind: None,
                 },
             },
             ControlMsg::CloseTab {
@@ -9377,8 +9109,6 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             }],
             truncated: false,
         };

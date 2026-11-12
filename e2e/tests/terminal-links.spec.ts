@@ -1,16 +1,14 @@
 // Browser-level coverage for terminal link activation: both the OSC 8
 // hyperlinks an agent's process emits (the kind Claude Code prints for file
-// paths and URLs) and the bare plain-text http(s) URLs the vendored
-// WebLinks addon linkifies. A click on either opens the target in a NEW
-// tab, with no `confirm()` dialog in between. The dialog is what the OSC 8
-// half pins against: xterm.js ships a default link handler that, absent a
-// configured `linkHandler`, pops "Do you want to navigate to …? WARNING:
-// This link could potentially be dangerous" on every click — a blanket
-// warning the user cannot act on, and one that surfaced as "some popup
-// about possibly being dangerous" in real use. terminal.js now configures
-// its own handler (the `linkHandler` option at `new Terminal({...})` plus
-// the shared opener both adapters call); this file is the proof the
-// configured path is the one a real click takes.
+// paths and URLs) and the bare plain-text http(s) URLs the page linkifies.
+// A click on either opens the target in a NEW tab, with no `confirm()`
+// dialog in between: SPEC.md promises links open "with no confirmation or
+// prompt of any kind". (The terminal library the page used before the grid
+// shipped a default handler that popped a blanket "this link could
+// potentially be dangerous" warning on every click, which is where this
+// file's dialog assertions come from.) Every click goes through the shared
+// opener terminal.js's grid links call; this file is the proof that path is
+// the one a real click takes.
 //
 // Only the WEB branch of that opener (`window.open`) is reachable here.
 // The opener's other branch — navigating the page itself, which the
@@ -23,8 +21,8 @@
 //
 // A dedicated file, per this suite's standing convention for new coverage
 // (mouse-modes.spec.ts's header): one subject, findable and runnable on
-// its own. Both engines run it: link activation goes through xterm's
-// `Linkifier` mouse handling, which is exactly the kind of input path the
+// its own. Both engines run it: link activation goes through the grid's
+// mouse handling, which is exactly the kind of input path the
 // WebKit projects exist to cross-check against the desktop renderer family.
 // That includes the selection/copy legs — deliberately NOT copying
 // terminal-clipboard.spec.ts's WebKit skip. The clipboard suite skips
@@ -35,8 +33,8 @@
 // would cost real input-path coverage for no reason.
 //
 // Every link is emitted through a `read`-gated invocation, for the reason
-// terminal-clipboard.spec.ts's "Gated invocations" header spells out: tmux
-// starts the process at session CREATION, and output printed before this
+// terminal-clipboard.spec.ts's "Gated invocations" header spells out: the
+// process starts at session CREATION, and output printed before this
 // test attaches would only ever reach the terminal via replay — a path
 // the replay test below covers deliberately, but not the live path the
 // rest of this coverage is about.
@@ -48,7 +46,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { stackScratchDir } from "./helpers/scratch";
 
-/** OSC spans have their own activation adapter. A drag within one span must
+/** OSC spans have their own activation path. A drag within one span must
  * retain selection without opening a web target or requesting a file save;
  * a subsequent plain click must still dispatch that same target. */
 for (const kind of ["web", "file"] as const) {
@@ -140,7 +138,7 @@ async function recordWindowOpen(page: Page): Promise<() => Promise<OpenedLink[]>
 
 /**
  * Collect every dialog the page raises for the test's whole lifetime, so
- * each activation test can assert xterm's default `confirm()` never ran.
+ * each activation test can assert no `confirm()` ever ran.
  * Installed per test (not per file) because `addInitScript`-style global
  * setup cannot observe dialogs, and a file-level listener would attribute
  * one test's dialog to whatever test happened to run next.
@@ -155,19 +153,17 @@ function recordDialogs(page: Page): string[] {
 }
 
 /**
- * Prove the link wiring under test actually loaded: the vendored addon's
- * UMD global and the shared opener/filter helper. Without both,
- * `mountWhenReady` never mounts at all (its gate waits rather than
- * mounting without links), so a missing script would otherwise surface as
- * a confusing attach timeout instead of naming the broken precondition.
+ * Prove the link wiring under test actually loaded: the shared opener and
+ * filter helper. Without it, `mountWhenReady` never mounts at all (its gate
+ * waits rather than mounting without links), so a missing script would
+ * otherwise surface as a confusing attach timeout instead of naming the
+ * broken precondition.
  */
 async function assertLinkWiring(page: Page): Promise<void> {
   const wiring = await page.evaluate(() => ({
-    addon: typeof (window as any).WebLinksAddon?.WebLinksAddon,
     helper: typeof (window as any).farhelmTerminalLinks?.openTerminalUrl,
     filter: typeof (window as any).farhelmTerminalLinks?.isPlainWebUrl,
   }));
-  expect(wiring.addon, "the vendored WebLinks addon global must be loaded").toBe("function");
   expect(wiring.helper, "the shared link opener must be loaded").toBe("function");
   expect(wiring.filter, "the plain-text URL filter must be loaded").toBe("function");
 }
@@ -222,12 +218,11 @@ async function findViewportRow(page: Page, needle: string): Promise<RowGeometry>
 
 /**
  * Pixel coordinates for the center of `clickText` where it appears in the
- * viewport row containing `rowNeedle` — real geometry from
- * `.xterm-screen`'s live box and xterm's own grid size, the same approach
+ * viewport row containing `rowNeedle` — real geometry from the grid
+ * screen's live box and the terminal's own size, the same approach
  * terminal-clipboard.spec.ts's `dragRow` uses and for the same reasons
- * (the screen layer is where xterm's mouse handlers live; the box is
- * measured after the row is found so a late re-fit cannot shift
- * coordinates under the gesture).
+ * (the screen covers exactly the cells; the box is measured after the row
+ * is found so a late re-fit cannot shift coordinates under the gesture).
  *
  * `rowNeedle` and `clickText` are usually the same string; they differ
  * when the click target is a substring of a longer row (a URL's middle,
@@ -252,21 +247,20 @@ async function linkCell(
 }
 
 /**
- * Move the pointer onto `clickText` and wait for xterm's link decoration
- * (the pointer cursor class) to resolve — the observable proof the hovered
+ * Move the pointer onto `clickText` and wait for the grid's link hover
+ * (its link-hover class) to resolve — the observable proof the hovered
  * cell is a live link, not merely link-shaped text.
  *
  * Starts each attempt by visiting the row's far edge and then leaving the
- * screen entirely: xterm retains its last cell on mouseleave and ignores
- * re-entry at that same cell, so arriving fresh (and clearing any earlier
+ * screen entirely, so arriving fresh (and clearing any earlier
  * link first, asserted, so a stale decoration cannot satisfy readiness) is
  * what makes the wait meaningful. Targets must therefore not sit on the
  * row's own last cell, where the clearing visit would itself land on the
  * link; no caller here puts one there.
  *
  * `attempts` re-derives coordinates and re-hovers when decoration does not
- * resolve — for the resize test only, where tmux reflow can still be
- * shifting rows under the first hover. Everywhere else a single attempt
+ * resolve — for the resize test only, where the terminal's reflow can still
+ * be shifting rows under the first hover. Everywhere else a single attempt
  * keeps a genuinely dead linkifier a fast, loud failure.
  */
 async function hoverLink(
@@ -337,7 +331,7 @@ async function clickLink(
  * center of `endCol` — real pixels from the live screen box, for gestures
  * whose start and end positions are the assertion (a drag starting AND
  * ending inside one URL). The short hop before the long sweep mirrors
- * `dragRow`'s: it makes xterm register the selection start before the
+ * `dragRow`'s: it makes the grid register the selection start before the
  * sweep, guarding against a threshold or coalescing quirk swallowing a
  * single large jump.
  */
@@ -361,12 +355,9 @@ async function dragRowSpan(
   await page.mouse.up();
 }
 
-/** The terminal's current local selection text (xterm's own API). */
+/** The terminal's current local selection text (the grid's own API). */
 async function getSelection(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const w = window as any;
-    return (w.__farhelmTerm ? w.__farhelmTerm.getSelection() : w.__farhelmGrid.selectionText()) as string;
-  });
+  return page.evaluate(() => (window as any).__farhelmGrid.selectionText() as string);
 }
 
 test("clicking an OSC 8 hyperlink opens it in a new tab with no confirm dialog", async ({
@@ -381,7 +372,7 @@ test("clicking an OSC 8 hyperlink opens it in a new tab with no confirm dialog",
   const text = `FARHELM-LINK-${stamp}`;
   // OSC 8 with BEL terminators: `ESC ] 8 ; ; <url> BEL <text> ESC ] 8 ; ; BEL`.
   // BEL rather than ST (`ESC \`) keeps a backslash out of the doubly-quoted
-  // printf format; xterm accepts either terminator.
+  // printf format; the terminal accepts either terminator.
   const invocation =
     `sh -c 'read _gate; printf "\\033]8;;${url}\\007${text}\\033]8;;\\007\\n"; sleep 300'`;
   const session = await createSession(request, {
@@ -402,7 +393,7 @@ test("clicking an OSC 8 hyperlink opens it in a new tab with no confirm dialog",
     await expect
       .poll(openedLinks, { timeout: 10_000, message: "waiting for the link click to reach window.open" })
       .toEqual([{ url, target: "_blank", features: "noopener" }]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -447,7 +438,7 @@ test("plain-text http and https URLs open in a new tab with no confirm dialog", 
         { url: httpsUrl, target: "_blank", features: "noopener" },
         { url: httpUrl, target: "_blank", features: "noopener" },
       ]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -504,7 +495,7 @@ test("a URL wrapped across rows activates from its continuation row with the ful
     await expect
       .poll(openedLinks, { timeout: 10_000, message: "waiting for the wrapped-URL click" })
       .toEqual([{ url, target: "_blank", features: "noopener" }]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -588,7 +579,7 @@ test("a URL beginning above the viewport activates from its visible continuation
     await expect
       .poll(openedLinks, { timeout: 10_000, message: "waiting for the above-viewport click" })
       .toEqual([{ url, target: "_blank", features: "noopener" }]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -609,7 +600,7 @@ test("a URL beginning above the viewport activates from its visible continuation
  * The URL's head need not stay on screen. The emulator behind a new terminal
  * reflows as alacritty does, keeping the cursor's row and pushing the lines
  * above it into history (seen here: the head left the screen with twenty
- * blank rows below the cursor), where tmux kept them on screen. So the wrap is
+ * blank rows below the cursor). So the wrap is
  * judged over every line the view can scroll to, and the click on the visible
  * tail is what must reach the head, wherever it now is.
  */
@@ -697,7 +688,7 @@ test("a wrapped URL still activates after a resize reflows it", async ({
     await expect
       .poll(openedLinks, { timeout: 10_000, message: "waiting for the post-reflow click" })
       .toEqual([{ url, target: "_blank", features: "noopener" }]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -747,7 +738,7 @@ test("a replayed plain-text URL activates after a reload with no second gate", a
     await expect
       .poll(openedLinks, { timeout: 10_000, message: "waiting for the replayed-URL click" })
       .toEqual([{ url, target: "_blank", features: "noopener" }]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -810,7 +801,7 @@ test("a URL scrolled out of view activates after scrolling back to it", async ({
     await expect
       .poll(openedLinks, { timeout: 10_000, message: "waiting for the scrolled-back URL click" })
       .toEqual([{ url, target: "_blank", features: "noopener" }]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -859,7 +850,7 @@ test("surrounding punctuation is trimmed but in-URL characters are kept", async 
         { url: sentUrl, target: "_blank", features: "noopener" },
         { url: inUrlChars, target: "_blank", features: "noopener" },
       ]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -931,9 +922,8 @@ test("a drag starting and ending inside one URL selects and copies without openi
     expect(urlStart + url.length, "both drag endpoints must be inside the measured row").toBeLessThanOrEqual(headRow.cols);
 
     // Start AND end inside the URL, well clear of both ends: this is the
-    // gesture xterm's Linkifier would activate (matching press/release
-    // link identity, no selection guard of its own) if the plain-link
-    // adapter did not suppress it.
+    // gesture a click handler that matched only press/release link identity
+    // would activate, if the drag guard did not suppress it.
     await dragRowSpan(page, `DRAG-${stamp}`, urlStart + 4, urlStart + url.length - 9);
 
     // The selection survived the gesture (not cleared by any activation
@@ -966,7 +956,7 @@ test("a drag starting and ending inside one URL selects and copies without openi
     await expect
       .poll(openedLinks, { timeout: 10_000, message: "waiting for the post-selection click" })
       .toEqual([{ url, target: "_blank", features: "noopener" }]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -998,8 +988,8 @@ test("dragging from inside a URL into surrounding text selects without opening",
     await waitForTermText(page, `ACROSS-${stamp}`);
 
     // From inside the URL to the row's last text cell: the release lands
-    // outside the link (so xterm's own identity check already declines)
-    // AND a selection exists (so the adapter guard declines too) —
+    // outside the link (so the press/release identity check already
+    // declines) AND a selection exists (so the drag guard declines too) —
     // either way, nothing may open, and the selection must keep both
     // the URL span and the surrounding words.
     const rowText = (await findViewportRow(page, `ACROSS-${stamp}`)).rowText;
@@ -1009,7 +999,7 @@ test("dragging from inside a URL into surrounding text selects without opening",
     expect(selection, "the drag must keep the URL span").toContain(url.slice(4));
     expect(selection, "the drag must keep the surrounding words").toContain("trailing words");
     expect(await openedLinks(), "a drag out of a URL must not activate").toEqual([]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -1140,7 +1130,7 @@ test("an OSC 8 span wins over its https display text, beside a working bare URL"
         { url: target, target: "_blank", features: "noopener" },
         { url: bare, target: "_blank", features: "noopener" },
       ]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -1212,7 +1202,7 @@ test("forbidden and malformed schemes are neither decorated nor clickable", asyn
     await expect
       .poll(openedLinks, { timeout: 10_000, message: "waiting for the control click" })
       .toEqual([{ url: control, target: "_blank", features: "noopener" }]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }
@@ -1275,7 +1265,7 @@ test("an http substring inside a forbidden scheme opens only the http part", asy
         { url: embeddedJs, target: "_blank", features: "noopener" },
         { url: embeddedData, target: "_blank", features: "noopener" },
       ]);
-    expect(dialogs, "xterm's default confirm() must not run").toEqual([]);
+    expect(dialogs, "no confirm() dialog may run").toEqual([]);
   } finally {
     await cleanupSession(request, session.id);
   }

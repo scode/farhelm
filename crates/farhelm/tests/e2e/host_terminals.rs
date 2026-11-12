@@ -892,32 +892,21 @@ async fn delete_ends_the_adopted_host_and_never_one_that_replaced_it() {
     .await;
 }
 
-/// A host agent attaches only for a client that can show grids, and its
-/// grid stream shows the host child's output.
+/// A host agent attaches as a grid stream that shows the host child's
+/// output.
 ///
-/// Why: a host terminal has no byte stream; sending a bytes-only client
-/// anything would show it nothing it could draw, and the refusal is how a
-/// viewer learns why. A client that can show grids gets the terminal from
-/// the supervisor's emulator, fed by a real host. Spec: a bytes-only attach
-/// is refused with the supervisor's permanent "needs a client that can show
-/// grid terminals" message; a grid attach is answered with stream kind
-/// `grid`, its first message is `hello`, a screen row it sends reads `host
-/// child ready`, and `ReplayComplete` arrives; the host's child runs on
-/// through both.
+/// Why: a viewer gets the terminal from the supervisor's emulator, fed by a
+/// real host, and nothing else shows that the two meet end to end through a
+/// real supervisor. Spec: the attach's first message is `hello`, a screen
+/// row it sends reads `host child ready`, and `ReplayComplete` arrives; the
+/// host's child runs on through it.
 #[farhelm_testtrace::test]
-async fn a_host_agent_attaches_only_as_a_grid() {
+async fn a_host_agent_attaches_as_a_grid() {
     let h = harness().await;
     let (session, work) = basic_session(&h).await;
     let installed = install_host(&h, &session.id, &tree_script(work.path())).await;
     let (child, _) = tree_pids(work.path()).await;
 
-    let Err(refused) = h.client.attach(&session.id, 80, 24).await else {
-        panic!("a bytes-only client cannot attach a host terminal");
-    };
-    assert!(
-        format!("{refused:#}").contains("needs a client that can show grid terminals"),
-        "{refused:#}"
-    );
     let (_channel, mut stream) = h
         .client
         .attach_terminal(
@@ -926,11 +915,9 @@ async fn a_host_agent_attaches_only_as_a_grid() {
             24,
             farhelm_proto::TerminalSelector::default(),
             "",
-            farhelm_helm::ViewerStreams::BytesOrGrid,
         )
         .await
         .expect("a grid attach");
-    assert_eq!(stream.stream_kind(), farhelm_proto::StreamKind::Grid);
     let mut first = None;
     let mut ready_shown = false;
     let mut replay_complete = false;

@@ -12,7 +12,6 @@ import { routeGate } from "./helpers/route-gate";
 import { DEVICE_SECRET_KEY } from "./helpers/device-auth";
 import { requireHelmBuild } from "./helpers/helm-build";
 import { waitForReplayReveal } from "./helpers/terminal-readiness";
-import { watchHostPremise } from "./helpers/host-premise";
 import { currentStackSlot } from "../stack-slots";
 
 const GET_STARTED_URL = "https://farhelm.io/docs/get-started/first-session/";
@@ -61,8 +60,6 @@ for (const dismissal of ["got it", "close", "Escape"] as const) {
     await expect(page.locator(".new-session-button")).toBeVisible();
     await expect(dialog).toHaveCount(0);
     const other = await browser.newContext({ storageState: currentStackSlot().authStatePath });
-    // Under the host-terminal premise's watch like every other context.
-    watchHostPremise(other);
     try {
       const seed = await other.storageState();
       expect(seed.origins.flatMap(origin => origin.localStorage.map(item => item.name)),

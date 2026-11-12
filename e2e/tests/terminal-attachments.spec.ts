@@ -121,8 +121,8 @@ interface PayloadEntry {
  * These are the assertions that separate "the handler ran" from "the
  * handler took responsibility for the event": an interception that
  * forgets `preventDefault` lets the engine navigate to the dropped file,
- * and one that forgets `stopPropagation` lets xterm paste the payload's
- * text on top of the upload.
+ * and one that forgets `stopPropagation` lets the grid's input field paste
+ * the payload's text on top of the upload.
  */
 interface DispatchResult {
   /** Whether anything called `preventDefault()` on the event. */
@@ -130,10 +130,10 @@ interface DispatchResult {
   /** Whether anything called `stopPropagation()` on it. */
   propagationStopped: boolean;
   /**
-   * Whether the event reached its own TARGET — xterm's helper textarea
+   * Whether the event reached its own TARGET — the grid's input field
    * for a paste. False means an ancestor's capture handler stopped it on
-   * the way down, which is how "intercepted before xterm sees it" is
-   * observed rather than assumed.
+   * the way down, which is how "intercepted before the terminal sees it"
+   * is observed rather than assumed.
    */
   reachedTarget: boolean;
   /** For a `dragover`, the drop effect the handler asked for. */
@@ -145,10 +145,10 @@ interface DispatchResult {
  * carrying `entries` as file objects and `text` as `text/plain`, and
  * report what the handlers did with it.
  *
- * A paste targets the surface's input element: xterm's hidden helper
- * TEXTAREA or the grid's input. The xterm target is deliberate: it registers its own
- * paste handler there, so dispatching anywhere above it would fail to prove
- * that capture-phase interception runs before the engine's own handler.
+ * A paste targets the grid's input field. The target is deliberate: the
+ * grid registers its own paste handler there, so dispatching anywhere above
+ * it would fail to prove that capture-phase interception runs before the
+ * terminal's own handler.
  * Farhelm owns text pastes too, sanitizing them before the terminal's own
  * paste path frames them rather than letting the event reach that handler.
  *
@@ -265,7 +265,7 @@ async function dispatchPayload(
       };
 
       if (kind === "paste") {
-        const target = el.querySelector(".xterm-helper-textarea, .grid-terminal-input") ?? el;
+        const target = el.querySelector(".grid-terminal-input") ?? el;
         return { event: fire("paste", target, "clipboardData") };
       }
       const dragover = fire("dragover", el, "dataTransfer");
@@ -276,8 +276,8 @@ async function dispatchPayload(
 }
 
 /**
- * One island's buffer as LOGICAL lines: xterm's wrapped continuation rows
- * are joined back onto the row they continue.
+ * One island's text as LOGICAL lines: a row the terminal wrapped is joined
+ * with the row it continues onto.
  *
  * The imported `islandText` helper joins every buffer row with a newline,
  * which is right for content assertions and wrong for these: an attachment
@@ -286,46 +286,33 @@ async function dispatchPayload(
  * Every assertion here matches a path, so every one of them would fail on a
  * terminal that is behaving perfectly.
  *
- * Rows are translated WITHOUT trailing-space trimming and the assembled
+ * Rows are read WITHOUT trailing-space trimming and the assembled
  * line is trimmed at the end instead — trimming each row would silently
  * eat a space that fell on a wrap boundary, which for these tests is the
  * separator between two attached paths.
  */
 async function islandLogicalText(page: Page, elementId: string): Promise<string> {
   return page.evaluate((el) => {
-    const island = (window as any).__farhelmIslands?.[el];
-    if (!island) return "";
-    if (island.grid) {
-      // The grid's model, history then screen, each row at its own width
-      // and untrimmed; a row whose `wrapped` flag is set continues onto the
-      // next (xterm.js flags the continuation row instead).
-      const model = island.grid.model;
-      const rowText = (window as any).farhelmGridBuffer.rowText;
-      const rows: { text: string; wrapped: boolean }[] = [];
-      for (let i = 0; i < model.historyLength; i++) {
-        const row = model.historyLine(i);
-        rows.push({ text: rowText(row, row.cols), wrapped: !!row.wrapped });
-      }
-      for (const row of model.screen) rows.push({ text: rowText(row, model.cols), wrapped: !!row.wrapped });
-      const joined: string[] = [];
-      let continues = false;
-      for (const row of rows) {
-        if (continues && joined.length) joined[joined.length - 1] += row.text;
-        else joined.push(row.text);
-        continues = row.wrapped;
-      }
-      return joined.map((line) => line.replace(/\s+$/, "")).join("\n");
+    const grid = (window as any).__farhelmIslands?.[el]?.grid;
+    if (!grid) return "";
+    // The grid's model, history then screen, each row at its own width and
+    // untrimmed; a row whose `wrapped` flag is set continues onto the next.
+    const model = grid.model;
+    const rowText = (window as any).farhelmGridBuffer.rowText;
+    const rows: { text: string; wrapped: boolean }[] = [];
+    for (let i = 0; i < model.historyLength; i++) {
+      const row = model.historyLine(i);
+      rows.push({ text: rowText(row, row.cols), wrapped: !!row.wrapped });
     }
-    const buf = island.term.buffer.active;
-    const lines: string[] = [];
-    for (let i = 0; i < buf.length; i++) {
-      const line = buf.getLine(i);
-      if (!line) continue;
-      const text = line.translateToString(false);
-      if (line.isWrapped && lines.length) lines[lines.length - 1] += text;
-      else lines.push(text);
+    for (const row of model.screen) rows.push({ text: rowText(row, model.cols), wrapped: !!row.wrapped });
+    const joined: string[] = [];
+    let continues = false;
+    for (const row of rows) {
+      if (continues && joined.length) joined[joined.length - 1] += row.text;
+      else joined.push(row.text);
+      continues = row.wrapped;
     }
-    return lines.map((line) => line.replace(/\s+$/, "")).join("\n");
+    return joined.map((line) => line.replace(/\s+$/, "")).join("\n");
   }, elementId);
 }
 
@@ -334,71 +321,20 @@ async function islandLogicalText(page: Page, elementId: string): Promise<string>
  * in `tail` (itself a regex fragment).
  *
  * Anchored at the leading `/`, which is not fussiness: an inserted path
- * arrives through `term.paste()`, so where this client has the pane's
- * bracketed-paste mode it is wrapped in the paste markers, and the pty
- * echoes those control bytes back in caret notation — the buffer really
+ * arrives through the terminal's paste path, so while the program has
+ * bracketed paste on it is wrapped in the paste markers, and the pty
+ * echoes those control bytes back in caret notation — the text really
  * does read `^[[200~/tmp/.../notes.txt ^[[201~`. A pattern starting with
  * `\S*` swallows the `^[[200~` into the path and hands the test a
  * filename that does not exist.
  *
  * The markers are deliberately tolerated rather than required, here and
- * in every `\S*?` that joins two of these fragments: whether THIS client
- * knows the pane is in bracketed-paste mode depends on the tmux underneath
- * (see `latchBracketedPaste`), and no assertion about where a path landed
- * should turn on that. The one test that does pin the markers latches the
- * mode first.
+ * in every `\S*?` that joins two of these fragments: no assertion about
+ * where a path landed should turn on the program's paste mode. The tests
+ * that pin the markers say so.
  */
 function hostPathEnding(tail: string): string {
   return `\\/\\S*\\/attachments\\/\\S*${tail}`;
-}
-
-/**
- * Put this island's xterm into the bracketed-paste mode its pane is
- * already in, so a subsequent paste's markers are observable no matter
- * what the attach snapshot was able to carry.
- *
- * xterm wraps `term.paste()` in `\x1b[200~`/`\x1b[201~` only once it has
- * parsed a `\x1b[?2004h` of its own. The pane genuinely is in that mode —
- * the `basic` fake agent enables it before printing its ready banner — but
- * a client that attaches AFTER the agent said so never sees that byte
- * live: it can only learn the mode from the supervisor's replay, which
- * reconstructs it from tmux's `bracket_paste_flag`. That format variable
- * arrived in tmux 3.7, so against any older tmux the mode is not restored
- * — a degradation the supervisor knows about and warns about once per
- * process — and the paste goes out unwrapped even though the client took
- * exactly the paste path. CI's tmux is one of those, which is why the
- * marker assertion failed there on every run while passing on developer
- * machines with a newer one.
- *
- * So this writes a truth about the pane into the client rather than
- * inventing one, and it leaves the marker assertion pinning what it exists
- * to pin: that insertion went through `term.paste()` rather than straight
- * at the socket, which no amount of restored mode state would fake.
- *
- * Awaited on xterm's own write callback because `term.write` is
- * asynchronous — returning before the parser has run would reintroduce the
- * very race this removes.
- */
-async function latchBracketedPaste(page: Page, elementId: string): Promise<void> {
-  await page.evaluate(
-    (el) =>
-      new Promise<void>((resolve, reject) => {
-        const island = (window as any).__farhelmIslands?.[el];
-        if (!island) {
-          reject(new Error(`no island ${el} to put into bracketed-paste mode`));
-          return;
-        }
-        // A grid terminal has nothing to latch: the supervisor adds the
-        // markers from its own emulator's mode, which saw the program turn
-        // it on, however late this client attached.
-        if (island.grid) {
-          resolve();
-          return;
-        }
-        island.term.write("\x1b[?2004h", () => resolve());
-      }),
-    elementId,
-  );
 }
 
 /**
@@ -688,7 +624,7 @@ test("a pasted image is uploaded under a generated name and its path inserted", 
 // the text says. This pins both halves: the text arrives as terminal
 // input, and no upload was attempted.
 //
-// It also exercises Farhelm's text interception and xterm's paste method,
+// It also exercises Farhelm's text interception and the grid's paste path,
 // so sanitizing framing controls cannot accidentally swallow ordinary text.
 test("pasted text that looks like a path arrives as text, with nothing uploaded", async ({
   page,
@@ -719,7 +655,7 @@ test("pasted text that looks like a path arrives as text, with nothing uploaded"
 });
 
 // A pure sanitizer test cannot prove the capture listener intercepted before
-// xterm's own handler or that drops use it too. The live pty echo distinguishes
+// the grid's own handler or that drops use it too. The live pty echo distinguishes
 // one outer paste frame from an embedded marker that would close it early.
 test("pasted and dropped text cannot close bracketed paste early", async ({ page, request }) => {
   test.setTimeout(120_000);
@@ -728,7 +664,6 @@ test("pasted and dropped text cannot close bracketed paste early", async ({ page
     const stamp = Date.now();
     const session = await openAttachmentSession(page, request, `attach-frame-${stamp}`);
     id = session.id;
-    await latchBracketedPaste(page, "terminal");
     // Both gestures must sanitize embedded framing before the terminal's
     // own paste path adds its bracketed-paste markers.
     for (const kind of ["paste", "drop"] as const) {
@@ -996,7 +931,7 @@ test("two dropped files insert both paths, each its own word", async ({ page, re
       ],
     });
 
-    // Each path is its own `term.paste()`, so each carries its own
+    // Each path is its own paste, so each carries its own
     // bracketed-paste wrapper and the echoed markers land BETWEEN them:
     // `^[[200~<first> ^[[201~^[[200~<second> ^[[201~`. The space after the
     // first path is the separator under test; the `\S*?` after it is the
@@ -1105,7 +1040,7 @@ test("a clipboard payload of two real files uploads both, each under its own nam
 });
 
 // A Mac-only failure can expose a file item while refusing its `File` object.
-// The event remains xterm's business, but its serializable evidence must stay
+// The event remains the terminal's business, but its serializable evidence must stay
 // readable so the manual run can carry the exact item shape into a fixture.
 test("clipboard facts survive a failed File projection without intercepting paste", async ({
   page,
@@ -1128,7 +1063,7 @@ test("clipboard facts survive a failed File projection without intercepting past
     // let it get there.
     expect(
       dispatched.event.reachedTarget,
-      "the diagnostic observer must not stop the unsupported paste before xterm sees it",
+      "the diagnostic observer must not stop the unsupported paste before the terminal sees it",
     ).toBe(true);
 
     const captured = await lastClipboardFacts(page);
@@ -1249,7 +1184,7 @@ test("a path whose directories need quoting arrives at the shell as one word", a
 });
 
 // SPEC.md's "an attachment must never disappear silently", at the one seam
-// where it is easiest to break: `term.paste()` into an island whose socket
+// where it is easiest to break: a paste into an island whose socket
 // is gone drops the text with no error anywhere. A payload offered to a
 // detached terminal is therefore refused up front, visibly, and nothing is
 // uploaded for it.
@@ -2043,12 +1978,6 @@ test("a completed upload keeps focus where it was and inserts through bracketed 
     const session = await openAttachmentSession(page, request, `attach-focus-${stamp}`);
     id = session.id;
 
-    // A precondition, not part of what is under test: this client attached
-    // after the agent turned bracketed paste on, so on an old tmux it would
-    // never have learned the mode the pane is in (see
-    // `latchBracketedPaste`), and the markers below would be missing for a
-    // reason that has nothing to do with the insertion path.
-    await latchBracketedPaste(page, "terminal");
     // Focus deliberately parked outside the terminal before the drop —
     // the persistent Hosts toggle, available with Sessions shown.
     await page.locator(".hosts-panel-toggle").focus();
@@ -2095,8 +2024,7 @@ test("the attachment indicator never resizes the terminal", async ({ page, reque
     // The page's own fit, not a grid's committed size (which only follows a
     // round trip later). A grid's cached fit changes when its resize
     // observer next runs, so it is refitted here first, making a pane that
-    // an indicator shrank observable at the moment of reading; xterm.js's
-    // read is as it always was.
+    // an indicator shrank observable at the moment of reading.
     const geometry = async () => {
       await page.evaluate(() => (window as any).__farhelmIslands?.terminal?.grid?.fit());
       return terminalFit(page);
@@ -2188,15 +2116,15 @@ test("a text-only drop is prevented, inserted, and leaves the page where it was"
   }
 });
 
-// Interception has to happen BEFORE xterm's own paste handler, and only
+// Interception has to happen BEFORE the grid's own paste handler, and only
 // for the flavors it takes responsibility for. A file paste that reached
-// xterm would paste the payload's text on top of the upload; a text paste
+// the grid would paste the payload's text on top of the upload; a text paste
 // that reached it would bypass Farhelm's removal of framing controls.
 //
 // Both are observed rather than inferred: the helper reports whether the
 // event was cancelled, whether propagation was stopped, and whether it
-// ever arrived at xterm's own textarea.
-test("file and text pastes are intercepted before xterm sees the event", async ({
+// ever arrived at the grid's own input field.
+test("file and text pastes are intercepted before the terminal sees the event", async ({
   page,
   request,
 }) => {
@@ -2222,7 +2150,7 @@ test("file and text pastes are intercepted before xterm sees the event", async (
     expect(intercepted.event.propagationStopped).toBe(true);
     expect(
       intercepted.event.reachedTarget,
-      "xterm must never see a paste this island took responsibility for",
+      "the terminal must never see a paste this island took responsibility for",
     ).toBe(false);
 
     const passed = await dispatchPayload(page, "terminal", "paste", { text: `plain-${stamp}` });
@@ -2230,7 +2158,7 @@ test("file and text pastes are intercepted before xterm sees the event", async (
     expect(passed.event.propagationStopped).toBe(true);
     expect(
       passed.event.reachedTarget,
-      "text must not fall through to xterm's unsanitized event handler",
+      "text must not fall through to the terminal's unsanitized event handler",
     ).toBe(false);
     await waitForIslandLogicalText(page, "terminal", `plain-${stamp}`);
   } finally {

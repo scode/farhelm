@@ -2,26 +2,16 @@
 // exactly what grid-terminal.js's "Size" section documents, computed from
 // the character the browser measures, at every text size and pixel ratio.
 //
-// Why it matters: fitting from a previous answer made the same pane depend
-// on its resize history. The grid uses a fixed 80 x 24 proposal reference;
-// old terminals retain their legacy calculation. A compatibility handoff
-// explicitly preserves its inherited answer until an effective input
-// change, rather than relying on both calculations always agreeing.
-//
-// Two tests hold the components to their written formulas, each on its
-// own, rather than to each other:
-//
-// - the grid, with no xterm.js on the page: new terminals' fit is defined
-//   by the formula, not by what xterm.js does;
-// - old terminals' xterm.js, with its existing fit-from-current-size rule.
-//   Direct inherited-size and attachment tests establish handoff behavior.
-//   Legacy formula coverage goes when old terminals do.
+// Why it matters: the fit is Farhelm's contract for how many rows and
+// columns a pane gives its program, and fitting from a previous answer made
+// the same pane depend on its resize history. The grid uses a fixed 80 x 24
+// proposal reference, and these tests hold it to its written formula.
 //
 // Not frozen row and column counts: the character's measured size differs
 // across engines, fonts' hinting and machines, so expected counts are
 // worked out from each run's own measurement.
 //
-// Each case mounts the component in a `.terminal` container (the class the
+// Each case mounts the grid in a `.terminal` container (the class the
 // session view's mount point has), then steps it through text sizes, as the
 // text-size shortcut does, comparing after each step.
 import { expect, test } from "@playwright/test";
@@ -40,7 +30,6 @@ const GRID_SCRIPTS = [
   "grid-buffer.js",
   "grid-terminal.js",
 ];
-const OLD_TERMINAL_SCRIPTS = ["terminal-theme.js", "vendor/xterm.js", "vendor/addon-fit.js"];
 
 // Pane sizes: an ordinary one, and one chosen so neither dimension is a
 // round multiple of a common cell size.
@@ -51,29 +40,25 @@ const PANES = [
 // The supported range's ends, the default and sizes between.
 const FONT_SIZES = [9, 12, 14, 15, 17, 20, 23, 28];
 
-type Component = "grid" | "xterm";
-
-function pageFor(component: Component): string {
-  const scripts = component === "grid" ? GRID_SCRIPTS : OLD_TERMINAL_SCRIPTS;
-  const xtermCss = component === "xterm" ? '<link rel="stylesheet" href="/assets/vendor/xterm.css">\n' : "";
+function pageFor(): string {
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
-${xtermCss}<link rel="stylesheet" href="/assets/app.css">
-${scripts.map((name) => `<script src="/assets/${name}"></script>`).join("\n")}
+<link rel="stylesheet" href="/assets/app.css">
+${GRID_SCRIPTS.map((name) => `<script src="/assets/${name}"></script>`).join("\n")}
 </head>
 <body style="margin: 0"><div id="slots"></div></body>
 </html>`;
 }
 
-async function openPage(page: Page, component: Component): Promise<void> {
-  const body = pageFor(component);
+async function openPage(page: Page): Promise<void> {
+  const body = pageFor();
   await page.route(`${ORIGIN}/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/") return route.fulfill({ contentType: "text/html", body });
     const name = path.replace(/^\/assets\//, "");
-    if (!/^(vendor\/)?[A-Za-z0-9.-]+$/.test(name)) return route.abort();
+    if (!/^[A-Za-z0-9.-]+$/.test(name)) return route.abort();
     const file = name.endsWith(".woff2") ? join(ASSETS, "fonts", name) : join(ASSETS, name);
     return route.fulfill({ path: file });
   });
@@ -96,7 +81,7 @@ async function openPage(page: Page, component: Component): Promise<void> {
  * remains separate below.
  */
 test("an unchanged pane keeps its first fitted size", async ({ page }, testInfo) => {
-  await openPage(page, "grid");
+  await openPage(page);
   const result = await page.evaluate(() => {
     const w = window as any;
     const family = '"JetBrains Mono", monospace';
@@ -139,64 +124,6 @@ test("an unchanged pane keeps its first fitted size", async ({ page }, testInfo)
   expect(result.resizes, "repeated notifications must not resize the program again").toEqual([result.sizes[0]]);
 });
 
-/** A renderer handoff keeps a size that deliberately differs from direct fitting.
- * Replacing a renderer alone must not resize the program or rebuild history.
- * The inherited answer is local to this mount; a real later pane change must
- * release it and use the same answer as a fresh direct grid in that new pane.
- */
-test("an inherited size survives unchanged fits and yields to a real pane change", async ({ page }) => {
-  await openPage(page, "grid");
-  const result = await page.evaluate(() => {
-    const w = window as any;
-    const measureText = OffscreenCanvasRenderingContext2D.prototype.measureText;
-    OffscreenCanvasRenderingContext2D.prototype.measureText = function (text) {
-      const metrics = measureText.call(this, text);
-      Object.defineProperty(metrics, "width", { value: 7.8000030517578125 });
-      return metrics;
-    };
-    const carried = { cols: 84, rows: 31 };
-    const resizes: { cols: number; rows: number }[] = [];
-    /** Mount equal panes so only the explicit inherited-size contract differs. */
-    const create = (size?: { cols: number; rows: number }) => {
-      const box = document.createElement("div");
-      box.className = "terminal";
-      box.style.width = "677px";
-      box.style.height = "410px";
-      document.getElementById("slots")!.appendChild(box);
-      const grid = w.farhelmGridTerminal.create(box, {
-        fontFamily: '"JetBrains Mono", monospace', fontSize: 13,
-        theme: w.farhelmTerminalTheme, platform: navigator.platform, size,
-        send: () => {}, onResize: size ? (cols: number, rows: number) => resizes.push({ cols, rows }) : undefined,
-      });
-      return { box, grid };
-    };
-    const inherited = create(carried);
-    const direct = create();
-    try {
-      direct.grid.fit();
-      const canonical = direct.grid.size();
-      if (canonical.cols !== 83) throw new Error("controlled pane no longer differs from the inherited 84 columns");
-      for (let i = 0; i < 3; i++) inherited.grid.fit();
-      const kept = inherited.grid.size();
-      const before = [...resizes];
-      inherited.box.style.width = direct.box.style.width = "679px";
-      inherited.grid.fit();
-      direct.grid.fit();
-      return { carried, canonical, kept, before, changed: inherited.grid.size(), directChanged: direct.grid.size(), resizes };
-    } finally {
-      inherited.grid.dispose();
-      direct.grid.dispose();
-      inherited.box.remove();
-      direct.box.remove();
-    }
-  });
-  expect(result.canonical.cols, "premise: direct sizing differs from the carried 84 columns").toBe(83);
-  expect(result.kept).toEqual(result.carried);
-  expect(result.before, "changing renderers alone must send no new resize").toEqual([]);
-  expect(result.changed).toEqual(result.directChanged);
-  expect(result.resizes).toEqual([result.directChanged]);
-});
-
 test.describe("sizing after real pane changes", () => {
   test.use({ deviceScaleFactor: 1.5 });
 
@@ -207,7 +134,7 @@ test.describe("sizing after real pane changes", () => {
    * at a fractional pixel ratio, rather than only repeating an unchanged fit.
    */
   test("resized and freshly mounted panes give the same size", async ({ page }, testInfo) => {
-    await openPage(page, "grid");
+    await openPage(page);
     const result = await page.evaluate(() => {
       const w = window as any;
       const measureText = OffscreenCanvasRenderingContext2D.prototype.measureText;
@@ -260,25 +187,23 @@ test.describe("sizing after real pane changes", () => {
 });
 
 /**
- * For every font size, the size `component` fitted and the size the
+ * For every font size, the size the grid fitted and the size the
  * documented formula gives, in one pane. The formula is restated here rather
  * than taken from grid-terminal.js, so a change to either side shows:
  *
  * - the character: an offscreen canvas's `measureText("W")`, its width and
  *   its font bounding box's ascent plus descent;
- * - the cell at a fixed 80 x 24 reference for the grid, or the previous
- *   fitted size for xterm (80 x 24 before the first fit),
- *   and pixel ratio `dpr`: width `round(charWidth * dpr * cols / dpr) /
- *   cols`, height `round(floor(ceil(charHeight * dpr)) * rows / dpr) /
- *   rows`;
+ * - the cell at the fixed 80 x 24 reference and pixel ratio `dpr`: width
+ *   `round(charWidth * dpr * cols / dpr) / cols`, height
+ *   `round(floor(ceil(charHeight * dpr)) * rows / dpr) / rows`;
  * - the room: the pane's computed width and height (whole pixels) less the
  *   terminal element's padding, and 14 more pixels of width for the
  *   scrollbar;
  * - the size: the room over the cell, rounded down, at least 2 x 1 and at
  *   most 1000 x 1000.
  */
-async function fittedSizes(page: Page, component: Component, pane: { width: number; height: number }) {
-  return page.evaluate(({ component, pane, fontSizes }) => {
+async function fittedSizes(page: Page, pane: { width: number; height: number }) {
+  return page.evaluate(({ pane, fontSizes }) => {
     const w = window as any;
     const slots = document.getElementById("slots")!;
     slots.replaceChildren();
@@ -288,35 +213,13 @@ async function fittedSizes(page: Page, component: Component, pane: { width: numb
     box.style.height = `${pane.height}px`;
     slots.appendChild(box);
     const family = '"JetBrains Mono", monospace';
-    // The component under test, behind one shape: its element, a way to
-    // change the text size (which refits), its fitted size, and disposal.
-    let mounted: { element: HTMLElement; setFontSize(size: number): void; size(): { cols: number; rows: number }; dispose(): void };
-    if (component === "grid") {
-      const grid = w.farhelmGridTerminal.create(box, {
-        fontFamily: family,
-        fontSize: fontSizes[0],
-        theme: w.farhelmTerminalTheme,
-        platform: navigator.platform,
-        send: () => {},
-      });
-      mounted = grid;
-    } else {
-      // An old terminal as terminal.js configures its size: scrollback on,
-      // so the fit add-on reserves the scrollbar's column.
-      const term = new w.Terminal({ fontFamily: family, fontSize: fontSizes[0], scrollback: 12000, theme: w.farhelmTerminalTheme });
-      const fit = new w.FitAddon.FitAddon();
-      term.loadAddon(fit);
-      term.open(box);
-      mounted = {
-        element: term.element,
-        setFontSize(size) {
-          term.options.fontSize = size;
-          fit.fit();
-        },
-        size: () => ({ cols: term.cols, rows: term.rows }),
-        dispose: () => term.dispose(),
-      };
-    }
+    const mounted = w.farhelmGridTerminal.create(box, {
+      fontFamily: family,
+      fontSize: fontSizes[0],
+      theme: w.farhelmTerminalTheme,
+      platform: navigator.platform,
+      send: () => {},
+    });
     const context = new OffscreenCanvas(100, 100).getContext("2d")!;
     const sample = context.measureText("W");
     const canvasMetrics = "width" in sample && "fontBoundingBoxAscent" in sample && "fontBoundingBoxDescent" in sample;
@@ -332,7 +235,7 @@ async function fittedSizes(page: Page, component: Component, pane: { width: numb
     };
     const roomWidth = px(outer, "width") - padding.left - padding.right;
     const roomHeight = px(outer, "height") - padding.top - padding.bottom;
-    let from = { cols: 80, rows: 24 };
+    const from = { cols: 80, rows: 24 };
     const results = [];
     for (const size of fontSizes) {
       context.font = `${size}px ${family}`;
@@ -347,11 +250,10 @@ async function fittedSizes(page: Page, component: Component, pane: { width: numb
       };
       mounted.setFontSize(size);
       results.push({ font: size, fitted: mounted.size(), expected, charWidth });
-      if (component === "xterm") from = expected;
     }
     mounted.dispose();
     return { canvasMetrics, padding, results };
-  }, { component, pane, fontSizes: FONT_SIZES });
+  }, { pane, fontSizes: FONT_SIZES });
 }
 
 for (const deviceScaleFactor of [1, 1.5, 2]) {
@@ -359,36 +261,16 @@ for (const deviceScaleFactor of [1, 1.5, 2]) {
     test.use({ deviceScaleFactor });
 
     test("the grid fits to the documented rows and columns at every text size", async ({ page }) => {
-      await openPage(page, "grid");
+      await openPage(page);
       expect(await page.evaluate(() => window.devicePixelRatio)).toBe(deviceScaleFactor);
       for (const pane of PANES) {
-        const { canvasMetrics, padding, results } = await fittedSizes(page, "grid", pane);
+        const { canvasMetrics, padding, results } = await fittedSizes(page, pane);
         // The premises: this engine's canvas reports the metrics the grid's
         // own measurement requires, so the grid measures by the canvas as
         // the formula does, not by its span fallback; and the grid
         // element's padding (app.css, `.grid-terminal`) is what was read.
         expect(canvasMetrics, "canvas text metrics with a font bounding box").toBe(true);
         expect(padding).toEqual({ left: 4, right: 4, top: 4, bottom: 4 });
-        for (const result of results) {
-          expect(result.charWidth, `a measured character at ${result.font}px`).toBeGreaterThan(0);
-          expect(result.fitted, `${pane.width}x${pane.height} at ${result.font}px`).toEqual(result.expected);
-        }
-      }
-    });
-
-    /**
-     * Old terminals retain their legacy fit-from-current-size calculation.
-     * The grid's new policy must not accidentally change this independent
-     * compatibility surface. Handoff preservation is tested directly above
-     * and through terminal.js's attachment fixture, not inferred from equal
-     * formulas across the two renderers.
-     */
-    test("old terminals' xterm.js retains its documented legacy fit", async ({ page }) => {
-      await openPage(page, "xterm");
-      expect(await page.evaluate(() => window.devicePixelRatio)).toBe(deviceScaleFactor);
-      for (const pane of PANES) {
-        const { canvasMetrics, results } = await fittedSizes(page, "xterm", pane);
-        expect(canvasMetrics, "canvas text metrics with a font bounding box").toBe(true);
         for (const result of results) {
           expect(result.charWidth, `a measured character at ${result.font}px`).toBeGreaterThan(0);
           expect(result.fitted, `${pane.width}x${pane.height} at ${result.font}px`).toEqual(result.expected);

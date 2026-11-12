@@ -703,8 +703,6 @@ mod tests {
                 github_repo: None,
                 working_copy: None,
                 notifications: Vec::new(),
-                agent_terminal: None,
-                supervisor_creates_host_terminals: false,
             },
             host,
             entry_uuid: format!("00000000-0000-4000-8000-{host:012x}"),

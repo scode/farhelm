@@ -1,8 +1,7 @@
 //! Grid streams: how a terminal that runs in a terminal host reaches its
 //! viewer, as a grid of styled runs rather than raw terminal bytes.
 //!
-//! Every new terminal runs in a terminal host and reaches its viewers this
-//! way; old tmux terminals keep their byte streams until they are gone.
+//! Every terminal runs in a terminal host and reaches its viewers this way.
 //! This module is the contract the supervisor's sender, its input encoder,
 //! the helm's relay and the browser's grid client are built against.
 //!
@@ -27,46 +26,26 @@
 //!   bounds-checked and held to Rust-generated fixtures; there is no second
 //!   compatible encoding, compression or state shared across messages.
 //! - **The helm relays without interpreting.** Grid messages travel on the
-//!   attachment's data channel (the one `ControlMsg::Attach` named), exactly
-//!   where terminal bytes travel for tmux terminals, and the helm relays each
-//!   data frame as one WebSocket binary message in each direction, unchanged.
-//!   All the helm learns is the client's `grid` capability on
-//!   `ControlMsg::Attach` and the [`crate::StreamKind`] in
-//!   `ControlMsg::Attached`.
+//!   attachment's data channel (the one `ControlMsg::Attach` named), and the
+//!   helm relays each data frame as one WebSocket binary message in each
+//!   direction, unchanged.
 //!
-//! # Attach and the stream kind
+//! # Attachments
 //!
-//! A client that can render grids says so with `Attach::grid`; the supervisor
-//! answers with the stream kind in `Attached::stream`, `grid` only for an
-//! attach that asked. A client that cannot render grids (every client before
-//! protocol 68) attaching to a host terminal is refused with a clear error;
-//! that refusal is permanent behavior, not a placeholder. `ReplayComplete`,
-//! `Detached`, `Resize`, `PauseOutput`/`ResumeOutput` and the stall detach
-//! serve both stream kinds, as their declarations in the crate root define
-//! them; for grid streams, pause means "send nothing until the resume",
-//! history included, and the supervisor coalesces (see "Flow control"). The
-//! grid client itself sends no pause or resume: it applies messages as they
-//! arrive and draws at most once per animation frame, so no backlog builds up
-//! in the page. Its backlog builds up in the helm instead, which pauses and
-//! resumes the supervisor from its own queue.
+//! Every attachment's data channel carries a grid stream; neither `Attach`
+//! nor `Attached` says so, because there is nothing else it could carry.
+//! `ReplayComplete`, `Detached`, `Resize`, `PauseOutput`/`ResumeOutput` and
+//! the stall detach work as their declarations in the crate root define
+//! them; pause means "send nothing until the resume", history included, and
+//! the supervisor coalesces (see "Flow control"). The grid client itself
+//! sends no pause or resume: it applies messages as they arrive and draws at
+//! most once per animation frame, so no backlog builds up in the page. Its
+//! backlog builds up in the helm instead, which pauses and resumes the
+//! supervisor from its own queue.
 //!
-//! The helm passes the browser's request through as `grid`, and relays a
-//! grid channel with what it needs that a byte channel does not: frames up
-//! to [`GRID_MAX_MESSAGE`] (a byte channel's are at most
-//! [`crate::MAX_TERMINAL_DATA_LEN`]) in a queue bounded in bytes as well as
-//! frames, each browser input message forwarded as one frame, and its own
-//! pause and resume, since the grid client sends none (see "Flow control").
-//! The helm also refuses an `Attached` that names `grid` for an attach that
-//! did not ask for it, rather than tell a browser that cannot draw grids to
-//! expect one.
-//!
-//! The helm tells the browser the stream kind in a
-//! `{"type":"stream","kind":"grid"|"bytes"}` text frame, so the client picks
-//! its terminal component per attachment (xterm.js for `bytes`, the grid
-//! client for `grid`). The ordering contract for the browser: on every
-//! attachment, the stream notice comes before the first binary data frame
-//! and before `replay_complete`; `pong` and `detached` may come before it and
-//! settle nothing.
+//! The helm relays frames up to [`GRID_MAX_MESSAGE`] in a queue bounded in
+//! bytes as well as in messages, and forwards each browser input message as
+//! one frame (see "Flow control").
 //!
 //! # Framing
 //!
@@ -292,7 +271,7 @@
 //! One [`GridInput`] per data frame: keys the client does not handle itself,
 //! typed and composed text, paste parts, mouse events in cell coordinates,
 //! and focus changes. Resize stays the existing control message; the grid
-//! client sends no pause or resume (see "Attach and the stream kind").
+//! client sends no pause or resume (see "Attachments").
 //!
 //! A resize to the size the terminal already has is a no-op for a grid
 //! terminal: the supervisor does not resize the pty, reflow, redraw or reset
@@ -344,7 +323,7 @@
 //! a grid stream (`PauseOutput`) once its queue for it passes a mark, and
 //! resumes it once the browser has drained it, and a pause that outlives
 //! the stall timeout, from a browser that stopped reading, ends the
-//! attachment as a byte stream's does.
+//! attachment as stalled.
 //!
 //! # What this module checks
 //!
@@ -425,20 +404,24 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Most encoded bytes in one supervisor-to-client grid message.
 ///
-/// Larger than [`crate::MAX_TERMINAL_DATA_LEN`] because a row cannot be split
-/// across messages and one 1000-column row with its links can exceed 64 KiB.
-/// The helm admits frames up to this bound on an attachment that asked for
-/// grids, and holds at most as many bytes per attachment as a byte stream's
-/// worst case (module docs, "Attach and the stream kind").
+/// A row cannot be split across messages, and one row of the widest grid
+/// ([`GRID_MAX_DIMENSION`] columns, a different style and link in every
+/// cell) with its link table can run to several hundred KiB; 1 MiB leaves
+/// that row room while keeping one message a small share of what the helm
+/// holds for an attachment. The helm admits frames up to this bound and
+/// ends an attachment whose supervisor sends a larger one.
 pub const GRID_MAX_MESSAGE: usize = 1024 * 1024;
 
-/// Most bytes of JSON in one client-to-supervisor grid message: the same
-/// bound every terminal data frame already has.
+/// Most bytes of JSON in one client-to-supervisor grid message: 64 KiB.
 ///
-/// The helm forwards each browser message on a grid channel as one data
-/// frame, never cut into its 32 KiB input chunks, and ends the attachment on
-/// a message over this bound rather than forward it.
-pub const GRID_MAX_INPUT_MESSAGE: usize = crate::MAX_TERMINAL_DATA_LEN;
+/// Twice the largest paste part ([`GRID_MAX_PASTE_PART_BYTES`]), so a part of
+/// ordinary text fits once JSON-escaped; the client cuts a part shorter when
+/// escaping would take it past this ("Client to supervisor"). It also keeps
+/// what one viewer can make the supervisor parse in a single message small.
+/// Both ends enforce it, so changing it is a protocol change. The helm
+/// forwards each browser message as one data frame, unchanged, and ends the
+/// attachment on a message over this bound rather than forward it.
+pub const GRID_MAX_INPUT_MESSAGE: usize = 64 * 1024;
 
 /// Largest `cols` or `rows` a grid has; the smallest is 1. Also bounds every
 /// cell coordinate (`y`, `col + width`, mouse `x` and `y`) that cannot be
@@ -1611,7 +1594,8 @@ pub enum GridInput {
         mods: u8,
         /// The viewer runs on a Mac, by an exact platform list
         /// (`navigator.platform` is `Macintosh`, `MacIntel`, `MacPPC` or
-        /// `Mac68K`, the list old terminals' xterm.js uses). Some keys encode
+        /// `Mac68K`, the list xterm.js uses, where the encoding was ported
+        /// from). Some keys encode
         /// differently there, because Option is a key of its own on a Mac
         /// (it composes characters) while Alt acts as Meta elsewhere
         /// (Ctrl+Option with `_` or `@`, among others). Carried on

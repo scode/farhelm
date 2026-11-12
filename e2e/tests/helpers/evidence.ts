@@ -14,23 +14,11 @@ import {
   BrowserTimeline,
   registerObservedPage,
 } from "./timeline";
-import { HostPremiseWatch, setActiveHostPremiseWatch, watchHostPremise } from "./host-premise";
 
 export { expect };
 
 type EvidenceFixtures = {
   timeline: BrowserTimeline;
-  /**
-   * The watch that fails a test any of whose attachments of a real session
-   * came back as an old terminal (host-premise.ts).
-   */
-  hostPremise: HostPremiseWatch;
-  /**
-   * A test that serves a session the helm does not list (a fabricated reply)
-   * sets this, so the host premise reads that session's absence as expected
-   * rather than as a failed lookup. Off by default.
-   */
-  fabricatedTerminals: boolean;
 };
 
 /**
@@ -72,30 +60,7 @@ export const test = base.extend<EvidenceFixtures>({
       }
     }
   }, { auto: true }],
-  fabricatedTerminals: [false, { option: true }],
-  hostPremise: [async ({ playwright, baseURL, extraHTTPHeaders, fabricatedTerminals }, use, testInfo) => {
-    // Lookups get a request context of their own, authorized as the test's
-    // is, made only if a byte stream ever shows up (HostPremiseWatch), so a
-    // test whose terminals are all new keeps its resource profile.
-    const watch = new HostPremiseWatch(
-      () => playwright.request.newContext({ baseURL, extraHTTPHeaders }),
-      { fabricated: fabricatedTerminals },
-    );
-    setActiveHostPremiseWatch(watch);
-    let problems: string[];
-    try {
-      await use(watch);
-    } finally {
-      setActiveHostPremiseWatch(null);
-      problems = await watch.finish(testInfo);
-    }
-    if (problems.length) {
-      throw new Error(`the host-terminal premise failed:\n${problems.join("\n")}`);
-    }
-  }, { auto: true }],
-  // Depends on `hostPremise` so the running test's watch is in place when
-  // `observeContext` registers this context with it.
-  context: async ({ context, timeline, hostPremise: _hostPremise }, use) => {
+  context: async ({ context, timeline }, use) => {
     await observeContext(context, timeline);
     await use(context);
   },
@@ -123,9 +88,6 @@ export async function observeContext(
   context: BrowserContext,
   timeline: BrowserTimeline,
 ): Promise<void> {
-  // Every observed context is also under the host-terminal premise's
-  // watch (host-premise.ts), before any listener group of its own.
-  watchHostPremise(context);
   let initReady = false;
   let removed = false;
   const seen = new WeakSet<Page>();

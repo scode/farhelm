@@ -46,7 +46,7 @@
 //
 // The decisions here that are pure — decoding a frame, picking a delay,
 // building the URL — are exported under CommonJS as well as installed on
-// `window`, exactly as term-bytes.js is, so `js-tests/events.test.js` can
+// `window`, exactly as paste-sanitizer.js is, so `js-tests/events.test.js` can
 // assert them directly instead of inferring them from a browser run. Both
 // installs are guarded on the environment having the thing they install
 // into: under `require()` there is no `window`, and in a browser there is no

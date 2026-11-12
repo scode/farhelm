@@ -2,8 +2,11 @@
 //! session, against a stand-in host in this test process
 //! (`hosts::terminal::test_host`): status and exit recording, the
 //! never-started excerpt, an unreadable host, the ticker's wake on a host
-//! exit, the hook anchor, the hold wait, prompt delivery, and Stop of a
-//! child whose host has not yet reported its exit. Re-adoption tests keep
+//! exit, the hook anchor, the hold wait, prompt delivery, Stop of a
+//! child whose host has not yet reported its exit, and grid viewers
+//! attached over the supervisor's own connection handling (takeover,
+//! pause and stall, and which attachment a pause or a detach may act on
+//! once a takeover replaced it). Re-adoption tests keep
 //! retry timing separate from the action: they assert the real due time,
 //! then force only the test-owned schedule due, so the reconnect window
 //! needs no minute-long test sleep.
@@ -2487,7 +2490,7 @@ async fn readoption_recovers_a_midlife_timeout_on_the_liveness_wake() {
     assert!(session_status(&entry).0.is_live());
     let mut viewer = GridPeer::connect(&sup).await;
     assert!(matches!(
-        viewer.attach(1, 1, "recovered-viewer", true).await,
+        viewer.attach(1, 1, "recovered-viewer").await,
         ControlMsg::Attached { .. }
     ));
     viewer
@@ -3229,6 +3232,9 @@ struct GridPeer {
     replayed: std::collections::HashSet<u32>,
     /// Every `Detached` that arrived, by channel.
     detached: HashMap<u32, farhelm_proto::DetachCode>,
+    /// Every `Detached` that arrived, in order: what shows a channel was
+    /// told twice, which `detached` (one code per channel) would hide.
+    detach_log: Vec<(u32, farhelm_proto::DetachCode)>,
     /// Replies to requests, by request id.
     replies: HashMap<u64, ControlMsg>,
 }
@@ -3255,6 +3261,7 @@ impl GridPeer {
             clients: HashMap::new(),
             replayed: Default::default(),
             detached: HashMap::new(),
+            detach_log: Vec::new(),
             replies: HashMap::new(),
         };
         tokio::time::timeout(
@@ -3274,21 +3281,44 @@ impl GridPeer {
             .expect("write a control frame");
     }
 
-    /// Attach `s1`'s agent on `channel` under `lease`, as a client that can
-    /// (`grid`) or cannot show grids, and return the reply.
-    async fn attach(&mut self, req_id: u64, channel: u32, lease: &str, grid: bool) -> ControlMsg {
+    /// Attach `s1`'s agent on `channel` under `lease`, and return the reply.
+    async fn attach(&mut self, req_id: u64, channel: u32, lease: &str) -> ControlMsg {
+        self.attach_session(req_id, "s1", channel, lease).await
+    }
+
+    /// Attach `session`'s agent on `channel` under `lease`, and return the
+    /// reply.
+    async fn attach_session(
+        &mut self,
+        req_id: u64,
+        session: &str,
+        channel: u32,
+        lease: &str,
+    ) -> ControlMsg {
+        self.send_attach(req_id, session, channel, lease).await;
+        self.attach_reply(req_id, channel).await
+    }
+
+    /// Send an attach of `session`'s agent without waiting for its reply,
+    /// for a test that must do something while the attach is in flight;
+    /// [`Self::attach_reply`] collects the reply.
+    async fn send_attach(&mut self, req_id: u64, session: &str, channel: u32, lease: &str) {
         self.send(&ControlMsg::Attach {
             req_id,
-            session_id: "s1".to_string(),
+            session_id: session.to_string(),
             channel,
             cols: 80,
             rows: 24,
             terminal: TerminalSelector::default(),
             lease: lease.to_string(),
             if_unowned: false,
-            grid,
         })
         .await;
+    }
+
+    /// The reply to the attach [`Self::send_attach`] sent as `req_id` on
+    /// `channel`, setting up the channel's client when it was attached.
+    async fn attach_reply(&mut self, req_id: u64, channel: u32) -> ControlMsg {
         self.until("the attach's reply", |peer| {
             peer.replies.contains_key(&req_id)
         })
@@ -3322,6 +3352,7 @@ impl GridPeer {
                 }
                 ControlMsg::Detached { channel, code, .. } => {
                     self.detached.insert(channel, code);
+                    self.detach_log.push((channel, code));
                 }
                 ControlMsg::SessionsChanged => {}
                 reply => {
@@ -3330,6 +3361,32 @@ impl GridPeer {
                 }
             },
         }
+    }
+
+    /// A round trip on this connection: a `ListSessions` sent as `req_id`,
+    /// and every frame up to its reply read and filed.
+    ///
+    /// The connection handles `PauseOutput` and `ResumeOutput` inline, in
+    /// the order its frames arrive, and sends no reply to either; the reply
+    /// to a request sent after one is therefore what shows it was applied.
+    /// It also files any `Detached` the supervisor queued before the reply.
+    async fn round_trip(&mut self, req_id: u64) {
+        self.send(&ControlMsg::ListSessions { req_id }).await;
+        self.until("the round trip's reply", |peer| {
+            peer.replies.contains_key(&req_id)
+        })
+        .await;
+        self.replies.remove(&req_id);
+    }
+
+    /// Whether `channel`'s screen shows a row reading exactly `text`.
+    fn shows(&self, channel: u32, text: &str) -> bool {
+        self.clients.get(&channel).is_some_and(|client| {
+            client
+                .screen
+                .iter()
+                .any(|row| crate::grid_output::test_client::row_text(row) == text)
+        })
     }
 
     /// Read frames until `done` holds; fails after [`WAIT`].
@@ -3368,41 +3425,24 @@ async fn grid_fixture(
     (state, sup, host, test_host)
 }
 
-/// A client that can show grids attaches a host agent as a grid stream,
-/// sees its screen, and types into it; one that cannot is refused.
+/// A client attaches a host agent as a grid stream, sees its screen, and
+/// types into it.
 ///
 /// Why: this is the path a viewer of a host terminal takes end to end
-/// through the supervisor's own connection handling: the attach's stream
-/// kind, the attach sequence ending in `ReplayComplete`, and input routed
-/// through the attachment's grid input side. Spec: a bytes-only attach is
-/// refused as an invalid request with the permanent "needs a client that
-/// can show grid terminals" message; a grid attach is answered `Attached`
-/// with stream kind `grid`, then the client's screen shows `hello from the
-/// host` and `ReplayComplete` arrives; a `text` input of `typed` then
-/// reaches the host's child.
+/// through the supervisor's own connection handling: the attach sequence
+/// ending in `ReplayComplete`, and input routed through the attachment's
+/// grid input side. Spec: the attach is answered `Attached`, then the
+/// client's screen shows `hello from the host` and `ReplayComplete` arrives;
+/// a `text` input of `typed` then reaches the host's child.
 #[farhelm_testtrace::test]
 async fn a_grid_client_attaches_a_host_agent_and_types_into_it() {
     let (_state, sup, host, test_host) = grid_fixture(SupervisorTimeouts::default()).await;
     test_host.output(b"hello from the host\r\n");
     let mut peer = GridPeer::connect(&sup).await;
 
-    let refused = peer.attach(1, 1, "viewer", false).await;
-    let ControlMsg::Error { kind, message, .. } = refused else {
-        panic!("a bytes-only attach is refused, got {refused:?}");
-    };
-    assert_eq!(kind, ErrorKind::InvalidRequest);
-    assert_eq!(message, crate::service::handlers::ATTACH_NEEDS_GRID_CLIENT);
-
-    let attached = peer.attach(2, 2, "viewer", true).await;
+    let attached = peer.attach(2, 2, "viewer").await;
     assert!(
-        matches!(
-            attached,
-            ControlMsg::Attached {
-                channel: 2,
-                stream: farhelm_proto::StreamKind::Grid,
-                ..
-            }
-        ),
+        matches!(attached, ControlMsg::Attached { channel: 2, .. }),
         "{attached:?}"
     );
     peer.until("the screen and the end of the catch-up", |peer| {
@@ -3437,17 +3477,17 @@ async fn a_grid_client_attaches_a_host_agent_and_types_into_it() {
 /// the viewer attaches again. Spec: viewer `a` attaches `s1`'s running
 /// host agent and catches up; with the entry's terminal then a placeholder
 /// for that host (unavailable as busy, a reason that may pass), viewer
-/// `b`'s grid attach is refused with `Unavailable` and a message saying the
+/// `b`'s attach is refused with `Unavailable` and a message saying the
 /// supervisor keeps trying to adopt the host, while `a` is not detached
 /// and still shows the host's next output; with the entry's terminal a
 /// runtime again, as re-adoption leaves it, `b`'s attach is answered
-/// `Attached` with stream kind `grid` and catches up, taking over from `a`.
+/// `Attached` and catches up, taking over from `a`.
 #[farhelm_testtrace::test]
 async fn a_grid_attach_to_a_placeholder_is_refused_until_a_runtime_replaces_it() {
     let (_state, sup, host, test_host) = grid_fixture(SupervisorTimeouts::default()).await;
     let mut incumbent = GridPeer::connect(&sup).await;
     assert!(matches!(
-        incumbent.attach(1, 1, "a", true).await,
+        incumbent.attach(1, 1, "a").await,
         ControlMsg::Attached { .. }
     ));
     incumbent
@@ -3467,7 +3507,7 @@ async fn a_grid_attach_to_a_placeholder_is_refused_until_a_runtime_replaces_it()
         Arc::new(entry_with(Some(placeholder), LastOutcome::Running)),
     );
     let mut viewer = GridPeer::connect(&sup).await;
-    let refused = viewer.attach(1, 1, "b", true).await;
+    let refused = viewer.attach(1, 1, "b").await;
     let ControlMsg::Error { kind, message, .. } = refused else {
         panic!("an attach to a placeholder is refused, got {refused:?}");
     };
@@ -3491,16 +3531,9 @@ async fn a_grid_attach_to_a_placeholder_is_refused_until_a_runtime_replaces_it()
         "s1".to_string(),
         Arc::new(entry_with(Some(host), LastOutcome::Running)),
     );
-    let attached = viewer.attach(2, 1, "b", true).await;
+    let attached = viewer.attach(2, 1, "b").await;
     assert!(
-        matches!(
-            attached,
-            ControlMsg::Attached {
-                channel: 1,
-                stream: farhelm_proto::StreamKind::Grid,
-                ..
-            }
-        ),
+        matches!(attached, ControlMsg::Attached { channel: 1, .. }),
         "{attached:?}"
     );
     viewer
@@ -3525,7 +3558,7 @@ async fn a_takeover_displaces_a_host_agents_grid_attachment() {
     let (_state, sup, _host, _test_host) = grid_fixture(SupervisorTimeouts::default()).await;
     let mut first = GridPeer::connect(&sup).await;
     assert!(matches!(
-        first.attach(1, 1, "a", true).await,
+        first.attach(1, 1, "a").await,
         ControlMsg::Attached { .. }
     ));
     first
@@ -3533,7 +3566,7 @@ async fn a_takeover_displaces_a_host_agents_grid_attachment() {
         .await;
     let mut second = GridPeer::connect(&sup).await;
     assert!(matches!(
-        second.attach(1, 1, "b", true).await,
+        second.attach(1, 1, "b").await,
         ControlMsg::Attached { .. }
     ));
     first
@@ -3563,7 +3596,7 @@ async fn a_stalled_grid_viewer_is_detached() {
     .await;
     let mut peer = GridPeer::connect(&sup).await;
     assert!(matches!(
-        peer.attach(1, 1, "viewer", true).await,
+        peer.attach(1, 1, "viewer").await,
         ControlMsg::Attached { .. }
     ));
     peer.until("the catch-up", |peer| peer.replayed.contains(&1))
@@ -3573,6 +3606,450 @@ async fn a_stalled_grid_viewer_is_detached() {
     peer.until("the stall detach", |peer| peer.detached.contains_key(&1))
         .await;
     assert_eq!(peer.detached[&1], farhelm_proto::DetachCode::Stalled);
+}
+
+// ---- Who may pause, stall-detach or naturally detach after a takeover ---------------
+//
+// Channel ids are unique only within a connection (every helm numbers its
+// channels from 1), and a takeover installs a different attachment under the
+// same key while the loser's output task may still be on its way out. These
+// tests pin that a pause, a stall teardown and a natural detach each act only
+// on the attachment that issued them, and that the stall bound applies to one
+// continuous pause rather than to their sum. They were ported from end-to-end
+// tests that ran on the removed tmux driver; the code they cover serves every
+// grid viewer.
+
+/// The key of `s1`'s agent attachment, the one these tests attach.
+fn s1_agent() -> AttachmentKey {
+    AttachmentKey::new("s1", TerminalId::Agent)
+}
+
+/// Whether the output task of the attachment at `key` has finished while
+/// the attachment is still in the map: the task has reported its verdict
+/// (`connection::report_forwarder_end` runs on the task itself, so the
+/// detach it asks for is spawned by then), and nothing has removed the
+/// attachment yet.
+fn verdict_reported(
+    attachments: &HashMap<AttachmentKey, ActiveAttach>,
+    key: &AttachmentKey,
+) -> bool {
+    attachments
+        .get(key)
+        .is_some_and(|attachment| attachment.forwarder.is_finished())
+}
+
+/// Re-check `done` until it holds; fails after [`WAIT`]. For conditions
+/// that nothing announces, such as a spawned task's end.
+async fn poll_until(what: &str, mut done: impl FnMut() -> bool) {
+    let reached = tokio::time::timeout(WAIT, async {
+        while !done() {
+            // sleep-ok: the polling interval of this shared helper; a task's end has no notifier to wait on.
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    assert!(reached.is_ok(), "{what} did not happen within {WAIT:?}");
+}
+
+/// A `PauseOutput` from a client that lost a takeover does not pause the
+/// winner's attachment, though both use the same channel id.
+///
+/// Why: a pause names only a channel, and the winner's connection numbers
+/// its channels from 1 like the loser's. Without the connection half of
+/// the ownership check (`connection::set_attachment_paused`), one browser
+/// tab's stale pause would silence the terminal another tab now holds.
+/// Spec: viewer `a` attaches `s1` on channel 1 and viewer `b`, on its own
+/// connection, takes it over on channel 1 (premise: `a` is told it was
+/// taken over); `a` then pauses channel 1, and once a round trip on `a`'s
+/// connection shows the pause was handled, output the host prints next
+/// reaches `b`'s screen and `b` is not detached.
+#[farhelm_testtrace::test]
+async fn a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner() {
+    let (_state, sup, _host, test_host) = grid_fixture(SupervisorTimeouts::default()).await;
+    let mut loser = GridPeer::connect(&sup).await;
+    assert!(matches!(
+        loser.attach(1, 1, "a").await,
+        ControlMsg::Attached { .. }
+    ));
+    loser
+        .until("the loser's catch-up", |peer| peer.replayed.contains(&1))
+        .await;
+    let mut winner = GridPeer::connect(&sup).await;
+    assert!(matches!(
+        winner.attach(1, 1, "b").await,
+        ControlMsg::Attached { channel: 1, .. }
+    ));
+    loser
+        .until("the takeover notice", |peer| peer.detached.contains_key(&1))
+        .await;
+    assert_eq!(
+        loser.detached[&1],
+        farhelm_proto::DetachCode::TakenOver,
+        "premise: the loser lost channel 1 to a takeover"
+    );
+    winner
+        .until("the winner's catch-up", |peer| peer.replayed.contains(&1))
+        .await;
+
+    loser.send(&ControlMsg::PauseOutput { channel: 1 }).await;
+    loser.round_trip(2).await;
+    test_host.output(b"after the losing pause\r\n");
+    winner
+        .until("the winner's output after the losing pause", |peer| {
+            peer.shows(1, "after the losing pause") || peer.detached.contains_key(&1)
+        })
+        .await;
+    assert!(
+        winner.detached.is_empty(),
+        "the winner was detached: {:?}",
+        winner.detach_log
+    );
+}
+
+/// A stall teardown that reaches the attachments lock after a takeover
+/// leaves the winner's attachment alone.
+///
+/// Why: a stalled output task hands its teardown to a task of its own
+/// (output tasks never take the attachments lock), so between the stall
+/// verdict and the teardown a takeover can install a different attachment
+/// under the same key, on another connection using the same channel id.
+/// Without the identity check in `connection::detach_stalled` the
+/// teardown would remove the winner's live attachment and tell the loser
+/// it stalled. The old end-to-end test swept takeover timings and could
+/// not tell whether it hit the window; here the test holds the lock itself
+/// so the order is fixed, and the loser's notice proves it afterwards.
+///
+/// Spec: with a 3 s stall timeout (room for the takeover's attach to reach
+/// the lock first, even under load), viewer `a` attaches `s1` on channel 1
+/// and pauses it (a round trip shows the pause handled). Holding the
+/// attachments lock, the test sends viewer `b`'s attach of `s1` on channel 1
+/// (which queues on the lock) and waits until `a`'s output task has
+/// reported its verdict with the attachment still in the map. Once the test
+/// lets go, the takeover runs first and the teardown after it (the lock
+/// is FIFO); then, under the lock again, the attachment at the key is a
+/// live one; `a` was told only that it was taken over, which is what shows
+/// the takeover won; `b`'s attach was answered `Attached` and output the
+/// host prints next reaches `b`'s screen with `b` not detached.
+#[farhelm_testtrace::test]
+async fn a_stall_teardown_racing_a_takeover_never_detaches_the_winner() {
+    let (_state, sup, _host, test_host) = grid_fixture(SupervisorTimeouts {
+        stall_detach: Duration::from_secs(3),
+        ..SupervisorTimeouts::default()
+    })
+    .await;
+    let key = s1_agent();
+    let mut loser = GridPeer::connect(&sup).await;
+    assert!(matches!(
+        loser.attach(1, 1, "a").await,
+        ControlMsg::Attached { .. }
+    ));
+    loser
+        .until("the loser's catch-up", |peer| peer.replayed.contains(&1))
+        .await;
+    // Connected before the lock is taken, so that nothing in the handshake
+    // can wait on it.
+    let mut winner = GridPeer::connect(&sup).await;
+    loser.send(&ControlMsg::PauseOutput { channel: 1 }).await;
+    loser.round_trip(2).await;
+
+    let attachments = sup.attachments.lock().await;
+    // The stall clock started when the pause was handled, and the attach has
+    // the rest of those three seconds to reach the lock; whether it did is asserted
+    // below from the loser's notice, not assumed.
+    winner.send_attach(1, "s1", 1, "b").await;
+    poll_until("the stalled attachment's verdict", || {
+        verdict_reported(&attachments, &key)
+    })
+    .await;
+    // The teardown task was spawned as the verdict was reported, and may
+    // not have run yet; one yield on this single-threaded runtime lets it
+    // run up to the lock, so that it queues there before the test does.
+    tokio::task::yield_now().await;
+    drop(attachments);
+
+    let attachments = sup.attachments.lock().await;
+    let current = attachments
+        .get(&key)
+        .expect("the winner's attachment survived the stall teardown");
+    assert!(
+        !current.forwarder.is_finished(),
+        "the attachment at the key is the winner's live one"
+    );
+    drop(attachments);
+
+    let attached = winner.attach_reply(1, 1).await;
+    assert!(
+        matches!(attached, ControlMsg::Attached { channel: 1, .. }),
+        "{attached:?}"
+    );
+    loser.round_trip(3).await;
+    assert_eq!(
+        loser.detach_log,
+        [(1, farhelm_proto::DetachCode::TakenOver)],
+        "the takeover reached the lock before the stall teardown, and the teardown told the \
+         loser nothing"
+    );
+    test_host.output(b"after the stall teardown\r\n");
+    winner
+        .until("the winner's output after the stall teardown", |peer| {
+            peer.shows(1, "after the stall teardown") || peer.detached.contains_key(&1)
+        })
+        .await;
+    assert!(
+        winner.detached.is_empty(),
+        "the winner was detached: {:?}",
+        winner.detach_log
+    );
+}
+
+/// Pauses that each end well inside the stall timeout never detach, though
+/// together they last several times longer.
+///
+/// Why: the stall timeout bounds ONE continuous pause, measured from the
+/// instant it started (`connection::apply_pause_transition` clears that
+/// instant on resume). An implementation that kept the instant across a
+/// resume, or timed a cumulative budget, would detach a slow client that
+/// is being served correctly. The complement of
+/// `a_stalled_grid_viewer_is_detached`; the unit test
+/// `repeated_pause_spam_never_moves_the_stall_anchor` pins the anchor
+/// itself under a paused clock.
+///
+/// Spec: with a 2 s stall timeout, a grid viewer of `s1` pauses for 1.2 s
+/// and resumes, five times (6 s paused in all), with a round trip after
+/// each resume showing it handled and no `Detached` filed by then; output
+/// the host prints afterwards reaches the viewer's screen, still attached.
+#[farhelm_testtrace::test]
+async fn repeated_short_pauses_never_accumulate_into_a_stall_detach() {
+    let stall = Duration::from_secs(2);
+    let (_state, sup, _host, test_host) = grid_fixture(SupervisorTimeouts {
+        stall_detach: stall,
+        ..SupervisorTimeouts::default()
+    })
+    .await;
+    let mut peer = GridPeer::connect(&sup).await;
+    assert!(matches!(
+        peer.attach(1, 1, "viewer").await,
+        ControlMsg::Attached { .. }
+    ));
+    peer.until("the catch-up", |peer| peer.replayed.contains(&1))
+        .await;
+
+    for cycle in 0..5u64 {
+        peer.send(&ControlMsg::PauseOutput { channel: 1 }).await;
+        // sleep-ok: the stimulus under test is a pause held for 60% of the stall timeout; 0.8 s of margin absorbs the resume's delivery.
+        tokio::time::sleep(stall.mul_f64(0.6)).await;
+        peer.send(&ControlMsg::ResumeOutput { channel: 1 }).await;
+        peer.round_trip(10 + cycle).await;
+        assert!(
+            peer.detached.is_empty(),
+            "cycle {cycle}: a pause shorter than the stall timeout detached: {:?}",
+            peer.detach_log
+        );
+    }
+
+    test_host.output(b"after the pauses\r\n");
+    peer.until("the output after the pauses", |peer| {
+        peer.shows(1, "after the pauses") || peer.detached.contains_key(&1)
+    })
+    .await;
+    assert!(
+        peer.detached.is_empty(),
+        "the viewer was detached: {:?}",
+        peer.detach_log
+    );
+}
+
+/// A stall detaches only the stalled attachment, never another attachment
+/// on the same connection.
+///
+/// Why: the stall bound is per terminal (PLAN_M4.md item 3, in lore): a
+/// client whose background tab wedged loses that tab, not the terminal
+/// the user is looking at, and a client that is wedged everywhere reaches
+/// each terminal's bound in turn anyway. A teardown that swept by
+/// connection would take down every terminal the helm is showing, since
+/// they all ride one connection. The two attachments belong to different
+/// sessions under different leases, so neither can displace the other, and
+/// losing the survivor could only come from the stall teardown.
+///
+/// Spec: with a 300 ms stall timeout, one connection attaches `s1` on
+/// channel 1 and `s2` (a host of its own) on channel 2, under two leases;
+/// once both caught up, channel 1 is paused and is detached as stalled;
+/// channel 2 is not detached, output `s2`'s host prints next reaches
+/// channel 2's screen, and input typed on channel 2 reaches `s2`'s host.
+#[farhelm_testtrace::test]
+async fn a_stall_detaches_only_its_own_attachment_not_the_connections_others() {
+    let (_state, sup, _host, _test_host) = grid_fixture(SupervisorTimeouts {
+        stall_detach: Duration::from_millis(300),
+        ..SupervisorTimeouts::default()
+    })
+    .await;
+    let (live_host, live_test_host) = adopt_test_host(None).await;
+    let mut live_entry = entry_with(Some(live_host), LastOutcome::Running);
+    live_entry.info.id = "s2".to_string();
+    sup.sessions
+        .lock()
+        .await
+        .insert("s2".to_string(), Arc::new(live_entry));
+
+    let mut peer = GridPeer::connect(&sup).await;
+    assert!(matches!(
+        peer.attach_session(1, "s1", 1, "lease-of-the-stalled-view")
+            .await,
+        ControlMsg::Attached { channel: 1, .. }
+    ));
+    assert!(matches!(
+        peer.attach_session(2, "s2", 2, "lease-of-the-live-view")
+            .await,
+        ControlMsg::Attached { channel: 2, .. }
+    ));
+    peer.until("both catch-ups", |peer| {
+        peer.replayed.contains(&1) && peer.replayed.contains(&2)
+    })
+    .await;
+    assert!(
+        peer.detached.is_empty(),
+        "premise: neither attach displaced the other: {:?}",
+        peer.detach_log
+    );
+
+    peer.send(&ControlMsg::PauseOutput { channel: 1 }).await;
+    peer.until("the stall detach", |peer| peer.detached.contains_key(&1))
+        .await;
+    assert_eq!(peer.detached[&1], farhelm_proto::DetachCode::Stalled);
+
+    live_test_host.output(b"still live\r\n");
+    peer.until("the live view's next output", |peer| {
+        peer.shows(2, "still live") || peer.detached.contains_key(&2)
+    })
+    .await;
+    assert_eq!(
+        peer.detach_log,
+        [(1, farhelm_proto::DetachCode::Stalled)],
+        "only the stalled attachment was detached"
+    );
+    peer.writer
+        .write_frame(&Frame::data(
+            2,
+            br#"{"t":"text","data":"still-mine"}"#.to_vec(),
+        ))
+        .await
+        .expect("write input");
+    assert!(
+        live_test_host.received_becomes(b"still-mine", WAIT).await,
+        "the live view's input route survived; the host received {:?}",
+        live_test_host.received()
+    );
+}
+
+/// A takeover's notice wins over a natural detach that was decided before
+/// the takeover and arbitrated after it.
+///
+/// Why: an output task that ends on its own (its input failed, its stream
+/// failed, its terminal ended) hands the detach to a task of its own, which
+/// claims the attachment only if it is still the same one
+/// (`connection::detach_naturally`). A takeover landing in between owns
+/// the only notice; without the identity check the stale verdict would
+/// remove the winner's attachment and tell the loser a second, false
+/// reason. The removed end-to-end test held the arbiter with a fault seam
+/// that no longer exists. A Delete in progress holds every natural detach
+/// of its session before it claims anything (`Supervisor::delete_over`),
+/// so a Delete's mark, taken by hand, holds the arbiter at the same point
+/// without touching the product code.
+///
+/// Spec: viewer `a` attaches `s1` on channel 1, and a Delete of `s1` is
+/// marked in progress. `a` types while the host holds its input, and the
+/// host's connection drops, so the input's fate is unknown and `a`'s
+/// attachment fails its input: its output task reports the verdict while
+/// the attachment stays in the map and `a` is told nothing. Viewer `b`
+/// then attaches `s1` on channel 1 of its own connection and `a` is told
+/// it was taken over. Once the mark is gone and the arbiter has had its
+/// turn at the lock, the attachment at the key is `b`'s live one, `a` was
+/// told nothing more, and output the host prints next reaches `b`'s screen
+/// with `b` not detached.
+#[farhelm_testtrace::test]
+async fn takeover_reason_wins_over_a_held_natural_detach() {
+    let (_state, sup, _host, test_host) = grid_fixture(SupervisorTimeouts::default()).await;
+    let key = s1_agent();
+    let mut loser = GridPeer::connect(&sup).await;
+    assert!(matches!(
+        loser.attach(1, 1, "a").await,
+        ControlMsg::Attached { .. }
+    ));
+    loser
+        .until("the loser's catch-up", |peer| peer.replayed.contains(&1))
+        .await;
+
+    let delete_mark = sup.mark_delete_in_progress("s1");
+    test_host.hold_input().await;
+    loser
+        .writer
+        .write_frame(&Frame::data(1, br#"{"t":"text","data":"lost"}"#.to_vec()))
+        .await
+        .expect("write input");
+    assert!(
+        test_host.holds(1, WAIT).await,
+        "premise: the host holds the loser's input"
+    );
+    test_host.drop_connection();
+    test_host.release_input();
+    poll_until("the loser's natural verdict", || {
+        sup.attachments
+            .try_lock()
+            .is_ok_and(|attachments| verdict_reported(&attachments, &key))
+    })
+    .await;
+    loser.round_trip(2).await;
+    assert!(
+        loser.detached.is_empty(),
+        "premise: the natural detach is held, so the loser was told nothing yet: {:?}",
+        loser.detach_log
+    );
+
+    let mut winner = GridPeer::connect(&sup).await;
+    let attached = winner.attach(1, 1, "b").await;
+    assert!(
+        matches!(attached, ControlMsg::Attached { channel: 1, .. }),
+        "{attached:?}"
+    );
+    loser
+        .until("the takeover notice", |peer| peer.detached.contains_key(&1))
+        .await;
+
+    drop(delete_mark);
+    // The arbiter wakes as the mark drops; one yield on this
+    // single-threaded runtime lets it take the lock and decide before the
+    // test looks.
+    tokio::task::yield_now().await;
+    let attachments = sup.attachments.lock().await;
+    let current = attachments
+        .get(&key)
+        .expect("the winner's attachment survived the natural detach");
+    assert!(
+        !current.forwarder.is_finished(),
+        "the attachment at the key is the winner's live one"
+    );
+    drop(attachments);
+
+    loser.round_trip(3).await;
+    assert_eq!(
+        loser.detach_log,
+        [(1, farhelm_proto::DetachCode::TakenOver)],
+        "the loser hears only the takeover"
+    );
+    winner
+        .until("the winner's catch-up", |peer| peer.replayed.contains(&1))
+        .await;
+    test_host.output(b"after the natural detach\r\n");
+    winner
+        .until("the winner's output after the natural detach", |peer| {
+            peer.shows(1, "after the natural detach") || peer.detached.contains_key(&1)
+        })
+        .await;
+    assert!(
+        winner.detached.is_empty(),
+        "the winner was detached: {:?}",
+        winner.detach_log
+    );
 }
 
 /// A child process of this test that is killed and reaped when dropped, so

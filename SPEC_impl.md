@@ -11,9 +11,9 @@ of it in the same change.
 
 ## Language and runtime
 
-Rust throughout, async on tokio, one cargo workspace. The only sanctioned non-Rust runtime code is the xterm.js terminal
-island and the thin JS interop around it (see GUI), the grid client that draws terminals running in terminal hosts in
-the same island ("Terminal widget: xterm.js island", "The grid client"), plus Playwright test code in TypeScript.
+Rust throughout, async on tokio, one cargo workspace. The only sanctioned non-Rust runtime code is the terminal island,
+the grid client that draws every terminal, and the thin JS interop around it (see GUI; "Terminal widget: the grid
+island", "The grid client"), plus Playwright test code in TypeScript.
 
 Motivation: single language across supervisor, helm, CLI, and UI maximizes shared types and lets one test suite exercise
 real components. tokio because the chosen web stack (axum, tungstenite) lives there; no exotic async needs exist that
@@ -518,18 +518,16 @@ whose displayed age has not moved — an `8h` row survives sixty ticks comparing
 
 Styling is the single hand-written application stylesheet, `crates/farhelm-ui/assets/app.css`: plain CSS, with no
 preprocessing and no framework transformation, though Dioxus still registers it as a packaged asset and decides its
-served path the same way it does every other asset. xterm.js's own look is a separate vendored stylesheet
-(`vendor/xterm.css`), loaded alongside app.css rather than folded into it. Its colors, font stacks, and non-zero corner
-radii are declared once as CSS custom properties in a `:root` block at the top of the file and referenced as
-`var(--token)` everywhere else; the rule is that no use site holds a literal, with one carve-out — a structural `0`,
-where a corner has to stay square because it joins a neighboring control, names no design value and stays a literal. The
-tokens are named for the role a value plays — surface levels (`--bg-*`), foreground levels (`--fg-*`), one accent
-family, `--ok`/`--warn`/`--danger` with their fill and border variants, `--radius-*`, `--font-ui`/`--font-mono` — rather
-than for the color it happens to be, so a restyle is an edit to one block instead of to every rule that mentioned the
-same hex. The dark palette is Steel: blue-gray surfaces and a periwinkle accent. Steel Light is a second
-`:root[data-appearance="light"]` block defining every color, elevation and opacity role independently. Geometry and font
-roles remain shared. The token and contrast checks read both owners separately, so a missing light role cannot silently
-inherit its dark value.
+served path the same way it does every other asset. Its colors, font stacks, and non-zero corner radii are declared once
+as CSS custom properties in a `:root` block at the top of the file and referenced as `var(--token)` everywhere else; the
+rule is that no use site holds a literal, with one carve-out — a structural `0`, where a corner has to stay square
+because it joins a neighboring control, names no design value and stays a literal. The tokens are named for the role a
+value plays — surface levels (`--bg-*`), foreground levels (`--fg-*`), one accent family, `--ok`/`--warn`/`--danger`
+with their fill and border variants, `--radius-*`, `--font-ui`/`--font-mono` — rather than for the color it happens to
+be, so a restyle is an edit to one block instead of to every rule that mentioned the same hex. The dark palette is
+Steel: blue-gray surfaces and a periwinkle accent. Steel Light is a second `:root[data-appearance="light"]` block
+defining every color, elevation and opacity role independently. Geometry and font roles remain shared. The token and
+contrast checks read both owners separately, so a missing light role cannot silently inherit its dark value.
 
 One classic head script owns the device appearance choice, stored as `system`, `dark` or `light` under
 `farhelm.appearance` in localStorage. Missing, invalid or refused storage starts with System; an unavailable system
@@ -561,40 +559,40 @@ level one step above that (menus, dialogs, forms, bands that interrupt a pane). 
 amount. In Steel, the ground is a near-black and not `#000`, because pure black would be the one untinted surface in a
 set meant to read as one material at three depths. The terminal's own `--terminal-bg` surface, Ghostty's default
 background for an out-of-the-box readable terminal, is not a rung on that ladder: it is the terminal theme's background
-(`assets/terminal-theme.js`), which the grid and xterm.js both paint, mirrored so the pane's gutter and viewport agree.
-Which level an element sits on is recorded in the `:root` comments; a `--control-hover-bg` and a `--chip-bg` token fill
-a bordered control's hover state and a small chip respectively, named for that specific role rather than folded into the
-`--bg-*` surface family, so neither one reads as a fourth and fifth level to lay something out on. `--well` is a third
-fill of that kind: the inside of an input, select, or code box, darker than its raised panel so that a field reads as
-cut into it. In Steel it stays lighter than the ground so a field on a dialog does not read as a hole through to the
-page; Steel Light uses a pale recessed fill. The second is that there is ONE accent, and what it may be spent on is a
-closed list rather than a palette to decorate with: selection, `:focus-visible`, normal primary actions, any PRESSED
-disclosure control, and the wait after a confirmed delete (the spinner and words on the session's row and over its
-terminal, and the dot and words in its header). That last entry is the maintainer's choice (2026-09-30): the wait is the
-outcome the user just confirmed, so the danger red it used to be read as a failure; grey is what an earlier indicator
-used, and it went unnoticed; and `--info`, the blue for status, already means idle with unseen output. It is the one
-entry that does not mean "this is where you are" (see below), so it is kept narrow enough not to compete with selection:
-it colors only the spinner or dot, the words, and the terminal overlay card's edge, and the deleting row takes no tint
-or edge of its own, which would look exactly like the selection it usually already is. Action buttons use three
-deliberate tiers on the shared ghost `.btn` base: `.btn-primary` is the normal periwinkle affirmative, `.btn-neutral` is
-the quiet secondary treatment, and `.btn-danger` is reserved for destructive confirmations. A permanent answer uses the
-outlined form of its one-off tier: the YOLO confirmation's "Start, and don't ask again on this host" and host removal's
-"Remove, don't ask again" keep the danger color, while host setup's "Set up, don't ask again" keeps the primary color.
-Each leaves its one-off action as the filled choice. The maintainer chose (2026-09-30) not to make a permanent answer
-the filled one that draws the reflex click. The host row's inline update action is another deliberate outlined
-treatment: amber (`--warn`) for an optional update and red (`--danger-strong`) for a required one. Its outline signals
-urgency without presenting an update as a destructive confirmation. Being outlined, it preserves the sidebar's
-one-filled-control rule. Pressed disclosures use `--accent-fill-hover` so an open trigger is distinct from a resting
-primary. The normal-primary entry is scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly
-one filled control (`New session`), and each dialog or popup that floats over it may supply its own affirmative primary.
-The sidebar's secondary actions use the neutral tier; menu items, tabs, composer selections, relays, and other explicit
-exemptions retain their ghost or purpose-built styling. Destructive menu items remain red text, while their confirmation
-buttons use the danger tier. SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so
-anything else joining that list has to be a place where the accent means "this is where you are" — the same thing every
-entry but the delete wait says — because an accent spread across ordinary decoration would leave nothing to make the
-selection readable. Both constraints have a contrast floor under them: the quiet foreground tokens are set so that
-metadata stays at WCAG AA against the brightest ordinary surface it lands on. Solid selected surfaces have separate
-inverse text roles, so their legibility does not depend on muted prose colors also surviving the selection fill.
+(`assets/terminal-theme.js`), which the grid paints, mirrored so the pane's gutter and viewport agree. Which level an
+element sits on is recorded in the `:root` comments; a `--control-hover-bg` and a `--chip-bg` token fill a bordered
+control's hover state and a small chip respectively, named for that specific role rather than folded into the `--bg-*`
+surface family, so neither one reads as a fourth and fifth level to lay something out on. `--well` is a third fill of
+that kind: the inside of an input, select, or code box, darker than its raised panel so that a field reads as cut into
+it. In Steel it stays lighter than the ground so a field on a dialog does not read as a hole through to the page; Steel
+Light uses a pale recessed fill. The second is that there is ONE accent, and what it may be spent on is a closed list
+rather than a palette to decorate with: selection, `:focus-visible`, normal primary actions, any PRESSED disclosure
+control, and the wait after a confirmed delete (the spinner and words on the session's row and over its terminal, and
+the dot and words in its header). That last entry is the maintainer's choice (2026-09-30): the wait is the outcome the
+user just confirmed, so the danger red it used to be read as a failure; grey is what an earlier indicator used, and it
+went unnoticed; and `--info`, the blue for status, already means idle with unseen output. It is the one entry that does
+not mean "this is where you are" (see below), so it is kept narrow enough not to compete with selection: it colors only
+the spinner or dot, the words, and the terminal overlay card's edge, and the deleting row takes no tint or edge of its
+own, which would look exactly like the selection it usually already is. Action buttons use three deliberate tiers on the
+shared ghost `.btn` base: `.btn-primary` is the normal periwinkle affirmative, `.btn-neutral` is the quiet secondary
+treatment, and `.btn-danger` is reserved for destructive confirmations. A permanent answer uses the outlined form of its
+one-off tier: the YOLO confirmation's "Start, and don't ask again on this host" and host removal's "Remove, don't ask
+again" keep the danger color, while host setup's "Set up, don't ask again" keeps the primary color. Each leaves its
+one-off action as the filled choice. The maintainer chose (2026-09-30) not to make a permanent answer the filled one
+that draws the reflex click. The host row's inline update action is another deliberate outlined treatment: amber
+(`--warn`) for an optional update and red (`--danger-strong`) for a required one. Its outline signals urgency without
+presenting an update as a destructive confirmation. Being outlined, it preserves the sidebar's one-filled-control rule.
+Pressed disclosures use `--accent-fill-hover` so an open trigger is distinct from a resting primary. The normal-primary
+entry is scoped per SURFACE, not per screen: the sidebar's resting chrome carries exactly one filled control
+(`New session`), and each dialog or popup that floats over it may supply its own affirmative primary. The sidebar's
+secondary actions use the neutral tier; menu items, tabs, composer selections, relays, and other explicit exemptions
+retain their ghost or purpose-built styling. Destructive menu items remain red text, while their confirmation buttons
+use the danger tier. SPEC.md requires the sidebar to mark the selected session's row readably at a glance, so anything
+else joining that list has to be a place where the accent means "this is where you are" — the same thing every entry but
+the delete wait says — because an accent spread across ordinary decoration would leave nothing to make the selection
+readable. Both constraints have a contrast floor under them: the quiet foreground tokens are set so that metadata stays
+at WCAG AA against the brightest ordinary surface it lands on. Solid selected surfaces have separate inverse text roles,
+so their legibility does not depend on muted prose colors also surviving the selection fill.
 
 Links use their own `--link` role (`#9cb7ff` in Steel), separate from the accent and from status colors. Every anchor
 and button styled as an inline link uses that color and stays underlined at rest, with no different visited or hover
@@ -668,7 +666,7 @@ three-keyframe pulse is eight changes per cycle). Interpolating timing functions
 JS timers that change what is drawn more often than 10 times per second. That list explains the rule; it is not a
 whitelist, and a technique it does not name that redraws every frame is just as forbidden. One-shot transitions and
 animations started by a user action or a state change, and done drawing within about a second, are allowed (a delay
-before one starts draws nothing and does not count): the 100 ms hover tints, or xterm.js's 800 ms scrollbar fade. Every
+before one starts draws nothing and does not count): the 100 ms hover tints, or the grid's 800 ms scrollbar fade. Every
 looping animation also stands still while the window is inactive, meaning the window or tab lacks keyboard focus or is
 hidden or minimized, which includes a Farhelm window visible beside another app that has focus; one universal
 `animation-play-state` rule in app.css, keyed on an attribute the UI root keeps in step with focus and visibility,
@@ -694,8 +692,8 @@ the same mono metrics. Both families ship as WOFF2 with their licenses; Inter's 
 the same files the docs website vendors. Form controls inherit their surrounding face rather than opting in: user-agent
 stylesheets give `button`, `input`, `select`, and `textarea` a platform face instead of letting them inherit, so one
 zero-specificity rule in app.css makes them inherit `font-family`, and a control added later cannot fall back to the
-platform sans-serif the way most of the launch composer's buttons once did. The rule leaves font size alone, and it
-excludes xterm.js's own helper textarea, which belongs to the vendored widget.
+platform sans-serif the way most of the launch composer's buttons once did. The rule leaves font size alone; the grid
+terminal's hidden input field matches it harmlessly, since it is never visible and sets its own font inline.
 
 The open session's chrome has one top row with terminal tabs on the left and fixed text-size controls, Stop, split
 Restart and Replace buttons, Clone and Delete on the right, and a slim details bar below the terminal. The bottom bar is
@@ -771,19 +769,19 @@ cannot hide its explanation and the sidebar stays usable (a window too narrow fo
 lets the card take those 320px over the sidebar's edge).
 
 The session view remembers whether it has offered terminals. Staleness retains those islands and makes their panes and
-tab strip inert; a freshly opened stale view offers no terminals. The existing recovery snapshot's element (the grid's,
-or xterm.js's for an old terminal) moves beside the replacement mount so hidden replay does not hide the old screen. It
-is disposed only at successful replay reveal, or restored into its mount for a final refusal. Pane visibility still
-hides background tabs. Availability in the synced terminal specs nudges waiting recovery controllers once when the host
-returns, through the existing automatic `if_unowned` path, without changing the retry ladder or disturbing attempts
-already in flight. Takeover tombstones and the build-mismatch capability veto remain authoritative. Interruption after a
-reboot still empties the desired set. Replay callbacks from a socket that died meanwhile cannot retire its new recovery.
-If replay reveals while the pane is still inert, the availability edge completes the focus handoff through the same
-guard used by reveal, preserving deliberate focus in fields, dialogs and other keyboard owners. Inline session questions
-share a keyboard-owner marker: header Restart, Replace and Delete, sidebar Delete and Replace, interrupted-card Replace
-and tab Close keep focus on their answers across replay reveal, availability recovery and automatic selected-tab
-fallback. The guard follows focus inside the question, so explicitly selecting a terminal still allows typing there.
-Header Escape cancellation keeps its existing post-unmount return to the selected terminal.
+tab strip inert; a freshly opened stale view offers no terminals. The existing recovery snapshot's element (the grid's)
+moves beside the replacement mount so hidden replay does not hide the old screen. It is disposed only at successful
+replay reveal, or restored into its mount for a final refusal. Pane visibility still hides background tabs. Availability
+in the synced terminal specs nudges waiting recovery controllers once when the host returns, through the existing
+automatic `if_unowned` path, without changing the retry ladder or disturbing attempts already in flight. Takeover
+tombstones and the build-mismatch capability veto remain authoritative. Interruption after a reboot still empties the
+desired set. Replay callbacks from a socket that died meanwhile cannot retire its new recovery. If replay reveals while
+the pane is still inert, the availability edge completes the focus handoff through the same guard used by reveal,
+preserving deliberate focus in fields, dialogs and other keyboard owners. Inline session questions share a
+keyboard-owner marker: header Restart, Replace and Delete, sidebar Delete and Replace, interrupted-card Replace and tab
+Close keep focus on their answers across replay reveal, availability recovery and automatic selected-tab fallback. The
+guard follows focus inside the question, so explicitly selecting a terminal still allows typing there. Header Escape
+cancellation keeps its existing post-unmount return to the selected terminal.
 
 Restart with is a mode of the shared session launcher. Its source seeds the same draft that New, Clone and Replace with
 use; the mode controls held-field applicability and submit routing. Templates, search and shortcut batches obey the same
@@ -1137,22 +1135,21 @@ The persistent list owns header Stop, Restart and Replace requests as well as ro
 source-session errors are shared with the keyed session view, so switching views cannot cancel a request or lose its
 outcome. Stop and Restart publish their start and completion boundaries to any mounted view: detail reads spanning
 either boundary are fenced, and Restart's completion reattaches the agent terminal even after a refusal or lost reply. A
-successful reply supplies the terminal kind until a current detail read catches up. A view mounted during the request
-observes its completion, and one opened before the listing catches up can use the retained successful reply. Replace
-uses the existing shared retry identity and selects its replacement only while its source remains selected. Its inline
-YOLO questions coexist per source in the same persistent owner. Their existing exclusion signal participates in the
-common session admission and header gates, while pending-request presentation stays separate so the question's own
-answers remain enabled. An answer consumes its rendered source/token and admits the request synchronously; a refused
-admission restores only that source's question and error under a fresh opening. The page operation token remains the
-launch-versus-host-mutation exclusion, independent of session claims. Suspend and Resume, from Hosts or a sandbox
-session (Stop and suspend included), are not registry mutations and never claim it. The token instead records the
-existing host a launch resolved (`OpGuard::target`, set synchronously once the submit has resolved and checked that
-host, cleared when the launch's guard drops), and those controls are refused while it names their host, at the click and
-again at the answer. A launch that creates its own environment records no target: its host does not exist until the
-create, and that session's controls appear only after it. Hosts' per-host busy checks still serialize this page's
-requests on one host. Header composer openings check both exclusions before publishing their prefill, and the list
-rechecks before consuming it. Releasing a claim between the click and that effect cannot revive a refused opening. Only
-the admitted list opening retires an earlier Replace retry identity.
+view mounted during the request observes its completion, and one opened before the listing catches up can use the
+retained successful reply. Replace uses the existing shared retry identity and selects its replacement only while its
+source remains selected. Its inline YOLO questions coexist per source in the same persistent owner. Their existing
+exclusion signal participates in the common session admission and header gates, while pending-request presentation stays
+separate so the question's own answers remain enabled. An answer consumes its rendered source/token and admits the
+request synchronously; a refused admission restores only that source's question and error under a fresh opening. The
+page operation token remains the launch-versus-host-mutation exclusion, independent of session claims. Suspend and
+Resume, from Hosts or a sandbox session (Stop and suspend included), are not registry mutations and never claim it. The
+token instead records the existing host a launch resolved (`OpGuard::target`, set synchronously once the submit has
+resolved and checked that host, cleared when the launch's guard drops), and those controls are refused while it names
+their host, at the click and again at the answer. A launch that creates its own environment records no target: its host
+does not exist until the create, and that session's controls appear only after it. Hosts' per-host busy checks still
+serialize this page's requests on one host. Header composer openings check both exclusions before publishing their
+prefill, and the list rechecks before consuming it. Releasing a claim between the click and that effect cannot revive a
+refused opening. Only the admitted list opening retires an earlier Replace retry identity.
 
 Session-action and launch completions have three responsibilities: settle, return and leave alone. These rules cover
 New, Clone, quick launch, Restart with, Replace with, and Stop, Restart, Replace and Delete from rows, headers,
@@ -1500,49 +1497,26 @@ same physical key (`event.code`) releases the recorded composing key; any keyup 
 Browser replay of the outlined 229-or-window rule exposes the conflict at equal elapsed time; a threshold cannot select
 the two different desired outcomes. This is the agreed spare-real-key fallback, not an inference that a held key caused
 the end. The 16ms bound covers the immediate replay sequence with a scheduling margin, not measured native Mac timing;
-delayed ending keys remain unprotected. Installation is idempotent across authenticated-tree remounts, and xterm's
-helper textarea retains its own input-method handling. Browser tests replay both orders and pin the overlap omission;
-they do not establish real Mac IME or desktop-shell behavior.
+delayed ending keys remain unprotected. Installation is idempotent across authenticated-tree remounts, and the grid
+terminal's input field retains its own input-method handling. Browser tests replay both orders and pin the overlap
+omission; they do not establish real Mac IME or desktop-shell behavior.
 
-## Terminal widget: xterm.js island
+## Terminal widget: the grid island
 
-This section covers the old terminals, the ones in the private tmux server ("Terminal substrate: private tmux server"),
-for as long as both kinds exist. A terminal in a terminal host ("Terminal host") reaches the same island as a grid
-stream, which the grid client draws instead of xterm.js ("The grid client", at the end of this section); the attach
-reply says which kind an attachment carries, so one page holds both. Much of the GUI section describes terminal behavior
-in xterm.js's terms (sizes, selection, links, input). For grid terminals the same behavior, kept where it does a job, is
-Farhelm's own contract: the grid client's file headers state each rule in their own terms, say when a rule's job is that
-a session behaves the same in either kind of terminal, say where it departs, and name xterm.js only as a rule's origin
-or when describing old terminals (the code ported from it is listed in `THIRD_PARTY_NOTICES.md`).
+Every terminal runs in a terminal host ("Terminal host") and is interpreted by the supervisor's emulator, so the browser
+draws a grid stream with its own grid client ("The grid client", at the end of this section), mounted as a JS island
+inside the Dioxus tree. Grid messages flow WebSocket → the grid component directly, bypassing Dioxus state entirely.
+Dioxus owns everything around the terminal (tabs, status, dialogs), not the terminal's content path. Everything is a
+static asset (no CDN — the UI must be fully self-contained, consistent with SPEC.md's no-public-relay,
+no-third-party-services posture and the loopback deployment). Terminals that earlier releases ran in a private tmux
+server were drawn by a vendored xterm.js; much of the grid client's behavior was ported from it or made to match it, and
+the grid client's file headers state each kept rule in their own terms, naming xterm.js only as a rule's origin (the
+code ported from it is listed in `THIRD_PARTY_NOTICES.md`).
 
-The old terminal is xterm.js, vendored as a static asset (no CDN — the UI must be fully self-contained, consistent with
-SPEC.md's no-public-relay, no-third-party-services posture and the loopback deployment), mounted as a JS island inside
-the Dioxus tree. PTY bytes flow WebSocket → `term.write()` directly, bypassing Dioxus state entirely. Dioxus owns
-everything around the terminal (tabs, status, dialogs), not the terminal's content path.
-
-The unmodified `@xterm/addon-unicode-graphemes` 0.4.0 add-on selects `15-graphemes` before the terminal opens or parses
-any output, including reconnect prefill. It uses xterm's proposed Unicode API. Agents and tmux count emoji, including
-variation-selector emoji, as two cells; xterm's default Unicode 6 table counts them as one, which can clip glyphs and
-shift cursor-addressed redraws. The pinned tmux enables `variation-selector-always-wide` by default, so live output and
-replayed rows use the same widths without an extra generated configuration setting.
-
-Vendored xterm.js 6.0.0 has an observed, reproduced defect: a scrolled-back viewport can paint stale rows during
-sustained output, both once scrollback is already full and when output is confined to a DECSTBM scroll region. What is
-established from the bundle: `BufferService.scroll` decrements `ydisp` by one per evicted line while scrolled back with
-the buffer full, and the parser's per-write repaint maps dirty screen rows to viewport rows via `(ybase - ydisp)`,
-skipping the refresh once that offset reaches the row count. On their own both are correct behavior (the viewport's
-lines do not change under either), so they rule out the per-write path as the repainter rather than explain the stale
-DOM; the exact xterm-internal step that leaves stale content is not established from source. `terminal.js` compensates
-with a throttled, unconditional `term.refresh()` while the viewport sits away from the tail, rather than patching the
-vendored bundle. The bundle is deliberately never patched: keeping the vendored file byte-identical to upstream is what
-makes its provenance checkable and a future version bump a plain swap. Decided 2026-10-10: non-security bugs inside the
-bundle are fixed by upgrading it, not worked around in Farhelm, unless a workaround is already recorded here (the
-refresh above is one).
-
-JetBrains Mono Nerd Font is vendored alongside xterm.js for the same self-contained reason, and terminal.js gives it to
-both kinds of terminal as their `fontFamily`. The terminal and the interface's technical values share the same two
-cached `.woff2` files; ordinary interface text uses Inter. A terminal mounts only once both bundled mono weights have
-loaded, the same as its bundled scripts, with no fallback font. Inter is not a terminal-mount prerequisite.
+JetBrains Mono Nerd Font is vendored for the same self-contained reason, and terminal.js gives it to the grid as its
+`fontFamily`. The terminal and the interface's technical values share the same two cached `.woff2` files; ordinary
+interface text uses Inter. A terminal mounts only once both bundled mono weights have loaded, the same as its bundled
+scripts, with no fallback font. Inter is not a terminal-mount prerequisite.
 
 Sidebar width lives in `sidebar-width.js`, shared by web and desktop. It reads localStorage once at script load
 (`farhelm.sidebar-width`): plain content-width digits only, clamped to 240–600px, with 340px for absent, malformed or
@@ -1588,29 +1562,28 @@ Terminal text size lives entirely in `terminal.js`. It reads the remembered size
 localStorage (`farhelm.terminal-font-size`; 9 to 28 in steps of 1, default 14; a missing or unreadable value, or
 anything but plain digits, means the default, and an out-of-range number is clamped) and constructs every terminal at
 it. `farhelmTerm.stepFontSize` clamps, stores, then hands the size to every mounted terminal: a grid's `setFontSize`
-re-measures, redraws and refits it, and an old terminal gets `term.options.fontSize` and then its fit, since setting the
-option only makes xterm re-measure the font, and the fit is what recomputes rows and columns and sends the resize to the
-pty. Hidden tabs are mounted and sized like visible ones, so they take the change at once. A screen held aside during a
+re-measures, redraws and refits it, and the refit reports the new rows and columns, which terminal.js sends as a resize.
+Hidden tabs are mounted and sized like visible ones, so they take the change at once. A screen held aside during a
 reconnect or kept after a takeover keeps its old size: it is frozen, with no program to tell. The shortcut is one
 capture-phase `keydown` listener on `window`, matched on `event.code` (`Equal`, `Minus`, so the US-layout key positions)
-with Shift and Meta on macOS or Ctrl elsewhere, by a platform-string test that agrees with xterm.js's own Mac check;
-capture on `window` runs before the terminal's own key handling (the grid's, or xterm.js's custom key handler), which is
-left untouched, and preventDefault keeps the browser out. With no terminal mounted the listener lets the keys through.
-The top row's zoom buttons are stateless Rust buttons that call the same function, which hands focus back to the
-terminal the view last focused when the click left it on a button; nothing about the size flows back to Rust, so they
-have no disabled state at the ends of the range. The two magnifier buttons and a fixed-width, non-focusable point-size
-span share one border. `farhelmTerm.paintFontSize` paints every readout at script load and after each step. The Rust
-span has no text children, so Dioxus leaves its text to JS, and its mount asks for another paint: whichever side arrives
-second supplies the size, including after a session switch or a terminal surface returning. In the desktop app the size
-persists as far as the webview keeps its local storage across restarts; that was verified on Linux, not on macOS, where
-a webview that does not keep it would fall back to the default rather than earn a native state file.
+with Shift and Meta on macOS or Ctrl elsewhere, by a platform-string test that agrees with the grid's own Mac check;
+capture on `window` runs before the grid's own key handling, which is left untouched, and preventDefault keeps the
+browser out. With no terminal mounted the listener lets the keys through. The top row's zoom buttons are stateless Rust
+buttons that call the same function, which hands focus back to the terminal the view last focused when the click left it
+on a button; nothing about the size flows back to Rust, so they have no disabled state at the ends of the range. The two
+magnifier buttons and a fixed-width, non-focusable point-size span share one border. `farhelmTerm.paintFontSize` paints
+every readout at script load and after each step. The Rust span has no text children, so Dioxus leaves its text to JS,
+and its mount asks for another paint: whichever side arrives second supplies the size, including after a session switch
+or a terminal surface returning. In the desktop app the size persists as far as the webview keeps its local storage
+across restarts; that was verified on Linux, not on macOS, where a webview that does not keep it would fall back to the
+default rather than earn a native state file.
 
 The quick switcher installs an idempotent capture-phase window keydown listener through inline `document::eval` in both
 renderers. It matches `KeyK` with Meta alone on macOS or Ctrl+Shift elsewhere, using terminal.js's platform test;
 composition and repeat do not open it. Cmd+J is matched by the shared template-shortcut listener from the Rust
 definition, and uses the same focus-capturing opener with a templates-only relay. An existing modal or an absent
 list-owned trigger yields the chord without preventing its default. Otherwise it prevents default and propagation before
-xterm handles input, records the active element and clicks the appropriate hidden trigger. In sessions mode, each
+the terminal handles input, records the active element and clicks the appropriate hidden trigger. In sessions mode, each
 mounted dialog fetches one unfiltered activity-ordered session snapshot and partitions it into title and metadata-only
 subsequence matches, retaining helm order inside each tier. It never adds a result cap or subscribes to listing updates.
 Peer text is escaped and isolated before highlighting. Closing releases modal isolation and waits for actual DOM removal
@@ -1639,11 +1612,11 @@ a preparation error rather than launching a stale captured definition.
 
 The keyboard-shortcuts overview installs its own idempotent capture-phase window listener in `AppBody`, immediately
 after the quick switcher's listener and before the session-action listener. The composition guard and shared template
-listener still run first, and all these command listeners precede xterm. Physical `Slash` uses Meta alone on macOS or
-Ctrl+Shift elsewhere, with the same `/Mac/` platform test as the quick switcher. A modal or an absent authenticated,
-preferences-ready trigger yields the chord; otherwise the listener consumes it before xterm, ignores repeat and
-composition, and opens the AppBar-owned dialog through a hidden trigger. The help menu opens that same ordinary
-`ModalDialog`, with focus restored to the help toggle rather than to a removed menu item.
+listener still run first, and all these command listeners precede the terminal. Physical `Slash` uses Meta alone on
+macOS or Ctrl+Shift elsewhere, with the same `/Mac/` platform test as the quick switcher. A modal or an absent
+authenticated, preferences-ready trigger yields the chord; otherwise the listener consumes it before the terminal,
+ignores repeat and composition, and opens the AppBar-owned dialog through a hidden trigger. The help menu opens that
+same ordinary `ModalDialog`, with focus restored to the help toggle rather than to a removed menu item.
 
 The overview's Rust row definitions reuse `SESSION_DELETE_SHORTCUT`, `SESSION_RENAME_SHORTCUT` and `TEMPLATE_SHORTCUTS`,
 plus shared quick-switcher and text-size label definitions. One platform evaluation per opening feeds one-form labels
@@ -1655,11 +1628,12 @@ browser tests keep the separately written JS matchers and Rust labels in agreeme
 
 Session-action shortcuts use an idempotent capture listener and a pure key matcher from `session-action-shortcuts.js`.
 The build's Mac-desktop condition selects Cmd+W for Delete; browsers use Ctrl+Shift+Backspace. A visible modal yields,
-and browser Delete leaves ordinary editors alone while consuming xterm's input proxy. Matching keys stop before xterm;
-repeat and disabled controls never click. Delete clicks the current header button, sharing admission, confirmation and
-the skip preference. Cmd+W is consumed even without a header. The Mac desktop installs an explicit native menu without
-muda's predefined Close Window, whose fixed Cmd+W accelerator would win before the page. Its renderer-free description
-is tested on Linux; native construction is type-checked by Linux desktop builds, while only macOS installs it.
+and browser Delete leaves ordinary editors alone while consuming the terminal's input proxy. Matching keys stop before
+the terminal; repeat and disabled controls never click. Delete clicks the current header button, sharing admission,
+confirmation and the skip preference. Cmd+W is consumed even without a header. The Mac desktop installs an explicit
+native menu without muda's predefined Close Window, whose fixed Cmd+W accelerator would win before the page. Its
+renderer-free description is tested on Linux; native construction is type-checked by Linux desktop builds, while only
+macOS installs it.
 
 The same matcher maps Cmd+L on Mac desktop or Ctrl+Shift+L in browsers to a list-owned hidden Rename trigger. The open
 view publishes its accepted raw title through a separate signal, keyed by the selected session ID and independent of
@@ -1730,48 +1704,33 @@ edited titles keep ordinary validation and refusal behavior. Naming and shortcut
 generation-fenced, post-unmount terminal focus return. The terminal's existing modal guard withholds focus while naming
 is mounted; an unrevealed terminal retains its ordinary reveal-time handoff after early dismissal.
 
-Motivation: xterm.js is the only battle-tested embeddable terminal (VS Code) and full escape-sequence fidelity is a
-SPEC.md requirement. Routing high-frequency PTY output through a reactive framework would be a performance disaster, so
-the bypass is load-bearing, not an optimization. A pure-Rust wasm terminal (alacritty_terminal grid + canvas renderer)
-was rejected: it is a project in itself and reintroduces the untestable-canvas problem inside the most important widget.
-The terminal-host design later put `alacritty_terminal` in the supervisor instead, which leaves the browser only a grid
-of styled text to draw as ordinary DOM ("The grid client"), so neither objection applies to it.
+Motivation: full escape-sequence fidelity is a SPEC.md requirement, and the supervisor's emulator (`alacritty_terminal`,
+"The supervisor's terminal emulator") already interprets every byte, keeps the scrollback across supervisor restarts and
+answers the program's queries; the browser only has to draw a grid of styled text as ordinary DOM, which keeps the most
+important widget testable in an ordinary browser. Routing high-frequency output through a reactive framework would be a
+performance disaster, so the bypass is load-bearing, not an optimization. Before terminal hosts, terminals ran in tmux
+and the page drew them with xterm.js, then the only battle-tested embeddable terminal (VS Code); a pure-Rust wasm
+terminal in the page had been rejected as a project in itself that reintroduced the untestable-canvas problem, an
+objection that does not apply to an emulator in the supervisor.
 
-The bypass alone is not sufficient (audited): `term.write()` is non-blocking with a hard ~50MB buffer that silently
-discards beyond the cap, and xterm.js parses at roughly 5–35 MB/s while a PTY can produce far faster. The terminal path
-therefore carries end-to-end backpressure — write-completion callbacks drive watermark pause/resume messages over the
-WebSocket, and the supervisor throttles its pane reads accordingly. Interactive agent output never approaches these
-rates; `cat` of a huge file must degrade to slow, never to silent data loss. Precisely (sharpened while planning M2.5,
-when the original sentence met tmux's actual flow-control mechanics): no code Farhelm owns may ever drop a terminal byte
-— every Farhelm-side bound is backpressure or a visible detach, never discard.
+No code Farhelm owns may ever drop a terminal's output silently: every Farhelm-side bound on the way to a viewer is
+backpressure, a skipped intermediate screen with the current one sent (never a lost scrollback line), or a visible
+detach. How a grid stream meets that is in "Grid streams" (flow control and the helm's pause and resume); the page
+applies every message as it arrives and sends no flow control of its own. The scrollback a viewer keeps is the history
+cap the stream's `hello` announces (the supervisor's 12,000 lines), so a viewer holds what the terminal retains.
 
-This supervisor produces no byte stream: every terminal it serves is in a terminal host, and reaches a viewer as a grid
-("The grid client"), whose flow control is the grid sender's. A byte stream, and with it this section's xterm.js, now
-reaches a page only from a supervisor of an earlier release, whose tmux driver met the contract above with tmux's own
-`pause-after` flow control (throttling a stalled viewer's pane, or cutting its stream and replaying it from history) and
-a per-session control client that kept every pane readable; the supervisor-side mechanics this section describes below
-are that driver's.
-
-Outbound key delivery has one non-obvious mechanic: for input small enough to fit one protocol frame and one `send-keys`
-command, message boundaries are pty write boundaries. The transport frames input at 32KiB and the supervisor chunks each
-frame into `send-keys` commands of at most 256 bytes, so larger input is deliberately split — nothing may depend on
-atomic delivery of an arbitrary message. But a message at or under one command IS one command, and tmux flushes each
-command to the pane as its own write — measured on the pinned 3.7b: two commands landed as two reads ~7ms apart, never
-coalesced. For almost all input none of this matters, but SPEC.md's Shift+Enter chord (ESC CR, two bytes, always one
-frame and one command) is exactly the sequence where the boundary is meaning: split across two writes it reads as
-Escape-then-Enter to boundary-sensitive line editors, which is how the chord shipped broken for Codex while bash's 500ms
-readline timeout hid the split. The implementation therefore merges the pair into ONE message at the source
-(`shift-enter-key.js`, whose header owns the full design rationale): the chord's keydown arms the merge and returns
-`true` so xterm's own Enter path — scroll-on-input, selection dismissal, hidden-textarea cleanup, accessibility — runs
-untouched, and the `term.onData` wrapper prepends the pending ESC onto the `\r` xterm emits synchronously for that same
-keystroke. The arm's lifetime is that one synchronous dispatch (expired in a microtask queued at arm time), so a fizzled
-chord leaves no stale arm behind and the ESC is never flushed alone: a stray lone ESC is the byte shape the merge exists
-to never emit.
+Shift+Enter (SPEC.md, "Terminal experience") leaves the page as an ordinary `key` message; the supervisor's encoder
+(`crates/farhelm-supervisor/src/grid_input.rs`) turns the exact chord into ESC CR and sends it as one input, which the
+terminal host writes to the pty in one write. The single write is the promise: split across two writes, the pair reads
+as Escape-then-Enter to line editors that disambiguate a lone ESC by read boundary (Codex; zsh with a small KEYTIMEOUT),
+which is how the chord once shipped broken. The page's key table (`grid-keys.jsonl`) records the chord's ESC CR like
+every other key.
 
 Clipboard writes — SPEC.md's terminal contract is that select-to-copy and a program's OSC 52 WRITE land on the system
-clipboard while an OSC 52 READ is never answered — are implemented per surface, because the web platform only delivers
-that contract on some engines. Both of terminal.js's write paths (the copy-on-select mouseup callback and the OSC 52
-`ClipboardAddon` provider) prefer `window.__farhelmNativeClipboardWrite` whenever it exists and fall back to
+clipboard while an OSC 52 READ is never answered (the supervisor's emulator answers no clipboard read) — are implemented
+per surface, because the web platform only delivers that contract on some engines. Both of the page's write paths (the
+grid's completed-selection `onCopy` and its program-clipboard `onClipboard`) go through one page-wide queue
+(`clipboard-writer.js`) that prefers `window.__farhelmNativeClipboardWrite` whenever it exists and fall back to
 `navigator.clipboard.writeText` otherwise, with every failure swallowed per the contract's best-effort clause. The
 global exists ONLY in the desktop app, installed by desktop authentication's success path (auth.rs's
 `arm_native_clipboard`, re-armed whenever that authentication runs again from the failure page's Retry): it POSTs the
@@ -1784,33 +1743,30 @@ the endpoint's contract: device-session auth with the desktop-webview CORS layer
 helm without a sink so a remote browser can never write a server machine's clipboard, and a silent 204 whether the
 native write succeeded or not). A browser tab keeps the web API path and inherits its engine's policy: Chromium-family
 engines treat loopback HTTP as a secure context and work; Safari does not, and stays silently refused. OSC 52 reads are
-refused identically on every surface — the native route is write-only by construction, not by policy that could drift.
+never answered on any surface — the native route is write-only by construction, not by policy that could drift.
 
 The "this drag did not copy" notice is decided in `assets/copy-on-select.js` (`dragMayHaveCopiedNothing`,
-`dragCopyNoticeText`) and driven by terminal.js per surface. The press records the pointer position, whether the pane's
-program had mouse tracking on (`term.modes.mouseTrackingMode` or `grid.model.state.mouse`), and the pane's program-copy
-count. xterm.js keeps that count through a fall-through `registerOscHandler(52, …)` registered after the clipboard addon
-so the addon still performs the write; the grid counts completed `onClipboard` callbacks for either target, including
-primary writes that it does not copy to the system clipboard. Local grid selection copying is a separate callback and
-does not increment that count. The release checks for a plain drag under press-time mouse tracking without the forcing
-modifier, and 1.5 seconds later whether any OSC 52 arrived since the press. A retained local selection does not suppress
-this notice: that program-owned gesture does not copy it. The forcing modifier it names follows the exact Mac platform
-list both kinds of terminal use (`copy-on-select.js`'s `MAC_PLATFORMS`, the list old terminals' xterm.js uses).
-Agent-specific wording comes from the session's agent kind (`SessionAgentKind::drag_copy_hint` in the UI crate, an
-exhaustive per-kind function per the harness map), passed on the agent terminal's spec only; tabs always get the generic
-text. The persistent Rust-rendered live region holds an initially empty text span and a dismiss button.
-`createDragCopyNotice` owns its placement and thirty-second timer per mount; every qualifying drag replaces its position
-and deadline. Horizontal placement reuses `placeTooltip`. The bottom edge sits three terminal rows above the release
-pointer when the whole box fits inside the pane and viewport, otherwise the top edge sits three rows below. When neither
-fits, vertical placement falls back to six pixels above, clamped to the viewport. Row height comes from the rendered
-grid row (screen height divided by model rows before any row is painted), or xterm's screen height divided by its rows.
+`dragCopyNoticeText`) and driven by terminal.js around the grid. The press records the pointer position, whether the
+pane's program had mouse tracking on (`grid.model.state.mouse`), and the pane's program-copy count: the completed
+`onClipboard` callbacks for either target, including primary writes that the page does not copy to the system clipboard.
+Local grid selection copying is a separate callback and does not increment that count. The release checks for a plain
+drag under press-time mouse tracking without the forcing modifier, and 1.5 seconds later whether any OSC 52 arrived
+since the press. A retained local selection does not suppress this notice: that program-owned gesture does not copy it.
+The forcing modifier it names follows the exact Mac platform list the grid uses (`copy-on-select.js`'s `MAC_PLATFORMS`,
+the same as grid-input.js's `platformOf`). Agent-specific wording comes from the session's agent kind
+(`SessionAgentKind::drag_copy_hint` in the UI crate, an exhaustive per-kind function per the harness map), passed on the
+agent terminal's spec only; tabs always get the generic text. The persistent Rust-rendered live region holds an
+initially empty text span and a dismiss button. `createDragCopyNotice` owns its placement and thirty-second timer per
+mount; every qualifying drag replaces its position and deadline. Horizontal placement reuses `placeTooltip`. The bottom
+edge sits three terminal rows above the release pointer when the whole box fits inside the pane and viewport, otherwise
+the top edge sits three rows below. When neither fits, vertical placement falls back to six pixels above, clamped to the
+viewport. Row height comes from the rendered grid row (screen height divided by model rows before any row is painted).
 CSS caps the box to the viewport and hides its entire subtree when dismissed. Only × takes pointer events; its mousedown
 prevents the native focus change, and its click hides locally outside the terminal element. A terminal press cancels
 both the visible notice and any pending OSC 52 grace check. The grid observes presses in capture phase, including its
 scrollbar, and marks a withheld link press as ineligible. Resize repositions the notice; surface teardown removes
-listeners, cancels timers and invalidates deferred work even when the mount itself survives an xterm-to-grid swap. The
-grid's teardown runs before it becomes a frozen takeover snapshot, so that snapshot remains selectable without raising
-guidance.
+listeners, cancels timers and invalidates deferred work. The notice driver's teardown runs before the grid becomes a
+frozen takeover snapshot, so that snapshot remains selectable without raising guidance.
 
 Terminal web-link click ownership is the nullable `terminal_link_click` shared preference added by helm schema 46:
 `intercept` is the default, `both` preserves Farhelm activation plus program mouse reporting, and `program` disables
@@ -1819,48 +1775,31 @@ publishes the current choice into the page-wide terminal asset state; every term
 without a remount. Other clients seed again on reload, matching host confirmation choices. File downloads and agent URL
 forwarding do not consult this choice.
 
-OSC 8 and plain-web hover callbacks identify only targets their existing activation checks would open. In interception
-mode a primary non-forced press on such a target is stopped by a screen-element listener installed after xterm opens.
-The vendored Linkifier's screen listener must see it first to record the owning link; capture-phase suppression would
-leave a stale pressed-link record and can duplicate a later activation. Suppression occurs before xterm's enclosing
-terminal-element mouse reporter, so that press installs neither the program's release reporter nor its drag reporter.
-Another held button can already have installed them, or can install them during the withheld gesture. Independent
-primary-button ownership therefore lasts through release. Document capture listeners record each mouse event and its
-ownership decision; the public `onData` and `onBinary` callbacks discard only complete mouse-report chunks emitted
-synchronously while that event's `eventPhase` is nonzero. DOM supplies the end-of-dispatch boundary: a microtask can run
-between native capture and bubble callbacks and would clear suppression too early. The reporters still run their
-all-buttons-up cleanup, and other buttons' reports pass through. The always-on move reporter ignores motion while a
-button is down; the drag reporter prioritizes the primary bit when buttons overlap. Normal release link callbacks still
-open the target. The withheld press explicitly runs drag-notice dismissal bookkeeping, marks its gesture as withheld,
-clears an earlier local selection, prevents the native focus change and focuses the terminal. Forced-selection presses
-keep xterm's own path; file links, other buttons, wheel and unowned moves remain unchanged. Teardown removes the screen
-and document listeners with the mount's copy-on-select listeners, so reconnects cannot accumulate owners. A restored
-recovery snapshot reinstalls its retained terminal's link-gesture observer beside local copy-on-select. Burial removes
-both; input and transport listeners remain detached.
+OSC 8 and plain-web links identify only targets their existing activation checks would open (each link's `web` flag).
+Under mouse reporting the grid asks terminal.js's `linkPress` about a primary press on a link, without the forcing
+modifier held, before reporting it; in interception mode a web link's press is withheld (`interceptLinkPress`), and the
+grid then reports neither the press nor its drag nor its release to the program, while the release still activates the
+link through its ordinary click admission. The withheld press runs the drag-notice dismissal bookkeeping and marks its
+gesture as withheld, so it never raises the guidance. Forced-selection presses keep their local selection; file links,
+other buttons, wheel and moves keep their existing behavior.
 
 An OSC 8 link's hover compares the link's underlined text with its target (`linkTextMismatch` in
 `assets/terminal-links.js`) to decide whether the display is the quiet one or the loud mismatch warning. The link code
 in `terminal-links.js` and `terminal-files.js` reads a terminal through one small interface, "link lines" (each line's
 length, whether it soft-wraps from the previous one, its cells' characters, widths and hyperlink tags, and its text),
-which the grid offers directly (`grid-buffer.js`'s `linkLines`); old terminals read xterm.js's buffer through an adapter
-to that interface (`xtermLines`), so both kinds share one implementation. The text is joined by `linkHoverText` from the
-cells' hyperlink tags; on an old terminal the tag is the undocumented `extended.urlId` on the cell returned by
-xterm.js's public `term.buffer.active.getLine(y).getCell(x)` API, read from a fresh cell each time. Only consecutive
-rows carrying the same tag join, with exactly one contiguous tagged run per row, at most 128 rows and 8192 characters.
-Each run is read without trimming; only the ends of the joined string are trimmed. One synthetic empty padding cell
-before a terminal-wrapped wide character is omitted; an actual printed space is preserved. Agent cursor moves do not set
-a soft wrap, so that flag is not a join condition. Within a complete bounded, unambiguous extent, rows whose addresses
-each independently match the target compare as separate occurrences. Otherwise the whole text is compared normally. An
-adjacent continuation that exceeds a bound or has ambiguous runs yields Fragment: its hovered piece warns whenever it
-looks like an address, even if that piece happens to equal the target. A single row with repeated same-tag links keeps
-its existing comparison. An unavailable tag yields Unknown and restores the previous row-only comparison unchanged,
-including its false alarms and gaps.
-
-Decided 2026-10-15: accept this read-only private field access, superseding the 2026-09-30 decision to accept
-wrapped-link false alarms. The bundle stays byte-identical to upstream. The field can change at a manual xterm upgrade;
-a browser test against the vendored bundle pins its presence and shared tag for both agent layouts. Losing it falls back
-to today's row comparison, never a quieter partial-match rule. That old rule is incomplete: `https://git` followed by
-`hub.com/login` targeting `https://hub.com/login` was quiet on the second row, which alone equals the target.
+which the grid offers directly (`grid-buffer.js`'s `linkLines`). The text is joined by `linkHoverText` from the cells'
+hyperlink tags. Only consecutive rows carrying the same tag join, with exactly one contiguous tagged run per row, at
+most 128 rows and 8192 characters. Each run is read without trimming; only the ends of the joined string are trimmed.
+One synthetic empty padding cell before a terminal-wrapped wide character is omitted; an actual printed space is
+preserved. Agent cursor moves do not set a soft wrap, so that flag is not a join condition. Within a complete bounded,
+unambiguous extent, rows whose addresses each independently match the target compare as separate occurrences. Otherwise
+the whole text is compared normally. An adjacent continuation that exceeds a bound or has ambiguous runs yields
+Fragment: its hovered piece warns whenever it looks like an address, even if that piece happens to equal the target. A
+single row with repeated same-tag links keeps its existing comparison. The grid gives every cell an integer tag (0 for
+no link), so the join always has its tags; a missing hover range or row yields Unknown, which keeps the row-only
+comparison, and the link-lines interface keeps that fallback for a cell whose tag is undefined. That row-only rule is
+incomplete and is never the answer while tags are readable: `https://git` followed by `hub.com/login` targeting
+`https://hub.com/login` is quiet on the second row, which alone equals the target.
 
 The tagged cells, read row by row, must spell the target for a quiet URL-like comparison; this does not certify all text
 the reader sees. Untagged decoy text is outside the comparison. Nor is the join complete against a hostile program, and
@@ -1895,38 +1834,25 @@ an unwrapped row carrying that piece's original generated id no longer joins tha
 
 ### The grid client
 
-A terminal in a terminal host is interpreted by the supervisor's emulator ("The supervisor's terminal emulator"), so the
-browser gets the screen and scrollback as rows of styled runs (the grid stream of protocol 68, "Helm ↔ supervisor
-transport: system ssh + stdio protocol") and draws them; it is not a terminal emulator. It lives in
+A terminal is interpreted by the supervisor's emulator ("The supervisor's terminal emulator"), so the browser gets the
+screen and scrollback as rows of styled runs (the grid stream, "Helm ↔ supervisor transport: system ssh + stdio
+protocol", "Grid streams") and draws them; it is not a terminal emulator. It lives in
 `crates/farhelm-ui/assets/grid-*.js`: `grid-terminal.js` is the DOM half (rendering, the virtualized scrollback,
 selection, the pointer and keyboard), and `grid-model.js`, `grid-buffer.js`, `grid-style.js` and `grid-input.js` hold
-the decisions it acts on as pure functions, which `node --test` covers. `terminal.js` owns the connection for both kinds
-and picks the surface before the socket exists, because the socket URL carries its measured size. The session view hands
-it each terminal's kind from the listing (`SessionInfo::agent_terminal`, `TabInfo::kind`). A new terminal mounts the
-grid component directly: nothing of xterm.js is built, measured, waited for or published as a test hook for it, the
-grid's own fit gives the size, and a byte stream on its attachment is a broken contract that ends the attachment as a
-stream error. An old terminal, or one whose kind the page does not know, builds the xterm.js surface first as it always
-has, asks for either kind (`grid=1`), and replaces that surface with the grid component when the helm's stream notice
-says `grid`, before any data has been written to it. That swap is the compatibility path for a kind the page did not
-know or had stale, such as another client's Restart moving an old agent into a new terminal before this view's listing
-caught up. A Restart requested by this client does not need it: the retained reply names the restarted agent's kind,
-which the remount uses until a listing of the restarted run arrives, including after switching away and back. While the
-Restart is in flight, if it can move the agent into a new terminal, the agent's spec says `pending` and its reconnect
-attempts mount nothing until the kind is known. The catch-up and its reveal, the heartbeat, detaches, banners,
-reconnect, resize, paste interception, the clipboard queue, links with their hover checks, file downloads and tunnels
-are shared with xterm.js terminals.
+the decisions it acts on as pure functions, which `node --test` covers. `terminal.js` owns the connection and mounts the
+grid component for every terminal before the socket exists, because the socket URL carries its fitted size. The catch-up
+and its reveal, the heartbeat, detaches, banners, reconnect, resize, paste interception, the clipboard queue, links with
+their hover checks, file downloads and tunnels are terminal.js's around it.
 
 The grid's deterministic fit is Farhelm's documented formula (`grid-terminal.js`, "Size"): the character measured by an
 offscreen canvas, the proposal cell rounded through device pixels at a fixed 80-column, 24-row reference, and the room
 less the element's padding and a 14-pixel scrollbar. The fixed reference preserves direct mounts' initial fits while
 making later answers independent of resize history. Drawing still rounds cells at the supervisor-committed size, never
-at the proposal reference. A compatibility swap keeps the size already sent by the old renderer: its first usable grid
-observation records the effective pane, character metrics and pixel ratio without resizing, and identical observations
-keep that inherited answer. A subsequent effective input change uses the deterministic rule. The inherited answer can
-differ from a direct mount's answer; this local exception does not survive a fresh mount, and no per-terminal sizing
-state is retained across visits. Separate browser checks hold direct fitting to its independently computed formula
-across text sizes and pixel ratios, retain the old renderer's own formula coverage, and prove that a noncanonical
-inherited size survives the handoff. Rendering is one element per visible row with its runs as spans reused in place,
+at the proposal reference. An observation whose pane, character metrics and pixel ratio are all unchanged proposes
+nothing, and no per-terminal sizing state is retained across visits. The measurement, the 14-pixel scrollbar reserve and
+the padding were first those of xterm.js 6.0 and its fit add-on, so panes kept their rows and columns when the grid
+replaced it; they are Farhelm's fit contract now. Browser checks hold the fit to its independently computed formula
+across text sizes and pixel ratios. Rendering is one element per visible row with its runs as spans reused in place,
 painted at most once per animation frame however many messages arrive; the choice between boxing every non-ASCII cell
 and letting characters the font draws at the cell width flow inline came from a renderer benchmark against xterm.js,
 recorded in the file's header. Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never
@@ -1935,10 +1861,10 @@ Which keydowns reach the program, and the bytes each key and click becomes, are 
 checked-in tables (`grid-keys.jsonl` and `grid-mouse.jsonl` under `crates/farhelm-supervisor/tests/fixtures/`, and the
 page's keydown and Alt-click tables under `crates/farhelm-ui/js-tests/fixtures/input/`) that the page's code and the
 supervisor's encoder are held to, the key table by both. They are the xterm family's encodings, which shells and agents
-expect, and were first computed by the vendored xterm.js, so a program reads the same keys and clicks in both kinds of
-terminal; no test reads xterm.js for them any more. The client sends no flow-control pause or resume: it applies every
-message as it arrives, applying a large history in slices between frames so that the screen stays usable, and the helm
-pauses a grid stream on its own queue instead.
+expect, and were first computed by xterm.js 6.0.0, so programs kept reading the same keys and clicks when the grid
+replaced it. The client sends no flow-control pause or resume: it applies every message as it arrives, applying a large
+history in slices between frames so that the screen stays usable, and the helm pauses a grid stream on its own queue
+instead.
 
 History stays in binary form until a reader asks for a row. Arrival owns an exact copy of the message's row region and a
 typed offset index, validates its declared links once, and checks every row envelope. The existing sliced drain then
@@ -1957,8 +1883,7 @@ Fully discarded entries release those allocations. Empty appends settle numberin
 so only real rows absorb trims. A real reset drops the old queue on arrival and clears the applied history at its
 existing drain boundary.
 
-Not built for grid terminals, a near-term entry in `TODO.md`: showing an input method's composition at the cursor
-(committed text is sent).
+Not built, a near-term entry in `TODO.md`: showing an input method's composition at the cursor (committed text is sent).
 
 ## Terminal host
 
@@ -2625,65 +2550,44 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   never finishes behind a wedged host can need more than the budget (its fence alone can take 40 seconds), so it may
   take more than one start. The ordinary start reclaims nothing and costs a listing of the launch directory and a scan
   that contacts no socket; each stale socket costs the refusal window twice (the scan's, then the removal's own check).
-- **Grid streams** (`service/grid_stream.rs`, the encoding in `grid_output.rs`): an attach to a host terminal from a
-  client that can show grids is answered with stream kind `grid` and gets a sender task of its own in the forwarder's
-  place, with the attachment machinery (takeover, detach, pause, the stall detach and its verdicts). It waits up to a
-  second for the viewer's size to take effect, then sends `hello`, `state`, the visible screen, the history once (oldest
-  first, in messages of about 32 KiB, which bounds what one attachment can have queued on the connection), and
-  `ReplayComplete`; then, whenever the terminal changes, at most every 8 ms, one cycle of what changed: `state`, the
-  lines that entered history, and the screen rows that differ from what this viewer was last sent, shifted when output
-  scrolled. It reads the emulator only when it is home (never waiting through a snapshot encode), marking the status
-  seen just before each read, so a change published after a read wakes it again. While the writer queue is full or the
-  viewer has paused it sends nothing, and the next cycle starts from the emulator as it is then, so skipped screen
-  revisions cost nothing. History is not skipped: lines are numbered by the vendored count of lines scrolled into
-  history, and the viewer is sent every line from the one it is owed, unless that line scrolled off the far end or
-  history changed shape (a rebuild or a size-changing resize, which the runtime counts, an erasure, which the emulator
-  counts, or a redefined palette entry, which recolors rows already sent), when it is sent `history_reset` and the
-  history held; a change of shape is acted on once it has held for a quarter second, or two seconds after the first of a
-  run of changes that does not settle, so a window dragged to a new size resends the history once, not at every step;
-  after a reset forced by the two seconds, the next run waits until it settles, so changes that never stop resend the
-  history once, not every two seconds. A resend transfers the whole retained history, as an attach does (the opt-in grid
-  benchmark measures its bytes and attach cost), and a redefined palette entry costs one whether or not any history row
-  uses it, since telling would mean scanning the history. A live cycle sends at most about 256 KiB of history ahead of
-  its screen frame (an estimate that errs high, counting escaped text and each run's link target, plus at most one row
-  more), so a resend goes out over many cycles with the screen current in each. The attach's catch-up ends early when
-  history changes shape under it, leaving the reset to the live path's settle rule, and is followed at once by a live
-  cycle, since its later reads take history only. The program's exit is `state`'s, over the final screen; a host that is
-  gone ends the attachment as a dead pane's, and an unavailable one as a failed stream. An attach to a host that cannot
-  be read is refused as `Unavailable` before anything is taken over, with a message that says what can help: a handle
-  whose reason may pass becomes attachable once re-adoption replaces it with a runtime (the viewer attaches again then),
-  while a reason that will not pass stays refused until the supervisor restarts. Clipboard writes reach the viewer from
-  the attachment's notice subscription; while the viewer is behind only the latest is kept. Viewer input is decoded and
-  encoded where the connection reads it, with the modes and size the status carries, never waiting there, and handed to
-  the attachment's own input pump, which writes it through one input sequence per attachment. A paste is collected in
-  the attachment and handed on only with its last part, as one paste the runtime writes whole; one whose last part never
-  arrives is dropped whole. What an attachment holds (a paste being collected, input waiting for the pump, a paste not
-  yet written) is bounded at 8 MiB. A malformed message, an interrupted paste, input past the bound, or input whose fate
-  is unknown or not sent ends the attachment as an input failure, which the sender notices wherever it waits, a pause
-  included. Since another producer's input lost with a connection moves the terminal's input epoch too, an attachment's
-  next input after any such loss fails it, and the viewer attaches again. An attachment that ends drops the input its
-  pump had not handed to the runtime and stops the pump at once; what the pump handed over is written before anything a
-  replacement attachment sends.
-- **Terminal kinds on replies** (the migration band and the session details' kinds, SPEC.md "Terminal experience").
-  `SessionInfo` carries `agent_terminal` (`tmux` or `host`), taken in `status::entry_info` from the terminal the entry
-  holds, not from the row's stored `terminal_kind`, so a session with no terminal reports none; each `TabInfo` carries
-  `kind`. The supervisor serves only terminal hosts, so it reports `host` for every terminal it has
-  (`Terminal::wire_kind`, through `Terminal::tab_info` and `HostTab::tab_info` for tabs); the fields stay on the wire
-  for clients that still tell the two kinds apart. A replayed keyed create reports the live entry's kind, as the first
-  reply did. `supervisor_creates_host_terminals` is always true, since every terminal a supervisor creates is a host,
-  added at the two boundaries every `SessionInfo` leaves through (`listing::list_all` and
-  `Supervisor::with_checkout_metadata`, which every single-session reply passes) rather than stored on entries, since it
-  describes the supervisor process, not the entry. A supervisor from before terminal hosts sends no such field, which
-  reads as false, so its sessions show neither the band nor the kinds. The three fields joined protocol 68 without a
-  bump: each is optional with a decode default, and a peer that ignores or lacks them only shows no migration guidance,
-  which is what a supervisor without hosts would have it show. They decode through
-  `farhelm_proto::lenient_terminal_kind`, so a kind a build does not know reads as unreported instead of failing the
-  session, which matters because the UI decodes these types directly. The UI's decisions
-  (`crates/farhelm-ui/src/migration.rs`) are pure functions of the session and of the tabs the strip shows
-  (`tabs::visible_tab_infos`: the strip's own list, with kinds by tab id and an optimistic open's kind from its open
-  reply), so a tab is named by the label on screen even before the next detail read; that list is a type of its own
-  (`tabs::VisibleTabs`), so neither surface can be handed the server's list. The band's dismissal is the band
-  component's own state, kept per message, and the session view is keyed by session, so the next visit mounts it afresh.
+- **Grid streams** (`service/grid_stream.rs`, the encoding in `grid_output.rs`): an attach to a host terminal gets a
+  sender task of its own in the forwarder's place, with the attachment machinery (takeover, detach, pause, the stall
+  detach and its verdicts). It waits up to a second for the viewer's size to take effect, then sends `hello`, `state`,
+  the visible screen, the history once (oldest first, in messages of about 32 KiB, which bounds what one attachment can
+  have queued on the connection), and `ReplayComplete`; then, whenever the terminal changes, at most every 8 ms, one
+  cycle of what changed: `state`, the lines that entered history, and the screen rows that differ from what this viewer
+  was last sent, shifted when output scrolled. It reads the emulator only when it is home (never waiting through a
+  snapshot encode), marking the status seen just before each read, so a change published after a read wakes it again.
+  While the writer queue is full or the viewer has paused it sends nothing, and the next cycle starts from the emulator
+  as it is then, so skipped screen revisions cost nothing. History is not skipped: lines are numbered by the vendored
+  count of lines scrolled into history, and the viewer is sent every line from the one it is owed, unless that line
+  scrolled off the far end or history changed shape (a rebuild or a size-changing resize, which the runtime counts, an
+  erasure, which the emulator counts, or a redefined palette entry, which recolors rows already sent), when it is sent
+  `history_reset` and the history held; a change of shape is acted on once it has held for a quarter second, or two
+  seconds after the first of a run of changes that does not settle, so a window dragged to a new size resends the
+  history once, not at every step; after a reset forced by the two seconds, the next run waits until it settles, so
+  changes that never stop resend the history once, not every two seconds. A resend transfers the whole retained history,
+  as an attach does (the opt-in grid benchmark measures its bytes and attach cost), and a redefined palette entry costs
+  one whether or not any history row uses it, since telling would mean scanning the history. A live cycle sends at most
+  about 256 KiB of history ahead of its screen frame (an estimate that errs high, counting escaped text and each run's
+  link target, plus at most one row more), so a resend goes out over many cycles with the screen current in each. The
+  attach's catch-up ends early when history changes shape under it, leaving the reset to the live path's settle rule,
+  and is followed at once by a live cycle, since its later reads take history only. The program's exit is `state`'s,
+  over the final screen; a host that is gone ends the attachment as a dead pane's, and an unavailable one as a failed
+  stream. An attach to a host that cannot be read is refused as `Unavailable` before anything is taken over, with a
+  message that says what can help: a handle whose reason may pass becomes attachable once re-adoption replaces it with a
+  runtime (the viewer attaches again then), while a reason that will not pass stays refused until the supervisor
+  restarts. Clipboard writes reach the viewer from the attachment's notice subscription; while the viewer is behind only
+  the latest is kept. Viewer input is decoded and encoded where the connection reads it, with the modes and size the
+  status carries, never waiting there, and handed to the attachment's own input pump, which writes it through one input
+  sequence per attachment. A paste is collected in the attachment and handed on only with its last part, as one paste
+  the runtime writes whole; one whose last part never arrives is dropped whole. What an attachment holds (a paste being
+  collected, input waiting for the pump, a paste not yet written) is bounded at 8 MiB. A malformed message, an
+  interrupted paste, input past the bound, or input whose fate is unknown or not sent ends the attachment as an input
+  failure, which the sender notices wherever it waits, a pause included. Since another producer's input lost with a
+  connection moves the terminal's input epoch too, an attachment's next input after any such loss fails it, and the
+  viewer attaches again. An attachment that ends drops the input its pump had not handed to the runtime and stops the
+  pump at once; what the pump handed over is written before anything a replacement attachment sends.
 
 Test harnesses end the hosts they leave behind: `farhelm-teststate` ends every host whose socket is in a `hosts`
 directory within an owned run directory (its dead-run sweep, and every `TestDir` drop) through a small blocking client
@@ -3081,10 +2985,11 @@ registered, so the user gets a clear error rather than a puzzling ssh failure; t
 since it also covers callers that never go through the registry.
 
 On top of that byte pipe: a multiplexed framing protocol — length-prefixed frames carrying a channel id and a type tag;
-control messages are serde_json, terminal data channels are raw bytes. The same protocol runs over the unix socket
-locally, so "local host" and "remote host" differ only in transport. Connection setup exchanges protocol and build
-versions; it refuses protocol-version incompatibility per SPEC.md's version-skew rule, while build versions travel for
-diagnostics only — mixed builds with a compatible protocol are the normal steady state SPEC.md describes.
+control messages are serde_json, and data channels carry their stream's own bytes (a terminal's grid messages, a file's
+or a relay's bytes). The same protocol runs over the unix socket locally, so "local host" and "remote host" differ only
+in transport. Connection setup exchanges protocol and build versions; it refuses protocol-version incompatibility per
+SPEC.md's version-skew rule, while build versions travel for diagnostics only — mixed builds with a compatible protocol
+are the normal steady state SPEC.md describes.
 
 Motivation: SPEC.md promises provisioning and transport ride "the user's keys, agent, and config", apart from
 Tensorlake's identity policy — only the real ssh binary honors ~/.ssh/config fully (ProxyJump, Match blocks, the agent
@@ -3098,45 +3003,55 @@ an upgrade survives if the new helm reuses that master within its 60 seconds of 
 macOS desktop app: quit, install, reopen), and lasts until the master exits (left unused for over a minute, its
 connection to the host dropped, or `ssh -O exit` on its socket); see the `CONNECTION_OVERRIDES` docs.
 `ClearAllForwardings` leaves ProxyJump working, because the jump runs as its own `ssh -W` child; that was checked with a
-real connection through a jump on localhost. JSON control frames keep the protocol debuggable by eye; raw binary data
-channels keep PTY throughput off the JSON path.
+real connection through a jump on localhost. JSON control frames keep the protocol debuggable by eye; binary data
+channels keep terminal and transfer throughput off the control path.
 
 ### Grid streams
 
-Protocol 68 adds grid streams, the form in which terminals that run in terminal hosts reach their viewers: the
-supervisor interprets their output and sends the screen as rows of styled runs. `Attach` carries the client's `grid`
-capability and `Attached` the channel's stream kind (`bytes` or `grid`), which the helm passes to the browser as a
-`{"type":"stream","kind":...}` text frame before any data. A grid channel carries one message per data frame in each
-direction, and the helm relays them without reading them. The helm passes the browser's `grid=1` on as `grid`, and
-refuses a grid stream it did not ask for. Its relay differs from a byte stream's in three ways
-(`crates/farhelm-helm/src/terminal.rs`, "Grid streams"): it admits frames up to the grid bound of 1 MiB (a long row with
-its links does not fit in 64 KiB), up to 4,096 of them, while holding no more bytes per attachment than a byte stream's
-worst case of 16 MiB; it forwards each browser message as one data frame, never cut into the 32 KiB input chunks, and
-ends the attachment on a message over the 64 KiB input bound rather than forward it; and it pauses the supervisor
-itself. The grid client sends no pause or resume (the helm drops one a page sends on a grid socket), and the helm reads
-its supervisor connection without waiting on any one terminal, so without that a browser slower than the supervisor's
-link would fill its attachment's queue at the first large catch-up (a full scrollback can be thousands of messages) and
-be detached as stalled. Instead the helm sends `PauseOutput` once a grid attachment's queue holds 2 MiB or 512 messages,
-and `ResumeOutput` once it has drained to 1.5 MiB and 384. A paused grid stream is sent nothing, history included, until
-the resume, then what it owes; it costs screen frames, never output.
+Grid streams are the form in which terminals reach their viewers: the terminal runs in a terminal host, the supervisor
+interprets its output, and it sends the screen as rows of styled runs. Protocol 68 added them beside the byte streams
+that terminals in the supervisor's private tmux server sent, with a `grid` capability on `Attach`, a stream kind on
+`Attached` and a `{"type":"stream","kind":...}` notice from the helm that told the browser which terminal component to
+build. Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries
+a grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no
+longer report a terminal kind. The removal is a bump rather than an additive change because an older peer of the same
+protocol would still send and expect what a newer one no longer reads (a supervisor streaming an old terminal as bytes,
+a helm refusing a grid answer it did not ask for); a helm and supervisor of different protocols refuse each other at the
+hello, so a remote host shows Needs update until it is updated. The helm keeps the last listing of each host in
+`helm.db` as `SessionInfo` JSON, whose decode ignores unknown fields, so rows cached before 77 still read. A page loaded
+from the previous helm and left open across the update must be reloaded; nothing keeps it working. Its terminals stop
+reconnecting on their own once the page sees the helm's new build (the build-mismatch latch, which can take a few
+seconds), and any reconnect from it, automatic in that window or manual, misdraws the terminal: that page builds its old
+terminal component for a terminal whose kind the listing no longer names and takes the missing stream notice for an
+older helm's byte stream, so it draws grid messages as terminal output, and what is typed into it ends the attachment as
+malformed input. Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.
+
+An attachment carries one message per data frame in each direction, and the helm relays them without reading them
+(`crates/farhelm-helm/src/terminal.rs`, "Bounds and flow control"). It admits frames up to the grid bound of 1 MiB (one
+row of the widest grid with its links can run to hundreds of KiB), up to 4,096 of them, holding no more than 16 MiB per
+attachment; it forwards each browser message as one data frame and ends the attachment on a message over the 64 KiB
+input bound rather than forward it; and it pauses the supervisor itself. The grid client sends no pause or resume (the
+helm ignores one a page sends), and the helm reads its supervisor connection without waiting on any one terminal, so
+without that a browser slower than the supervisor's link would fill its attachment's queue at the first large catch-up
+(a full scrollback can be thousands of messages) and be detached as stalled. Instead the helm sends `PauseOutput` once
+an attachment's queue holds 2 MiB or 512 messages, and `ResumeOutput` once it has drained to 1.5 MiB and 384. A paused
+grid stream is sent nothing, history included, until the resume, then what it owes; it costs screen frames, never
+output.
 
 The supervisor ends an attachment that stays paused past its 60 second stall timeout, counted from the pause, which is
-what ends a browser that stopped reading, for both kinds. It also sets the slowest browser that still reads and is not
-ended: from the pause it must drain the 512 KiB between the marks plus whatever was already on its way (up to the
-supervisor's writer queue, 64 messages of about 32 KiB, and what the link holds) within the 60 seconds. That is about 47
-KB/s locally during a scrollback catch-up, the realistic case for a pause, since the sender then fills its writer queue;
-about 10 KB/s when little was in flight; and about 110 KB/s over ssh if its channel window and socket buffers hold about
-4 MiB more, a figure that moves with however much the link actually holds. The resume's own wait in the helm's shared
-writer queue, behind other input, uploads and control messages, comes out of the same 60 seconds. A byte stream's
-browser pauses at 4 MiB of unparsed output and resumes at 1 MiB against the same deadline, so it must parse at least 3
-MiB plus what was in flight (52 KB/s and up), and a byte stream whose browser is slow on the network is not paused at
-all: it overflows the helm's queue and is detached at once. Rearming the deadline while the browser keeps draining would
-remove the floor, but needs the helm to report progress and the supervisor to act on it, a protocol and supervisor
-change; the marks keep the floor low enough without it. The pause leaves 14 MiB of the budget for what arrives after it,
-plenty at the sender's 32 KiB packing. Rows too large for that packing go alone in messages of up to 1 MiB, and a writer
-queue full of them (output that makes huge rows) can exceed the budget; that ends the attachment as stalled and the
-browser shows it as any stall until the user reconnects. The budget stays the hard bound; per-attachment credits that
-would avoid it are not built.
+what ends a browser that stopped reading. It also sets the slowest browser that still reads and is not ended: from the
+pause it must drain the 512 KiB between the marks plus whatever was already on its way (up to the supervisor's writer
+queue, 64 messages of about 32 KiB, and what the link holds) within the 60 seconds. That is about 47 KB/s locally during
+a scrollback catch-up, the realistic case for a pause, since the sender then fills its writer queue; about 10 KB/s when
+little was in flight; and about 110 KB/s over ssh if its channel window and socket buffers hold about 4 MiB more, a
+figure that moves with however much the link actually holds. The resume's own wait in the helm's shared writer queue,
+behind other input, uploads and control messages, comes out of the same 60 seconds. Rearming the deadline while the
+browser keeps draining would remove the floor, but needs the helm to report progress and the supervisor to act on it, a
+protocol and supervisor change; the marks keep the floor low enough without it. The pause leaves 14 MiB of the budget
+for what arrives after it, plenty at the sender's 32 KiB packing. Rows too large for that packing go alone in messages
+of up to 1 MiB, and a writer queue full of them (output that makes huge rows) can exceed the budget; that ends the
+attachment as stalled and the browser shows it as any stall until the user reconnects. The budget stays the hard bound;
+per-attachment credits that would avoid it are not built.
 
 The format is not permanent: it changes with ordinary protocol bumps, unlike the terminal host's protocol and snapshots.
 Protocol 72 replaces the JSON `rows`, `frame` and `history` messages with fixed-field little-endian binary records. The
@@ -3163,8 +3078,7 @@ varied-row corpus and malformed records; there is no tolerated binary category w
 client's node tests decode the same binary records, compare their content and model effects with the descriptions, and
 hold the test-only JavaScript feed encoder byte-equal to Rust. They also apply every JSON control fixture and compare
 the input builders with the valid input fixtures, some of which are allowed wire forms the client never sends (an empty
-last paste part, for one); they also hold the client's hand-copied input bounds to the invalid input fixtures. Every
-terminal in a terminal host streams this way; old tmux terminals keep their byte streams.
+last paste part, for one); they also hold the client's hand-copied input bounds to the invalid input fixtures.
 
 `SessionInfo` carries a `last_activity_at` (unix seconds) beside `created_at`: the last time the supervisor observed
 that session's agent pane change. It was added WITHIN protocol version 11 rather than bumping it, per the running rule
@@ -3187,7 +3101,7 @@ helm and `terminal.js` compared English sentences they each kept a copy of, and 
 have noticed a rewording.
 
 The helm also uses `tab_closed` for a tab attach refused as `NotFound`. That refusal describes current state, not a
-passing condition: the supervisor looks the tab up in tmux's live panes, and a session or host that cannot be found has
+passing condition: the supervisor looks the tab up among its live tabs, and a session or host that cannot be found has
 taken its tabs with it. Reported as `other`, it sent the browser's reconnect ladder through every attempt for every
 listed tab, rebuilding a terminal each time. The browser stops retrying on it, but paints the reason as a banner rather
 than hiding the pane, because silence is the reap's promise for a tab this view had working. The agent terminal's
@@ -3270,9 +3184,8 @@ Acknowledgements count cumulative bytes. Uploads earn one after each disk write;
 write. Downloads earn one when the helm's consumer takes a chunk from its bounded receive queue, before it writes or
 forwards those bytes. Uploads are rechunked independently of HTTP body boundaries. Downloads fill frames across short
 file reads and send a partial frame only at EOF. Relays forward short socket reads immediately rather than waiting to
-fill a frame, as the [relay contract](#tcp-relay-channels) explains. Terminal bytes use 32 KiB pieces, while grid
-messages target 32 KiB and may need a larger frame for one row. Terminals use [pause and resume](#grid-streams), not
-transfer credit.
+fill a frame, as the [relay contract](#tcp-relay-channels) explains. Grid messages target 32 KiB and may need a larger
+frame for one row. Terminals use [pause and resume](#grid-streams), not transfer credit.
 
 The 32 KiB transfer cap matches OpenSSH's default session-channel packet size
 ([`CHAN_SES_PACKET_DEFAULT`](https://github.com/openssh/openssh-portable/blob/master/channels.h)), so larger frames
@@ -3717,55 +3630,55 @@ added.
 The hover splits the disclosed path for presentation into a file-type Nerd Font icon and name, then host:directory,
 without shortening either. All remote fragments still use textContent, peer isolation and visible format-character
 escapes. Decimal size (1000 bytes per KB) and exact byte thresholds set the left stripe and size color; refusals
-override size with red. Native mode alone advertises the platform modifier for `can_open` files. Both plain and OSC
-adapters forward their mouse event to the same transfer path; web modifiers always request a plain browser download.
+override size with red. Native mode alone advertises the platform modifier for `can_open` files. Printed paths and OSC
+file links forward their mouse event to the same transfer path; web modifiers always request a plain browser download.
 
-`terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which a
-grid hosts directly and an old terminal loads as an xterm.js add-on (`XtermFileLinksAddon`) below the existing OSC 8 and
-web providers; only that add-on registers xterm.js link providers or wraps xterm.js's private OSC 8 provider. Link-line
-cells map UTF-16 token offsets to wrapped coordinates, preserving wide/combined glyphs. Logical lines over 8192
-characters or 128 rows are not linkified. Whitespace, quotes and brackets delimit ordinary paths; filenames with spaces
-require an OSC file link. A deliberate exception reconstructs one isolated pair of rows broken by a program rather than
-the terminal: the head's last token has no whitespace, quote or bracket after it apart from space padding, the tail's
-first token has only space indentation before it, and that token is longer in terminal columns than the head's unused
-columns minus a four-column right-margin allowance. The existing tokenizer must recognize a path at the head's final
-token and recognize the joined token; a plain word before an absolute path is not a cut. Both checks read the full line
-so URI chunk exclusions and diagnostic suffixes still apply. Both halves share its whole target and mapped range, with
-padding and indentation left out of the target. Consecutive possible hard cuts are left unchanged rather than
-reconstructing a three-row path. Terminal wrap handling and the 8192-character bound remain in force. Plain schemes and
-protocol-relative tokens are excluded. File URIs decode once; their path belongs to the session host regardless of URI
-authority. No shell directory tracking or hover cache is introduced.
+`terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which the
+grid hosts directly (terminal.js's `createGridLinks`), after OSC 8 and printed web links in the order a line's links are
+offered. Link-line cells map UTF-16 token offsets to wrapped coordinates, preserving wide/combined glyphs. Logical lines
+over 8192 characters or 128 rows are not linkified. Whitespace, quotes and brackets delimit ordinary paths; filenames
+with spaces require an OSC file link. A deliberate exception reconstructs one isolated pair of rows broken by a program
+rather than the terminal: the head's last token has no whitespace, quote or bracket after it apart from space padding,
+the tail's first token has only space indentation before it, and that token is longer in terminal columns than the
+head's unused columns minus a four-column right-margin allowance. The existing tokenizer must recognize a path at the
+head's final token and recognize the joined token; a plain word before an absolute path is not a cut. Both checks read
+the full line so URI chunk exclusions and diagnostic suffixes still apply. Both halves share its whole target and mapped
+range, with padding and indentation left out of the target. Consecutive possible hard cuts are left unchanged rather
+than reconstructing a three-row path. Terminal wrap handling and the 8192-character bound remain in force. Plain schemes
+and protocol-relative tokens are excluded. File URIs decode once; their path belongs to the session host regardless of
+URI authority. No shell directory tracking or hover cache is introduced.
 
 Grid printed-path hovers track the neighboring rows that can create or remove a cut. When only those outside rows
 change, the grid synchronously re-recognizes the path and range: an unchanged match keeps its hover and host check,
 without another asynchronous container-admission request. A changed match takes the ordinary leave/requery path.
 Covered-row changes always take that path too, preserving the existing display-text and provider-precedence checks.
 
-The OSC handler enables `allowNonHttpProtocols` and owns the explicit scheme boundary: parsed http/https targets go
-unchanged to the existing opener, valid file targets go to file lookup/download, and every other scheme does nothing.
-Fresh hover evidence owns an AbortController and click admission. Covers are declarative: every surface that draws at or
-above the hover's layer and can overlap it carries a `data-link-cover` marker in its own markup (today the approval
-region, the tunnel-error notice, the quick-launch pill, Farhelm's hover tooltip and the trash flight animation), and
-file and disclosed web-link activation alike check the live bounds of every rendered marked surface for any overlap with
-the hover. A hand-kept selector list was how the quick-launch pill went uncounted. Overlap is the whole test, so a
-tooltip refuses a click only while it actually overlaps the hover, and a link's own hover never shows one. Modal
-backdrops are not covers: they span the window and make every terminal inert, so no link under one can be clicked. A
-covered hover refuses the click before transfer or opening. Its explanation sits above every cover except the brief,
-unfilled trash flight until the pointer leaves the link, then returns to the ordinary failure layer. app.css's z-index
-ladder states the rule next to the hover's layer, and a browser test checks the explanation's layer against every marked
-surface it can render. xterm synchronously leaves and re-enters a link when its rows redraw, so leaving withdraws
-click/cursor admission immediately but defers abort and tooltip removal to the next task. A re-hover in that interval
-keeps the evidence only for the same displayed text, target path and snapshotted start/end cell range; a real departure
-or replacement invalidates it, including raced replies. A kept ready cursor is restored in a microtask, after xterm
-installs its decoration accessors, and only while that replacement link is still hovered. Teardown never writes cursor
-decorations: xterm's accessors target whichever link is current, which may already be unrelated. Plain links underline
-before lookup but gain a pointer only when ready. Click reopens the disclosed canonical path independently. Browser
-bodies become a bounded Blob only after successful EOF; an object URL is released after the save click. The desktop
-handoff secret identifies native mode, which requests `save_to_downloads` and adds `open` only for its platform
-modifier-click when that hover's stat reply offered opening; otherwise the modified click saves and explains that
-opening was not offered. It never falls back to Blob. Tooltip and transfer outcomes use textContent, peer-value
-isolation and visible Unicode format escapes. The addon is disposed with its terminal, cancelling pending work; retained
-reconnect terminals retain it.
+The grid passes every OSC 8 target on, so the page's OSC link handling owns the explicit scheme boundary (`oscTarget`):
+parsed http/https targets go unchanged to the existing opener, valid file targets go to file lookup/download, and every
+other scheme does nothing. Fresh hover evidence owns an AbortController and click admission. Covers are declarative:
+every surface that draws at or above the hover's layer and can overlap it carries a `data-link-cover` marker in its own
+markup (today the approval region, the tunnel-error notice, the quick-launch pill, Farhelm's hover tooltip and the trash
+flight animation), and file and disclosed web-link activation alike check the live bounds of every rendered marked
+surface for any overlap with the hover. A hand-kept selector list was how the quick-launch pill went uncounted. Overlap
+is the whole test, so a tooltip refuses a click only while it actually overlaps the hover, and a link's own hover never
+shows one. Modal backdrops are not covers: they span the window and make every terminal inert, so no link under one can
+be clicked. A covered hover refuses the click before transfer or opening. Its explanation sits above every cover except
+the brief, unfilled trash flight until the pointer leaves the link, then returns to the ordinary failure layer.
+app.css's z-index ladder states the rule next to the hover's layer, and a browser test checks the explanation's layer
+against every marked surface it can render. The grid synchronously leaves and re-enters a link when its rows redraw
+(grid-terminal.js's `refreshHover`), so leaving withdraws click/cursor admission immediately but defers abort and
+tooltip removal to the next task. A re-hover in that interval keeps the evidence only for the same displayed text,
+target path and snapshotted start/end cell range; a real departure or replacement invalidates it, including raced
+replies. A kept ready cursor is restored in a microtask, once the hover callback has returned and the grid has settled
+which link is current, and only while that replacement link is still hovered. Teardown never writes cursor decorations:
+by then another link may be the hovered one, and the cursor is that link's to set. Plain links underline before lookup
+but gain a pointer only when ready. Click reopens the disclosed canonical path independently. Browser bodies become a
+bounded Blob only after successful EOF; an object URL is released after the save click. The desktop handoff secret
+identifies native mode, which requests `save_to_downloads` and adds `open` only for its platform modifier-click when
+that hover's stat reply offered opening; otherwise the modified click saves and explains that opening was not offered.
+It never falls back to Blob. Tooltip and transfer outcomes use textContent, peer-value isolation and visible Unicode
+format escapes. `FileLinks` is disposed with its grid, cancelling pending work; a grid held across a reconnect or kept
+as a takeover snapshot keeps it.
 
 Container environments use these ordinary file rules against their in-container supervisor. The earlier
 checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are
@@ -4454,21 +4367,19 @@ channel records these notices.
   accepted reports and decision-time Restart can change the row after the pane stops. An injected launch holding no
   identity warns once after 65 seconds from the first input frame delivered to the agent pane that holds an Enter
   (`capture::submits_a_line`): a carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends `ESC CR`
-  to insert a newline) and not inside a bracketed paste of the same frame (a paste's newlines reach the agent as
-  carriage returns, converted by xterm.js for an old terminal and by the supervisor's grid input encoder for a new one),
-  in a frame whose every chunk tmux confirmed (an old terminal) or that the grid input path queued for the agent's
-  terminal host (a new one, where a bracketed paste is judged whole and never counts). The terminal's automatic replies
-  to the agent TUI's own queries (device attributes, cursor position, colour answers, focus reports) never carry a
-  carriage return, so an agent the user opened but has not typed into cannot trip it. An Enter while the latest screen
-  reading before delivery is `Waiting` answers a recognized dialog and does not start the clock. An outdated waiting
-  reading can defer the clock to the next Enter; no capture runs on the input path. With no reading yet, or no dedicated
-  reader, the existing submitted-line rule applies. An old terminal's paste large enough to span frames still has its
-  middle frames judged without their markers. The spawn records whether its argv received the hook before the agent's
-  terminal (its tmux session or its terminal host) starts, fenced by launch generation. Reload restores that flag; older
-  rows default unhooked and stay unchecked. The anchor is an in-memory monotonic instant, reset with the diagnostic
-  latch on every relaunch and supervisor restart, so a picked-up launch starts its clock at the next qualifying Enter
-  after reload rather than recovering the time of an earlier Enter. A Resume carries its identity and therefore stays
-  silent even if its new hook never reports. The warning changes no offer or admission rule.
+  to insert a newline), in a frame the grid input path queued for the agent's terminal host. A bracketed paste is judged
+  whole and never counts: its newlines reach the agent as carriage returns (the supervisor's grid input encoder converts
+  them), inside the paste markers. The terminal's automatic replies to the agent TUI's own queries (device attributes,
+  cursor position, colour answers, focus reports) never carry a carriage return, so an agent the user opened but has not
+  typed into cannot trip it. An Enter while the latest screen reading before delivery is `Waiting` answers a recognized
+  dialog and does not start the clock. An outdated waiting reading can defer the clock to the next Enter; no capture
+  runs on the input path. With no reading yet, or no dedicated reader, the existing submitted-line rule applies. The
+  spawn records whether its argv received the hook before the agent's terminal host starts, fenced by launch generation.
+  Reload restores that flag; older rows default unhooked and stay unchecked. The anchor is an in-memory monotonic
+  instant, reset with the diagnostic latch on every relaunch and supervisor restart, so a picked-up launch starts its
+  clock at the next qualifying Enter after reload rather than recovering the time of an earlier Enter. A Resume carries
+  its identity and therefore stays silent even if its new hook never reports. The warning changes no offer or admission
+  rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
@@ -8320,11 +8231,10 @@ constraint (see the GUI section's motivation), not an afterthought:
   browser suite, which runs every terminal in a host on a real stack. `.agents/validation.md` names the selections.
 - **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside
   `assets/` for source/test separation — bundling itself is by explicit `asset!` registration, so placement alone
-  neither includes nor excludes a file). It currently covers `term-bytes.js`'s byte-domain conversion for
-  `term.onBinary` — the byte-for-byte contract pinned at the boundaries (0x00, 0x7f, 0x80, 0xff), empty input, and a
-  mouse-report-shaped sequence. Node's built-in runner over vitest/jest: node is already a CI requirement for
-  Playwright, so this is zero new dependencies, and the asset-JS layer has no bundler for a module-tooling-heavy runner
-  to pay for (PLAN_M6_5.md item 1).
+  neither includes nor excludes a file). It covers the pure parts of the page's scripts, the grid client's decoder,
+  input rules and link recognition among them. Node's built-in runner over vitest/jest: node is already a CI requirement
+  for Playwright, so this is zero new dependencies, and the asset-JS layer has no bundler for a module-tooling-heavy
+  runner to pay for (PLAN_M6_5.md item 1).
 - **A CentOS Stream 9 container stands in for a host that is not the CI runner.** Provisioning accepts any Linux host
   with a usable systemd user manager, but every provisioning integration test dials `localhost`, and both CI and the
   release gate run on Ubuntu — so the case the retired `ID=ubuntu` gate existed to forbid, a helm installing onto a
@@ -9301,9 +9211,8 @@ reset. Picking the already committed host does not reset the draft. Template edi
 separate stale-only host read remains limited to outage details. The shared preferences signal controls whether a
 colored frame is drawn. The host color word becomes one CSS custom property on the terminal panes container, inherited
 by each terminal, using `--fg-0` for `default` and the matching `--host-icon-*` token otherwise. The current web and
-WebKit render has no distinct dark margin: pane, terminal and the terminal's own surface (the grid, or xterm.js's
-viewport for an old terminal) all paint the terminal theme's background (`--terminal-bg`) by default. With coloring
-enabled, a 4px inset shadow fills the terminal element's existing padding. The shadow leaves the terminal background and
-the terminal theme unchanged and adds no layout space; the setting-off render has no shadow. A host appearance refresh
-recolors an open session without fetching hosts from the session view, and a Settings write updates this client's
-preference signal immediately.
+WebKit render has no distinct dark margin: pane, terminal and the terminal's own surface (the grid) all paint the
+terminal theme's background (`--terminal-bg`) by default. With coloring enabled, a 4px inset shadow fills the terminal
+element's existing padding. The shadow leaves the terminal background and the terminal theme unchanged and adds no
+layout space; the setting-off render has no shadow. A host appearance refresh recolors an open session without fetching
+hosts from the session view, and a Settings write updates this client's preference signal immediately.

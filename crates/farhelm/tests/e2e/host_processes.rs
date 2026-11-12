@@ -336,7 +336,7 @@ fn typed_line(line: &str) -> [Vec<u8>; 2] {
 }
 
 /// A grid attachment through the supervisor's own client, as the helm
-/// makes one for a browser that can draw grids.
+/// makes one for a browser.
 struct GridViewer {
     channel: u32,
     stream: TermStream,
@@ -344,25 +344,12 @@ struct GridViewer {
 }
 
 impl GridViewer {
-    /// Attach to `session_id`'s agent terminal as a viewer that can draw
-    /// grids, and require a grid stream.
+    /// Attach to `session_id`'s agent terminal.
     async fn attach(client: &SupervisorClient, session_id: &str) -> Self {
         let (channel, stream) = client
-            .attach_terminal(
-                session_id,
-                80,
-                24,
-                TerminalSelector::default(),
-                "",
-                ViewerStreams::BytesOrGrid,
-            )
+            .attach_terminal(session_id, 80, 24, TerminalSelector::default(), "")
             .await
             .expect("a grid attach");
-        assert_eq!(
-            stream.stream_kind(),
-            farhelm_proto::StreamKind::Grid,
-            "a host terminal streams as a grid"
-        );
         Self {
             channel,
             stream,
@@ -416,9 +403,8 @@ impl GridViewer {
 /// supervisor all run the bare command, so this is what every user's
 /// terminals run in. Spec: a created session is a confirmed host row whose
 /// socket a host process serves; its agent terminal attaches as a grid
-/// stream that shows the agent's ready line; and a tab opened in it attaches
-/// as a grid stream too (a tmux window would answer a viewer that can draw
-/// grids with bytes).
+/// stream that shows the agent's ready line; and a tab opened in it
+/// attaches too.
 #[farhelm_testtrace::test]
 async fn a_bare_supervisor_run_creates_agents_and_tabs_in_hosts() {
     let mut stack = HostStack::new().await;
@@ -443,15 +429,9 @@ async fn a_bare_supervisor_run_creates_agents_and_tabs_in_hosts() {
             24,
             TerminalSelector::Tab { id: tab.id.clone() },
             "",
-            ViewerStreams::BytesOrGrid,
         )
         .await
         .expect("attach the tab");
-    assert_eq!(
-        tab_stream.stream_kind(),
-        farhelm_proto::StreamKind::Grid,
-        "a new tab runs in a terminal host, which streams as a grid"
-    );
     client.detach(tab_channel).await;
     drop(tab_stream);
     drop(viewer);
@@ -550,7 +530,6 @@ async fn a_supervisor_with_only_new_terminals_runs_no_tmux() {
             24,
             TerminalSelector::Tab { id: tab.id.clone() },
             "",
-            ViewerStreams::BytesOrGrid,
         )
         .await
         .expect("attach the tab");
@@ -876,14 +855,12 @@ impl BrowserSocket {
             .expect("send a frame to the helm");
     }
 
-    /// Apply the grid stream to `screen` until it shows `needle`, requiring
-    /// that the stream notice said `grid` before any data. On a timeout the
-    /// failure names the screen and `premise()`, as [`GridViewer::wait_for`]
-    /// does.
+    /// Apply the grid stream to `screen` until it shows `needle`. On a
+    /// timeout the failure names the screen and `premise()`, as
+    /// [`GridViewer::wait_for`] does.
     async fn wait_for(
         &mut self,
         screen: &mut GridScreen,
-        notice: &mut bool,
         needle: &str,
         premise: impl FnOnce() -> String,
     ) {
@@ -893,17 +870,11 @@ impl BrowserSocket {
                     Some((1, text)) => {
                         let message: serde_json::Value =
                             serde_json::from_slice(&text).expect("a JSON text frame");
-                        match message["type"].as_str() {
-                            Some("stream") => {
-                                assert_eq!(message["kind"], "grid", "{message}");
-                                *notice = true;
-                            }
-                            Some("detached") => panic!("detached: {message}"),
-                            _ => {}
+                        if message["type"] == "detached" {
+                            panic!("detached: {message}");
                         }
                     }
                     Some((2, data)) => {
-                        assert!(*notice, "the stream notice comes before any data");
                         screen.apply(&GridOutput::decode(&data).expect("a grid message"));
                     }
                     Some((opcode, _)) => panic!("an unexpected message opcode {opcode}"),
@@ -925,15 +896,13 @@ impl BrowserSocket {
 /// as a grid stream, and the browser's typing reaches the program.
 ///
 /// Why: this is the whole path a user's browser takes to a terminal in a
-/// host, with nothing in-process: the helm passes `grid=1` on as the
-/// attach's grid capability, relays the supervisor's grid messages unread,
-/// and carries each grid input message up as one frame. The helm's own tests
+/// host, with nothing in-process: the helm relays the supervisor's grid
+/// messages unread, and carries each grid input message up as one frame. The helm's own tests
 /// run against stand-in supervisors and the supervisor's against its own
 /// client; only here do the real processes meet. Spec: with a supervisor
 /// and a helm on its state directory, a
 /// session created through the helm's API is a host row; its terminal
-/// socket with `?grid=1` says `{"type":"stream","kind":"grid"}` before any
-/// data, its binary frames are grid messages whose screen shows the agent's
+/// socket's binary frames are grid messages whose screen shows the agent's
 /// ready line, and a line sent as `text` and `key` messages is echoed by the
 /// agent on that screen.
 #[farhelm_testtrace::test]
@@ -967,13 +936,12 @@ async fn a_host_terminal_reaches_a_browser_through_the_helm_as_a_grid() {
     let mut socket = BrowserSocket::open(
         &helm,
         &secret,
-        &format!("/api/sessions/{}/term?grid=1", session.id),
+        &format!("/api/sessions/{}/term", session.id),
     )
     .await;
     let mut screen = GridScreen::new();
-    let mut notice = false;
     socket
-        .wait_for(&mut screen, &mut notice, "FAKE-AGENT READY", || {
+        .wait_for(&mut screen, "FAKE-AGENT READY", || {
             stack.premise(&host_socket)
         })
         .await;
@@ -981,7 +949,7 @@ async fn a_host_terminal_reaches_a_browser_through_the_helm_as_a_grid() {
         socket.send_binary(&message).await;
     }
     socket
-        .wait_for(&mut screen, &mut notice, "echo:through-the-helm", || {
+        .wait_for(&mut screen, "echo:through-the-helm", || {
             stack.premise(&host_socket)
         })
         .await;

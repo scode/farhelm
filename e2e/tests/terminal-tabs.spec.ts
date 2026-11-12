@@ -679,8 +679,8 @@ test("leaving a session with tabs tears down every island and reopening builds n
     const before = await page.evaluate(() => {
       const islands = (window as any).__farhelmIslands;
       (window as any).__sockets = Object.keys(islands).map((el) => islands[el].ws);
-      // Each island's component, whichever kind: xterm.js or the grid.
-      (window as any).__terms = Object.keys(islands).map((el) => islands[el].term ?? islands[el].grid);
+      // Each island's grid component.
+      (window as any).__terms = Object.keys(islands).map((el) => islands[el].grid);
       return Object.keys(islands).sort();
     });
     expect(before).toEqual(
@@ -718,7 +718,7 @@ test("leaving a session with tabs tears down every island and reopening builds n
       await page.evaluate(() => {
         const islands = (window as any).__farhelmIslands;
         const old = (window as any).__terms;
-        return Object.keys(islands).every((el) => !old.includes(islands[el].term ?? islands[el].grid));
+        return Object.keys(islands).every((el) => !old.includes(islands[el].grid));
       }),
     ).toBe(true);
   } finally {
@@ -896,8 +896,7 @@ test("a tab whose mount fails is rolled back and bannered while its siblings sta
 // form.
 //
 // Count reads of the withheld `window.farhelmGridTerminal` (the grid
-// component, which the mount gate waits for on both kinds of terminal; a
-// new terminal's gate reads nothing of xterm.js): a surviving retry cannot
+// component, which the mount gate waits for): a surviving retry cannot
 // mount once its element is gone, so counting mounted islands alone would
 // miss it. A rising count first proves the retry is genuinely pending.
 test("a pending tab mount is cancelled when the tab leaves the desired set", async ({
@@ -1303,15 +1302,15 @@ test("an unselected terminal keeps real geometry while hidden", async ({
       const node = document.getElementById(el)!;
       const box = node.getBoundingClientRect();
       const island = (window as any).__farhelmIslands[el];
-      // The page's own fit: xterm.js's, or the grid's `size()`, which a
-      // hidden pane that measured nothing would leave unchanged.
-      const size = island.grid ? island.grid.size() : island.term;
+      // The page's own fit, the grid's `size()`, which a hidden pane that
+      // measured nothing would leave unchanged.
+      const size = island.grid.size();
       return { width: box.width, height: box.height, cols: size.cols, rows: size.rows };
     }, `terminal-${tabId}`);
     expect(hidden.width).toBeGreaterThan(0);
     expect(hidden.height).toBeGreaterThan(0);
-    // The floor is xterm.js's own minimum, so anything at it would mean
-    // `fit()` measured nothing; a real pane is far above it.
+    // A fit that measured nothing lands on the grid's floor (two columns);
+    // a real pane is far above these bounds.
     expect(hidden.cols).toBeGreaterThan(10);
     expect(hidden.rows).toBeGreaterThan(4);
 
@@ -1356,14 +1355,14 @@ async function terminalSizes(
 // refit each one so its program sees the new rows and columns, and the size
 // survives a reload because it is remembered in the page's own storage.
 //
-// Why each half matters: setting xterm's font size without a refit changes
-// the glyphs but not the grid, so the pane and the pty would disagree about
+// Why each half matters: changing the font size without a refit changes
+// the glyphs but not the rows and columns, so the pane and the pty would disagree about
 // how many rows exist (the garbage-rendering bug class the tab refit tests
 // above guard against); a hidden tab that missed the change would come up
 // at the old size when selected; and a size that did not survive a reload
 // would not be "remembered per device" at all. The pty half is checked with
 // the program's own answer (`stty size` in the tab's shell, the fake
-// agent's `size` reply), not with xterm's idea of it.
+// agent's `size` reply), not with the page's idea of it.
 //
 // What this cannot check: that the browser's own zoom does not also react,
 // which Playwright does not expose.
@@ -1394,8 +1393,8 @@ test("terminal text size steps every terminal, reaches the pty, and is remembere
     expect(await readout.evaluate((element) => (element as HTMLElement).tabIndex)).toBe(-1);
 
     // The shortcut, with focus inside the agent terminal: it must step the
-    // size there too, which is the case where xterm would otherwise get the
-    // key first.
+    // size there too, which is the case where the terminal would otherwise
+    // get the key first.
     await page.locator("#terminal").click();
     await expect
       .poll(() => agentTerminalHasFocus(page), { message: "test premise: focus is in the agent terminal" })
@@ -1446,7 +1445,7 @@ test("terminal text size steps every terminal, reaches the pty, and is remembere
     }
 
     // A grid draws the size the supervisor committed; wait until each one
-    // has taken its fit, as xterm.js's own size already is.
+    // has taken its fit.
     await expect
       .poll(() =>
         page.evaluate(() => {
@@ -1593,7 +1592,7 @@ test("opening the close confirmation refits the terminals below it", async ({
     const rows = () =>
       page.evaluate(() => {
         const island = (window as any).__farhelmIslands["terminal"];
-        return (island.grid ? island.grid.model.rows : island.term.rows) as number;
+        return island.grid.model.rows as number;
       });
 
     const before = await rows();
@@ -1635,7 +1634,7 @@ test("a viewport resize reflows every island, hidden ones included", async ({
         const islands = (window as any).__farhelmIslands;
         const out: Record<string, string> = {};
         for (const el of Object.keys(islands).sort()) {
-          const size = islands[el].grid ? islands[el].grid.model : islands[el].term;
+          const size = islands[el].grid.model;
           out[el] = `${size.cols}x${size.rows}`;
         }
         return out;
@@ -1963,17 +1962,9 @@ test("a tab opened after closing another starts with a clean island", async ({
     const below = await page.evaluate((el) => {
       const island = (window as any).__farhelmIslands[el];
       const junk: string[] = [];
-      if (island.grid) {
-        const snapshot = island.grid.snapshot();
-        for (let row = snapshot.cursor.y + 1; row < snapshot.lines.length; row++) {
-          const line = snapshot.lines[row].trimEnd();
-          if (line) junk.push(`${row}: ${line}`);
-        }
-        return junk;
-      }
-      const buf = island.term.buffer.active;
-      for (let row = buf.baseY + buf.cursorY + 1; row < buf.length; row++) {
-        const line = buf.getLine(row)?.translateToString(true).trimEnd();
+      const snapshot = island.grid.snapshot();
+      for (let row = snapshot.cursor.y + 1; row < snapshot.lines.length; row++) {
+        const line = snapshot.lines[row].trimEnd();
         if (line) junk.push(`${row}: ${line}`);
       }
       return junk;

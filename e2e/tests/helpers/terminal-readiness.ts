@@ -2,23 +2,23 @@
 // client-side facts a test needs without manufacturing input, focus, or replay.
 
 import { expect, type Page } from "@playwright/test";
-import { activeHostPremiseWatch, oldTerminalProblem } from "./host-premise";
 import { recordPage } from "./timeline";
 
-/** One island's catch-up record, as terminal.js publishes it. */
+/**
+ * One island's catch-up record, as terminal.js publishes it: the fields the
+ * specs read. A grid stream applies every message as it arrives and holds
+ * nothing back, so the record says how the catch-up ended and whether it
+ * revealed, not how much it held.
+ */
 export interface ReplayRecord {
   buffering: boolean;
-  bufferedBytes: number;
-  bufferedChunks: number;
-  writesWhileHidden: number;
   revealReason: string | null;
   revealed: boolean;
-  revealedInWriteCallback: boolean;
   viewportAtTailOnReveal: boolean | null;
   stalledIdleRearms: number;
   holdMarker: boolean;
   heldReason: string | null;
-  limits: { bufferBytes: number; bufferChunks: number; idleMs: number };
+  limits: { idleMs: number };
 }
 
 /** One island's catch-up record right now, without waiting for anything. */
@@ -57,11 +57,10 @@ export async function waitForReplayReveal(
 }
 
 /**
- * Wait until the island at `elementId` is MOUNTED — a terminal component
- * (the grid for a new terminal, else xterm.js until a grid stream replaces
- * it) and a socket exist for it.
+ * Wait until the island at `elementId` is MOUNTED — its grid component and
+ * a socket exist for it.
  *
- * The registry's terminal, socket, and test record together are the mount
+ * The registry's grid, socket, and test record together are the mount
  * boundary. It does not require OPEN, replay reveal, or focus, which is why
  * fixtures that hold replay or deliberately refuse a socket use this weaker
  * boundary.
@@ -72,7 +71,7 @@ export async function waitForIslandMounted(page: Page, elementId: string) {
       () =>
         page.evaluate((el) => {
           const island = (window as any).__farhelmIslands?.[el];
-          return !!((island?.term || island?.grid) && island?.ws && island?.test);
+          return !!(island?.grid && island?.ws && island?.test);
         }, elementId),
       { timeout: 20_000, message: `waiting for the island at ${elementId} to mount` },
     )
@@ -162,20 +161,15 @@ async function observeSession(
       }
     }
 
-    // The component's hidden text field is the actual keyboard-input
-    // destination: xterm.js's public textarea, or the grid's input field
-    // (a new terminal's from its mount, or once a grid stream replaced
-    // xterm.js, terminal.js's `adoptGrid`).
-    // Being somewhere inside a terminal container does not prove that keys
-    // reach the terminal; another focusable descendant could own them
-    // instead.
-    const input = island?.grid
-      ? island.grid.element?.querySelector(".grid-terminal-input")
-      : island?.term?.textarea;
+    // The grid's hidden input field is the actual keyboard-input
+    // destination. Being somewhere inside a terminal container does not
+    // prove that keys reach the terminal; another focusable descendant could
+    // own them instead.
+    const input = island?.grid?.element?.querySelector(".grid-terminal-input");
     return {
       pathname,
       pathnameMatches,
-      islandMounted: !!((island?.term || island?.grid) && island?.ws && island?.test),
+      islandMounted: !!(island?.grid && island?.ws && island?.test),
       socketOpen: island?.ws?.readyState === WebSocket.OPEN,
       socketMatches,
       replayRevealed: !!island?.test?.replay?.revealed,
@@ -254,28 +248,6 @@ async function waitForSession(
     );
   }
   recordPage(page, "readiness-success", [["requested", terminal.id], ["kind", kind]]);
-  if (kind === "revealed" || kind === "ready") await expectHostTerminalKind(page, terminal);
-}
-
-/**
- * In a test under the evidence fixtures' host-terminal premise
- * (host-premise.ts), a revealed or ready attachment
- * that did not come back as a grid is a failure unless its session was
- * declared fabricated (host-premise.ts's `oldTerminalProblem`): an early,
- * located failure for the premise that the automatic per-test check in evidence.ts
- * enforces for every terminal socket opened in a browser context the test
- * observes (the default one, `newObservedContext`, `observeContext`, or one
- * registered with `watchHostPremise`), tabs and remounts included.
- * The island is read first, so the ordinary case costs no request.
- */
-async function expectHostTerminalKind(page: Page, terminal: SessionTerminal): Promise<void> {
-  const watch = activeHostPremiseWatch();
-  if (!watch) return;
-  const elementId = terminal.tabId === undefined ? "terminal" : `terminal-${terminal.tabId}`;
-  const grid = await page.evaluate((el) => !!(window as any).__farhelmIslands?.[el]?.grid, elementId);
-  if (grid) return;
-  const problem = await oldTerminalProblem(page.request, terminal, watch.options);
-  expect(problem, "the host-terminal premise").toBeNull();
 }
 
 /** Compare the fixed readiness snapshot without serializing browser-derived data for diagnostics. */

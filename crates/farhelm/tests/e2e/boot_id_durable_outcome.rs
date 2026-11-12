@@ -290,10 +290,6 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
         "a session that was running when the host rebooted lost its terminal to that \
          reboot; that is knowable, unlike how (or whether) its agent ended"
     );
-    // Its row still names its last terminal host, but it holds no
-    // terminal now, so it reports no kind: there is nothing left that a
-    // client's migration band could ask the user to move.
-    assert_eq!(interrupted.agent_terminal, None);
     let after = listed(&client2, &stopped.id).await;
     assert!(
         matches!(after.status, SessionStatus::Exited { .. }),

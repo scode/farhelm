@@ -81,7 +81,7 @@ test("sidebar drag clamps, persists, resets and refits the program", async ({ pa
     // column must still receive clicks for selection, links and mouse mode.
     const screen = (await terminalScreen(page).boundingBox())!;
     expect(await page.evaluate(({ x, y }) => {
-      return !!document.elementFromPoint(x, y)?.closest(".xterm-screen, .grid-terminal-screen");
+      return !!document.elementFromPoint(x, y)?.closest(".grid-terminal-screen");
     }, { x: screen.x + 0.5, y: screen.y + 20 })).toBe(true);
     await page.screenshot({ path: info.outputPath("sidebar-default.png") });
 

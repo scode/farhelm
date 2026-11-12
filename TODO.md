@@ -161,41 +161,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Credentials for ordinary SSH hosts.** The Credentials section of Settings serves environments through their recipes.
   Extend it so ordinary SSH hosts can use the same named credentials.
 
-- **After tmux and xterm.js are dropped entirely: simplify terminal kind tracking.** While old terminals (tmux, drawn by
-  xterm.js) and new terminals (terminal hosts, drawn by the grid) coexist, every layer tracks which kind each terminal
-  is, and several pieces exist only so that a new terminal never touches xterm.js or tmux. Once a release stops
-  supporting old terminals, every terminal is a host, and this tracking should collapse rather than linger as dead
-  branches. The maintainer wants it removed then, not now. The pieces, as of the new-terminals cutover stack:
-  - Page (`crates/farhelm-ui`): each terminal spec carries a kind (`host`, `tmux`, unknown, or `pending`), worked out in
-    `session_view.rs` (`agent_spec_kind`) from the listing, the Restart reply's kind and whether a Restart is in flight.
-    `pending` exists only so that the reconnect after a Restart that moves an old agent into a host never builds
-    xterm.js; the reconnect controller in `assets/terminal.js` takes the latest synced spec for the same reason.
-    `terminal.js` also keeps the xterm-first path for old and unknown kinds (`buildXtermSurface`, then `adoptGrid`
-    swapping in the grid when the helm's stream notice says grid), the stream-kind chooser (`noteStreamKind`), and the
-    old-terminal link adapter (`xtermLines`, `XtermFileLinksAddon` in `terminal-links.js` and `terminal-files.js`). With
-    only hosts, the page can mount the grid unconditionally and drop the kind field, `pending`, the swap, and the
-    xterm.js scripts themselves.
-  - Protocol and helm: `TerminalKind`, `SessionInfo.agent_terminal`, `TabInfo.kind`, `StreamKind`, `Attach.grid` and the
-    helm's `?grid=1` and stream notice. Keep a cached `"tmux"` kind decodable for as long as `helm.db` can hold rows
-    from before the removal.
-  - Supervisor: the `terminal_kind` column, the per-session tmux presence tracking (`tmux/presence.rs`), the refusals of
-    Delete and Restart while an unusable private tmux server runs, `--new-terminals` and
-    `SupervisorSeams::tmux_terminals()`, and the old-terminal session notification (`NotificationKind::OldTerminal`, its
-    text and the ticker's sample-pass check that records and resolves it, in `service/notifications.rs`). Rows of that
-    kind already stored can stay as history: the helm and UI show a notification's text without knowing its kind.
-  - Tests: the browser suite's old-terminal set (`FARHELM_E2E_SUITE_TERMINALS=tmux`, `e2e/suite-terminals.ts`, the
-    `@old-terminal` tag) and the Rust tests that ask for old terminals by name (`harness_tmux`,
-    `supervisor_process_tmux`, `tests::tmux_supervisor`).
-
-  Plan: `plans/queue/tmux-end-old-terminals.md`.
-
 - **Finish removing tmux and xterm.js after old terminals end.** Asked for by the maintainer on 2026-11-11, with the
-  entry above, as one effort to remove every trace of tmux and xterm.js except the startup step that turns off a
-  supervisor's old private tmux server. The rest after the running product: stop requiring, probing, installing and
-  shipping tmux (setup, the desktop app, Linux provisioning, uninstall, the installer, the bundled musl tmux in
-  releases); drop tmux from test tooling, CI, the brick test and agent instructions; then bring the specs, docs and code
-  comments in line and audit what remains. Plan: `plans/queue/tmux-drop-from-install.md`, then
-  `plans/queue/tmux-drop-from-tooling.md` and `plans/queue/tmux-drop-from-docs.md`.
+  removal of terminal kind tracking that the first tmux plan carried out, as one effort to remove every trace of tmux
+  and xterm.js except the startup step that turns off a supervisor's old private tmux server. The rest after the running
+  product: stop requiring, probing, installing and shipping tmux (setup, the desktop app, Linux provisioning, uninstall,
+  the installer, the bundled musl tmux in releases); drop tmux from test tooling, CI, the brick test and agent
+  instructions; then bring the specs, docs and code comments in line and audit what remains. Plan:
+  `plans/queue/tmux-drop-from-install.md`, then `plans/queue/tmux-drop-from-tooling.md` and
+  `plans/queue/tmux-drop-from-docs.md`.
 
 - **Scroll the grid terminal entirely from a back buffer it keeps itself, instead of history sent by the supervisor.**
   The page already keeps the scrollback it shows and scrolling sends nothing
@@ -452,18 +425,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `plans/queue/tmux-drop-from-docs.md`.
 
 ## Tricky bugs
-
-- Investigate corruption in the Codex input area when typing quickly. In ordinary use, appending exactly
-  `include a SPEC.md` to a prompt quickly made the display show `include a SPE` followed by another line containing
-  scattered fragments such as `COMMI`, `PR`, and repeated `SPEC` text, with large gaps between them, before submission.
-  Later recurrences in the macOS desktop app showed the input itself is corrupted, not only its rendering: typing `SPE`
-  submitted `SPECIALLY`. [Investigation findings](docs/codex-input-investigation.md). Believed fixed by opting xterm's
-  hidden input textarea out of macOS inline predictive text (`writingsuggestions="false"` in `terminal.js`), since the
-  recent fragments (`SPEC`, `SPECIAL`, `SPECIALLY`) are all dictionary completions of `SPE`. The original report's
-  `COMMI` and `PR` are not, and fit xterm re-sending retained capitals instead, which this change does not address. The
-  entry stays open to gather evidence: there is no reliable reproduction, so the fix is unconfirmed until the symptom
-  stays absent in normal use. A recurrence after this change points back to the xterm composition defects the findings
-  doc cites. Plan: `plans/queue/tmux-end-old-terminals.md`.
 
 ## Deflake
 
@@ -930,12 +891,6 @@ are not.
   (the plan ruled out only a capped queue, which would evict reports during a long outage); keep a slot per reporting
   process; or have the hook check its own process chain before writing. The accepted gap is recorded in SPEC_impl.md's
   "Report files". Found 2026-10-05 reviewing the `hook-report-files` plan's report.
-
-- **Check upstream xterm.js for two link bugs at the next upgrade.** After part of a wrapped URL is repainted, clicking
-  it can still open the old target, and on very long wrapped lines a URL's click area shifts onto the row above. Farhelm
-  does not work around non-security bugs in the vendored bundle (SPEC_impl.md, decided 2026-10-10), so when the bundle
-  is next upgraded, check whether upstream fixed these and remove this entry. Plan:
-  `plans/queue/tmux-end-old-terminals.md`.
 
 - **Investigate harness-native notifications.** Claude Code and Codex can raise desktop notifications themselves, by
   writing terminal escape codes that a supporting terminal turns into a system notification. Claude Code picks the

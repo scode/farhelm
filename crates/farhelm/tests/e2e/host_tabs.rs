@@ -145,17 +145,9 @@ async fn attach_grid(
     lease: &str,
 ) -> TermStream {
     let (_channel, stream) = client
-        .attach_terminal(
-            session_id,
-            COLS,
-            ROWS,
-            terminal,
-            lease,
-            ViewerStreams::BytesOrGrid,
-        )
+        .attach_terminal(session_id, COLS, ROWS, terminal, lease)
         .await
         .expect("a grid attach");
-    assert_eq!(stream.stream_kind(), farhelm_proto::StreamKind::Grid);
     stream
 }
 

@@ -352,17 +352,9 @@ async fn mac_command(
     let token = format!("macinput{}", uuid::Uuid::new_v4().simple());
     let expected = token.to_ascii_uppercase();
     let (channel, mut terminal) = client
-        .attach_terminal(
-            session,
-            160,
-            24,
-            selector,
-            "",
-            crate::client::ViewerStreams::BytesOrGrid,
-        )
+        .attach_terminal(session, 160, 24, selector, "")
         .await
         .expect("attach the owned terminal");
-    assert_eq!(terminal.stream_kind(), farhelm_proto::StreamKind::Grid);
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             match terminal.recv().await {
@@ -555,11 +547,8 @@ async fn mac_assert_survival(
             ),
         );
     }
-    assert_eq!(row.agent_terminal, Some(farhelm_proto::TerminalKind::Host));
     assert!(
-        row.tabs
-            .iter()
-            .any(|row| row.id == tab && row.kind == Some(farhelm_proto::TerminalKind::Host)),
+        row.tabs.iter().any(|row| row.id == tab),
         "the same host tab is still listed"
     );
     assert!(

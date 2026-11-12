@@ -4340,7 +4340,7 @@ test("a click outside an open row menu closes it and leaves focus where it lande
     const terminal = terminalScreen(page);
     const terminalHasFocus = () =>
       page.evaluate(
-        () => !!document.activeElement?.matches(".xterm-helper-textarea, .grid-terminal-input"),
+        () => !!document.activeElement?.matches(".grid-terminal-input"),
       );
 
     // A click on the panel itself, away from any item, is inside.
