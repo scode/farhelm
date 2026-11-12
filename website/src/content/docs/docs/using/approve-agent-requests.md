@@ -16,8 +16,9 @@ those changes happens by default, whoever typed the command; a command you type 
 asked about the same way. You can [stop asking for a host](/docs/using/approve-agent-requests/#stop-asking-for-a-host).
 Looking never asks. An agent in a [container session](/docs/agents/containerized-sessions/) or a
 [session-owned sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) can act only within its own
-container or sandbox ([Agents in sandboxes and containers](#agents-in-sandboxes-and-containers)). Farhelm refuses
-agents' requests from other hosts to Delete or Clone those sessions or launch into new environments.
+container or sandbox ([Agents in sandboxes and containers](#agents-in-sandboxes-and-containers)). Agents on other hosts
+cannot delete those sessions, and they start new sandboxes and containers only behind a card that always asks
+([New sandboxes and containers](#new-sandboxes-and-containers)).
 
 An agent starting another session can supply its first message with `--prompt` or `--prompt-file` (`-` reads stdin). The
 approval card shows the full message. It is sent once when the new agent starts; restarting, copying or replacing that
@@ -93,14 +94,31 @@ container sessions can only act within their own sandbox or container.", anythin
 session, listing or changing launch templates, and host changes. Its requests ask you the same way as anywhere else,
 using the container's or sandbox's own [settings](#stop-asking-for-a-host), which start out asking.
 
+## New sandboxes and containers
+
+An agent on an ordinary host can ask for a session in a new [sandbox](/docs/using/tensorlake-sandboxes/) or
+[container](/docs/agents/containerized-sessions/), built from one of your recipes:
+
+- `farhelm agent create --recipe dev-box --command true --no-yolo` asks for a new Tensorlake sandbox from the `dev-box`
+  recipe. Add `--container-host build-box` for a container on that host instead.
+- `farhelm agent create --template <name>` does the same when the template's **Runs on** is a recipe.
+- `farhelm agent clone --source-session <id>` of a sandbox or container session asks for a new one from the same recipe,
+  with the same agent and repository, like **Clone** in the session menu.
+
+These always show a card, even on a host whose settings let other agent commands through without asking, and the card
+offers only Allow and Deny. It names the recipe and where the new sandbox or container will be, and for Tensorlake says
+that it bills while it runs. Allow is your confirmation: Farhelm then builds it the same way the session launcher does,
+and its progress shows in the sidebar. Deny creates nothing. The new session starts in the sandbox's or container's home
+directory, or in a fresh checkout there with `--gh`.
+
 ## Host changes
 
 An agent can ask to add an SSH host, edit a host's appearance or remove an SSH host. Each request needs your approval,
 every time. Neither **Manage sessions on this host without asking** nor **Run farhelm commands without asking** covers
 host changes, and these cards offer no **Always allow** choice.
 
-Agents cannot request new [Tensorlake sandboxes](/docs/using/tensorlake-sandboxes/) or delete Tensorlake hosts. Create
-those from **Add host**, and use **Delete sandbox** in the host's menu yourself.
+Agents cannot add [Tensorlake sandbox hosts](/docs/using/tensorlake-sandboxes/) or delete Tensorlake hosts. Add those
+from **Add host**, and use **Delete sandbox** in the host's menu yourself.
 
 - `farhelm agent host add build-box --alias build` asks to add an ssh destination, with an optional display alias.
 - `farhelm agent host edit build --icon flask --color teal` asks to change a host's appearance. It can also set an alias

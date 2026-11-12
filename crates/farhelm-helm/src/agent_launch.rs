@@ -140,6 +140,68 @@ pub(crate) fn resolve(
     spawn: bool,
     host_given: bool,
 ) -> anyhow::Result<Resolution> {
+    resolve_with(
+        stored,
+        templates,
+        edits,
+        &Placement {
+            known_hosts,
+            known_recipes: &[],
+            known_places: &[],
+        },
+        spawn,
+        host_given,
+    )
+    .map(|(resolution, _)| resolution)
+}
+
+/// What a resolution may place a session on beyond the asking host: the
+/// install identities a template may name, and the recipes and container
+/// places a template or the flags may target.
+///
+/// Ordinary creates and spawns pass no recipes or places, so a template
+/// carrying a recipe target is refused as unavailable there; only the
+/// environment-launch path ([`resolve_environment`]) passes them.
+pub(crate) struct Placement<'a> {
+    pub(crate) known_hosts: &'a [String],
+    pub(crate) known_recipes: &'a [String],
+    pub(crate) known_places: &'a [farhelm_proto::Place],
+}
+
+/// Resolve a hostless, non-spawn create whose templates or flags may place
+/// it in a NEW disposable environment (SPEC.md, "Agents and environments"),
+/// returning the recipe target beside the launch when the final placement is
+/// one.
+///
+/// Templates apply in order with the usual rule that a later placement
+/// replaces an earlier one, so `placement` must know both the installed
+/// hosts and the recipes and container places: a stack of an ordinary-host
+/// template and a recipe template is valid, and only the final result says
+/// which kind of create it is. With a recipe target the destination is the
+/// new environment's home or a managed checkout, as template application
+/// enforces for any recipe target.
+///
+/// `host_given` is [`resolve`]'s: an explicit `--host` drops every
+/// template's placement, recipe targets included, so it never yields one.
+pub(crate) fn resolve_placed(
+    stored: &[LaunchTemplate],
+    templates: &[String],
+    edits: &TemplateFields,
+    placement: &Placement<'_>,
+    host_given: bool,
+) -> anyhow::Result<(Resolution, Option<farhelm_proto::LaunchTarget>)> {
+    resolve_with(stored, templates, edits, placement, false, host_given)
+}
+
+/// The shared body of [`resolve`] and [`resolve_environment`].
+fn resolve_with(
+    stored: &[LaunchTemplate],
+    templates: &[String],
+    edits: &TemplateFields,
+    placement: &Placement<'_>,
+    spawn: bool,
+    host_given: bool,
+) -> anyhow::Result<(Resolution, Option<farhelm_proto::LaunchTarget>)> {
     let named: Vec<LaunchTemplate> = templates
         .iter()
         .map(|name| {
@@ -148,8 +210,12 @@ pub(crate) fn resolve(
                 .find(|template| &template.name == name)
                 .map(|template| {
                     let mut template = template.clone();
+                    // `--host` is a placement, so it replaces a template's
+                    // recipe target exactly as it replaces its host.
                     if host_given && !spawn {
                         template.fields.host = None;
+                        template.fields.recipe = None;
+                        template.fields.target = None;
                     }
                     template
                 })
@@ -166,9 +232,9 @@ pub(crate) fn resolve(
     let catalog = catalog();
     let context = TemplateContext {
         catalog: &catalog,
-        known_hosts,
-        known_recipes: &[],
-        known_places: &[],
+        known_hosts: placement.known_hosts,
+        known_recipes: placement.known_recipes,
+        known_places: placement.known_places,
         host_fixed: spawn,
     };
     let state =
@@ -271,16 +337,19 @@ pub(crate) fn resolve(
         && launch
             .agent_selection()
             .is_some_and(|selection| selection.wrapper_prefix.is_some());
-    Ok(Resolution {
-        prompt,
-        cwd,
-        github_repo,
-        launch,
-        agent_wrapper_supplied,
-        title: state.name,
-        title_kind: state.name_kind,
-        template_host: state.host,
-    })
+    Ok((
+        Resolution {
+            prompt,
+            cwd,
+            github_repo,
+            launch,
+            agent_wrapper_supplied,
+            title: state.name,
+            title_kind: state.name_kind,
+            template_host: state.host,
+        },
+        state.target,
+    ))
 }
 
 #[cfg(test)]
@@ -394,6 +463,77 @@ mod tests {
 
     fn message(error: anyhow::Error) -> String {
         format!("{error:#}")
+    }
+
+    /// Spec: placement templates stack as in the launcher, a later placement
+    /// replacing an earlier one, so an installed-host template under a recipe
+    /// template resolves to the recipe target and the reverse order to the
+    /// installed host; `--host` drops every template placement, recipe
+    /// targets included (SPEC.md, "Agents and environments").
+    ///
+    /// Why: the agent path picks an environment launch or an ordinary create
+    /// from this result, so judging by the first template instead would send
+    /// a create to the wrong kind of machine or refuse a valid stack.
+    #[farhelm_testtrace::test]
+    fn placement_templates_stack_and_the_last_one_decides() {
+        let target = farhelm_proto::LaunchTarget::Environment {
+            recipe: "dev".into(),
+            place: farhelm_proto::Place::PodmanHost(7),
+        };
+        let command = TemplateFields {
+            kind: Some(LauncherKind::Command),
+            command: Some("true".into()),
+            yolo: Some(false),
+            ..Default::default()
+        };
+        let stored = [
+            template(
+                "on-host",
+                TemplateFields {
+                    host: Some("identity-builder".into()),
+                    destination: folder("/work"),
+                    ..command.clone()
+                },
+            ),
+            template(
+                "in-container",
+                TemplateFields {
+                    target: Some(target.clone()),
+                    destination: folder("~"),
+                    ..command.clone()
+                },
+            ),
+        ];
+        let placement = Placement {
+            known_hosts: &["identity-builder".to_string()],
+            known_recipes: &["dev".to_string()],
+            known_places: &[farhelm_proto::Place::PodmanHost(7)],
+        };
+        let resolved = |names: &[&str], host_given: bool| {
+            let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+            resolve_placed(
+                &stored,
+                &names,
+                &TemplateFields::default(),
+                &placement,
+                host_given,
+            )
+            .unwrap()
+        };
+        let (resolution, placed) = resolved(&["on-host", "in-container"], false);
+        assert_eq!(placed, Some(target.clone()));
+        assert_eq!(
+            resolution.cwd, "~",
+            "a recipe target starts in the new home"
+        );
+        let (resolution, placed) = resolved(&["in-container", "on-host"], false);
+        assert_eq!(placed, None);
+        assert_eq!(
+            resolution.template_host.as_deref(),
+            Some("identity-builder")
+        );
+        let (_, placed) = resolved(&["in-container"], true);
+        assert_eq!(placed, None, "--host replaces the template's recipe target");
     }
 
     /// Spec: templates apply first, in order, and the flags then act as

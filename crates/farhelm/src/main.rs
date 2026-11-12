@@ -327,10 +327,30 @@ enum AgentCmd {
         #[arg(long, alias = "github", value_name = "REPO", conflicts_with = "cwd", value_parser = parse_checkout_repo)]
         gh: Option<String>,
         /// Host to create on, by the name `farhelm agent hosts` shows.
-        /// Required unless a template sets the host, and always with
-        /// `--idempotency-key`.
+        /// Required unless a template sets the host or --recipe is given,
+        /// and always with `--idempotency-key`.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
         host: Option<String>,
+        /// Create the session in a new sandbox or container built from this
+        /// recipe, behind a card that always asks; a Tensorlake sandbox unless
+        /// --container-host is given. Folder is the new home (--gh clones there).
+        #[arg(
+            long,
+            value_name = "NAME",
+            allow_hyphen_values = true,
+            conflicts_with_all = ["host", "idempotency_key"]
+        )]
+        recipe: Option<String>,
+        /// With --recipe: create a container on this host, by the name
+        /// `farhelm agent hosts` shows, instead of a Tensorlake sandbox.
+        #[arg(
+            long,
+            value_name = "NAME",
+            allow_hyphen_values = true,
+            requires = "recipe",
+            conflicts_with = "host"
+        )]
+        container_host: Option<String>,
         /// Removed with agent profiles. Kept, hidden, only so an agent still
         /// following older instructions gets a refusal naming what to do
         /// instead; its parser refuses every value.
@@ -390,8 +410,11 @@ enum AgentCmd {
         #[arg(long = "source-session", allow_hyphen_values = true)]
         source_session: String,
         /// Host to create on, by the name `farhelm agent hosts` shows.
+        /// Omit it for a sandbox or container session: its copy is a new
+        /// sandbox or container from the same recipe, behind a card that
+        /// always asks.
         #[arg(long, value_name = "NAME", allow_hyphen_values = true)]
-        host: String,
+        host: Option<String>,
         /// Working directory; omitted copies this session's.
         #[arg(long, value_name = "DIR", allow_hyphen_values = true)]
         cwd: Option<String>,
@@ -670,14 +693,14 @@ impl AgentCmd {
                 cwd,
                 gh,
                 host,
+                recipe,
+                container_host,
                 launch,
                 title,
                 idempotency_key,
                 ..
-            } => Some(farhelm_proto::AgentVerb::Create {
-                host: host.clone(),
-                templates: launch.templates.clone(),
-                edits: {
+            } => {
+                let edits = {
                     let mut edits = launch.edits(cwd.clone(), title.clone());
                     if let Some(repo) = gh {
                         edits.destination = Some(
@@ -685,11 +708,26 @@ impl AgentCmd {
                         );
                     }
                     edits
-                },
-                intent_key: idempotency_key.clone(),
-                confirm_yolo: false,
-                spawn: None,
-            }),
+                };
+                // A recipe is its own verb, so a helm that predates it
+                // refuses the request instead of creating an ordinary session.
+                Some(match recipe {
+                    Some(recipe) => farhelm_proto::AgentVerb::CreateEnvironment {
+                        recipe: recipe.clone(),
+                        container_host: container_host.clone(),
+                        templates: launch.templates.clone(),
+                        edits,
+                    },
+                    None => farhelm_proto::AgentVerb::Create {
+                        host: host.clone(),
+                        templates: launch.templates.clone(),
+                        edits,
+                        intent_key: idempotency_key.clone(),
+                        confirm_yolo: false,
+                        spawn: None,
+                    },
+                })
+            }
             AgentCmd::Clone {
                 source_session,
                 host,
@@ -699,7 +737,7 @@ impl AgentCmd {
                 ..
             } => Some(farhelm_proto::AgentVerb::Clone {
                 source_session_id: Some(source_session.clone()),
-                host: Some(host.clone()),
+                host: host.clone(),
                 cwd: cwd.clone(),
                 title: title.clone(),
                 intent_key: idempotency_key.clone(),
@@ -2883,6 +2921,68 @@ fn verified_release_sums(
 
 #[cfg(test)]
 mod tests {
+    /// Spec: `farhelm agent create --recipe` becomes the environment verb,
+    /// with `--container-host` only beside `--recipe`; `--recipe` refuses
+    /// `--host` and `--idempotency-key`; `clone` may omit `--host` (SPEC.md,
+    /// "Agents and environments").
+    ///
+    /// Why: sending a recipe as an ordinary create would let a helm that
+    /// predates environment launches create an ordinary session somewhere
+    /// else, and a keyed environment launch could never be found again.
+    #[test]
+    fn recipe_flags_send_the_environment_verb_and_refuse_placement_mixes() {
+        use super::{Cli, Cmd};
+        use clap::Parser as _;
+        let agent = |args: &[&str]| {
+            let mut full = vec!["farhelm", "agent"];
+            full.extend_from_slice(args);
+            Cli::try_parse_from(full)
+        };
+        let Cmd::Agent { command } = agent(&[
+            "create",
+            "--recipe",
+            "dev",
+            "--container-host",
+            "build-box",
+            "--command",
+            "true",
+            "--no-yolo",
+        ])
+        .unwrap()
+        .command
+        else {
+            panic!("agent create")
+        };
+        let Some(farhelm_proto::AgentVerb::CreateEnvironment {
+            recipe,
+            container_host,
+            edits,
+            ..
+        }) = command.verb()
+        else {
+            panic!("an environment launch")
+        };
+        assert_eq!(recipe, "dev");
+        assert_eq!(container_host.as_deref(), Some("build-box"));
+        assert_eq!(edits.command.as_deref(), Some("true"));
+        for refused in [
+            &["create", "--recipe", "dev", "--host", "h"][..],
+            &["create", "--recipe", "dev", "--idempotency-key", "k"],
+            &["create", "--container-host", "build-box", "--host", "h"],
+            &["create", "--container-host", "build-box"],
+        ] {
+            assert!(agent(refused).is_err(), "{refused:?}");
+        }
+        let Cmd::Agent { command } = agent(&["clone", "--source-session", "id"]).unwrap().command
+        else {
+            panic!("agent clone")
+        };
+        assert!(matches!(
+            command.verb(),
+            Some(farhelm_proto::AgentVerb::Clone { host: None, .. })
+        ));
+    }
+
     /// A delayed helper invocation from the retired container model must fail
     /// parsing instead of retaining authority to create or enter a container.
     #[test]

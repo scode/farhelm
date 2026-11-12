@@ -2512,14 +2512,17 @@ fn prompt_confirmation_escapes_the_target() {
     assert!(output.stderr.is_empty(), "{output:?}");
 }
 
-/// Spec: clone refuses omitted source and destination selectors before it
-/// opens the supervisor socket.
+/// Spec: clone refuses an omitted source selector before it opens the
+/// supervisor socket.
 ///
 /// The optional directory and title still inherit from the explicit source,
-/// but neither the source nor its destination may be inferred from the
-/// calling session.
+/// but the source may not be inferred from the calling session. The
+/// destination host is no longer required here: a copy of a sandbox or
+/// container session takes none, and only the helm knows which kind of
+/// source it is, so the helm refuses an ordinary source without `--host`
+/// (SPEC.md, "Agents and environments").
 #[farhelm_testtrace::test]
-fn clone_without_source_or_host_is_refused_before_sending() {
+fn clone_without_source_is_refused_before_sending() {
     let temp = farhelm_teststate::tempdir().unwrap();
     let socket = temp.path().join("supervisor.sock");
     let output = output_with_timeout(agent_command_with_args(&socket, &["clone"]));
@@ -2530,10 +2533,6 @@ fn clone_without_source_or_host_is_refused_before_sending() {
     assert!(
         stderr.contains("--source-session"),
         "the refusal must name the source: {stderr}"
-    );
-    assert!(
-        stderr.contains("--host"),
-        "the refusal must name the destination: {stderr}"
     );
 }
 

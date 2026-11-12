@@ -32,6 +32,18 @@ use crate::launcher::TemplateFields;
 /// before the relay gives up.
 pub const APPROVAL_WAIT: std::time::Duration = std::time::Duration::from_secs(9 * 60);
 
+/// How much longer than [`APPROVAL_WAIT`] the relay waits for a request that
+/// may launch a new disposable environment once allowed
+/// ([`crate::AgentVerb::may_launch_environment`]).
+///
+/// Building and starting an environment can take minutes (a container
+/// recipe's first launch on a host builds its image). The relay's budget
+/// starts when it forwards the request, so approval time and launch time come
+/// out of one span; a launch still running when it ends is reported as an
+/// unknown outcome while the helm's launch task carries on (SPEC.md, "Agents
+/// and environments").
+pub const ENVIRONMENT_LAUNCH_WAIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
 /// `GET /api/approvals`: every request waiting for the user, oldest first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingApprovals {
@@ -178,6 +190,35 @@ pub enum ApprovalAction {
         source: Option<ApprovalSession>,
         prompt: Option<String>,
     },
+    /// A new session in a NEW disposable environment: `farhelm agent create
+    /// --recipe`, a create applying a recipe template, or `farhelm agent clone`
+    /// of a sandbox or container session (SPEC.md, "Agents and environments").
+    ///
+    /// Its Allow is also the creation confirmation the launcher would show,
+    /// so it always needs the user's own Allow ([`Self::requires_direct_allow`])
+    /// and its own tag makes an older UI fail to decode the whole approval
+    /// list rather than offer Allow on a card it cannot show as a new machine.
+    /// The UI words the provider-specific parts (billing, what Suspend
+    /// keeps) from `place`, never from text the helm sends.
+    LaunchEnvironment {
+        verb: LaunchVerb,
+        /// The recipe the environment is built from.
+        recipe: String,
+        /// Where it will be created. A container place's host is the helm's
+        /// registry id; `place_name` is that host's display name.
+        place: crate::Place,
+        place_name: Option<String>,
+        /// The folder inside the new environment, or the folder a managed
+        /// checkout will be cloned to once it exists (named by `repo`).
+        cwd: String,
+        repo: Option<String>,
+        title: Option<String>,
+        launch: SessionLaunch,
+        /// The session a clone copies.
+        source: Option<ApprovalSession>,
+        /// The first message, shown in full like [`Self::LaunchWithPrompt`]'s.
+        prompt: Option<String>,
+    },
     /// `farhelm agent rename`.
     Rename {
         target: ApprovalSession,
@@ -283,7 +324,8 @@ impl ApprovalAction {
     /// neither the requesting host's "run farhelm commands from this host
     /// without asking" setting nor an Always allow answer can stand in for.
     ///
-    /// Two reasons put a kind here. An agent-supplied wrapper prefix: the
+    /// Three reasons put a kind here. A new disposable environment: its card
+    /// is the creation confirmation. An agent-supplied wrapper prefix: the
     /// host's ordinary command shortcut cannot vouch for a wrapper the agent
     /// chose, and a wrapper-bearing template becomes trusted by later
     /// launches only after this card. And a change to a host itself (add,
@@ -294,6 +336,9 @@ impl ApprovalAction {
     pub fn requires_direct_allow(&self) -> bool {
         match self {
             Self::LaunchWithAgentWrapper { .. } => true,
+            // A new machine, and for Tensorlake a bill: the user's own
+            // creation confirmation, which no host setting stands in for.
+            Self::LaunchEnvironment { .. } => true,
             Self::HostAdd { .. } | Self::HostEdit { .. } | Self::HostRemove { .. } => true,
             Self::TemplateWrite { fields, .. }
             | Self::TemplateWriteWithShortcuts { fields, .. } => {
@@ -489,6 +534,50 @@ mod tests {
             }
             .requires_direct_allow()
         );
+    }
+
+    /// Spec: an agent's request for a new sandbox or container travels under
+    /// its own kind tag, which a UI from before it cannot decode, and always
+    /// needs a direct Allow (SPEC.md, "Agents and environments").
+    ///
+    /// Why: the card is the creation confirmation for a new machine, and for
+    /// Tensorlake a bill. An older UI that decoded it as an ordinary launch
+    /// card would offer Allow and Always allow on a card that never says a
+    /// machine will be created, and no host setting may approve it.
+    #[test]
+    fn environment_launch_cards_fail_an_older_decoder_and_force_allow() {
+        #[derive(serde::Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum OlderAction {
+            Launch {},
+            LaunchWithPrompt {},
+            LaunchWithAgentWrapper {},
+        }
+        let card = super::ApprovalAction::LaunchEnvironment {
+            verb: super::LaunchVerb::Create,
+            recipe: "dev".into(),
+            place: crate::Place::PodmanHost(3),
+            place_name: Some("build-box".into()),
+            cwd: "~".into(),
+            repo: None,
+            title: None,
+            source: None,
+            prompt: None,
+            launch: crate::SessionLaunch::Command(crate::CommandLaunch {
+                command: "true".into(),
+                agent: None,
+                yolo: false,
+                resume: None,
+            }),
+        };
+        let value = serde_json::to_value(&card).unwrap();
+        assert_eq!(value["kind"], "launch_environment");
+        assert_eq!(
+            serde_json::from_value::<super::ApprovalAction>(value.clone()).unwrap(),
+            card
+        );
+        assert!(serde_json::from_value::<OlderAction>(value).is_err());
+        assert!(card.requires_direct_allow());
     }
 
     /// Spec: host add, edit and remove cards travel under their own kind tags,

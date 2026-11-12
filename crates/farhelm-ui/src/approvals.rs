@@ -890,6 +890,7 @@ fn action_kind(action: &ApprovalAction) -> &'static str {
         ApprovalAction::Launch { .. } => "launch",
         ApprovalAction::LaunchWithPrompt { .. } => "launch_with_prompt",
         ApprovalAction::LaunchWithAgentWrapper { .. } => "launch_with_agent_wrapper",
+        ApprovalAction::LaunchEnvironment { .. } => "launch_environment",
         ApprovalAction::Rename { .. } => "rename",
         ApprovalAction::Stop { .. } => "stop",
         ApprovalAction::Prompt { .. } => "prompt",
@@ -946,6 +947,14 @@ fn action_summary(action: &ApprovalAction) -> &'static str {
             verb: LaunchVerb::Clone,
             ..
         } => "start a copy of a session",
+        ApprovalAction::LaunchEnvironment {
+            verb: LaunchVerb::Clone,
+            ..
+        } => "copy a session into a new sandbox or container",
+        ApprovalAction::LaunchEnvironment {
+            verb: LaunchVerb::Spawn | LaunchVerb::SpawnInherited | LaunchVerb::Create,
+            ..
+        } => "start a session in a new sandbox or container",
         ApprovalAction::Rename { .. } => "rename a session",
         ApprovalAction::Stop { .. } => "stop a session's agent and close its terminal tabs",
         ApprovalAction::Prompt { .. } => "send a prompt to a session's agent",
@@ -1055,6 +1064,59 @@ fn action_rows(action: &ApprovalAction) -> Vec<CardRow> {
                 ..
             } = action
             {
+                rows.push(CardRow::Block("initial prompt", prompt.clone()));
+            }
+        }
+        ApprovalAction::LaunchEnvironment {
+            recipe,
+            place,
+            place_name,
+            cwd,
+            repo,
+            title,
+            launch,
+            source,
+            prompt,
+            ..
+        } => {
+            if let Some(source) = source {
+                session_rows(
+                    "copying session",
+                    "copied session id",
+                    Some("copied session's host"),
+                    source,
+                    &mut rows,
+                );
+            }
+            let provider = crate::environment_ui::ProviderUi(place.provider());
+            rows.push(CardRow::Value("recipe", recipe.clone()));
+            match provider.agent_launch_place() {
+                // The host's name is the helm's registry name, shown as data
+                // like every other host name on a card.
+                crate::environment_ui::AgentLaunchPlace::NamedHost(label) => rows.push(
+                    CardRow::Value(label, place_name.clone().unwrap_or_default()),
+                ),
+                crate::environment_ui::AgentLaunchPlace::Note(label, words) => {
+                    rows.push(CardRow::Note(label, words))
+                }
+            }
+            rows.push(CardRow::Note(
+                "consequence",
+                provider.agent_launch_consequence(),
+            ));
+            match repo {
+                Some(repo) => rows.push(CardRow::Value(
+                    "managed checkout of",
+                    format!("GitHub: {repo}"),
+                )),
+                None => rows.push(CardRow::Value("folder", cwd.clone())),
+            }
+            match title {
+                Some(title) => rows.push(CardRow::Value("title", title.clone())),
+                None => rows.push(CardRow::Note("title", "generated")),
+            }
+            launch_rows(launch, Runs::Start, &mut rows);
+            if let Some(prompt) = prompt {
                 rows.push(CardRow::Block("initial prompt", prompt.clone()));
             }
         }
@@ -2269,6 +2331,95 @@ mod tests {
             "a command launch's claim is not restated as Farhelm's verdict: {rows:?}"
         );
         assert!(rows.contains(&CardRow::Note("title", "generated")));
+    }
+
+    /// Spec: an agent's environment-launch card names the recipe, where the
+    /// new machine will be (a Tensorlake sandbox, or a container on a named
+    /// host), the consequence the launcher's own footer states (billing for
+    /// Tensorlake), the destination and the launch (SPEC.md, "Agents and
+    /// environments"). A clone's card also names the copied session.
+    ///
+    /// Why: this card is the creation confirmation. If it did not say a
+    /// machine will be created, and for Tensorlake that it bills, the user's
+    /// Allow would not be the informed confirmation it stands in for.
+    #[test]
+    fn an_environment_launch_card_names_the_new_machine_and_its_cost() {
+        let launch = SessionLaunch::Command(CommandLaunch {
+            command: "agent --go".to_string(),
+            yolo: false,
+            agent: None,
+            resume: None,
+        });
+        let sandbox = ApprovalAction::LaunchEnvironment {
+            verb: LaunchVerb::Create,
+            recipe: "dev".to_string(),
+            place: farhelm_proto::Place::TensorlakeAccount,
+            place_name: None,
+            cwd: "~".to_string(),
+            repo: None,
+            title: None,
+            launch: launch.clone(),
+            source: None,
+            prompt: Some("start here".to_string()),
+        };
+        let rows = action_rows(&sandbox);
+        assert!(rows.contains(&CardRow::Value("recipe", "dev".to_string())));
+        assert!(rows.contains(&CardRow::Note("creates", "a new Tensorlake sandbox")));
+        assert!(rows.iter().any(
+            |row| matches!(row, CardRow::Note("consequence", text) if text.contains("bills"))
+        ));
+        assert!(rows.contains(&CardRow::Value("folder", "~".to_string())));
+        assert!(rows.contains(&CardRow::Block("command", "agent --go".to_string())));
+        assert!(rows.contains(&CardRow::Block("initial prompt", "start here".to_string())));
+        assert_eq!(
+            action_summary(&sandbox),
+            "start a session in a new sandbox or container"
+        );
+
+        let container = ApprovalAction::LaunchEnvironment {
+            verb: LaunchVerb::Clone,
+            recipe: "dev".to_string(),
+            place: farhelm_proto::Place::PodmanHost(3),
+            place_name: Some("build-box".to_string()),
+            cwd: String::new(),
+            repo: Some("acme/web".to_string()),
+            title: Some("copy".to_string()),
+            launch,
+            source: Some(ApprovalSession {
+                id: "entry:source".to_string(),
+                title: Some("original".to_string()),
+                host_name: Some("dev container".to_string()),
+            }),
+            prompt: None,
+        };
+        let rows = action_rows(&container);
+        assert!(rows.contains(&CardRow::Value(
+            "new container on host",
+            "build-box".to_string()
+        )));
+        assert!(rows.iter().any(
+            |row| matches!(row, CardRow::Note("consequence", text) if !text.contains("bills"))
+        ));
+        assert!(rows.contains(&CardRow::Value(
+            "managed checkout of",
+            "GitHub: acme/web".to_string()
+        )));
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row, CardRow::Value("folder", _))),
+            "a checkout's folder does not exist yet: {rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| matches!(row, CardRow::CopyIdentity("copied session id", _))),
+            "{rows:?}"
+        );
+        assert_eq!(
+            action_summary(&container),
+            "copy a session into a new sandbox or container"
+        );
+        assert_eq!(action_kind(&container), "launch_environment");
     }
 
     /// A wrapped launch's exact prefix is peer-controlled data the user must

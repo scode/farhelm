@@ -3768,6 +3768,30 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
     }
     const LIFECYCLE_FLAG: &str = "--session";
     const LIFECYCLE_REMEDY: &str = "name the asking session explicitly to act on it";
+    /// Bound the template names a create applies. They are quoted back in
+    /// the helm's unknown-template refusal, so they are held to a size and
+    /// kept free of control characters here like a host name.
+    fn validate_templates(templates: &[String]) -> Result<(), String> {
+        if templates.len() > AGENT_TEMPLATES_CAP {
+            return Err(format!(
+                "{} templates were named, more than the {AGENT_TEMPLATES_CAP} one create may \
+                 apply",
+                templates.len()
+            ));
+        }
+        for name in templates {
+            if name.len() > farhelm_proto::launcher::TEMPLATE_NAME_CAP
+                || name.chars().any(char::is_control)
+            {
+                return Err(
+                    "a --template name is too long or contains control characters; \
+                     farhelm agent templates lists the names"
+                        .to_string(),
+                );
+            }
+        }
+        Ok(())
+    }
     match verb {
         // The helm owns URL validation and link permission decisions. This relay only
         // authenticates the session and forwards; an untrusted host cannot grant a link.
@@ -3835,27 +3859,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
                     "farhelm spawn always creates on its own host and takes no --host".to_string(),
                 );
             }
-            if templates.len() > AGENT_TEMPLATES_CAP {
-                return Err(format!(
-                    "{} templates were named, more than the {AGENT_TEMPLATES_CAP} one create may \
-                     apply",
-                    templates.len()
-                ));
-            }
-            for name in templates {
-                // Quoted back in the helm's unknown-template refusal, so
-                // bounded and kept free of control characters here like a
-                // host name.
-                if name.len() > farhelm_proto::launcher::TEMPLATE_NAME_CAP
-                    || name.chars().any(char::is_control)
-                {
-                    return Err(
-                        "a --template name is too long or contains control characters; \
-                         farhelm agent templates lists the names"
-                            .to_string(),
-                    );
-                }
-            }
+            validate_templates(templates)?;
             // The flags carry the folder, title, command and resume command:
             // the create payload `validate_create_fields` bounds, counted as
             // the JSON they travel as.
@@ -3865,12 +3869,34 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
                     .and_then(|spawn| spawn.parent.as_deref())
                     .map_or(0, str::len);
             validate_create_fields(
-                HostSelector::Optional(host.as_deref()),
+                host.as_deref(),
                 "",
                 edits_bytes,
                 None,
                 intent_key.as_deref(),
             )
+        }
+        AgentVerb::CreateEnvironment {
+            recipe,
+            container_host,
+            templates,
+            edits,
+        } => {
+            // Whether the recipe exists and can run at that place is the
+            // helm's to decide; this doorway only bounds what travels upward,
+            // the recipe name like a host name.
+            if recipe.is_empty()
+                || recipe.len() > farhelm_proto::launcher::TEMPLATE_NAME_CAP
+                || recipe.chars().any(char::is_control)
+            {
+                return Err(
+                    "--recipe must be a nonempty recipe name without control characters"
+                        .to_string(),
+                );
+            }
+            validate_templates(templates)?;
+            let edits_bytes = serde_json::to_string(edits).map_or(usize::MAX, |json| json.len());
+            validate_create_fields(container_host.as_deref(), "", edits_bytes, None, None)
         }
         AgentVerb::Clone {
             source_session_id,
@@ -3896,7 +3922,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
                 );
             }
             validate_create_fields(
-                HostSelector::Required(host.as_deref()),
+                host.as_deref(),
                 cwd.as_deref().unwrap_or_default(),
                 0,
                 title.as_deref(),
@@ -3921,7 +3947,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
                     farhelm_proto::launcher::TEMPLATE_FIELDS_CAP
                 ));
             }
-            validate_create_fields(HostSelector::Optional(host.as_deref()), "", 0, None, None)
+            validate_create_fields(host.as_deref(), "", 0, None, None)
         }
         AgentVerb::TemplateDelete { name } => validate_template_name(name),
         // A host verb's name is quoted back in the helm's unknown-host
@@ -4028,19 +4054,12 @@ fn validate_template_name(name: &str) -> Result<(), String> {
 /// SOURCE's, which was bounded when the source was created and never
 /// travels through this doorway at all.
 fn validate_create_fields(
-    host: HostSelector<'_>,
+    host: Option<&str>,
     cwd: &str,
     launch_bytes: usize,
     title: Option<&str>,
     intent_key: Option<&str>,
 ) -> Result<(), String> {
-    let host = match host {
-        HostSelector::Required(None) => {
-            return Err("--host is required; name the destination explicitly".to_string());
-        }
-        HostSelector::Required(Some(host)) | HostSelector::Optional(Some(host)) => Some(host),
-        HostSelector::Optional(None) => None,
-    };
     if let Some(host) = host {
         if host.is_empty() {
             return Err("--host must not be empty; list hosts and pass one exact name".to_string());
@@ -4070,13 +4089,6 @@ fn validate_create_fields(
         )),
         _ => Ok(()),
     }
-}
-
-/// A creating verb's `--host`: `clone` must name one, while `create` may
-/// leave it to a template and a spawn never names one.
-enum HostSelector<'a> {
-    Required(Option<&'a str>),
-    Optional(Option<&'a str>),
 }
 
 /// The most templates one create may name. Far past any real stack of
@@ -7297,6 +7309,42 @@ mod tests {
             );
         }
         assert!(validate_agent_verb(&edit("h", Some(HostAliasEdit::Set("baz".into())))).is_ok());
+    }
+
+    /// The environment verb crosses this doorway with the same bounds as an
+    /// ordinary create: a recipe name held like a host name, the container
+    /// host like `--host`, and the template list like create's.
+    ///
+    /// Why: nothing about a recipe launch is checked until the helm, so this
+    /// hop is the only thing keeping an oversized or control-laced request
+    /// out of the byte-unbounded queues and the helm's audit lines.
+    #[farhelm_testtrace::test]
+    fn validate_agent_verb_bounds_the_environment_verb() {
+        let launch = |recipe: &str, container_host: Option<&str>, templates: Vec<String>| {
+            AgentVerb::CreateEnvironment {
+                recipe: recipe.to_string(),
+                container_host: container_host.map(str::to_string),
+                templates,
+                edits: Default::default(),
+            }
+        };
+        assert!(validate_agent_verb(&launch("dev", None, Vec::new())).is_ok());
+        assert!(validate_agent_verb(&launch("dev", Some("build-box"), Vec::new())).is_ok());
+        for refused in [
+            launch("", None, Vec::new()),
+            launch("dev\n", None, Vec::new()),
+            launch(
+                &"r".repeat(farhelm_proto::launcher::TEMPLATE_NAME_CAP + 1),
+                None,
+                Vec::new(),
+            ),
+            launch("dev", Some(""), Vec::new()),
+            launch("dev", Some("box\u{7}"), Vec::new()),
+            launch("dev", None, vec!["t".to_string(); AGENT_TEMPLATES_CAP + 1]),
+            launch("dev", None, vec!["bad\nname".to_string()]),
+        ] {
+            assert!(validate_agent_verb(&refused).is_err(), "{refused:?}");
+        }
     }
 
     /// Spec: the two CREATING verbs refuse an empty, control-laced or

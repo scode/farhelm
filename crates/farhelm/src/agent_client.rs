@@ -678,9 +678,9 @@ impl ReplyKind {
             // stops this CLI printing an EXISTING session's id as though
             // it had just created one — a target an agent might then go on
             // to stop.
-            farhelm_proto::AgentVerb::Create { .. } | farhelm_proto::AgentVerb::Clone { .. } => {
-                ReplyKind::Created
-            }
+            farhelm_proto::AgentVerb::Create { .. }
+            | farhelm_proto::AgentVerb::CreateEnvironment { .. }
+            | farhelm_proto::AgentVerb::Clone { .. } => ReplyKind::Created,
             farhelm_proto::AgentVerb::TemplateCreate { .. }
             | farhelm_proto::AgentVerb::TemplateEdit { .. } => ReplyKind::TemplateWritten,
             farhelm_proto::AgentVerb::TemplateDelete { .. } => ReplyKind::TemplateDeleted,
