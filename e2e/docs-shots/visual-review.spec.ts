@@ -1754,7 +1754,7 @@ async function settingsShots(page: Page, name: string, includePhone: boolean) {
   const window = [page.locator("body")];
   const settings = await openSettings(page);
   // Every section the web UI shows: all of Settings' sections except the native-only App.
-  await expect(settings.locator(".app-settings-navigation button")).toHaveCount(9);
+  await expect(settings.locator(".app-settings-navigation button")).toHaveCount(11);
   for (const part of [".host-settings-header", ".host-settings-footer", ".app-settings-close"]) {
     await insideViewport(page, settings.locator(part));
   }
@@ -2656,12 +2656,13 @@ async function rowQuestionShots(page: Page, waitingRow: Locator, name: string) {
   try {
     await expect(waitingRow).toHaveAttribute("data-session-selected", "true");
     await expect(waitingRow.locator(".status-badge.waiting")).toHaveCount(1);
-    // A real unanswered confirmation disables the selected open button.
-    // Its identity must remain readable through that ancestor, too.
+    // A real unanswered confirmation leaves the selected open button usable:
+    // inline lifecycle questions no longer block opening the session (#3276).
+    // Its identity must remain readable beside the question, too.
     await openRowMenu(waitingRow);
     await waitingRow.locator(".session-row-delete").click();
     await expect(waitingRow.locator(".confirm-consequence")).toBeVisible();
-    await expect(waitingRow.locator(".session-row-open")).toBeDisabled();
+    await expect(waitingRow.locator(".session-row-open")).toBeEnabled();
     await expect(waitingRow.locator(".session-row-open")).toHaveCSS("opacity", "1");
     await clickDialogGap(page, waitingRow.locator(".session-row-menu-panel"));
     await shot(page, `${name}-selected-confirmation`, window, { pad: 0 });
