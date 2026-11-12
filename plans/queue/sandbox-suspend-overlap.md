@@ -323,52 +323,77 @@ If a `## Decisions` section exists, its latest entry must also be satisfied. The
 `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12): deliver its report through the queue script, write
 a closing entry in its log, and stop the watchdog. Never edit `plans/` yourself.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-12 (claim 4f8530).
+### 2026-11-12: answer to a blocked question
 
-### The change is over the size you set for it
+The question, as the executor put it:
 
-**What this plan is about.** Suspending or resuming a Tensorlake sandbox, from Hosts or from a sandbox session's row or
-the top of an open session (Stop and suspend included), used to lock the whole browser window against launches and host
-changes until Tensorlake answered. A Resume can take up to two and a half minutes, and for that long no session could be
-launched on any host in that window. You decided on the 2026-11-11 planning page to let them overlap, refusing a Suspend
-or Resume only while that window's own launch is starting on, or waking, that same host, with the same rule in Hosts.
-You also asked for the launch's own wake to be hardened: wait out a "this host is busy" refusal instead of failing, and
-fail at once, with a clear message, when the host is suspended again while the launch waits for it to connect.
+> Blocked on 2026-11-12 (claim 4f8530).
+>
+> ### The change is over the size you set for it
+>
+> **What this plan is about.** Suspending or resuming a Tensorlake sandbox, from Hosts or from a sandbox session's row
+> or the top of an open session (Stop and suspend included), used to lock the whole browser window against launches and
+> host changes until Tensorlake answered. A Resume can take up to two and a half minutes, and for that long no session
+> could be launched on any host in that window. You decided on the 2026-11-11 planning page to let them overlap,
+> refusing a Suspend or Resume only while that window's own launch is starting on, or waking, that same host, with the
+> same rule in Hosts. You also asked for the launch's own wake to be hardened: wait out a "this host is busy" refusal
+> instead of failing, and fail at once, with a clear message, when the host is suspended again while the launch waits
+> for it to connect.
+>
+> **What is done.** The first of the two planned PRs is built, reviewed and open as a draft: #3339. It covers everything
+> except the wake hardening: the host-scoped rule in all five places that start a Suspend or Resume, the spec text, and
+> browser tests on Chromium and WebKit showing that a held Suspend no longer stops a launch on another host, and that
+> Hosts refuses Resume, and still refuses host Settings (a change to the host list), for a host a launch is waking. Its
+> review found one real bug (the Hosts Suspend confirmation stayed clickable during a same-host launch), which is fixed
+> in the draft.
+>
+> **Why it stopped.** You set a size gate of about 400 changed lines for both PRs together, counting code, tests and
+> docs, and said to stop and bring it back if it went over. The first PR alone is about 600 changed lines (about 420
+> added, 190 removed), counted the way the gate counts, without its changelog entry. The scope did not grow; the
+> estimate was low. The rule has to be wired into five separate controls plus the launcher, the old mechanism that
+> carried the lock through each session action had to be removed along with its two tests, and the browser tests that
+> show the new behavior are about 140 lines. The second PR is estimated at about 300 more added lines, give or take a
+> hundred given how far off the first estimate was: the helm marking its "busy" refusal so the page can tell it apart
+> from other refusals, the wake's wait and its suspended-again check, unit tests for both, and one browser test. The
+> whole stack would be roughly 900 changed lines.
+>
+> ### The question
+>
+> How should this continue?
+>
+> - **Continue as planned at the larger size.** The second PR is built as the plan describes and both land together.
+>   Nothing you decided is dropped; the cost is a review of roughly twice the size you expected.
+> - **Land the first PR alone and drop the wake hardening.** Suspend and Resume stop blocking other hosts' launches,
+>   which was the main complaint. Without the hardening, a launch whose wake races a Resume of the same host, now
+>   possible from the same window as well as from another, can fail with "This host is busy", and a launch whose host is
+>   suspended again while it waits keeps waiting for up to a minute before a misleading timeout. Neither leaves anything
+>   in a wrong state; the user just launches again.
+> - **Land the first PR alone and plan the hardening separately.** As above for now, with the hardening as its own plan
+>   (about the size of the second PR) that you can schedule later.
+>
+> I recommend continuing as planned. The overlap and the hardening were decided together, and the first PR on its own
+> makes the two races in the second option more likely: a Suspend or Resume already pending in a window no longer holds
+> back that window's launch on the same host, so in the gap before the window's next read of the host list shows the
+> host as suspending or resuming, a launch can start beside it. I have not measured how long that gap usually is.
 
-**What is done.** The first of the two planned PRs is built, reviewed and open as a draft: #3339. It covers everything
-except the wake hardening: the host-scoped rule in all five places that start a Suspend or Resume, the spec text, and
-browser tests on Chromium and WebKit showing that a held Suspend no longer stops a launch on another host, and that
-Hosts refuses Resume, and still refuses host Settings (a change to the host list), for a host a launch is waking. Its
-review found one real bug (the Hosts Suspend confirmation stayed clickable during a same-host launch), which is fixed in
-the draft.
+The maintainer's answer:
 
-**Why it stopped.** You set a size gate of about 400 changed lines for both PRs together, counting code, tests and docs,
-and said to stop and bring it back if it went over. The first PR alone is about 600 changed lines (about 420 added, 190
-removed), counted the way the gate counts, without its changelog entry. The scope did not grow; the estimate was low.
-The rule has to be wired into five separate controls plus the launcher, the old mechanism that carried the lock through
-each session action had to be removed along with its two tests, and the browser tests that show the new behavior are
-about 140 lines. The second PR is estimated at about 300 more added lines, give or take a hundred given how far off the
-first estimate was: the helm marking its "busy" refusal so the page can tell it apart from other refusals, the wake's
-wait and its suspended-again check, unit tests for both, and one browser test. The whole stack would be roughly 900
-changed lines.
+### Continue as planned at the larger size
 
-### The question
+Answered by the landing monitor on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering blocks" (the
+maintainer delegated non-huge blocks to it on 2026-10-28). A later change of mind is a follow-up, not a reason to stop
+the plan.
 
-How should this continue?
+Decision: build the second PR (the wake hardening: a launch's wake waits out a "this host is busy" refusal, and fails at
+once with a clear message when its host is suspended again while it waits) as the plan describes, on top of #3339, and
+deliver both together. The size gate is raised from about 400 to about 1,000 changed lines for the whole stack, counted
+as before (code, tests and docs, without changelog fragments or the TODO.md removal). Over that, block again rather than
+trim what the acceptance criteria ask for.
 
-- **Continue as planned at the larger size.** The second PR is built as the plan describes and both land together.
-  Nothing you decided is dropped; the cost is a review of roughly twice the size you expected.
-- **Land the first PR alone and drop the wake hardening.** Suspend and Resume stop blocking other hosts' launches, which
-  was the main complaint. Without the hardening, a launch whose wake races a Resume of the same host, now possible from
-  the same window as well as from another, can fail with "This host is busy", and a launch whose host is suspended again
-  while it waits keeps waiting for up to a minute before a misleading timeout. Neither leaves anything in a wrong state;
-  the user just launches again.
-- **Land the first PR alone and plan the hardening separately.** As above for now, with the hardening as its own plan
-  (about the size of the second PR) that you can schedule later.
-
-I recommend continuing as planned. The overlap and the hardening were decided together, and the first PR on its own
-makes the two races in the second option more likely: a Suspend or Resume already pending in a window no longer holds
-back that window's launch on the same host, so in the gap before the window's next read of the host list shows the host
-as suspending or resuming, a launch can start beside it. I have not measured how long that gap usually is.
+Why: the overlap and the hardening were decided together on the 2026-11-11 planning page, and #3339 on its own makes the
+two races the hardening covers more likely (a launch can now start beside a pending Suspend or Resume of the same host
+in the same window, before the window's next read of the host list shows it). The first PR went over because the
+estimate was low, not because the scope grew. The alternatives were landing #3339 alone and dropping the hardening, or
+landing it alone and planning the hardening separately; both leave those races in place for now.
