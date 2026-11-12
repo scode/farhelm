@@ -791,7 +791,15 @@ mod tests {
     #[farhelm_testtrace::test]
     fn only_listed_final_extensions_may_open() {
         let default = OpenExtensions::from_stored(None).unwrap();
-        for name in ["notes.md", "notes.TXT", "archive.tar.md", "data.JSON"] {
+        for name in [
+            "notes.md",
+            "notes.TXT",
+            "archive.tar.md",
+            "data.JSON",
+            "photo.PNG",
+            "photo.jpeg",
+            "clip.avif",
+        ] {
             assert!(may_open(Path::new(name), &default), "{name}");
         }
         for name in [
@@ -805,6 +813,8 @@ mod tests {
             "notes.htm",
             "report.html",
             "report.HtMl",
+            "drawing.svg",
+            "photo.png.command",
         ] {
             assert!(!may_open(Path::new(name), &default), "{name}");
         }

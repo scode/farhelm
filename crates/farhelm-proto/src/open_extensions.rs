@@ -5,7 +5,11 @@
 //! same parser to warn about types outside the small set it recognizes.
 
 /// An unset preference has this policy, including on upgraded helms.
-pub const DEFAULT: &str = "md, txt, json";
+///
+/// Every entry must be [`WarningKind::Safe`], or the settings dialog would warn
+/// about the default it shows. A saved list, empty included, is never replaced
+/// by this, so a change here reaches only helms whose list was never saved.
+pub const DEFAULT: &str = "md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif";
 
 const MAX_TEXT_BYTES: usize = 512;
 const MAX_ENTRIES: usize = 32;
@@ -100,9 +104,14 @@ impl OpenExtensions {
     }
 
     /// Classify warnings without treating an unknown type as forbidden.
+    ///
+    /// The safe set is plain text and the common raster image formats the
+    /// default lists. SVG is not among the images: it is HTML-like and can carry
+    /// scripts, so it gets the browser warning.
     pub fn warning_kind(extension: &str) -> WarningKind {
         match extension {
-            "md" | "txt" | "json" | "log" => WarningKind::Safe,
+            "md" | "txt" | "json" | "log" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+            | "avif" => WarningKind::Safe,
             "html" | "htm" | "xhtml" | "svg" => WarningKind::Html,
             _ => WarningKind::Other,
         }
@@ -153,6 +162,20 @@ mod tests {
                 ("command", WarningKind::Other),
             ]
         );
+    }
+
+    /// The settings dialog warns about every listed type that is not safe, so
+    /// a default with an unsafe entry would greet every user with a warning
+    /// about Farhelm's own choice. SVG must keep its HTML warning even though
+    /// the default now holds other image formats.
+    #[test]
+    fn default_types_are_safe_and_svg_is_not() {
+        let default = OpenExtensions::parse(DEFAULT).unwrap();
+        assert_eq!(default.normalized(), DEFAULT);
+        for (entry, kind) in default.entries() {
+            assert_eq!(kind, WarningKind::Safe, "{entry}");
+        }
+        assert_eq!(OpenExtensions::warning_kind("svg"), WarningKind::Html);
     }
 
     /// Final extensions have no inner dot, and bounded text prevents a
