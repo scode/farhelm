@@ -6148,6 +6148,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   rebuilt `terminal_kind` has no default (schema 32 gave it `tmux`): every writer names the kind, so the default changed
   nothing, and without it a writer that forgot the kind fails at its insert instead of quietly writing a tmux row. Like
   every step it is one-way: a build at 33 refuses the database.
+- Schema 35 adds `supervisor_meta.sealed` (integer, 0 or 1, default 0), the environment seal described under
+  "Environment Delete and the seal". It is a schema step rather than a file beside the database so that a build from
+  before the seal, which would accept creates on a sealed supervisor, refuses the database instead.
 - Session notifications (SPEC.md, Status) are recorded by the supervisor, which holds the specifics their wording
   depends on (which agent, which reporter, why a hook was not added), in a `session_notifications` table of its own
   database: a per-session sequence number that only grows, a kind naming the problem, the launch generation it belongs
@@ -6581,11 +6584,69 @@ explicit cleanup keeps its resource and reason visible for retry. No startup cle
 ### Environment ownership and refusal
 
 Use the landed sandbox-session contract for both providers. Record ownership and a reserved resource name before
-creation. Confirmed user Delete destroys the whole resource, including unlisted sessions and files, without membership
-proof. Replace stays inside it and uses ordinary supervisor session deletion for its source, preserving the resource and
-existing files on every failed or ambiguous outcome. A failed normal initial launch may destroy only its new
-environment. Retain failed cleanup and interrupted resources for explicit deletion. Add no session-finality state,
-membership RPC, connection handshake, transparent recovery or startup continuation protocol for these cases.
+creation. User Delete of a session goes to the environment's supervisor and removes the resource only with its last
+session ("Environment Delete and the seal" below); the warned whole-environment Delete destroys the whole resource,
+including unlisted sessions and files, without membership proof. Replace stays inside it and uses ordinary supervisor
+session deletion for its source, preserving the resource and existing files on every failed or ambiguous outcome. A
+failed normal initial launch may destroy only its new environment. Retain failed cleanup and interrupted resources for
+explicit deletion. The supervisor's seal and the one request that sets it are the only session-finality state and the
+only protocol change for these cases: add no helm-side record of which sessions an environment holds, no membership RPC,
+no Resume to count sessions, no connection handshake change, no transparent recovery of failed Replaces and no startup
+continuation protocol.
+
+### Environment Delete and the seal
+
+A user's Delete of a session in an environment is `ControlMsg::DeleteSessionOrSeal` (protocol 76), sent only by the
+helm's full-authority connection; a session-authenticated one is refused like a create. The supervisor handles it like
+`DeleteSession` (agent fence, so the session's in-flight agent requests finish first; admission; directory admission;
+lifecycle claim), with each wait before the decision bounded so that a busy environment gets a definite "nothing was
+deleted" `Conflict` rather than a decision taken after the helm gave up. A supervisor already sealed answers `Sealed` to
+any such request, whether or not the session still exists; an unsealed one that does not find the session answers
+`NotFound`, which the helm reads as an earlier attempt having deleted only that session. Otherwise teardown runs its
+read-only preflight, then one store transaction counts the other rows in `sessions` (any state: a `Launching` row is
+written before its terminal starts, and a Restart keeps its row while its entry is off the in-memory map; a pending
+reservation with no row is not counted) and, when there are none, sets `supervisor_meta.sealed`. A failure to write the
+seal is an error before anything destructive. The in-memory seal is set after the commit, and the supervisor hints a
+listing change. Counting under directory admission means a create, which holds it until its launch settles, is either
+counted or refused. A non-final Delete then finishes the ordinary teardown, except that the checkout's last reference is
+discarded (renamed into the trash folder for immediate removal and never listed) instead of archived, and answers
+`Deleted { remaining }`; a checkout another session still uses stays, as it does for any Delete. A final Delete skips
+the archive move, finishes the teardown and answers `Sealed`, with any later teardown failure as its notice: the
+environment's destruction ends what remains, and the sealed supervisor refuses to restart it. Teardown is split at its
+preflight boundary so the seal sits between the two halves without the shared teardown knowing about it.
+
+Schema 35 stores the seal (below). It is loaded at startup and checked with `ErrorKind::Sealed`, which on its own says
+nothing was created (a sealed refusal records nothing, so `create_unaccepted`, which needs a durable refusal record,
+stays false), at the top of `create_session_admitted`, after reservation resolution, which every create passes through:
+the helm's own, Replace's replacement, agent spawns and creates, a keyed retry that would launch, and managed-checkout
+recovery, whose inspect-only path offers no recovery on a sealed supervisor; at Restart and Restart with after their
+lifecycle claim; and at a tab open after its lifecycle claim. A tab open takes no directory admission, which is still
+sound: a seal happens only when no other row exists, and a tab of the deleted session is serialized by its lifecycle
+claim, which the seal holds. A replay that only answers an existing session still answers. The seal is never cleared.
+`SessionList.sealed` carries it on every listing, since the hello is sent once per connection.
+
+On the helm, the new path is opted into by a query only new pages send; a plain DELETE of a session on a session-owned
+host is still refused, so an older page cannot reach it, and `delete_sandbox=true` keeps meaning the whole-environment
+Delete. The helm denies the session's pending approval cards first (an unanswered spawn card would otherwise hold the
+agent fence), queues behind any other environment session Delete of the same host, then takes the host's provisioning
+lock without waiting (a setup, update, suspend or whole-environment removal answers "try again"), re-reads the row and
+requires it session-owned and machine-deleting, and sends the request only while the host is connected, with a reply
+deadline derived from the supervisor's wait bound and teardown's own bounds. Not connected, not sent, sent without an
+answer, or past the deadline: the helm answers with a marker that nothing was decided, and the page offers the warned
+whole-environment Delete. `Deleted` runs the ordinary local forgetting and reports the supervisor's count; `Sealed`
+destroys the environment through the same removal path as host removal, under the lock already held.
+
+Whenever a connection publishes a listing with `sealed` set for a session-owned, machine-deleting host, a helm-owned
+finisher destroys it through that same function, at most one at a time per host. A sealed listing from any other host is
+shown as a problem (a failed refresh naming the seal) and never acted on. Every machine-deleting removal shows the host
+as `HostState::Deleting` through the connection hold, with the provider's wording from the UI. A sealed host is also
+kept in an in-memory seal record, pending or with its last destruction's failure, and the manager's status reads report
+every host in that record as `HostState::Deleting` with that failure and no client, whatever its connection does
+meanwhile (held, released, reconnected, retired), so the failure and its Retry cannot be lost and nothing is routed to a
+supervisor that takes no new sessions. Retry runs the destruction again only for a host whose record holds a failure.
+Nothing about it is stored on the helm: after a restart the seal arrives with the next listing. While a host is
+`Deleting`, its sessions show as being deleted with their actions unavailable. Replace counts `NotFound` from its source
+removal as success and turns `ErrorKind::Sealed` on its create into "the environment is being deleted".
 
 Suspend closes the exec connection before Podman pause, and Resume unpauses a Suspended container or starts a Stopped
 one. Stopped auto-start is attempted once after observation with a connected place, then failures wait for explicit
@@ -6594,10 +6655,51 @@ kernel-boot comparison interrupts sessions last known live across a host reboot 
 container stop/start uses ordinary exit reconciliation. Plain Stop and Stop and suspend retain their ordinary
 chosen-session semantics followed, for the latter, by provider suspension.
 
-The owning helm refuses requests from session-owned origins after the existing prompts-off and origin-liveness gates,
-before permissions or approval. Agent Delete/Clone aimed at either provider's owned sessions and recipe-target launches
-are refused too. Keep local help, conversation reporting and ordinary disconnected-helm relay behavior. No supervisor
-restriction metadata, acknowledgement, membership or notification bookkeeping is added.
+### Agent requests and environments
+
+Everything SPEC.md's "Agents and environments" asks of the helm lives in `agent_requests.rs`, keyed on one fact: whether
+the origin's host row is session-owned, read from the same manager status the origin-liveness check uses, after the
+existing prompts-off and liveness gates. That makes the origin _confined_, and each verb arm applies the confinement
+where it resolves its host or target, before any card: listings filter to the origin host, lifecycle verbs compare the
+resolved target's host with the origin's, create resolves an absent or own-named host to the origin and refuses any
+other host or any template or flag that sets one or a recipe target, and clone, the template verbs and the host verbs
+refuse outright. The check names no provider: a confined origin is any session-owned row, so a third provider inherits
+the rule without a branch. The refusal is an ordinary `Unauthorized` agent error with one fixed message; no
+notification, supervisor metadata or acknowledgement is involved, and the ordinary relay still fails closed without an
+owning helm.
+
+A confined Delete of another session in the same environment goes to that host's supervisor as a session-only delete,
+the same supervisor operation Replace uses for its source, which never seals. It does not pass through the user's
+environment Delete (`sessions::sandbox::delete_if_owned`), which only an explicit user confirmation reaches. From
+elsewhere, Delete of a session-owned target is still refused, and session-owned rows stay out of `resolve_host` and
+template host identities.
+
+An environment launch for an agent is `AgentVerb::CreateEnvironment`, naming a recipe and, for a container, the
+container host's display name. It is a verb of its own (protocol 75) rather than a field on `AgentVerb::Create`, so a
+helm that predates it fails to decode the request instead of ignoring the placement and creating an ordinary session. A
+plain create with no `--host` whose named template targets a recipe takes the same path. Clone of a session-owned source
+builds the same plan from the source's row (recipe and place) and its launch and repository intent, read live from its
+owning supervisor as ordinary clone reads them, since a cached launch may no longer be the session's; a suspended or
+unreachable source is refused until it is resumed. Before asking, the helm checks the place's cached availability and
+the launcher's own environment-launch validation, so the user is never asked to approve a launch that is then refused
+before anything starts. It asks with `ApprovalAction::LaunchEnvironment`, which `requires_direct_allow` and which an
+older UI fails to decode with the rest of its approval list. Its Allow stands in for the launcher's creation
+confirmation: the helm calls `ProvisioningService::start_session_environment` directly, which is what the
+confirmation-checking REST route calls after its own check. The agent YOLO rule needs no host row here: a new
+environment row is registered with `yolo_without_asking` on (Topology), which vouches for every launch, so the rule is
+satisfied by construction, and the direct-Allow card already covers an agent-supplied wrapper.
+
+The answer waits for that task's result. The supervisor relay's answer budget starts when it forwards the request and
+knows nothing of the approval, and only the helm knows whether a create's template or a clone's source leads to a new
+environment, so `AgentVerb::may_launch_environment` (the new verb, create and clone) adds `ENVIRONMENT_LAUNCH_WAIT`
+(thirty minutes) to the ordinary budget plus the approval wait, in one span. The helm bounds its own wait for the task
+to the same allowance after the Allow and then answers `Timeout`, saying the launch carries on, so the agent normally
+hears that before its relay gives up. Neither expiry cancels the task, which is helm-owned. Keyed environment launches
+are refused before anything else: the key would have to be held by a supervisor that does not exist until the launch has
+run.
+
+Keep local help, conversation reporting and ordinary disconnected-helm relay behavior. No supervisor restriction
+metadata, acknowledgement, membership or notification bookkeeping is added.
 
 ## Tensorlake account
 
@@ -6995,19 +7097,21 @@ no special reconciliation: the newly created resource may be destroyed. Interrup
 Hosts, and resources without a row are discoverable by the reserved prefix. There is no new launch journal, retained
 request fingerprint, exactly-once launch guarantee or startup continuation worker.
 
-Explicit session Delete calls the existing whole-sandbox removal path after an always-on confirmation authorizing all
-processes, files and snapshots in that resource. It validates the host/resource binding and deletion consent, not the
-number of sessions. Any names displayed come from the ordinary cache and make no completeness claim. The same deletion
-works while the supervisor is unreachable or suspended; it never asks for Resume to inspect membership. Existing bounded
-termination and snapshot cleanup precede forgetting the actor and host-owned rows. Failure retains the resource and
-reason. Host Delete sandbox uses that same path and confirmation. Bulk Delete coalesces targets by host ID without
-requiring a complete member set or a designated last session.
+Explicit session Delete asks the sandbox's supervisor ("Environment Delete and the seal"); on `Sealed`, and for the
+warned whole-sandbox Delete when the supervisor cannot be asked, it calls the existing whole-sandbox removal path, which
+validates the host/resource binding and deletion consent, not the number of sessions. Any names displayed come from the
+ordinary cache and make no completeness claim. The whole-sandbox deletion works while the supervisor is unreachable or
+suspended; it never asks for Resume to inspect membership. Existing bounded termination and snapshot cleanup precede
+forgetting the actor and host-owned rows. Failure retains the resource and reason. Host Delete sandbox always uses that
+path and its own confirmation. Bulk Delete sends one supervisor request per marked session of a connected sandbox and
+coalesces only the rows of sandboxes it could not ask by host ID, without requiring a complete member set or a
+designated last session.
 
 Replace stays in the same sandbox and retains ordinary create-before-source-removal ordering. Its internal source
-removal calls ordinary supervisor session deletion, never whole-sandbox removal. Failures preserve the resource and
-report known outcomes and its name; rare unresolved cases can require manual recovery. Explicit whole-sandbox Delete may
-subsequently destroy any leftover session, listed or unlisted. This is accepted product behavior, so do not add stored
-session membership, finality tracking, or protocol and connection changes to prove which session remains.
+removal calls ordinary supervisor session deletion, which never seals and never destroys the sandbox. Failures preserve
+the resource and report known outcomes and its name; rare unresolved cases can require manual recovery. The warned
+whole-sandbox Delete may subsequently destroy any leftover session, listed or unlisted. This is accepted product
+behavior; the seal is the only finality state, and nothing else proves which session remains.
 
 Suspend and Resume reuse host lifecycle tasks. Stop and suspend completes ordinary Stop first, then applies the host
 Suspend rule to the whole resource; failure or incomplete Stop withholds Suspend. No path automatically resumes it. Bulk
@@ -7018,16 +7122,15 @@ membership-specific locks or ordering.
 Templates represent a recipe separately from the existing opaque install-identity host field; both together are an
 inapplicable Host field. Shared template application treats them as one placement choice. Clone resolves an owned source
 to its recipe and creates a new sandbox. Restart/Replace retain the actual host internally; ordinary creates reject
-owned host destinations. Agents cannot list, read, write or launch recipe templates; agent template verbs naming one are
-refused. Changes to the shared template encoding must preserve the existing strict-decoder and old-page failure
+owned host destinations, except an agent create from that same environment. Agents cannot list, read or write recipe
+templates; agent template verbs naming one are refused, and only `farhelm agent create --template` from an ordinary host
+launches one. Changes to the shared template encoding must preserve the existing strict-decoder and old-page failure
 behavior; a protocol bump, if needed for that encoding, is separate from the removed supervisor policy and membership
 protocol.
 
-After the existing global prompts-off refusal and origin-liveness check, the helm's agent dispatcher refuses a
-session-owned origin before verb handling, permissions or approval. It also refuses agent Delete/Clone of sandbox
-sessions and recipe launch after template resolution. Use the ordinary refusal kind and relay. Do not add a notification
-kind, generation bookkeeping, supervisor metadata or acknowledged connection policy for this restriction. All policy
-belongs to the owning helm; the ordinary relay already refuses when no owning helm connection exists.
+Agent requests from and about sandbox sessions follow "Agent requests and environments" under Disposable environments.
+Do not add a notification kind, generation bookkeeping, supervisor metadata or acknowledged connection policy for them.
+All policy belongs to the owning helm; the ordinary relay already refuses when no owning helm connection exists.
 
 ## Tensorlake hosts
 

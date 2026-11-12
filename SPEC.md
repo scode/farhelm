@@ -1442,10 +1442,10 @@ explanation of its retained request.
 
 A sandbox session is an ordinary session in a named Tensorlake sandbox created from a recipe for that launch. Its
 session-owned host uses the ordinary Tensorlake connection, credentials, tunnels, updates and lifecycle machinery. It
-has no permanent host-rail icon, is not an ordinary launch destination, and is omitted from agent host listings. Its
-sessions appear under All. Opening Hosts lists the sandbox with its ordinary diagnostics and applicable controls;
-updates, problems and progress also appear in the existing sidebar attention area. Update all and automatic updates
-include it under their ordinary rules. No separate session-only host-management surface is required.
+has no permanent host-rail icon, is not an ordinary launch destination, and is omitted from the host listings of agents
+outside it. Its sessions appear under All. Opening Hosts lists the sandbox with its ordinary diagnostics and applicable
+controls; updates, problems and progress also appear in the existing sidebar attention area. Update all and automatic
+updates include it under their ordinary rules. No separate session-only host-management surface is required.
 
 The launcher's **New sandbox** segment lists recipes with a cube mark and CPU and memory size. A recipe without a built
 snapshot is disabled with **No snapshot yet**. A missing API key or absent or unreadable local Farhelm SSH key also
@@ -1455,9 +1455,9 @@ the new sandbox and snapshots. Brief billing and visible failed cleanup are acce
 reason. Launch never starts a missing software snapshot build; Add host keeps its existing build-if-missing behavior.
 
 The footer names **new &lt;recipe&gt; sandbox**. Its note explains that the sandbox is for this session, bills while
-running, Suspend stops CPU and memory billing, and Delete removes the whole sandbox and its files. Managed checkout
-works normally, including the recipe's GitHub token for private clones. Folder is fixed to the new sandbox's home,
-without Browse or recent folders.
+running, Suspend stops CPU and memory billing, and deleting its last session removes the sandbox and its files. Managed
+checkout works normally, including the recipe's GitHub token for private clones. Folder is fixed to the new sandbox's
+home, without Browse or recent folders.
 
 Launching asks **Create a sandbox for this session?**, naming recipe, CPU, memory and disk, linking Tensorlake pricing,
 and explaining suspension, the idle timeout and irreversible file deletion. Cancel creates nothing; **Create and
@@ -1496,18 +1496,51 @@ stays unavailable rather than silently choosing another host. The normal creatio
 Replace creates its replacement before removing the old session. That internal source removal is session-only and never
 destroys the sandbox or files. A failed or ambiguous Replace preserves the existing sandbox, reports what is known, and
 identifies its name. Partial failures can leave several sessions; rare failures may require manual data recovery.
-Farhelm does not add a membership protocol or transparent recovery to hide this case.
+Farhelm adds no transparent recovery to hide this case. If a Replace's new session is admitted before a user Delete of
+its source, that Delete is not the sandbox's last and removes only the source, and Replace's own removal of the source
+finding it already gone counts as success. In the other order the sealed sandbox (below) refuses Replace's create, and
+Replace reports that the sandbox is being deleted.
 
-**Delete always destroys the whole sandbox**, even if a failed Replace left another session there. It always confirms
-that every session, process, file, checkout, unpushed change and snapshot in that sandbox will be removed, with **Delete
-session and sandbox**. Any listed session names are drawn from Farhelm's existing records, not a complete inventory.
-Destroying an unlisted leftover session under this confirmation is an accepted consequence. Delete needs no fresh
-session listing, count or proof that this is the last session. It works while suspended or disconnected through the
-ordinary Tensorlake deletion path, without Resume. Sandbox and snapshot cleanup finish before the host and its session
-entries are forgotten; failure keeps a visible reason and allows retry. **Delete sandbox** in Hosts has the same
-whole-resource consequence and confirmation. Bulk Delete uses this consequence once per sandbox; it does not remove
-members in a special order to establish finality. Sandbox deletion moves nothing to the checkout trash and produces no
-archive cue or not-archived notice; its checkout tooltip and Delete consequence explain sandbox destruction instead.
+**Delete removes the sandbox together with its last session.** Only the Farhelm running inside the sandbox knows which
+sessions it holds. Farhelm's own list can miss some: a Replace whose reply was lost, or sessions started there while the
+helm was not connected. So no Delete decides from the helm's list, a cache or anything stored on the helm's side that a
+session is the last one. When the helm is connected to the sandbox's Farhelm, Delete asks it, in one step that waits for
+the session's in-flight Farhelm commands to finish, to delete this session and, if no other session of any kind remains
+(one still launching or restarting counts), to **seal** the sandbox. A sealed sandbox permanently refuses every new
+session and every new run, from any source and with or without a helm connected: creates, Replace's replacement, agent
+spawns and creates, the retry of an earlier create, recovery of a managed-checkout launch, Restart, Restart with and new
+terminal tabs. The seal survives a restart of its Farhelm and is never lifted.
+
+The confirmation states both outcomes: the session and its checkout are deleted, and if it is the last session in the
+sandbox, the sandbox, every process and file in it and its snapshots are deleted too, with **Delete session**. It is
+never skipped, since it may destroy the sandbox. If other sessions remain, only the chosen session is removed, with its
+checkout discarded rather than moved to the checkout trash (unless another session still uses that checkout), and the
+result says the sandbox stays and how many other sessions it holds, as its Farhelm counted them. If it was the last, the
+helm destroys the sandbox through the ordinary Tensorlake deletion path. A sealed sandbox's Farhelm reports the seal
+whenever it lists its sessions, and the helm finishes destroying any sealed sandbox it sees, whether or not it sent the
+Delete: after a lost reply, a failed destruction or its own restart. While that runs, and if it fails, Hosts and the
+sidebar attention area show the sandbox as being deleted, with the reason and **Retry**, and its sessions show as being
+deleted with their actions unavailable. Two windows deleting a sandbox's last two sessions at once can briefly show "the
+sandbox stays" in one window just before the other window's Delete seals it; the list then shows the truth.
+
+When the helm cannot ask the sandbox's Farhelm (the sandbox is suspended or unreachable, or its Farhelm is a version
+this helm cannot talk to until it is updated), or the request gets no answer, nothing is decided. Delete does not guess
+and never resumes the sandbox: it offers the whole-sandbox Delete instead, whose confirmation warns that every session,
+process, file, checkout, unpushed change and snapshot in the sandbox will be removed, including sessions Farhelm does
+not list because they were started while it was not connected, and that resuming or updating the sandbox first lets
+Farhelm delete just this session. **Delete session and sandbox** proceeds; it works while suspended or disconnected
+through the ordinary Tensorlake deletion path. Sandbox and snapshot cleanup finish before the host and its session
+entries are forgotten; failure keeps a visible reason and allows retry. A sandbox that was sealed and then suspended or
+became unreachable before the helm read the seal shows no sessions until the helm reaches it again; **Delete sandbox**
+in Hosts is the way out meanwhile. **Delete sandbox** in Hosts always destroys the whole sandbox after its own
+confirmation, whether or not its Farhelm answers.
+
+Bulk Delete sends one such request per marked session of a sandbox the helm is connected to; its Farhelm takes them one
+at a time, and the last one seals if nothing else remains. Marked sessions of a sandbox the helm could not ask when the
+modal opened get the whole-sandbox Delete, once per sandbox, and the modal says which rows are which. A refusal or a
+missing answer partway through leaves that row with its reason and never turns into a whole-sandbox Delete without that
+warned confirmation. Whole-sandbox deletion moves nothing to the checkout trash and produces no archive cue or
+not-archived notice; its checkout tooltip and Delete consequence explain sandbox destruction instead.
 
 The session toolbar offers **Suspend** immediately left of Stop, with a pause glyph. Plain Suspend freezes processes
 without stopping them; Resume continues them. Both affect the whole sandbox, including leftover sessions. Reuse the
@@ -1521,16 +1554,17 @@ and a pause-marked **Suspended** badge. The row menu offers Suspend/Resume and e
 sandbox. Plain Stop ends the chosen agent and tabs but keeps its sandbox running and billing. Its inline question says
 so and offers **Stop and suspend** as well. That action finishes ordinary Stop before requesting host Suspend; a failed
 or incomplete Stop does not suspend. The row menu always offers Stop and suspend, so it remains reachable when ordinary
-confirmations are skipped. Delete's whole-sandbox confirmation is never skipped.
+confirmations are skipped. Delete's confirmations are never skipped.
 
-The helm refuses every agent request originating from a session-owned host before approvals or host-permission
-shortcuts, with **Agents in sandbox and container sessions can't ask Farhelm to act yet.** This adds no notification.
-Requests still use the ordinary relay and fail closed when the owning helm is disconnected. No supervisor-local
-restriction is stored. Local help and conversation reporting remain unchanged; the global prompts-off refusal keeps its
-existing precedence. Recipe templates are GUI-only in this first version: agents cannot list, read, write or launch
-them, and agent template verbs naming one are refused. Agents on other hosts cannot Delete or Clone a sandbox session or
-launch a recipe target directly or through a template. Other supported targeted operations keep ordinary approval.
-Ordinary creates cannot target the disposable host; only its initial launch and internal Restart/Replace paths use it.
+Agents in a sandbox session act only within their own sandbox, and agents elsewhere launch sandboxes only behind a card
+that always asks; [Agents and environments](#agents-and-environments) has the rules. The helm enforces them at the
+ordinary relay, which fails closed when the owning helm is disconnected. No supervisor-local agent restriction is
+stored. Local help and conversation reporting remain unchanged; the global prompts-off refusal keeps its existing
+precedence. Recipe templates stay GUI-only for listing and writing: agents cannot list, read or write them, and agent
+template verbs naming one are refused, while `farhelm agent create --template` may launch one from an ordinary host.
+Ordinary creates from the GUI or from agents on other hosts cannot target the disposable host; its initial launch,
+internal Restart/Replace paths and its own agents' creates use it. User Delete of a session in it follows the rule
+above: the sandbox goes only with its last session, or through the warned whole-sandbox Delete.
 
 ### Managed checkouts
 
@@ -2011,9 +2045,11 @@ submission and focus-return behavior.
 The off-by-default **Skip session confirmations** switch in Settings skips session row, header and bulk Stop, session
 row and bulk Delete, row Replace, header Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close.
 Each runs on the first click through the ordinary action path, with consent from the state shown by that render. It does
-not skip an environment session's whole-resource Delete (including bulk Delete), YOLO, host or trash questions, nor the
-Restart with or Replace with launcher. Host setup and removal retain their separate choices. Environment Suspend and
-Stop and suspend keep the host-wide activity confirmation described under Sandbox sessions and Container sessions.
+not skip an environment session's Delete in either form, including bulk Delete: neither the Delete that asks the
+environment's Farhelm and may remove the environment with its last session, nor the whole-resource Delete. Nor does it
+skip YOLO, host or trash questions, or the Restart with or Replace with launcher. Host setup and removal retain their
+separate choices. Environment Suspend and Stop and suspend keep the host-wide activity confirmation described under
+Sandbox sessions and Container sessions.
 
 Where keyboard focus starts in a confirmation, and how modal dialogs keep it, is under
 [Keyboard focus](#keyboard-focus).
@@ -2194,17 +2230,20 @@ and never opens a session that is still being deleted. Pending Stop batches do n
 Bulk Stop and Delete ask once when any target would need its ordinary confirmation, unless **Skip session
 confirmations** is on. A batch containing an environment Delete always asks. Their structured modal lists one row per
 target with status, name, full host and what the action will do, with the same conditional managed-checkout consequence
-for Delete. Environment rows name the whole-resource Delete consequence, including when several marked sessions share a
-resource. Sandbox rows also name continued billing for Stop. Stop names the agent and terminal tabs it ends, with a
-separate no-tabs precondition for every target whose displayed state showed no tabs. The answer authorizes only those
-listed identities and drawn consequences. An accepted changed target rewords the question and replaces its opening;
-authoritative disappearance can remove it, while a filtered, partial, failed or non-authoritative omission cannot. An
-old answer cannot authorize a replacement question, and answer-time admission may only remove targets no longer
-displayed or marked. Changed facts or confirmation preferences never dispatch a destructive action by themselves.
-Cancel, Close and Escape dismiss their current question without clearing marks. After confirmation closes the question,
-keyboard focus returns to the marked count, which remains programmatically focusable. Pending launches and actions on
-other sessions do not lock the bulk buttons; each action still refuses its own busy targets. Completion and failures use
-the ordinary rows and open-session surfaces.
+for Delete. Environment rows say which Delete they get. Rows of a sandbox or container the helm is connected to state
+both outcomes: the session and its checkout are deleted, and if it is the last session there, the sandbox or container
+and all its files go too. Rows of one the helm could not ask when the modal opened name the whole-resource Delete
+consequence, including when several marked sessions share it; that Delete runs once per resource. Sandbox rows also name
+continued billing for Stop. Stop names the agent and terminal tabs it ends, with a separate no-tabs precondition for
+every target whose displayed state showed no tabs. The answer authorizes only those listed identities and drawn
+consequences. An accepted changed target rewords the question and replaces its opening; authoritative disappearance can
+remove it, while a filtered, partial, failed or non-authoritative omission cannot. An old answer cannot authorize a
+replacement question, and answer-time admission may only remove targets no longer displayed or marked. Changed facts or
+confirmation preferences never dispatch a destructive action by themselves. Cancel, Close and Escape dismiss their
+current question without clearing marks. After confirmation closes the question, keyboard focus returns to the marked
+count, which remains programmatically focusable. Pending launches and actions on other sessions do not lock the bulk
+buttons; each action still refuses its own busy targets. Completion and failures use the ordinary rows and open-session
+surfaces.
 
 Escape clears marks only from the session list, without preventing default handling, and yields to a menu, dialog or
 terminal that owns the key. Quick switching and shortcuts keep their existing meaning: session shortcuts act only on the
@@ -3439,9 +3478,10 @@ before proceeding with such changes. A schema version bump on its own, where old
 and nothing is lost, need not be raised.
 
 Sessions depend on exactly one thing staying up: their host. For environment sessions that host is their sandbox or
-container. Suspension freezes its processes and Resume continues them, whereas Delete ends the environment and removes
-its files. A container host reboot stops its containers, whose automatic start and interrupted sessions follow Container
-sessions. Every other component is disposable, with the sandbox idle-timeout exception below:
+container. Suspension freezes its processes and Resume continues them, whereas deleting its last session, or the
+environment itself, ends it and removes its files. A container host reboot stops its containers, whose automatic start
+and interrupted sessions follow Container sessions. Every other component is disposable, with the sandbox idle-timeout
+exception below:
 
 - Clients and the helm can close, crash, or restart freely — closing the app, network loss, Mac sleep, a helm upgrade —
   and sessions keep running, local and remote. Sandbox sessions have an explicit exception: after the remote connection
@@ -3770,10 +3810,9 @@ Ordinary session operation is version-control-agnostic. Explicit managed-checkou
 
 ## Agent-spawned sessions
 
-Sandbox and container sessions are the exception to the agent-operation contracts in this section. Every request from
-their own host is refused, agents elsewhere cannot Delete or Clone them, and agents cannot launch recipe targets or
-target session-owned host entries (see [Sandbox sessions](#sandbox-sessions) and
-[Container sessions](#container-sessions)).
+Agents in sandbox and container sessions act only within their own environment, and agents elsewhere launch new
+environments only behind a card that always asks; both are described under
+[Agents and environments](#agents-and-environments) at the end of this section.
 
 A running agent must be able to create sessions itself, via a stable CLI or local API available inside its session,
 e.g.:
@@ -4246,6 +4285,60 @@ The parent reference is optional organizational metadata only and implies no VCS
 agent-created sessions to have no parent reference; the parent filter need not identify everything an agent created. The
 control plane creates no worktree, workspace, or branch as part of spawning — if the agent wants a `jj workspace` first,
 the agent creates it.
+
+### Agents and environments
+
+An agent in a sandbox or container session (see [Sandbox sessions](#sandbox-sessions) and
+[Container sessions](#container-sessions)) can ask Farhelm to act, but only within its own environment. It cannot reach
+another host any further than it could from anywhere else, change templates or hosts, or create a new environment. The
+helm decides this by the session-owned host entry the request arrived on, as it decides everything else about an agent
+request, and the rules are the same for every provider. Within that scope the ordinary rules of this section apply:
+approval, the YOLO rule, idempotency keys and the environment host's own permission settings. An environment host starts
+with the defaults of a new Tensorlake or container host (see [Topology](#topology)): YOLO launches are allowed without
+asking, and every acting command from its agents asks until the user changes that host's settings.
+
+- `farhelm spawn` creates in the asking session's environment, as it does on any host. `farhelm agent create` creates
+  there too when it names no host or names the environment's own host by the name its hosts listing reports. Any other
+  `--host`, a template that sets a host or a recipe target, and `--recipe` are refused.
+- Rename, stop, restart and delete act only on sessions in the same environment; a session still cannot delete itself.
+  Deleting another session in the environment removes that session only, through the ordinary session teardown, and
+  never the environment: the asking session is still in it, so it cannot be the environment's last session.
+- `farhelm agent hosts` lists only the environment's own host entry, under its own name, and `farhelm agent sessions`
+  only the sessions in that environment.
+- Clone is refused, whatever its target: copying a session out of an environment creates a new environment, and a
+  session in the same environment is what spawn and create are for.
+- The template verbs (`templates` and the template writes) and the host verbs are refused.
+- `farhelm agent open-url` keeps its ordinary rules, under the environment host's link permissions.
+
+Every refusal says **Agents in sandbox and container sessions can only act within their own sandbox or container.** No
+notification is added, and when no helm is connected the ordinary relay refusal applies.
+
+An agent on another host keeps its ordinary approval rules for sessions in environments, except that Delete of a sandbox
+or container session is refused, since only the user deletes one, and that no create or template may put a session into
+an existing environment's host entry: those entries are absent from agents' host listings and are refused as `--host`
+values. Clone of a sandbox or container session creates a new environment, as Clone in the GUI does, behind the card
+below.
+
+`farhelm agent create --recipe <name>` launches a session in a new environment built from that recipe: a Tensorlake
+sandbox, or with `--container-host <host>` a container on that host, named by the display name the hosts listing
+reports. `--recipe` is exclusive with `--host`, and `--container-host` needs `--recipe`. A template whose target is a
+recipe launches the same way through `--template`, and `--recipe` replaces a template's target. The destination follows
+the launcher's rules for a new environment: a folder is the new environment's home, and `--gh` clones the repository
+inside it. `farhelm agent clone` of a sandbox or container session takes no `--host` or `--cwd`; it targets the source's
+recipe at the source's place, with the source's launch and repository intent, never a copy of its disk.
+
+Each of these always shows its own card, whatever the requesting host's permissions say, with Allow and Deny only. The
+card names the recipe and where the environment will be created (Tensorlake, or the container host), says that a
+Tensorlake sandbox bills while it runs, and otherwise shows what any launch card shows. Its Allow is the creation
+confirmation, so a Tensorlake launch shows no separate billing question even when **Create Tensorlake sandboxes without
+asking** is off; Deny creates nothing. It is a card kind an older UI cannot decode. After Allow the helm runs the same
+launch task as the launcher, whose named progress appears in the host's attention area like any other environment
+launch. The command waits for that task and prints the new session's ID. Its wait covers the nine-minute approval wait
+and thirty minutes more, counted together from when the request reaches the helm, so a slow answer leaves less time for
+the launch; a launch still unfinished then is reported as an unknown outcome while the task carries on, and the session
+appears in listings once it exists. The YOLO rule judges these launches by the defaults the new environment host will
+start with, which allow YOLO launches, so it refuses none of them. An idempotency key is refused: its record would live
+inside the environment the first attempt created, where a retry could not find it before creating a second environment.
 
 ## Errors and diagnostics
 
@@ -4779,11 +4872,17 @@ failed initial launch may discard its newly created container, including after a
 cleanup and interrupted launches remain discoverable for explicit deletion through Hosts or **Containers not on this
 helm**. Nothing automatically continues an interrupted launch at helm startup.
 
-User Delete always confirms destruction of the container, every session and process in it, its checkout, files and
-unpushed work, including unlisted leftovers from Replace. It needs no fresh membership listing or final-session proof.
-Delete works while paused or while its supervisor is disconnected when the container host can be reached, without
-Resume. Confirmed container absence precedes forgetting its row and cached sessions. Failure keeps the resource and
-reason visible for retry. Host-level **Delete container** has the same consequence. No checkout moves to the trash.
+User Delete follows Sandbox sessions' rule: it asks the container's Farhelm to delete the session and seal the container
+if no other session remains, removes the container together with its last session, and otherwise reports that the
+container stays and how many other sessions are in it. The confirmation states both outcomes and is never skipped. When
+the helm cannot ask the container's Farhelm (the container is paused or unreachable, or its Farhelm is a version this
+helm cannot talk to) or gets no answer, it offers the whole-container Delete, whose confirmation warns that the
+container, every session and process in it, its checkouts, files and unpushed work are destroyed, including sessions
+Farhelm does not list. That Delete works while paused or while its supervisor is disconnected when the container host
+can be reached, without Resume. Confirmed container absence precedes forgetting its row and cached sessions. Failure
+keeps the resource and reason visible for retry; a sealed container whose destruction failed shows as being deleted,
+with the reason and Retry. Host-level **Delete container** always destroys the whole container after its confirmation.
+Whole-container deletion moves no checkout to the trash.
 
 Suspend uses Podman pause, preserving processes and memory. Resume unpauses them. The helm closes its exec connection
 before pausing, since a paused exec pipe can hang. Controls, the suspended card, rows and Stop and suspend follow the
@@ -4816,7 +4915,8 @@ disables Podman's implicit HTTP-proxy inheritance and writes those values into t
 its user manager and every session inherit the same settings. Later host changes affect newly created containers.
 Rootless Podman supplies the containment. Internet, LAN, tailnet and cloud metadata remain reachable, and this version
 adds no network policy or CPU/memory limits. The container host's Podman configuration still applies. Agents in
-containers follow the same helm-side refusal as sandbox agents, including Delete/Clone requests from other hosts.
+containers follow the same rules as sandbox agents ([Agents and environments](#agents-and-environments)), including
+Delete requests and Clone from other hosts.
 
 Farhelm may pull the recipe's image when missing and the pinned managed Ubuntu base. Superseded Farhelm-built images are
 removed after successful replacement once no container uses them. Rebuild at a place and recipe deletion clean up that
@@ -4865,12 +4965,17 @@ directional: the helm and GUI must treat remote supervisor messages and agent-co
 host must not gain unauthorized execution or access to secrets on the helm's machine or another host through Farhelm.
 Existing redaction promises remain requirements even where the sender already has local account authority.
 
-Until environment-session trust is supported, their agents have no Farhelm request authority. The helm refuses every
-request from a session-owned origin before approval or host-permission shortcuts, through the ordinary owning-helm
-relay. This restriction adds neither a supervisor-local policy nor a notification. Agents on other hosts cannot Delete
-or Clone a sandbox or container session, launch a recipe target directly or through a template, or target a
-session-owned host entry. Other supported targeted operations keep their existing approval rules. User operations follow
-Sandbox sessions and Container sessions.
+An agent in a sandbox or container session has Farhelm request authority only over its own environment
+([Agents and environments](#agents-and-environments)). It reaches no other host through Farhelm any further than a
+process anywhere else could, and it cannot change templates or hosts or create another environment, so a disposable
+environment does not become a way into the rest of the fleet. The helm enforces that by the session-owned host entry the
+request arrived on, through the ordinary owning-helm relay, adding neither a supervisor-local policy nor a notification.
+Inside that scope, approval and the environment host's own permission settings apply as on any host. Agents on other
+hosts cannot Delete a sandbox or container session or target a session-owned host entry. Creating a new environment for
+an agent, through `--recipe`, a recipe template or Clone of an environment session, always needs the user's own Allow on
+a card that is also the creation confirmation, whatever the requesting host's settings say, because it starts a new
+machine and, for Tensorlake, bills. Other supported targeted operations keep their existing approval rules. User
+operations follow Sandbox sessions and Container sessions.
 
 Confirmed 2026-10-10: text a host supplied that the GUI shows outside a terminal is escaped so invisible and
 direction-changing characters are visible, including in accessible names, wherever it appears and however it reached the
@@ -4940,14 +5045,14 @@ That setting never covers changes to the hosts themselves. An agent's `farhelm a
 a host does not let its sessions add, rename, restyle or remove any host, and even an approved edit reaches only a
 host's alias, icon and color, never its permissions or destination.
 
-Reading is separate from acting, and stays open for ordinary hosts for now; session-owned origins remain refused as
-above. Any other attached host may obtain any ordinary template's full contents, including a command line and resume
-command it carries: an approved spawn that applies a template, or any spawn from a host the user lets run commands
-without asking, delivers those contents to it. Until the read side is closed (TODO.md's
+Reading is separate from acting, and stays open for ordinary hosts for now; session-owned origins read only their own
+environment, as above. Any other attached host may obtain any ordinary template's full contents, including a command
+line and resume command it carries: an approved spawn that applies a template, or any spawn from a host the user lets
+run commands without asking, delivers those contents to it. Until the read side is closed (TODO.md's
 [Maybe later bucket](TODO.md#maybe-later)), templates are no place for secrets that must stay hidden from an attached
-host. The fleet-wide session and host listings stay readable by every attached host except session-owned origins under
-Sandbox sessions and Container sessions. This acceptance is not a standing grant: it ends when reading other hosts'
-session and template data is limited to explicitly trusted environments.
+host. The fleet-wide session and host listings stay readable by every attached host except session-owned origins, which
+see only their own environment. This acceptance is not a standing grant: it ends when reading other hosts' session and
+template data is limited to explicitly trusted environments.
 
 Confirmed 2026-09-28, under that same read-side acceptance: command lines are not secret from agents either. An agent
 runs with the same account authority as its host's supervisor, so an agent may obtain any template's command line and
