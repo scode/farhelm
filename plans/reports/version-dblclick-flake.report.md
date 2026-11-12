@@ -99,3 +99,42 @@ that no later focus move applies to this test. Of its four minor findings, two s
 error and the comment wrapping), the dependency on the startup session taking focus was accepted as described above, and
 its reminder to verify on Tensorlake before delivering is met by the 100-of-100 run. The commit message went through two
 cold reads.
+
+### Landing
+
+#### What landed with it
+
+It landed in one round with session-action-leftovers (two fixes to how a session remembers a finished Restart and
+Replace with's progress) and cmd-click-images (more file types open on Cmd-click by default); neither changes header
+focus or which session is selected, which this test depends on. While the round ran, a docs refresh (#3349) and a change
+to a docs-screenshot test (#3347) landed on main; neither touches this test.
+
+No fixes were made while landing. The changed test passed in the whole browser run below on both engines.
+
+#### Checks
+
+The round's three plans were checked together, stacked in queue order on main (session-action-leftovers, then
+version-dblclick-flake, then cmd-click-images; their TODO.md conflicts were resolved by keeping each plan's removal of
+its own entry). Browser runs were on Tensorlake sandboxes at the maintainer's request; the sandboxes run Node 24.16
+where the development machine runs 24.20, which these tests do not depend on, and each shard is recorded in the
+recorder's mode for arbitrary commands.
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, the docs website build (`bun install --frozen-lockfile` and
+  `bun run build`), `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and
+  `cargo check -p farhelm-ui --features desktop` passed.
+- `cargo nextest run -p farhelm-helm -p farhelm-proto -p farhelm-ui --lib`: 2,978 passed (run
+  `64f04ec9-18bc-4bb4-bdd1-fb2503b7cbb9`).
+- The whole browser suite, `npx playwright test` split by project over ten sandboxes, because three plans' interactions
+  were checked in one run and session-action-leftovers changes how every session view keeps a finished Restart: 3,296
+  passed, 14 skipped, none failed (runs `4f802ef7-91db-4b47-9622-41cf69ad4216`, `ff5047d5-a356-4d6d-bd9e-e6d79ddb5e00`,
+  `97413f07-ea76-496b-8a26-64ff1045e28b`, `ee9ea862-1e4c-437f-bedd-f90e8c07713f`,
+  `8e430cf6-69d0-4c89-9e08-09f390b77eea`, `5dd8460f-f24d-4845-94ea-23b92f1697dd`,
+  `87bed0c7-b106-4e86-9a62-9122c45e4de0`, `7f818c77-32af-40f4-afeb-2dc08cc60aaf`, `8bb6cc96-5151-42f9-a4c4-9385246c5f1d`
+  and `517ea6a3-9db7-4f5b-ac17-f5139f5ffae6`). The 14 skips are as many as in earlier whole-suite runs.
+
+Main differs from the tested tree only by the docs refresh (#3349) and the docs-screenshot test change (#3347), which
+landed while the round ran; the docs refresh and cmd-click-images both edit the session list's docs page, in separate
+paragraphs, and the website was not rebuilt with both edits together. Skipped: the workspace Rust tests beyond the three
+changed crates' library tests (nothing else reads what changed), the old-terminal browser set (nothing here touches old
+terminals), and the desktop app itself (the Cmd-click list is shared code the library tests cover).
