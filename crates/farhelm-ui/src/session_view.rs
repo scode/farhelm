@@ -622,11 +622,7 @@ pub(crate) fn SessionView(
     // `agent_spec_kind`.
     let mut restart_terminal_kind = use_signal(|| {
         operations
-            .lifecycle
-            .peek()
-            .get(session.id.raw())
-            .and_then(|state| state.restart)
-            .filter(|outcome| outcome.succeeded)
+            .retained_restart(session.id.raw())
             .map(|outcome| outcome.agent_terminal)
     });
     // Whether this client has relaunched the session since it last saw it
@@ -638,15 +634,16 @@ pub(crate) fn SessionView(
     // Per view on purpose: another client's restart reaches this one
     // through the listing like any other change. A newly mounted view seeds it
     // from the retained successful reply, so returning before the listing
-    // catches up does not resurrect an interrupted-session card.
-    let mut relaunched = use_signal(|| {
-        operations
-            .lifecycle
-            .peek()
-            .get(session.id.raw())
-            .and_then(|state| state.restart)
-            .is_some_and(|outcome| outcome.succeeded)
-    });
+    // catches up does not resurrect an interrupted-session card. The sidebar's
+    // listing forgets that reply once it shows the restarted run, so a view
+    // opened after a later reboot is not seeded and shows the card. That
+    // assumes the `session` this view opens with is at least as new as the
+    // listing that forgot it, which holds for sidebar rows. The quick switcher
+    // opens with its own snapshot, taken when it opened: a pick of a session
+    // whose Restart finished while the switcher was open can show the card
+    // until this view's first detail read, a brief gap accepted rather than
+    // changing what the switcher hands over.
+    let mut relaunched = use_signal(|| operations.retained_restart(session.id.raw()).is_some());
     // Whether a restart is in flight (disables the control and guards
     // re-entry, mirroring `ListView`'s `pending`).
     let restarting = use_memo(move || {
@@ -1028,8 +1025,9 @@ pub(crate) fn SessionView(
                     closed_tabs.write().retain(|id| live.contains(id.as_str()));
                     occurrences.observe(&fresh);
                     workspace_occurrences.observe(&fresh);
-                    let fresh_confirms_run =
-                        fresh.stale || !matches!(fresh.status, SessionStatus::Interrupted);
+                    // The same rule the sidebar's listing commit retires the
+                    // outcome by, so the two cannot disagree.
+                    let fresh_confirms_run = crate::session_ops::read_confirms_run(&fresh);
                     current.set(fresh);
                     if fresh_confirms_run
                         && !operations
@@ -3980,13 +3978,14 @@ mod tests {
         let (mut operations, generation) = HANDLES.with(Cell::get).unwrap();
         for (index, succeeded) in [false, true].into_iter().enumerate() {
             dom.in_runtime(|| {
-                operations.boundary("source", None);
-                operations.boundary(
+                operations.boundary("source");
+                operations.finish_restart(
                     "source",
-                    Some(crate::list::RestartOutcome {
+                    crate::list::RestartOutcome {
                         succeeded,
                         agent_terminal: None,
-                    }),
+                    },
+                    0,
                 );
                 // Model the admitted post-completion detail commit before any
                 // observer gets to run, rather than relying on network timing.
@@ -4490,6 +4489,85 @@ mod tests {
             ..interrupted.clone()
         };
         assert_eq!(terminal_absence(&stale, true), Some(TerminalAbsence::Stale));
+    }
+
+    /// Why this matters: a Restart that succeeded while the user was on
+    /// another session used to be remembered until that session was next
+    /// opened. If the host rebooted again first, opening it showed a terminal
+    /// for a destroyed pane instead of the interrupted card and its Restart
+    /// offer. The fix must not cost the window the memory exists for: opened
+    /// before any listing caught up, the session still shows its terminal.
+    ///
+    /// What, through what a newly mounted view seeds itself from
+    /// (`SessionOps::retained_restart`) and how it decides on the card
+    /// (`terminal_absence`): a Restart recorded with no view mounted, then
+    /// opened while the listing still says Interrupted, mounts the terminal;
+    /// a listing read that was in flight at the reply and shows the replaced
+    /// run as running changes nothing; a later read showing the session
+    /// running forgets the Restart, so once a reboot makes the session
+    /// Interrupted again, a newly opened view shows the interrupted card.
+    #[farhelm_testtrace::test]
+    fn a_restart_finished_elsewhere_is_forgotten_once_the_listing_shows_it_running() {
+        use std::cell::Cell;
+        thread_local! {
+            static OPERATIONS: Cell<Option<SessionOps>> = const { Cell::new(None) };
+        }
+        fn app() -> Element {
+            let operations = use_hook(SessionOps::new);
+            OPERATIONS.with(|slot| slot.set(Some(operations)));
+            rsx! {}
+        }
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        let operations = OPERATIONS.with(Cell::get).unwrap();
+        let interrupted = Session {
+            id: "restarted".into(),
+            status: crate::SessionStatus::Interrupted,
+            ..live_session()
+        };
+        let running = Session {
+            status: crate::SessionStatus::Running,
+            ..interrupted.clone()
+        };
+        let opened = |session: &Session| {
+            let seeded = operations.retained_restart(session.id.raw()).is_some();
+            terminal_absence(session, seeded)
+        };
+        dom.in_runtime(|| {
+            assert_eq!(
+                opened(&interrupted),
+                Some(TerminalAbsence::Interrupted),
+                "premise: an interrupted session with no Restart shows the card"
+            );
+            // Listing generation 3 was the newest started when the reply came.
+            operations.boundary("restarted");
+            operations.finish_restart(
+                "restarted",
+                crate::list::RestartOutcome {
+                    succeeded: true,
+                    agent_terminal: None,
+                },
+                3,
+            );
+            operations.retire_confirmed_restarts(std::slice::from_ref(&interrupted), 4);
+            assert_eq!(
+                opened(&interrupted),
+                None,
+                "before the listing catches up, the restarted session mounts its terminal"
+            );
+            operations.retire_confirmed_restarts(std::slice::from_ref(&running), 3);
+            assert_eq!(
+                opened(&interrupted),
+                None,
+                "a read already in flight at the reply proves nothing about the new run"
+            );
+            operations.retire_confirmed_restarts(std::slice::from_ref(&running), 5);
+            assert_eq!(
+                opened(&interrupted),
+                Some(TerminalAbsence::Interrupted),
+                "after a later reboot, the card and its Restart offer are back"
+            );
+        });
     }
 
     /// The agent terminal's spec kind follows the listing, except where a
