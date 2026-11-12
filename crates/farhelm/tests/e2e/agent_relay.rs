@@ -473,6 +473,7 @@ async fn agent_delete_relay_preserves_consent_and_refuses_self() {
         outcome: farhelm_proto::SessionDeleteOutcome {
             notice: Some("checkout preserved".into()),
             archived: false,
+            environment_remaining: None,
         },
     };
     let handler = ScriptedHandler::answering(reply.clone());

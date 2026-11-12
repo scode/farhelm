@@ -460,7 +460,26 @@ pub struct SupervisorTimeouts {
     /// that bound with discovery held on purpose instead of waiting out the
     /// production budget.
     pub orphan_reclaim: Duration,
+    /// See [`SEAL_DELETE_ADMISSION_WAIT`]: how long an environment Delete
+    /// waits for its session's in-flight agent requests, an admission slot
+    /// and directory admission before it answers "busy, nothing deleted".
+    /// Here so a test can hold the fence and reach the refusal without
+    /// waiting out the production bound.
+    pub seal_delete_wait: Duration,
 }
+
+/// How long an environment Delete ([`ControlMsg::DeleteSessionOrSeal`]) may
+/// wait for the locks it needs before deciding anything: the session's agent
+/// fence (an approved agent request still in flight), an admission slot, and
+/// directory admission (a create holds it until its launch settles).
+///
+/// Bounded, unlike an ordinary Delete's wait, because this one has a helm on
+/// the other end waiting with a deadline of its own and a user deciding
+/// what to do next. Without the bound the supervisor could still decide (and
+/// seal) after the helm had told the user that nothing was decided. A wait
+/// cut off here has done nothing, so its "nothing was deleted" is true. The
+/// helm's reply deadline is derived from this bound and teardown's own.
+pub const SEAL_DELETE_ADMISSION_WAIT: Duration = Duration::from_secs(30);
 
 impl Default for SupervisorTimeouts {
     fn default() -> Self {
@@ -480,6 +499,7 @@ impl Default for SupervisorTimeouts {
             agent_fence_retain: AGENT_FENCE_RETAIN_TIMEOUT,
             delete_host_end: super::session_hosts::DELETE_HOST_END_BUDGET,
             orphan_reclaim: ORPHAN_RECLAIM_BUDGET,
+            seal_delete_wait: SEAL_DELETE_ADMISSION_WAIT,
         }
     }
 }
@@ -1852,6 +1872,13 @@ impl RequestError {
         }
     }
 }
+
+/// What a sealed supervisor says when it refuses a new session or a new
+/// run. Neutral about the provider on purpose: the supervisor inside an
+/// environment does not know whether it is a sandbox or a container, and the
+/// UI words the refusal for each provider from [`ErrorKind::Sealed`].
+pub(crate) const SEALED_REFUSAL: &str =
+    "this environment is being deleted, so it starts no new sessions, restarts or terminal tabs";
 
 /// Recovers the `ErrorKind` a handler attached via [`RequestError`].
 ///
@@ -5547,6 +5574,21 @@ pub struct Supervisor {
     /// How long create, delete, and restart hold it differs; the lock-order
     /// table in this struct's docs describes those lifetimes.
     pub(crate) working_copy_operations: Arc<tokio::sync::Mutex<()>>,
+    /// The environment seal (SPEC_impl.md, "Environment Delete and the
+    /// seal"): set when [`ControlMsg::DeleteSessionOrSeal`] found no other
+    /// session, from then on refusing every new session and new run with
+    /// [`ErrorKind::Sealed`], and carried on every session listing so a helm
+    /// finishes destroying the environment. Loaded from the store at
+    /// construction and set only after the store has committed it; never
+    /// cleared.
+    ///
+    /// The creates and Restarts that check it hold directory admission, under
+    /// which the seal is decided, so none can slip in between. A tab open
+    /// takes no directory admission and is still covered: a seal happens
+    /// only when no other session row exists, so the only session a tab
+    /// could open on is the one being deleted, whose lifecycle claim the
+    /// seal holds and the tab open waits for before it checks.
+    pub(crate) sealed: std::sync::atomic::AtomicBool,
     /// Fresh accepted creates owe coalesced spare work; only the serve-owned
     /// worker mutates records, independently of directory admission.
     pub(super) spare_builder: Arc<super::spare_builder::Builder>,
@@ -6597,6 +6639,9 @@ impl Supervisor {
         } else {
             store.read_host_identity().await?
         };
+        // Loaded once: only `seal_unless_other_sessions` sets the column,
+        // through this same process's in-memory flag, and nothing clears it.
+        let sealed = store.is_sealed().await?;
         // Threaded from `timeouts` rather than `TmuxDriver::new`'s
         // production default so an integration test's loosened budgets
         // (see `SupervisorTimeouts::tmux_exchange`) actually reach the
@@ -6732,6 +6777,7 @@ impl Supervisor {
             lifecycle_locks: Arc::new(KeyedLocks::default()),
             agent_request_locks: Arc::new(KeyedLocks::default()),
             working_copy_operations: Arc::new(tokio::sync::Mutex::new(())),
+            sealed: std::sync::atomic::AtomicBool::new(sealed),
             spare_builder: Arc::new(super::spare_builder::Builder::default()),
             trash_remover: Arc::new(super::trash_remover::Remover::default()),
             repository_scanner: crate::repository_discovery::RepositoryScanner::new("git"),
@@ -9178,6 +9224,9 @@ impl Supervisor {
                 LaunchEvidence::Absent => {}
                 LaunchEvidence::Unresolved(error) => return Err(error),
             }
+            // A recovery card would ask the user to approve a launch the
+            // create door then refuses; say why up front instead.
+            self.refuse_when_sealed()?;
             let FreshCreateFingerprint::GithubCheckout {
                 prompt,
                 launch,
@@ -9274,6 +9323,21 @@ impl Supervisor {
         .map(|session| (Some(session), None))
     }
 
+    /// Refuse a new session or run on a sealed supervisor
+    /// ([`Supervisor::sealed`]). Callers check it where they already hold
+    /// directory admission (creates, Restart) or the lifecycle claim of the
+    /// session they act on (a tab open), which is what keeps a seal decided
+    /// under those locks from being slipped past.
+    pub(crate) fn refuse_when_sealed(&self) -> anyhow::Result<()> {
+        if self.sealed.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(anyhow::Error::new(RequestError::new(
+                ErrorKind::Sealed,
+                SEALED_REFUSAL,
+            )));
+        }
+        Ok(())
+    }
+
     /// Resolve or launch under admission already held by the caller.
     /// The wire path constructs its fingerprint only after protected inherited
     /// resolution; internal callers use `create_session` to acquire the same
@@ -9302,6 +9366,10 @@ impl Supervisor {
         // digest of the agent's request, before any resolution at all.)
         let fresh = inputs.github_checkout.is_some();
         let Some(claim) = claim else {
+            // The one create door every create passes (the helm's own,
+            // Replace's replacement, agent spawns and creates, checkout
+            // recovery), with directory admission already held.
+            self.refuse_when_sealed()?;
             let request = self
                 .validate_create(inputs)
                 .await
@@ -9329,6 +9397,10 @@ impl Supervisor {
                 identity: new_session_identity(),
             },
         };
+        // After resolution, so a keyed replay that only answers a session
+        // that already exists still answers; anything that would launch,
+        // a first attempt or a retry's relaunch, is refused.
+        self.refuse_when_sealed()?;
         let validated = match &reserved {
             Reserved::Retry(reservation) => self.validate_retry(inputs, reservation).await,
             _ => self.validate_create(inputs).await,
@@ -12939,6 +13011,9 @@ impl Supervisor {
         // including the republication. See the lock-order table in the
         // `Supervisor` struct's docs.
         let lifecycle = self.lifecycle_locks.claim(session_id).await;
+        // A sealed environment starts no new run, including of the session
+        // whose post-seal teardown failed and left its row behind.
+        self.refuse_when_sealed()?;
         // No gap between the admission-time check and the claim it guards
         // (R1.1): a checkout whose registry row carries unresolved archive
         // state, or whose fresh-create plan was never accepted, must not be
@@ -15553,6 +15628,12 @@ impl Supervisor {
         session_id: &str,
     ) -> Result<TabInfo, RequestError> {
         let lifecycle = self.lifecycle_locks.claim(session_id).await;
+        // Checked after the claim: a seal is decided under the deleted
+        // session's own claim, and that session is the only one a sealed
+        // supervisor can still hold (see `Supervisor::sealed`).
+        if self.sealed.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(RequestError::new(ErrorKind::Sealed, SEALED_REFUSAL));
+        }
         let entry = self.sessions.lock().await.get(session_id).cloned();
         let Some(entry) = entry else {
             return Err(RequestError::new(

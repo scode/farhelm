@@ -661,6 +661,11 @@ pub struct SessionListing<T = SessionInfo> {
     /// Whether `sessions` is missing entries the supervisor held back at
     /// its cap (`farhelm_proto::LIST_SESSIONS_CAP`), straight off the wire.
     pub truncated: bool,
+    /// Whether the supervisor said it is sealed
+    /// (`farhelm_proto::ControlMsg::DeleteSessionOrSeal`), straight off the
+    /// wire. Untrusted like everything a supervisor says: it is acted on
+    /// only for a host whose removal deletes a disposable machine.
+    pub sealed: bool,
 }
 
 /// The peer's own hello, retained from the handshake that opened this
@@ -3342,10 +3347,12 @@ impl SupervisorClient {
             ControlMsg::SessionList {
                 sessions,
                 truncated,
+                sealed,
                 ..
             } => Ok(SessionListing {
                 sessions,
                 truncated,
+                sealed,
             }),
             other => Err(wrong_reply("ListSessions", &other)),
         }
@@ -3942,7 +3949,11 @@ impl SupervisorClient {
         {
             ControlMsg::SessionDeleted {
                 notice, archived, ..
-            } => Ok(farhelm_proto::SessionDeleteOutcome { notice, archived }),
+            } => Ok(farhelm_proto::SessionDeleteOutcome {
+                notice,
+                archived,
+                environment_remaining: None,
+            }),
             other => Err(wrong_reply("DeleteSession", &other)),
         }
     }
@@ -5261,6 +5272,7 @@ mod tests {
                 .unwrap();
             writer
                 .write_control(&ControlMsg::SessionList {
+                    sealed: false,
                     req_id,
                     sessions: vec![session("s1")],
                     truncated: false,
@@ -5388,6 +5400,7 @@ mod tests {
             for req_id in [second, first] {
                 writer
                     .write_control(&ControlMsg::SessionList {
+                        sealed: false,
                         req_id,
                         sessions: vec![session(&req_id.to_string())],
                         truncated: false,
@@ -5439,6 +5452,7 @@ mod tests {
                 };
                 writer
                     .write_control(&ControlMsg::SessionList {
+                        sealed: false,
                         req_id,
                         sessions: vec![session("a")],
                         truncated: sent,
@@ -5965,6 +5979,7 @@ mod tests {
             };
             writer
                 .write_control(&ControlMsg::SessionList {
+                    sealed: false,
                     req_id,
                     sessions,
                     truncated: false,
@@ -9752,6 +9767,7 @@ mod tests {
         };
         peer.writer
             .write_control(&ControlMsg::SessionList {
+                sealed: false,
                 req_id,
                 sessions: Vec::new(),
                 truncated: false,
@@ -9803,6 +9819,7 @@ mod tests {
         };
         peer.writer
             .write_control(&ControlMsg::SessionList {
+                sealed: false,
                 req_id,
                 sessions: vec![session("a")],
                 truncated: false,
@@ -9884,6 +9901,7 @@ mod tests {
         };
         peer.writer
             .write_control(&ControlMsg::SessionList {
+                sealed: false,
                 req_id,
                 sessions: Vec::new(),
                 truncated: false,

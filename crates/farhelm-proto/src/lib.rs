@@ -241,7 +241,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_75` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_76` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -252,7 +252,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 75;
+pub const PROTOCOL_VERSION: u32 = 76;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -460,6 +460,20 @@ pub enum ErrorKind {
     /// way for people. The helm relays it to the browser as
     /// [`DetachCode::TakenOver`].
     TakenOver,
+    /// The supervisor is sealed: a Delete found its environment's last
+    /// session and closed the environment to new sessions for good
+    /// ([`ControlMsg::DeleteSessionOrSeal`]). Added with `PROTOCOL_VERSION`
+    /// 76 for every refusal a sealed supervisor gives (a create, a retry
+    /// that would launch, a checkout recovery, a Restart, a tab open).
+    ///
+    /// Its own kind because the action differs from every other refusal's:
+    /// the environment is about to be destroyed, so retrying, resuming or
+    /// waiting cannot help, and Replace must tell the user that its
+    /// environment is being deleted rather than report a failed create.
+    /// A sealed supervisor records nothing for a create it refuses, so this
+    /// kind on its own says that nothing was created; the reply's
+    /// `create_unaccepted`, which needs a durable refusal record, stays false.
+    Sealed,
 }
 
 /// Frames larger than this are rejected at decode time. Terminal output is
@@ -2892,6 +2906,27 @@ pub struct SessionDeleteOutcome {
     pub notice: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+    /// Set when the Delete of a session in a disposable environment kept
+    /// the environment: how many other sessions its own supervisor counted
+    /// there ([`SealOutcome::Deleted`]). Never a count of the helm's own,
+    /// which can miss sessions; absent for every other Delete, including
+    /// one that removed the environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_remaining: Option<u32>,
+}
+
+/// What a supervisor did with [`ControlMsg::DeleteSessionOrSeal`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum SealOutcome {
+    /// Other sessions remain: only this one was deleted, its checkout
+    /// discarded unless another session still uses it, and the supervisor
+    /// stays open to new sessions. `remaining` counts the other sessions in
+    /// its store in any state, one still launching or restarting included.
+    Deleted { remaining: u32 },
+    /// No other session remained, so the supervisor is now sealed for good
+    /// (or already was): the environment can be destroyed.
+    Sealed,
 }
 
 /// Facts established by a completed Stop. The agent stopped even when a
@@ -3332,6 +3367,16 @@ pub enum ControlMsg {
         req_id: u64,
         sessions: Vec<SessionInfo>,
         truncated: bool,
+        /// This supervisor is sealed ([`ControlMsg::DeleteSessionOrSeal`]):
+        /// its environment's last session was deleted and it refuses every
+        /// new session for good. Carried on every listing, not in the hello,
+        /// because the hello is sent once per connection and the seal can
+        /// be set during one. A helm that sees it finishes destroying the
+        /// environment, whether or not it sent the Delete (a lost reply, a
+        /// failed destruction, its own restart). Serialized only when true;
+        /// arrived with `PROTOCOL_VERSION` 76.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        sealed: bool,
     },
     /// List immediate child directories on the supervisor's filesystem.
     ///
@@ -3585,6 +3630,46 @@ pub enum ControlMsg {
         /// use it for a local cue; session disappearance alone is not proof.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         archived: bool,
+    },
+    /// The user's Delete of a session in a disposable environment (a
+    /// sandbox or container whose host exists for its sessions alone):
+    /// delete this session and, if no other session remains on this
+    /// supervisor, seal it. Added with `PROTOCOL_VERSION` 76 (SPEC.md,
+    /// "Sandbox sessions"; SPEC_impl.md, "Environment Delete and the seal").
+    ///
+    /// Only the supervisor inside the environment knows every session it
+    /// holds; the helm's list can miss some (a Replace whose reply was lost,
+    /// sessions started while no helm was connected). So the count and the
+    /// seal happen here, in one step under the lock every create holds while
+    /// it launches, after the session's in-flight agent requests finished. A
+    /// sealed supervisor refuses every new session and new run from then on,
+    /// from any source, with [`ErrorKind::Sealed`], and never unseals.
+    ///
+    /// Meant only for environment supervisors: on an ordinary host a seal
+    /// would refuse every create for good. The helm sends it only for a
+    /// session-owned host whose removal deletes its machine; a
+    /// session-authenticated connection is refused. Unconditional like the
+    /// environment Delete it replaces, whose confirmation is never skipped,
+    /// and without an intent key: a sealed supervisor answers
+    /// [`SealOutcome::Sealed`] to any repeat, and on an unsealed one a
+    /// repeat that finds its session gone gets `NotFound`, meaning the
+    /// earlier attempt deleted only that session.
+    ///
+    /// [`ControlMsg::DeleteSession`] stays the delete that never seals:
+    /// Replace's removal of its source and an agent's delete of another
+    /// session in its own environment use it.
+    DeleteSessionOrSeal { req_id: u64, session_id: String },
+    /// Acknowledges [`ControlMsg::DeleteSessionOrSeal`]. `Deleted` is sent
+    /// only once the session is positively gone, like `SessionDeleted`.
+    /// `Sealed` is sent once the seal is durable, even when the teardown
+    /// after it failed (the failure is then `notice`, and the session's row
+    /// stays): the environment's destruction ends what remains, and the
+    /// sealed supervisor refuses to restart it.
+    SessionDeletedOrSealed {
+        req_id: u64,
+        outcome: SealOutcome,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        notice: Option<String>,
     },
     /// Relaunch a session's agent (PLAN_M3.md item 9) — the only relaunch
     /// mechanism SPEC.md's lifecycle "restart" names; the resume offered
@@ -4365,6 +4450,7 @@ impl ControlMsg {
             | ControlMsg::GithubRepoResults { req_id, .. }
             | ControlMsg::SessionStopped { req_id, .. }
             | ControlMsg::SessionDeleted { req_id, .. }
+            | ControlMsg::SessionDeletedOrSealed { req_id, .. }
             | ControlMsg::SessionRestarted { req_id, .. }
             | ControlMsg::PromptTarget { req_id, .. }
             | ControlMsg::SessionPrompted { req_id }
@@ -4401,6 +4487,7 @@ impl ControlMsg {
             | ControlMsg::GithubRepoSearch { .. }
             | ControlMsg::StopSession { .. }
             | ControlMsg::DeleteSession { .. }
+            | ControlMsg::DeleteSessionOrSeal { .. }
             | ControlMsg::RestartSession { .. }
             | ControlMsg::PromptTargetInfo { .. }
             | ControlMsg::PromptSession { .. }
@@ -4463,6 +4550,7 @@ impl ControlMsg {
             | ControlMsg::GithubRepoSearch { req_id, .. }
             | ControlMsg::StopSession { req_id, .. }
             | ControlMsg::DeleteSession { req_id, .. }
+            | ControlMsg::DeleteSessionOrSeal { req_id, .. }
             | ControlMsg::RestartSession { req_id, .. }
             | ControlMsg::PromptTargetInfo { req_id, .. }
             | ControlMsg::PromptSession { req_id, .. }
@@ -4501,6 +4589,7 @@ impl ControlMsg {
             | ControlMsg::GithubRepoResults { .. }
             | ControlMsg::SessionStopped { .. }
             | ControlMsg::SessionDeleted { .. }
+            | ControlMsg::SessionDeletedOrSealed { .. }
             | ControlMsg::SessionRestarted { .. }
             | ControlMsg::PromptTarget { .. }
             | ControlMsg::SessionPrompted { .. }
@@ -4587,6 +4676,8 @@ impl ControlMsg {
             ControlMsg::SessionStopped { .. } => "SessionStopped",
             ControlMsg::DeleteSession { .. } => "DeleteSession",
             ControlMsg::SessionDeleted { .. } => "SessionDeleted",
+            ControlMsg::DeleteSessionOrSeal { .. } => "DeleteSessionOrSeal",
+            ControlMsg::SessionDeletedOrSealed { .. } => "SessionDeletedOrSealed",
             ControlMsg::RestartSession { .. } => "RestartSession",
             ControlMsg::SessionRestarted { .. } => "SessionRestarted",
             ControlMsg::PromptTargetInfo { .. } => "PromptTargetInfo",
@@ -5836,8 +5927,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_75() {
-        assert_eq!(PROTOCOL_VERSION, 75);
+    fn protocol_version_is_pinned_at_76() {
+        assert_eq!(PROTOCOL_VERSION, 76);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,
@@ -6062,6 +6153,7 @@ mod tests {
             outcome: SessionDeleteOutcome {
                 notice: Some("checkout preserved".into()),
                 archived: false,
+                environment_remaining: None,
             },
         };
         assert_eq!(
@@ -7073,6 +7165,7 @@ mod tests {
                     req_id: 5,
                     sessions: vec![],
                     truncated: false,
+                    sealed: false,
                 },
                 serde_json::json!({
                     "type": "session_list",
@@ -7086,12 +7179,30 @@ mod tests {
                     req_id: 6,
                     sessions: vec![],
                     truncated: true,
+                    sealed: false,
                 },
                 serde_json::json!({
                     "type": "session_list",
                     "req_id": 6,
                     "sessions": [],
                     "truncated": true,
+                }),
+            ),
+            // A sealed supervisor's listing (protocol 76) carries the seal;
+            // an unsealed one keeps the shape above.
+            (
+                ControlMsg::SessionList {
+                    req_id: 8,
+                    sessions: vec![],
+                    truncated: false,
+                    sealed: true,
+                },
+                serde_json::json!({
+                    "type": "session_list",
+                    "req_id": 8,
+                    "sessions": [],
+                    "truncated": false,
+                    "sealed": true,
                 }),
             ),
         ] {
@@ -7145,6 +7256,7 @@ mod tests {
             req_id,
             sessions,
             truncated,
+            ..
         } = decoded
         else {
             panic!("expected ControlMsg::SessionList, got {decoded:?}");
@@ -9246,6 +9358,7 @@ mod tests {
     fn a_variant_name_carries_no_payload() {
         let fat = ControlMsg::SessionList {
             req_id: 1,
+            sealed: false,
             sessions: vec![SessionInfo {
                 screen_yolo: false,
                 claude_trust_prompt: false,

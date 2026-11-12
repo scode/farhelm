@@ -96,6 +96,40 @@ pub(crate) enum TeardownError {
     FailClosed(String),
 }
 
+/// What a Delete does with a checkout whose last reference it removes. A
+/// checkout another session still uses stays where it is whatever this says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CheckoutDisposition {
+    /// Move it into its root's trash, where the user can get it back
+    /// (SPEC.md "Managed checkouts"): every ordinary Delete.
+    Archive,
+    /// Remove it without offering it back: a Delete of one session in a
+    /// disposable environment that keeps the environment (SPEC.md, "Sandbox
+    /// sessions"). Moved into the trash by the same checked rename an
+    /// archive uses, so every safety check still decides whether the folder
+    /// moves, with its removal journaled in the same transaction that
+    /// removes the session, so no committed state (and no trash listing, and
+    /// no crash) ever offers it back as an ordinary archive; the rename and
+    /// queueing on the trash remover follow under the same admission.
+    Discard,
+    /// Leave it unarchived and say nothing: the last session of an
+    /// environment that is about to be destroyed with everything in it.
+    Abandon,
+}
+
+/// The read-only findings of [`Supervisor::prepare_teardown`], carried to
+/// [`Supervisor::finish_teardown`] under the same lifecycle claim and
+/// directory admission. Opaque outside this module.
+pub(crate) struct PreparedTeardown<'a> {
+    deleting: super::core::DeleteInProgress<'a>,
+    root_identity: Option<(u32, u64)>,
+    other_roots: Vec<(u32, u64)>,
+    hosts: SessionHosts,
+    host_roots: Vec<(u32, u64)>,
+    units: ScopeUnits,
+    container_runtime: Option<crate::container::ContainerRuntime>,
+}
+
 /// Why a Delete left its checkout unarchived, as the notice will tell it.
 ///
 /// `may_have_moved` separates the two outcomes a user must not confuse:
@@ -312,6 +346,38 @@ impl Supervisor {
         directory_admission: tokio::sync::OwnedMutexGuard<()>,
         found: Option<SessionHosts>,
     ) -> Result<farhelm_proto::SessionDeleteOutcome, TeardownError> {
+        let prepared = self.prepare_teardown(entry, session_id, found).await?;
+        self.finish_teardown(
+            entry,
+            session_id,
+            directory_admission,
+            prepared,
+            CheckoutDisposition::Archive,
+        )
+        .await
+    }
+
+    /// The first half of [`Self::teardown_session_with_hosts`]: every
+    /// refusal-prone, read-only preflight (pane ownership, the roots of every
+    /// process to sweep, terminal-tab rediscovery, scope enumeration), with
+    /// nothing changed yet. An `Err` here means nothing was touched and the
+    /// session is intact. Called under the same lifecycle claim and directory
+    /// admission as the second half, which must follow it under those same
+    /// holds: what this gathered is only true while they are held.
+    ///
+    /// Split from [`Self::finish_teardown`] so that a caller can decide
+    /// something between the two that has to come after every refusal and
+    /// before anything destructive. The environment Delete
+    /// (`DeleteSessionOrSeal`) records its seal there: a seal written before a
+    /// preflight refused would close the environment over a session that then
+    /// stays, and one written after the sweep began could be lost to a
+    /// failure that left the session half-deleted and the environment open.
+    pub(crate) async fn prepare_teardown<'a>(
+        &'a self,
+        entry: &SessionEntry,
+        session_id: &str,
+        found: Option<SessionHosts>,
+    ) -> Result<PreparedTeardown<'a>, TeardownError> {
         // Held until the session's viewers are detached, or to this
         // function's end on every failure path: a viewer whose stream ends
         // because this teardown ended its terminal hears this teardown's
@@ -548,6 +614,43 @@ impl Supervisor {
             units.extend_derived([unit]);
         }
         units.normalize();
+        Ok(PreparedTeardown {
+            deleting,
+            root_identity,
+            other_roots,
+            hosts,
+            host_roots,
+            units,
+            container_runtime,
+        })
+    }
+
+    /// The second half of [`Self::teardown_session_with_hosts`]: cancel the
+    /// session's transfers, kill everything it launched, end its terminals,
+    /// settle its checkouts by `disposition`, and remove its files and row.
+    /// See that method's docs for the locking, archival and notice contracts,
+    /// which all hold here unchanged.
+    ///
+    /// An `Err` from here on is a Delete that failed closed: the row and the
+    /// map entry stay for a retry, even though some processes or files may
+    /// already be gone.
+    pub(crate) async fn finish_teardown(
+        &self,
+        entry: &SessionEntry,
+        session_id: &str,
+        directory_admission: tokio::sync::OwnedMutexGuard<()>,
+        prepared: PreparedTeardown<'_>,
+        disposition: CheckoutDisposition,
+    ) -> Result<farhelm_proto::SessionDeleteOutcome, TeardownError> {
+        let PreparedTeardown {
+            deleting,
+            root_identity,
+            other_roots,
+            hosts,
+            host_roots,
+            units,
+            container_runtime,
+        } = prepared;
 
         // All refusal-prone, read-only preflights have passed: pane
         // ownership, terminal-tab rediscovery, and scope enumeration. Now
@@ -722,6 +825,10 @@ impl Supervisor {
         let mut notices: Vec<String> = Vec::new();
         let mut archived = false;
         let mut released: Vec<String> = Vec::new();
+        // Archives a `Discard` Delete moved into the trash: the final
+        // transaction journals their removal, and the rename and queueing
+        // finish right after it, still under directory admission.
+        let mut discard: Vec<String> = Vec::new();
         // Only a confirmed archive/missing decision authorizes trust cleanup;
         // releasing an unarchived checkout must retain its vendor entry.
         let mut trust_cleanup = std::collections::HashMap::new();
@@ -946,9 +1053,28 @@ impl Supervisor {
                         // naming it. Before this, each of these failures kept the session, and
                         // several could never clear (a removed or remounted root, a filesystem
                         // without no-replace rename, a path too long to archive).
+                        if disposition == CheckoutDisposition::Abandon {
+                            // The environment holding this checkout is about
+                            // to be destroyed with everything in it, so a
+                            // move into its trash would be wasted work and
+                            // one more way for the sealed Delete to fail.
+                            // Released quietly: there is no folder left for a
+                            // notice to send the user to.
+                            released.push(row.id.clone());
+                            continue;
+                        }
                         match self.archive_last_reference(&row, &registry, session_id).await {
                             Ok(moved) => {
-                                archived |= moved;
+                                if disposition == CheckoutDisposition::Discard {
+                                    // Into the trash only to be removed from
+                                    // it at once (the caller asks the trash
+                                    // remover), never offered back to the user.
+                                    if moved {
+                                        discard.push(row.id.clone());
+                                    }
+                                } else {
+                                    archived |= moved;
+                                }
                                 trust_cleanup.insert(row.id.clone(), row.canonical_path.clone());
                             }
                             Err(skipped) => {
@@ -997,7 +1123,7 @@ impl Supervisor {
             // duplicate (PLAN_M3.md item 6; the store method's own
             // docs carry the argument).
             self.store
-                .delete_session_archiving_memberships(session_id, &released)
+                .delete_session_archiving_memberships(session_id, &released, &discard)
                 .await
                 .map_err(|e| format!("{e:#}"))
         }
@@ -1022,6 +1148,44 @@ impl Supervisor {
                          stays there; Farhelm no longer manages it. Reason: {}",
                         late.path, late.reason
                     ));
+                }
+                if !discard.is_empty() {
+                    // The removal journal committed with the row above; finish
+                    // its rename and queue it now, while this Delete still
+                    // holds directory admission and before the unbounded
+                    // cleanup below. Problems are the user's to know about,
+                    // not a reason to fail a Delete whose row is already
+                    // gone, and the journal keeps them for the next startup.
+                    let ids = std::mem::take(&mut discard);
+                    let db = self.store.conn.clone();
+                    let resumed = tokio::task::spawn_blocking(move || {
+                        let live = crate::store::session_directory_paths(&db.lock())?;
+                        anyhow::Ok(crate::checkout_trash::resume_journaled(&db, &ids, &live))
+                    })
+                    .await
+                    .map_err(anyhow::Error::from)
+                    .and_then(|result| result);
+                    match resumed {
+                        Ok((queued, failed)) => {
+                            if let Err(error) = self.trash_remover.enqueue(queued) {
+                                notices.push(format!(
+                                    "The session's checkout is marked for removal, which finishes \
+                                     at the next start of Farhelm here: {error:#}"
+                                ));
+                            }
+                            for (_, error) in failed {
+                                notices.push(format!(
+                                    "The session's checkout is marked for removal but could not be \
+                                     moved out of the way yet; the next start of Farhelm here \
+                                     retries it: {error:#}"
+                                ));
+                            }
+                        }
+                        Err(error) => notices.push(format!(
+                            "The session's checkout is marked for removal, which finishes at the \
+                             next start of Farhelm here: {error:#}"
+                        )),
+                    }
                 }
                 retired
             }
@@ -1185,6 +1349,7 @@ impl Supervisor {
         Ok(farhelm_proto::SessionDeleteOutcome {
             notice: (!notices.is_empty()).then(|| notices.join(" ")),
             archived,
+            environment_remaining: None,
         })
     }
 
@@ -2847,7 +3012,7 @@ mod tests {
                 crate::working_copies::ArchiveOutcome::Archived { .. }
             ));
             sup.store
-                .delete_session_archiving_memberships(origin, &[])
+                .delete_session_archiving_memberships(origin, &[], &[])
                 .await
                 .unwrap();
             assert!(sup.store.session(origin).await.unwrap().is_none());
@@ -2952,7 +3117,7 @@ mod tests {
             crate::working_copies::ArchiveOutcome::Archived { .. }
         ));
         sup.store
-            .delete_session_archiving_memberships("trust-origin", &[])
+            .delete_session_archiving_memberships("trust-origin", &[], &[])
             .await
             .unwrap();
         assert!(!std::path::Path::new(&trust.project_path).exists());
@@ -3028,7 +3193,7 @@ mod tests {
 
         let settlement = sup
             .store
-            .delete_session_archiving_memberships("s-back", &[])
+            .delete_session_archiving_memberships("s-back", &[], &[])
             .await
             .expect("the present folder is released, not a failed Delete");
         assert_eq!(settlement.late_released.len(), 1);
@@ -3052,6 +3217,188 @@ mod tests {
             "contents",
             "the folder is untouched"
         );
+    }
+
+    /// Plant one allocated managed checkout under `root`, named `name`,
+    /// with `members` as its member sessions (the first is its origin), the
+    /// way the archive tests below do, and return its registry id.
+    fn planted_checkout(
+        sup: &Supervisor,
+        root: &std::path::Path,
+        name: &str,
+        members: &[&str],
+    ) -> String {
+        let conn = sup.store.conn.lock();
+        let planned = crate::working_copies::record_planned(
+            &conn,
+            &crate::working_copies::PlannedWorkingCopy {
+                id: uuid::Uuid::new_v4().to_string(),
+                canonical_root: root.to_string_lossy().into_owned(),
+                repo_owner: "octo".to_string(),
+                repo_name: name.to_string(),
+                original_basename: name.to_string(),
+                origin_session_id: members[0].to_string(),
+                root_identity: None,
+                preparation_snapshot: None,
+            },
+        )
+        .expect("record the checkout plan");
+        let dir = crate::working_copies::allocate(&conn, &planned.id, None).expect("allocate it");
+        std::fs::write(dir.canonical_path.join("file.txt"), "contents").expect("seed its contents");
+        for member in &members[1..] {
+            crate::working_copies::add_member(&conn, member, &planned.id).expect("attach a member");
+        }
+        planned.id
+    }
+
+    /// Why: the environment Delete removes a session's checkout without
+    /// offering it back when other sessions keep the environment (the
+    /// maintainer's 2026-11-12 decision), and skips the archive move when
+    /// the environment is about to be destroyed; neither may take a checkout
+    /// another session still uses. Spec: under `Discard`, a checkout with
+    /// another member stays where it is and is not handed back for removal;
+    /// the last reference is moved out of the way, not reported archived,
+    /// and handed back so the trash remover can take it; under `Abandon`
+    /// the last reference is not moved at all and the Delete says nothing
+    /// about it.
+    #[farhelm_testtrace::test]
+    async fn environment_deletes_discard_or_abandon_only_a_checkouts_last_reference() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let root = state.path().join("workroot");
+        std::fs::create_dir_all(&root).expect("the checkout root");
+        let shared = planted_checkout(&sup, &root, "shared", &["s-a", "s-b"]);
+        planted_checkout(&sup, &root, "alone", &["s-c"]);
+        let shared_path = root.join("shared");
+        let alone_path = root.join("alone");
+        let entry_a = seeded_session(&sup, "s-a", &shared_path.to_string_lossy()).await;
+        let entry_b = seeded_session(&sup, "s-b", &shared_path.to_string_lossy()).await;
+        let entry_c = seeded_session(&sup, "s-c", &alone_path.to_string_lossy()).await;
+
+        async fn delete(
+            sup: &Arc<Supervisor>,
+            entry: &SessionEntry,
+            id: &str,
+            disposition: CheckoutDisposition,
+        ) -> farhelm_proto::SessionDeleteOutcome {
+            let admission = test_admission(sup).await;
+            let prepared = sup
+                .prepare_teardown(entry, id, None)
+                .await
+                .unwrap_or_else(|_| panic!("prepare the delete of {id}"));
+            sup.finish_teardown(entry, id, admission, prepared, disposition)
+                .await
+                .unwrap_or_else(|_| panic!("finish the delete of {id}"))
+        }
+
+        let first = delete(&sup, &entry_a, "s-a", CheckoutDisposition::Discard).await;
+        assert_eq!(first.notice, None, "{:?}", first.notice);
+        assert!(
+            shared_path.join("file.txt").exists(),
+            "the shared checkout stays put"
+        );
+        assert!(
+            !sup.trash_remover.removing(),
+            "nothing is queued for a shared checkout"
+        );
+
+        let last = delete(&sup, &entry_b, "s-b", CheckoutDisposition::Discard).await;
+        assert!(
+            !last.archived,
+            "a discarded checkout is not reported archived"
+        );
+        assert_eq!(last.notice, None, "{:?}", last.notice);
+        assert!(
+            !shared_path.exists(),
+            "the last reference is moved out of its place"
+        );
+        // Journaled and queued before the Delete returned: the remover
+        // (which only `serve` runs) has it, and the trash lists it as being
+        // removed rather than as an archive to restore.
+        assert!(
+            sup.trash_remover.removing(),
+            "the discard is queued on the trash remover"
+        );
+        let listing = sup
+            .list_checkout_trash(false)
+            .await
+            .expect("list the trash");
+        assert!(
+            listing
+                .checkouts
+                .iter()
+                .all(|archive| archive.id != shared || archive.removing),
+            "a discarded checkout is never listed as an ordinary archive: {listing:?}"
+        );
+
+        let sealed = delete(&sup, &entry_c, "s-c", CheckoutDisposition::Abandon).await;
+        assert!(!sealed.archived);
+        assert_eq!(
+            sealed.notice, None,
+            "nothing to tell about a doomed checkout"
+        );
+        assert!(
+            alone_path.join("file.txt").exists(),
+            "an abandoned checkout is not moved"
+        );
+    }
+
+    /// Why: a crash right after the environment Delete's final transaction
+    /// must not leave a discarded checkout behind as an ordinary archive the
+    /// user is offered back, nor lose the removal for good. Spec: once the
+    /// transaction that removes the session commits, with nothing after it
+    /// run (the archive moved, the session's row deleted with the checkout in
+    /// the discard list), the registry row is journaled for removal, a trash
+    /// listing shows it as being removed, and startup's recovery picks it up.
+    #[farhelm_testtrace::test]
+    async fn a_discarded_checkout_is_journaled_in_the_deleting_transaction() {
+        let state = StateDir::new();
+        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+            .await
+            .expect("supervisor");
+        let root = state.path().join("workroot");
+        std::fs::create_dir_all(&root).expect("the checkout root");
+        let id = planted_checkout(&sup, &root, "doomed", &["s-a"]);
+        seeded_session(&sup, "s-a", &root.join("doomed").to_string_lossy()).await;
+
+        // The two steps `finish_teardown` takes before the boundary: the
+        // checked move into the trash, then the deleting transaction.
+        let registry = sup.store.working_copy_rows().await.expect("registry");
+        let row = registry
+            .iter()
+            .find(|row| row.id == id)
+            .expect("the planted row")
+            .clone();
+        let moved = sup
+            .archive_last_reference(&row, &registry, "s-a")
+            .await
+            .unwrap_or_else(|_| panic!("move the checkout into the trash"));
+        assert!(moved, "premise: the checkout moved into the trash");
+        sup.store
+            .delete_session_archiving_memberships("s-a", &[], std::slice::from_ref(&id))
+            .await
+            .expect("the deleting transaction");
+
+        let journaled = crate::working_copies::get_working_copy(&sup.store.conn.lock(), &id)
+            .expect("read the row")
+            .expect("the retired row stays until its removal finishes");
+        assert!(
+            crate::checkout_trash::is_removing(&journaled),
+            "the removal is journaled in the same transaction: {journaled:?}"
+        );
+        let listing = crate::checkout_trash::list(&sup.store.conn, false).expect("list the trash");
+        assert!(
+            listing
+                .checkouts
+                .iter()
+                .all(|archive| archive.id != id || archive.removing),
+            "never listed as an ordinary archive: {listing:?}"
+        );
+        let resumed =
+            crate::checkout_trash::resume_retirements(&sup.store.conn, &[], &mut |_, _| {});
+        assert_eq!(resumed, vec![id], "startup carries the removal on");
     }
 
     /// E1 (Design E): the last-reference delete archives the checkout —
@@ -3331,6 +3678,7 @@ mod tests {
         let Ok(farhelm_proto::SessionDeleteOutcome {
             notice: Some(notice),
             archived: false,
+            ..
         }) = result
         else {
             panic!("a foreign object at the recorded source still deletes, with a notice");
@@ -3415,6 +3763,7 @@ mod tests {
         let Ok(farhelm_proto::SessionDeleteOutcome {
             notice: Some(notice),
             archived: false,
+            ..
         }) = sup
             .teardown_session(&entry, "planned-origin", test_admission(&sup).await)
             .await
@@ -3681,6 +4030,7 @@ mod tests {
             let Ok(farhelm_proto::SessionDeleteOutcome {
                 notice: Some(notice),
                 archived: false,
+                ..
             }) = sup
                 .teardown_session(&entry, "missing-origin", test_admission(&sup).await)
                 .await
@@ -3796,6 +4146,7 @@ mod tests {
         let Ok(farhelm_proto::SessionDeleteOutcome {
             notice: Some(notice),
             archived: false,
+            ..
         }) = sup
             .teardown_session(&entry, "overlapped", test_admission(&sup).await)
             .await
@@ -3887,6 +4238,7 @@ mod tests {
         let Ok(farhelm_proto::SessionDeleteOutcome {
             notice: Some(notice),
             archived: false,
+            ..
         }) = result
         else {
             panic!("a refused archive rename still deletes the session, with a notice");
@@ -3990,6 +4342,7 @@ mod tests {
         let Ok(farhelm_proto::SessionDeleteOutcome {
             notice: Some(notice),
             archived: false,
+            ..
         }) = sup
             .teardown_session(&entry, "recovering", test_admission(&sup).await)
             .await
@@ -4130,6 +4483,7 @@ mod tests {
             let Ok(farhelm_proto::SessionDeleteOutcome {
                 notice: Some(notice),
                 archived: false,
+                ..
             }) = result
             else {
                 panic!("a failed archive barrier still deletes the session, with a notice");

@@ -4180,6 +4180,7 @@ fn delete_reply(body: Result<String, String>) -> farhelm_proto::SessionDeleteOut
         Ok(reply) => reply,
         Err(e) => farhelm_proto::SessionDeleteOutcome {
             archived: false,
+            environment_remaining: None,
             notice: Some(format!(
                 "The session was deleted, but the reply could not be read ({e}), so a notice about \
                  its checkout may have been lost."
