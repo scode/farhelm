@@ -2,6 +2,66 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.38.0 - 2026-11-11
+
+**DRAFT release notes - not yet finalized**
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#3132, #3254, #3252, #3261, #3329)
+- Farhelm now refuses to update an installation or remote host older than v0.23.0, and explains how to remove it and set it up again. Your data can stay on disk, but a fresh installation may not be able to use all of it. (#3239, #3241)
+- The earlier experimental containerized sessions are retired: existing ones can only be deleted, and their agents keep running until you delete them. Templates that used the old **Containerized** setting can launch once it is removed. (#3330)
+- EXPERIMENTAL: Tensorlake recipes now install Claude Code, Codex and your chosen packages on any base, including your own image or snapshot. A recipe that reused an image or snapshot needs a snapshot build before you add hosts from it, and a custom base must now meet [these requirements](https://farhelm.io/docs/using/tensorlake-sandboxes/#make-a-recipe). (#3178)
+
+### 🚀 Added
+
+- EXPERIMENTAL: [Sandbox sessions](https://farhelm.io/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) give a session its own Tensorlake sandbox, chosen with **New sandbox** in the session launcher. The sandbox bills while running, and Delete permanently removes it and its files. (#3264, #3265)
+- EXPERIMENTAL: [Container sessions](https://farhelm.io/docs/agents/containerized-sessions/) run a session and its checkout in a new rootless Podman container on one of your Linux hosts, chosen with **New container** in the session launcher. Delete removes the container and its files, including unpushed work; recipes for containers and Tensorlake sandboxes now live together in Settings → **Recipes**. (#3321, #3325, #3328, #3329)
+- You can now [add an Apple-silicon Mac](https://farhelm.io/docs/get-started/add-a-remote-host/) as a remote host over SSH, provided it does not have the Farhelm desktop app installed. After the Mac reboots, **Update** in its host menu starts Farhelm again. (#3213, #3267, #3298)
+- You can now switch to and act on other sessions while one is stopping, restarting, being replaced or deleted, or launching; its result waits on its row. (#3276, #3278)
+- You can now let agents manage sessions on their own host without asking, from the host's settings or an approval card. It is off by default, and requests for other hosts still ask. (#3205, #3206, #3208)
+- A bell above **Hosts** on the navigation rail now shows failed Trash cleanup, with buttons to retry it or open Trash. (#3243, #3244, #3251, #3315)
+- Each host's settings now has its own checkout folder, with Settings → **Checkouts** as the default for the rest. (#3250)
+- The host update prompt now offers **Always update**, which updates the listed hosts and turns on automatic updates from then on. (#3269)
+- Hovering a host's running setup, update or uninstall, in Hosts or anywhere on its sidebar row, now shows its steps and connection details. (#3272, #3309, #3310)
+
+### 🔄 Changed
+
+- Stop now closes a session's terminal tabs as well as ending its agent, and asks first when tabs are open. Restart still leaves them running. (#3132)
+- EXPERIMENTAL: New Tensorlake hosts now start from a snapshot with Farhelm already installed. Preparing that snapshot, for the first host from a recipe and again after 24 hours, a Farhelm update or a rebuild, briefly bills a preparation sandbox. (#3203)
+- New terminals now send their screen and scrollback in fewer bytes when you open or reconnect to a session, and very colorful scrollback uses much less memory. Uploads, downloads and tunnels also leave less data queued ahead of your typing on a remote host. (#3252, #3254, #3255)
+- On Linux, jobs you start under your own tmux inside a session, and programs that move out of the session's systemd groups, can now keep running after Stop, Restart, Replace, Delete or closing a tab; the tmux server itself still ends. (#3237, #3297)
+
+### 🔧 Fixes worth highlighting
+
+- Agents can now use `farhelm agent` commands and `farhelm spawn` in sessions that are not open on screen. Before, they were refused with "no helm is attached to this session" even while Farhelm was connected to the host. (#3261)
+- An agent's request to add a host no longer opens the **Add host** dialog by itself, where it could interrupt your typing; it waits as an approval card whose button opens the dialog. (#3326)
+- Agent request cards now keep their answer buttons visible, with long commands and other details scrolling inside the card, and show permissions as short labels. (#3273)
+- New checkouts no longer keep failing after interrupted repository-cache maintenance left a Git lock behind. (#3296)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- A broken or malicious host can no longer make a link in a new terminal's scrollback open a different address from the one shown. (#3289)
+- Switching back to a session in a new terminal no longer shifts text at the right edge or full-width lines, including after resizing the pane. (#3234)
+- Opening another session's actions after a failed action no longer shifts the session list under the click. (#3194)
+- Settings now keeps the same size when you switch sections, so its Close button stays put; longer sections scroll inside it. (#3231)
+- In the desktop app, the controls at the top of an open session now use their compact style only when the row is short of space, instead of whenever a tunnel is open. (#3288)
+- Stopping a session while its agent is starting now says "Exited — stopped before the agent finished starting" instead of blaming the host's systemd user manager. (#3210)
+- Editing Custom permission words while a suspended host resumes now cancels the pending launch, so the session launcher waits for another Launch press. (#3174)
+- The session launcher now spells the extra-high effort level "xhigh" instead of "Xhigh". (#3232)
+- Removing a host can no longer be undone by a sudden power loss, which could bring it back with its old permissions. (#3171)
+- In Hosts, a cancelled or replaced Suspend question no longer acts on an earlier Suspend click. (#3299)
+- Settings → **Credentials** no longer shows the **Not encrypted on disk** warning twice, and labels the Tensorlake field **Tensorlake API key**. (#3165)
+- Tensorlake snapshot builds and connections now offer Farhelm's registered key first, ahead of keys from your ssh-agent and any certificates or hardware-token keys your SSH configuration names; your proxy and jump settings still apply. OpenSSH 7.6 to 7.9 may print a harmless error about loading a library. (#3300, #3312)
+- Tensorlake connections now refuse a helm state folder whose path contains `%`, `"` or `\`, with advice on fixing it, because older OpenSSH versions could not connect reliably from one. A setup in such a folder that worked with a newer OpenSSH stops connecting until the folder moves. (#3168)
+- Adding a Tensorlake host now refuses a sandbox name already in use that Farhelm did not ask for, instead of taking that sandbox over, and building or deleting a recipe leaves alone another sandbox with the same build name and its snapshots. (#3188, #3190)
+- Delivering recipe credentials to a Tensorlake host no longer undoes Claude Code or Codex settings saved during the delivery. (#3173)
+- Claude Code and Codex credentials chosen in a Tensorlake recipe now clear out old API keys, extra headers and Claude Code credential helpers left in the host's settings, starting with the next credential delivery. (#3290, #3291)
+- Deleting a Tensorlake recipe now always warns that a running build is cancelled and the snapshots Farhelm built for it are deleted, also when a build finished after the editor opened; your own base images and snapshots are kept. (#3187)
+- Cancelling the deletion of a sandbox under **Sandboxes not on this helm** in Settings → **Tensorlake** now stops an already queued Delete click from deleting it. (#3186)
+
 ## v0.37.1 - 2026-11-07
 
 ### 💥 Breaking
