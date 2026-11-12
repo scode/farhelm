@@ -187,6 +187,12 @@ can work in separate jj workspaces whose results you merge back; you still own t
 sub-agent natively, with model and effort set explicitly where the mechanism allows; when the model you need is not
 available as a native sub-agent type, `$scode-harness-shellout` supplies the launch mechanics.
 
+Slow tests on Tensorlake, and parallel work (the maintainer, 2026-11-12, for every tmux-* plan): when you run slow
+end-to-end tests, especially the browser (Playwright) specs, use the `scode-ssh-delegate` skill and run them on
+Tensorlake sandboxes in parallel, up to 10 sandboxes at once, per `.agents/tensorlake.md`. This is the maintainer's
+request for Tensorlake that file asks for, and 10 is the budget. Also run independent work in parallel wherever that
+causes no conflicts and loses no quality.
+
 The review gate keeps the model and effort this file demands; the scope reassessment runs at your own model and effort.
 The sub-agents `plans/AGENTS.md`, "Sub-agents this file requires", requires of every plan (the resume check, and the
 cold reads of a blocked question and of the report) run as that file says: native, read-only, at your own model.
