@@ -21,8 +21,15 @@ pub(crate) enum HeaderAction {
         Option<Box<crate::replace::ReplaceAnswer>>,
         SessionGuard,
     ),
-    /// Sandbox identity selects whole-resource Delete; ordinary rows use the guard.
-    Delete(String, crate::DeleteGuard, Option<HostId>, SessionGuard),
+    /// An environment session's Delete carries the consent its question
+    /// drew (`sandbox_sessions::EnvironmentDelete`); ordinary sessions use
+    /// the guard.
+    Delete(
+        String,
+        crate::DeleteGuard,
+        Option<crate::sandbox_sessions::EnvironmentDelete>,
+        SessionGuard,
+    ),
     /// The direction was captured before the activity read, never toggled later.
     Sandbox(
         Session,
@@ -125,6 +132,13 @@ pub(crate) struct SessionOps {
     pub(crate) errors: Signal<HashMap<String, String>>,
     pub(crate) lifecycle: Signal<HashMap<String, Lifecycle>>,
     pub(crate) dispatch: Signal<Option<Callback<HeaderAction>>>,
+    /// The session whose environment Delete, sent from the session view's
+    /// header, came back with nothing decided because the helm could not ask
+    /// the environment's own Farhelm. The list owns that request, the header
+    /// owns the question: the header showing this session takes the value and
+    /// opens its warned whole-environment confirmation. Nothing is sent until
+    /// the user answers it.
+    pub(crate) warned_delete: Signal<Option<String>>,
 }
 
 impl SessionOps {
@@ -139,6 +153,7 @@ impl SessionOps {
             errors: Signal::new(HashMap::new()),
             lifecycle: Signal::new(HashMap::new()),
             dispatch: Signal::new(None),
+            warned_delete: Signal::new(None),
         }
     }
 

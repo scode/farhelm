@@ -1103,13 +1103,15 @@ pub(super) fn SessionRow(
     /// Like confirm, an omitted handler must retain a stable absent value.
     on_cancel_stop: Option<EventHandler<(String, ConfirmToken<RowQuestion>)>>,
     on_delete: EventHandler<DeleteTarget>,
-    /// The delete prompt's confirm: this row's id, the drawn opening, and
-    /// the guard derived from the same render as the consequence text.
+    /// The delete prompt's confirm: this row's id, the drawn opening, the
+    /// guard derived from the same render as the consequence text, and, for
+    /// an environment session, its Delete as this render drew it (ListView
+    /// takes the scope from the opening's lane, not from this value).
     on_confirm_delete: EventHandler<(
         String,
         ConfirmToken<RowQuestion>,
         crate::DeleteGuard,
-        Option<crate::HostId>,
+        Option<crate::sandbox_sessions::EnvironmentDelete>,
     )>,
     /// The delete prompt's cancel: this row's id and the drawn opening.
     on_cancel_delete: EventHandler<(String, ConfirmToken<RowQuestion>)>,
@@ -1163,12 +1165,37 @@ pub(super) fn SessionRow(
     let environment_stop_help = environment_ui
         .map(crate::environment_ui::ProviderUi::stop_help)
         .unwrap_or("");
-    let environment_delete_consequence = environment_ui
-        .map(crate::environment_ui::ProviderUi::delete_consequence)
-        .unwrap_or("");
-    let environment_delete_label = environment_ui
-        .map(crate::environment_ui::ProviderUi::delete_label)
-        .unwrap_or("Delete");
+    // Which Delete a click opens, from whether the helm is connected to the
+    // environment right now (`sandbox_sessions::delete_scope`). An open
+    // question keeps the lane it was opened in, whatever this becomes.
+    let environment_delete = sandbox_host
+        .as_ref()
+        .zip(sidebar_hosts)
+        .map(|(host, hosts)| {
+            crate::sandbox_sessions::EnvironmentDelete::for_host(host, &hosts.read())
+        });
+    // `Some(failed)` while the environment is being destroyed: every
+    // lifecycle action and Delete is unavailable, and the badge says why.
+    let environment_deleting = sandbox_host
+        .as_ref()
+        .and_then(crate::sandbox_sessions::being_deleted);
+    let environment_deleting_help = environment_ui
+        .zip(environment_deleting)
+        .map(|(ui, failed)| ui.session_deleting_help(failed));
+    let environment_deleting_label = sandbox_host
+        .as_ref()
+        .filter(|_| environment_deleting.is_some())
+        .map(|host| crate::hosts::phase_display_label(&host.state));
+    // The menu item's description for an environment session's Delete: why
+    // it is unavailable, or what the click's question will offer.
+    let environment_delete_description = environment_deleting_help.or_else(|| {
+        environment_ui
+            .zip(environment_delete)
+            .map(|(ui, delete)| match delete.scope {
+                crate::sandbox_sessions::DeleteScope::Session => ui.session_delete_help(),
+                crate::sandbox_sessions::DeleteScope::Whole => ui.whole_delete_help(),
+            })
+    });
     let sandbox_frozen = sandbox_host
         .as_ref()
         .is_some_and(crate::sandbox_sessions::frozen);
@@ -1201,7 +1228,27 @@ pub(super) fn SessionRow(
     // token itself travels into that prompt's answers below.
     let confirming = question
         .as_ref()
-        .is_some_and(|token| *token.key() == RowQuestion::Delete);
+        .is_some_and(|token| token.key().is_delete());
+    // The warned whole-environment lane of the Delete prompt. The other lane
+    // of an environment session states both outcomes.
+    let confirming_whole = question
+        .as_ref()
+        .is_some_and(|token| *token.key() == RowQuestion::DeleteWhole);
+    let environment_confirm = environment_ui.map(|ui| {
+        if confirming_whole {
+            (
+                ui.whole_delete_warning(),
+                ui.whole_delete_label(),
+                ui.whole_delete_help(),
+            )
+        } else {
+            (
+                ui.session_delete_consequence(),
+                ui.session_delete_label(),
+                ui.session_delete_help(),
+            )
+        }
+    });
     let confirming_replace = question
         .as_ref()
         .is_some_and(|token| *token.key() == RowQuestion::Replace);
@@ -1327,7 +1374,7 @@ pub(super) fn SessionRow(
     let stop_refuse_if_tabs_open = session.tabs.is_empty();
     let stop_refuse_if_agent_running = session.status.has_ended();
     let mut delete_target = DeleteTarget::for_session(&session);
-    delete_target.sandbox = sandbox;
+    delete_target.environment = environment_delete;
     let clone_target = session.clone();
     let replace_with_target = session.clone();
     let replace_target = session.clone();
@@ -2076,7 +2123,15 @@ pub(super) fn SessionRow(
                             if let Some(badge) = ended_badge {
                                 StatusBadgeView { badge, dot_onclick: move |_| {}, dot_title: None, session_row: true }
                             }
-                            if sandbox_suspended {
+                            if let (Some(label), Some(help)) = (environment_deleting_label, environment_deleting_help) {
+                                // Replaces the generic "Host being deleted"
+                                // stale cause with what it means here.
+                                span { class: "status-badge environment-deleting",
+                                    "data-tooltip": "{help}",
+                                    "data-tooltip-anchor": "session-row",
+                                    "{label}"
+                                }
+                            } else if sandbox_suspended {
                                 span { class: "status-badge",
                                     "data-tooltip": "Suspended: this session's environment is frozen; Resume continues its processes",
                                     "data-tooltip-anchor": "session-row",
@@ -2415,7 +2470,7 @@ pub(super) fn SessionRow(
                                 // The panel also hosts an ordinary menu; arm
                                 // its gap rule when confirmation first mounts.
                                 onmounted: move |_| { document::eval(&crate::dialog_focus::install_js(".session-row-menu-panel.menu-prompt", crate::dialog_focus::ContainerEnter::None)); },
-                                if sandbox.is_some() { "{environment_delete_consequence}" }
+                                if let Some((consequence, _, _)) = environment_confirm { "{consequence}" }
                                 else { "{confirm_consequence(&session.status, session.tabs.len())}" }
                                 if let Some(host) = &sandbox_host && let Some(name) = crate::sandbox_sessions::resource_name(host) {
                                      "{crate::sandbox_sessions::provider_ui(host).resource_label(name)}"
@@ -2456,12 +2511,14 @@ pub(super) fn SessionRow(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-danger confirm-delete",
-                                    "data-tooltip": "Delete this session and its state now",
+                                    "data-tooltip": environment_confirm.map(|(_, _, help)| help).unwrap_or("Delete this session and its state now"),
                                     // The question's own session claim leaves
                                     // its answer enabled; only a running request
                                     // disables it. The rendered opening token
                                     // still decides whether this answer is valid.
-                                    disabled: busy,
+                                    // An environment already being destroyed
+                                    // takes no further Delete.
+                                    disabled: busy || environment_deleting.is_some(),
                                     autofocus: !busy,
                                     onkeydown: crate::guard_confirmation_enter,
                                     onmounted: move |_| crate::focus_confirmation(".session-row-menu-panel .confirm-delete", ".session-row-menu-panel .confirm-cancel"),
@@ -2475,11 +2532,13 @@ pub(super) fn SessionRow(
                                                 confirm_id.clone(),
                                                 token,
                                                 crate::status::delete_guard(&session.status, session.tabs.len()),
-                                                sandbox,
+                                                // ListView takes the scope from
+                                                // the answered question's lane.
+                                                environment_delete,
                                             ));
                                         }
                                     },
-                                    if sandbox.is_some() { {environment_delete_label} } else { "Confirm delete" }
+                                    if let Some((_, label, _)) = environment_confirm { {label} } else { "Confirm delete" }
                                 }
                             }
                         } else if confirming_replace {
@@ -2798,7 +2857,7 @@ pub(super) fn SessionRow(
                                 menu_panel::MenuSeparator { class: "session-row-menu-separator" }
                                 if let Some(host) = &sandbox_host {
                                     crate::sandbox_sessions::Controls {
-                                        host: host.clone(), session: session.clone(), disabled: busy,
+                                        host: host.clone(), session: session.clone(), disabled: busy || environment_deleting.is_some(),
                                         ops: host_ops,
                                         claim: sandbox_claim, stop_choice: true, on_done: move |_| {},
                                         buttons: {
@@ -2869,7 +2928,7 @@ pub(super) fn SessionRow(
                                     role: "menuitem",
                                     aria_label: "Clone",
                                     aria_describedby: "session-menu-clone-description",
-                                    aria_disabled: if busy { "true" },
+                                    aria_disabled: if busy || environment_deleting.is_some() { "true" },
                                     tabindex: if menu_tab_stop == Some(MenuAction::Clone) { "0" } else { "-1" },
                                     "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Clone),
                                     onmounted: move |element| {
@@ -2888,7 +2947,7 @@ pub(super) fn SessionRow(
                                         );
                                     },
                                     onclick: move |_| {
-                                        if busy {
+                                        if busy || environment_deleting.is_some() {
                                             return;
                                         }
                                         on_clone.call(clone_target.clone());
@@ -2897,7 +2956,7 @@ pub(super) fn SessionRow(
                                     menu_panel::MenuItemCopy {
                                         label: rsx! { "Clone" },
                                         description_id: "session-menu-clone-description",
-                                        description: rsx! { if sandbox.is_some() { "New session in a new environment, keep this one" } else { "New session, keep this one" } },
+                                        description: rsx! { if let Some(help) = environment_deleting_help { {help} } else if sandbox.is_some() { "New session in a new environment, keep this one" } else { "New session, keep this one" } },
                                     }
                                 }
                                 // Between clone and replace: clone's exact
@@ -3061,7 +3120,7 @@ pub(super) fn SessionRow(
                                         role: "menuitem",
                                         aria_label: "Delete",
                                         aria_describedby: "session-menu-delete-description",
-                                        aria_disabled: if busy { "true" },
+                                        aria_disabled: if busy || environment_deleting.is_some() { "true" },
                                         tabindex: if menu_tab_stop == Some(MenuAction::Delete) { "0" } else { "-1" },
                                         "data-menu-focus": menu_panel::menu_item_focus_key(menu_wiring, MenuAction::Delete),
                                         onmounted: move |element| {
@@ -3084,7 +3143,7 @@ pub(super) fn SessionRow(
                                             );
                                         },
                                         onclick: move |_| {
-                                            if busy {
+                                            if busy || environment_deleting.is_some() {
                                                 return;
                                             }
                                             on_delete.call(delete_target.clone());
@@ -3093,7 +3152,7 @@ pub(super) fn SessionRow(
                                         menu_panel::MenuItemCopy {
                                             label: rsx! { "Delete" },
                                             description_id: "session-menu-delete-description",
-                                            description: rsx! { if sandbox.is_some() { {environment_delete_consequence} } else { "Removes the session and its state" } },
+                                            description: rsx! { if let Some(description) = environment_delete_description { {description} } else { "Removes the session and its state" } },
                                         }
                                     }
                                 }
@@ -3570,7 +3629,7 @@ mod tests {
                     String,
                     ConfirmToken<RowQuestion>,
                     crate::DeleteGuard,
-                    Option<crate::HostId>,
+                    Option<crate::sandbox_sessions::EnvironmentDelete>,
                 )| {},
             );
             let on_cancel_delete = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
@@ -3886,7 +3945,7 @@ mod tests {
                     String,
                     ConfirmToken<RowQuestion>,
                     crate::DeleteGuard,
-                    Option<crate::HostId>,
+                    Option<crate::sandbox_sessions::EnvironmentDelete>,
                 )| {
                     record("confirm delete", row, token);
                 },
@@ -4115,7 +4174,7 @@ mod tests {
                     String,
                     ConfirmToken<RowQuestion>,
                     crate::DeleteGuard,
-                    Option<crate::HostId>,
+                    Option<crate::sandbox_sessions::EnvironmentDelete>,
                 )| {},
             );
             let on_cancel_delete = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
@@ -4228,7 +4287,7 @@ mod tests {
                     String,
                     ConfirmToken<RowQuestion>,
                     crate::DeleteGuard,
-                    Option<crate::HostId>,
+                    Option<crate::sandbox_sessions::EnvironmentDelete>,
                 )| {},
             );
             let on_cancel_delete = use_callback(|_: (String, ConfirmToken<RowQuestion>)| {});
@@ -4428,7 +4487,7 @@ mod tests {
                     on_cancel_replace: |_: (String, ConfirmToken<RowQuestion>)| {},
                     on_stop: |_: DeleteTarget| {},
                     on_delete: |_: DeleteTarget| {},
-                    on_confirm_delete: |_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard, Option<crate::HostId>)| {},
+                    on_confirm_delete: |_: (String, ConfirmToken<RowQuestion>, crate::DeleteGuard, Option<crate::sandbox_sessions::EnvironmentDelete>)| {},
                     on_cancel_delete: |_: (String, ConfirmToken<RowQuestion>)| {},
                     on_rename_start: |_: (String, String)| {},
                     on_menu_toggle: |_: String| {},

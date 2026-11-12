@@ -10,8 +10,9 @@ sidebar:
 
 :::caution[Experimental]
 
-Container sessions need a Linux host with rootless Podman. They may change quickly. **Delete permanently removes the
-whole container and its files, including unpushed work.** Suspend keeps its memory in use on the host.
+Container sessions need a Linux host with rootless Podman. They may change quickly. **Deleting the last session in a
+container permanently removes the whole container and its files, including unpushed work.** Suspend keeps its memory in
+use on the host.
 
 :::
 
@@ -135,12 +136,28 @@ already exited keep their status, and stopping a container without rebooting its
 **Restart** to resume a captured conversation. Restarting the helm reconnects running containers and leaves paused ones
 paused.
 
-**Delete** always asks before destroying the whole container. This removes every session and process in it, the
-checkout, files and unpushed work, including anything left by a failed Replace. The checkout is permanently removed with
-the container. Deletion bypasses the managed-checkout trash. You can delete while paused or while the supervisor is
-disconnected, without Resume, if the container host is reachable. **Delete container** in Hosts has the same
-consequence. A deletion failure keeps the container and reason visible so you can retry. Farhelm forgets it only after
-confirming removal.
+**Delete** always asks first, because the container may go with the session. Its confirmation says both outcomes: the
+session and its checkout are deleted, and if it is the last session in the container, the whole container and its files
+are deleted too. Unless another session still uses it, the checkout is deleted for good; it does not go to the
+[checkout trash](/docs/using/session-list/#managed-checkout-trash). If other sessions are still there, for example ones
+an agent started or one a failed Replace left behind, the container stays and Farhelm tells you how many ("The container
+stays: 2 other sessions are in it"). An agent in the container that deletes another session removes only that session,
+never the container.
+
+Delete checks with the Farhelm running inside the container, the only place that knows every session in it. When that
+check cannot happen, because the container is paused or unreachable or its Farhelm needs an update, or it gets no
+answer, Delete offers **Delete session and container** instead. Its confirmation warns that the container, every session
+and process in it, its checkouts, files and unpushed work will be destroyed, including sessions Farhelm does not list.
+That works while paused or while the supervisor is disconnected, without Resume, if the container host is reachable. To
+delete just the one session, resume or update the container first.
+
+While Farhelm deletes a container, **Hosts** and the sidebar show it as **Deleting…**. If that fails after its last
+session was deleted, it shows **Deleting failed** with the reason, and **Retry** deletes it again. Farhelm forgets the
+container only after confirming its removal. Deleting several marked sessions works one session at a time in the same
+way, as for [sandboxes](/docs/using/tensorlake-sandboxes/#delete-a-session-in-its-own-sandbox).
+
+**Delete container** in Hosts always destroys the whole container after its own confirmation. A failure there keeps the
+container and reason visible so you can retry.
 
 **Containers not on this helm** in Settings → **Containers** lists discoverable leftovers for explicit deletion. Check
 the name and host before confirming. You must clean up environments and recipe images recorded on a host before removing

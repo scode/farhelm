@@ -17,7 +17,7 @@ its size and software in a saved recipe, then start [sessions](/docs/using/start
 You can suspend it with its processes and sessions intact, then resume where you left off.
 
 You can also [give each session its own sandbox](#give-each-session-its-own-sandbox), created when you launch and
-discarded when you delete the session.
+deleted together with the last session in it.
 
 Sandboxes bill while running, including while their agents are idle. Snapshot storage also costs money, including while
 a sandbox is suspended; see [Tensorlake pricing](https://www.tensorlake.ai/pricing) for current terms. Building a
@@ -198,14 +198,36 @@ its terminal tabs while the sandbox keeps running and billing. **Stop and suspen
 30-minute idle timeout after its connection from Farhelm ends. (On Tensorlake's Usage Credits plan, an ordinary host
 sandbox instead suspends after 24 hours without a connection from Farhelm.)
 
-**Delete session and sandbox** permanently removes the whole sandbox, every session and process in it, its files and
-snapshots. It always asks, including while suspended. If Replace failed and left another session there, Delete removes
-that session too. A failed Replace itself preserves the sandbox; its error identifies the machine to recover work from.
-
 These sandboxes appear in **Hosts** and the sidebar's update and problem notices, without permanent navigation rail
 icons. A sandbox left by interrupted setup or failed cleanup stays listed there. Agents in sandbox sessions can ask
 Farhelm to act only within their own sandbox
-([Agents in sandboxes and containers](/docs/using/approve-agent-requests/#agents-in-sandboxes-and-containers)).
+([Agents in sandboxes and containers](/docs/using/approve-agent-requests/#agents-in-sandboxes-and-containers)). An agent
+there that deletes another session removes only that session, never the sandbox.
+
+### Delete a session in its own sandbox
+
+**Delete** always asks first, because the sandbox may go with the session. Its confirmation says both outcomes: the
+session and its checkout are deleted, and if it is the last session in the sandbox, the sandbox, every process and file
+in it and its snapshots are deleted too. Unless another session still uses it, the checkout is deleted for good; it does
+not go to the [checkout trash](/docs/using/session-list/#managed-checkout-trash). If other sessions are still there, for
+example ones an agent started or one a failed Replace left behind, the sandbox stays and Farhelm tells you how many
+("The sandbox stays: 2 other sessions are in it"). A failed Replace itself preserves the sandbox; its error identifies
+the machine to recover work from.
+
+Delete checks with the Farhelm running inside the sandbox, the only place that knows every session in it. When that
+check cannot happen, because the sandbox is suspended or unreachable or its Farhelm needs an update, or it gets no
+answer, Delete offers **Delete session and sandbox** instead. Its confirmation warns that every session, process, file,
+checkout, unpushed change and snapshot in the sandbox will be removed, including sessions Farhelm does not list. To
+delete just the one session, [resume](#suspend-and-resume) or update the sandbox first.
+
+While Farhelm deletes a sandbox, **Hosts** and the sidebar show it as **Deleting…**, and its sessions' actions are
+unavailable. If that fails after its last session was deleted, it shows **Deleting failed** with the reason, and
+**Retry** deletes it again.
+
+Deleting several [marked sessions](/docs/using/stop-restart-resume/#stop-or-delete) works the same way, one session at a
+time. The confirmation says which marked sessions are in a sandbox Farhelm cannot check with, and those take their whole
+sandbox with them. **Delete sandbox** in **Hosts** always deletes the whole sandbox
+([Delete a sandbox](#delete-a-sandbox)).
 
 ## Add a sandbox host
 

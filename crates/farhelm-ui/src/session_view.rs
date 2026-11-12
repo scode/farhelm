@@ -745,7 +745,13 @@ pub(crate) fn SessionView(
     // transfers it to the persistent list in the confirm handler. That callback
     // releases the question's claim and immediately admits its request without
     // yielding, dispatching input, or leaving an old guard behind.
-    let mut confirming_header_delete: ConfirmSlot<(), OpGuard> = use_confirm_slot();
+    //
+    // Its key is the Delete the question offers. An environment session's
+    // `Whole` is the warned whole-environment lane, its `Session` the one that
+    // states both outcomes; an ordinary session always opens `Session`. The
+    // answer sends the lane it was opened in, whatever the host does meanwhile.
+    let mut confirming_header_delete: ConfirmSlot<crate::sandbox_sessions::DeleteScope, OpGuard> =
+        use_confirm_slot();
     let replace_error = use_memo(move || {
         operations
             .errors
@@ -769,6 +775,23 @@ pub(crate) fn SessionView(
     // The session guard excludes only this source. ListView's row entry points
     // consult the same state, including while one of these questions is open.
     let mut lifecycle = gate;
+    // An environment Delete sent from this header that came back "unasked"
+    // (the helm could not ask the environment's own Farhelm) reopens here as
+    // the warned whole-environment question; the list, which owns the request,
+    // hands the session over through `SessionOps::warned_delete`. The value is
+    // taken whether or not it names this session, so a hand-over meant for a
+    // view that is gone cannot pop up later in another one.
+    use_effect(move || {
+        let Some(offered) = operations.warned_delete.read().clone() else {
+            return;
+        };
+        operations.warned_delete.set(None);
+        if offered == *operation_id.peek()
+            && let Some(claim) = lifecycle.claim_guard()
+        {
+            confirming_header_delete.open(crate::sandbox_sessions::DeleteScope::Whole, claim);
+        }
+    });
     // Counts restart ATTEMPTS, and versions every read of this session
     // against them. The detail read below is a round trip that can outlive
     // a restart the user starts while one of its fetches is in flight;
@@ -1947,12 +1970,23 @@ pub(crate) fn SessionView(
     let environment_stop_help = environment_ui
         .map(crate::environment_ui::ProviderUi::stop_help)
         .unwrap_or("");
-    let environment_delete_consequence = environment_ui
-        .map(crate::environment_ui::ProviderUi::delete_consequence)
-        .unwrap_or("");
-    let environment_delete_label = environment_ui
-        .map(crate::environment_ui::ProviderUi::delete_label)
-        .unwrap_or("Delete");
+    // Which Delete the header's click opens, from whether the helm is
+    // connected to the environment right now (`sandbox_sessions::delete_scope`).
+    let environment_delete = sandbox_host.as_ref().map(|host| {
+        crate::sandbox_sessions::EnvironmentDelete::for_host(host, &sidebar_hosts.read())
+    });
+    // `Some(failed)` while the environment is being destroyed: its actions
+    // are unavailable, with this as the reason.
+    let environment_deleting = sandbox_host
+        .as_ref()
+        .and_then(crate::sandbox_sessions::being_deleted);
+    let environment_deleting_help = environment_ui
+        .zip(environment_deleting)
+        .map(|(ui, failed)| ui.session_deleting_help(failed));
+    let environment_deleting_label = sandbox_host
+        .as_ref()
+        .filter(|_| environment_deleting.is_some())
+        .map(|host| crate::hosts::phase_display_label(&host.state));
     let sandbox_frozen = sandbox_host
         .as_ref()
         .is_some_and(crate::sandbox_sessions::frozen);
@@ -2010,6 +2044,47 @@ pub(crate) fn SessionView(
     let header_stop_shown = confirming_stop.current();
     let header_replace_shown = confirming_header_replace.current();
     let header_delete_shown = confirming_header_delete.current();
+    // An environment session always confirms, so the skipped-question wording
+    // never applies to it; one being destroyed says why Delete is unavailable.
+    let header_delete_tooltip = if let Some(help) = environment_deleting_help {
+        help.to_owned()
+    } else if let Some((ui, delete)) = environment_ui.zip(environment_delete) {
+        let help = match delete.scope {
+            crate::sandbox_sessions::DeleteScope::Session => ui.session_delete_help(),
+            crate::sandbox_sessions::DeleteScope::Whole => ui.whole_delete_help(),
+        };
+        format!(
+            "{help}, after you confirm ({})",
+            crate::SESSION_DELETE_SHORTCUT
+        )
+    } else if skip_session_confirmations {
+        format!(
+            "Delete: remove this session and its state ({})",
+            crate::SESSION_DELETE_SHORTCUT
+        )
+    } else {
+        format!(
+            "Delete: remove this session and its state, after you confirm ({})",
+            crate::SESSION_DELETE_SHORTCUT
+        )
+    };
+    // The open Delete question's wording and answer for an environment
+    // session, by the lane it was opened in.
+    let environment_confirm =
+        environment_ui
+            .zip(header_delete_shown.as_ref())
+            .map(|(ui, shown)| match shown.key() {
+                crate::sandbox_sessions::DeleteScope::Whole => (
+                    ui.whole_delete_warning(),
+                    ui.whole_delete_label(),
+                    ui.whole_delete_help(),
+                ),
+                crate::sandbox_sessions::DeleteScope::Session => (
+                    ui.session_delete_consequence(),
+                    ui.session_delete_label(),
+                    ui.session_delete_help(),
+                ),
+            });
     let card_replace_shown = confirming_replace.current();
     let shown_title = shown.title.clone();
     // Built from the row's own `host_name` rather than from the host record,
@@ -2355,14 +2430,14 @@ pub(crate) fn SessionView(
                     div { class: "restart-offer header-stop-anchor",
                         if let Some(host) = &sandbox_host {
                             crate::sandbox_sessions::Controls {
-                                host: host.clone(), session: shown.clone(), disabled: lifecycle.busy(),
+                                host: host.clone(), session: shown.clone(), disabled: lifecycle.busy() || environment_deleting.is_some(),
                                 ops: composer_ops,
                                 claim: sandbox_claim, on_done: move |_| header_refresh.set(true),
                             }
                         }
                         button {
                             r#type: "button", class: "btn btn-neutral header-stop",
-                            "data-tooltip": if sandbox.is_some() { environment_stop_help } else { "Stop the agent and close its terminal tabs" },
+                            "data-tooltip": if let Some(help) = environment_deleting_help { help } else if sandbox.is_some() { environment_stop_help } else { "Stop the agent and close its terminal tabs" },
                             "aria-expanded": "{confirming_stop.is_open()}",
                             "aria-controls": "stop-confirm-panel",
                             disabled: lifecycle.busy() || shown.stale || sandbox_frozen,
@@ -2641,8 +2716,8 @@ pub(crate) fn SessionView(
                     button {
                         r#type: "button",
                         class: "btn btn-neutral header-clone",
-                        "data-tooltip": "Clone: open the new-session form with these settings; this session keeps running",
-                        disabled: lifecycle.busy() || composer_ops.busy(),
+                        "data-tooltip": environment_deleting_help.unwrap_or("Clone: open the new-session form with these settings; this session keeps running"),
+                        disabled: lifecycle.busy() || composer_ops.busy() || environment_deleting.is_some(),
                         onclick: move |_| publish_header_prefill(gate, composer_ops, prefill_request, crate::list::HeaderPrefillRequest::Clone(header_session.clone())),
                         ActionIcon { glyph: ActionGlyph::Clone }
                         "Clone"
@@ -2662,21 +2737,22 @@ pub(crate) fn SessionView(
                         button {
                             r#type: "button",
                             class: "btn btn-danger header-delete",
-                            "data-tooltip": if skip_session_confirmations {
-                                format!("Delete: remove this session and its state ({})", crate::SESSION_DELETE_SHORTCUT)
-                            } else {
-                                format!("Delete: remove this session and its state, after you confirm ({})", crate::SESSION_DELETE_SHORTCUT)
-                            },
-                            disabled: lifecycle.busy(),
+                            "data-tooltip": header_delete_tooltip,
+                            disabled: lifecycle.busy() || environment_deleting.is_some(),
                             "aria-expanded": "{confirming_header_delete.is_open()}",
                             onclick: {
                                 let id = shown.id.raw().to_owned();
+                                let deleting = environment_deleting.is_some();
                                 move |_| {
+                                    if deleting {
+                                        return;
+                                    }
                                     if let Some(claim) = lifecycle.claim_guard() {
-                                        if skip_session_confirmations && sandbox.is_none() {
-                                            operations.send(HeaderAction::Delete(id.clone(), header_delete_guard, sandbox, claim));
+                                        if skip_session_confirmations && environment_delete.is_none() {
+                                            operations.send(HeaderAction::Delete(id.clone(), header_delete_guard, None, claim));
                                         } else {
-                                            confirming_header_delete.open((), claim);
+                                            let scope = environment_delete.map_or(crate::sandbox_sessions::DeleteScope::Session, |delete| delete.scope);
+                                            confirming_header_delete.open(scope, claim);
                                         }
                                     }
                                 }
@@ -2692,7 +2768,7 @@ pub(crate) fn SessionView(
                                 // the two entry points warn about exactly the
                                 // same things (a live agent, open tabs).
                                 span { class: "confirm-consequence",
-                                    if sandbox.is_some() { "{environment_delete_consequence}" }
+                                    if let Some((consequence, _, _)) = environment_confirm { "{consequence}" }
                                     else { "{crate::status::confirm_consequence(&shown.status, shown.tabs.len())}" }
                                     if let Some(host) = &sandbox_host && let Some(name) = crate::sandbox_sessions::resource_name(host) {
                                      "{crate::sandbox_sessions::provider_ui(host).resource_label(name)}"
@@ -2706,8 +2782,8 @@ pub(crate) fn SessionView(
                                 button {
                                     r#type: "button",
                                     class: "btn btn-danger header-delete-confirm-submit",
-                                    "data-tooltip": "Delete this session and its state now",
-                                    disabled: header_deleting,
+                                    "data-tooltip": environment_confirm.map(|(_, _, help)| help).unwrap_or("Delete this session and its state now"),
+                                    disabled: header_deleting || environment_deleting.is_some(),
                                     autofocus: !header_deleting,
                                     onkeydown: crate::guard_confirmation_enter,
                                     onmounted: move |_| crate::focus_confirmation(".header-delete-confirm-submit", ".header-delete-confirm .btn-neutral"),
@@ -2718,10 +2794,13 @@ pub(crate) fn SessionView(
                                             let Some(claim) = confirming_header_delete.take(&shown_delete) else {
                                                 return;
                                             };
-                                            operations.send(HeaderAction::Delete(id.clone(), header_delete_guard, sandbox, claim));
+                                            // The answered lane's consent, not
+                                            // the host's state at this click.
+                                            let environment = environment_delete.map(|delete| delete.with_scope(*shown_delete.key()));
+                                            operations.send(HeaderAction::Delete(id.clone(), header_delete_guard, environment, claim));
                                         }
                                     },
-                                    if sandbox.is_some() { {environment_delete_label} } else { "Delete" }
+                                    if let Some((_, label, _)) = environment_confirm { {label} } else { "Delete" }
                                 }
                                 button {
                                     r#type: "button",
@@ -3242,7 +3321,10 @@ pub(crate) fn SessionView(
                 // Its own `if`, not nested under the badge's: see
                 // `activity_destination` for why an absent badge must not
                 // take the age with it.
-                if sandbox_suspended {
+                if let (Some(label), Some(help)) = (environment_deleting_label, environment_deleting_help) {
+                    span { class: "environment-deleting", "data-tooltip": "{help}", "{label}" }
+                }
+                else if sandbox_suspended {
                     span { "data-tooltip": "Suspended: this session's environment is frozen; Resume continues its processes",
                         crate::icons::SandboxPause {} "Suspended"
                     }

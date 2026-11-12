@@ -62,10 +62,10 @@ impl ProviderUi {
     pub(crate) fn launch_help(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => {
-                "A new Tensorlake sandbox for this session. It bills while running. Suspend stops CPU and memory billing; snapshot storage still bills. Delete removes the whole sandbox and its files. After Farhelm disconnects, Tensorlake suspends it after 30 minutes without activity."
+                "A new Tensorlake sandbox for this session. It bills while running. Suspend stops CPU and memory billing; snapshot storage still bills. Deleting its last session removes the sandbox and its files. After Farhelm disconnects, Tensorlake suspends it after 30 minutes without activity."
             }
             ProviderKind::Podman => {
-                "A new container for this session, built from the recipe on its container host. The checkout and files live inside it. Suspend freezes processes while keeping memory in use; Delete removes the whole container and its files."
+                "A new container for this session, built from the recipe on its container host. The checkout and files live inside it. Suspend freezes processes while keeping memory in use; deleting its last session removes the container and its files."
             }
         }
     }
@@ -107,7 +107,10 @@ impl ProviderUi {
             }
         }
     }
-    /// Whole-resource consent includes work missing from the session cache.
+    /// The consequence of Hosts' **Delete sandbox** / **Delete container**,
+    /// which always destroys the whole resource after its own confirmation.
+    /// Its consent covers work missing from the session cache, since nothing
+    /// asks the environment's own Farhelm what it holds.
     pub(crate) fn delete_consequence(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => {
@@ -118,11 +121,104 @@ impl ProviderUi {
             }
         }
     }
-    /// Session Delete names the resource it will destroy with the session.
-    pub(crate) fn delete_label(self) -> &'static str {
+    /// The confirmation of a session Delete that asks the environment's own
+    /// Farhelm (SPEC.md, "Sandbox sessions"). Nothing on this side knows
+    /// whether the session is the environment's last, so it states both
+    /// outcomes; it is never skipped, since one of them destroys the
+    /// environment.
+    pub(crate) fn session_delete_consequence(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Delete this session and its checkout? A checkout another session still uses stays. If this is the last session in its sandbox, the sandbox goes too, with every process and file in it and its snapshots. This cannot be undone."
+            }
+            ProviderKind::Podman => {
+                "Delete this session and its checkout? A checkout another session still uses stays. If this is the last session in its container, the container goes too, with every process and file in it. This cannot be undone."
+            }
+        }
+    }
+    /// The answer that sends the both-outcomes Delete. It names only the
+    /// session because only the environment's Farhelm decides whether the
+    /// resource goes too, and the consequence above says when it does.
+    pub(crate) fn session_delete_label(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake | ProviderKind::Podman => "Delete session",
+        }
+    }
+    /// The both-outcomes answer's tooltip, and the row and header Delete
+    /// tooltips of a session in a reachable environment.
+    pub(crate) fn session_delete_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Delete this session and its checkout; the sandbox goes too if this is its last session"
+            }
+            ProviderKind::Podman => {
+                "Delete this session and its checkout; the container goes too if this is its last session"
+            }
+        }
+    }
+    /// The warned whole-environment Delete of one session, offered when
+    /// Farhelm cannot ask the environment's own Farhelm (suspended, paused,
+    /// unreachable, or a version this helm cannot talk to) or got no answer.
+    /// Its consent must cover sessions no list here shows, so it names them,
+    /// and it says how to get the narrower Delete instead. Never skipped.
+    pub(crate) fn whole_delete_warning(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Farhelm cannot ask this sandbox's own Farhelm to delete just this session, so this deletes the whole sandbox: every session, running process, file, checkout, unpushed change and snapshot in it, including sessions Farhelm does not list because they were started while it was not connected. This cannot be undone. Resuming or updating the sandbox first lets Farhelm delete just this session."
+            }
+            ProviderKind::Podman => {
+                "Farhelm cannot ask this container's own Farhelm to delete just this session, so this deletes the whole container: every session, running process, file, checkout and unpushed change in it, including sessions Farhelm does not list because they were started while it was not connected. This cannot be undone. Resuming or updating the container first lets Farhelm delete just this session."
+            }
+        }
+    }
+    /// The warned Delete's answer names the resource it destroys with the
+    /// session.
+    pub(crate) fn whole_delete_label(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => "Delete session and sandbox",
             ProviderKind::Podman => "Delete session and container",
+        }
+    }
+    /// The warned answer's tooltip, and the row and header Delete tooltips of
+    /// a session whose environment Farhelm cannot ask.
+    pub(crate) fn whole_delete_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Delete this session together with its whole sandbox and everything in it"
+            }
+            ProviderKind::Podman => {
+                "Delete this session together with its whole container and everything in it"
+            }
+        }
+    }
+    /// The Delete notice when the environment stayed. `remaining` is the
+    /// count its own Farhelm reported, never one of this page's: the list
+    /// can miss sessions, and the next listing shows the ones that remain.
+    pub(crate) fn delete_kept(self, remaining: u32) -> String {
+        let noun = self.noun();
+        match remaining {
+            0 => format!("The {noun} stays: no other sessions are in it"),
+            1 => format!("The {noun} stays: 1 other session is in it"),
+            more => format!("The {noun} stays: {more} other sessions are in it"),
+        }
+    }
+    /// Why every action of a session whose environment is being destroyed is
+    /// unavailable, for the row's badge and the disabled controls' tooltips.
+    /// `failed` is the host's failed destruction, whose Retry lives in Hosts.
+    pub(crate) fn session_deleting_help(self, failed: bool) -> &'static str {
+        match (self.0, failed) {
+            (ProviderKind::Tensorlake, false) => {
+                "This session's sandbox is being deleted, so its actions are unavailable"
+            }
+            (ProviderKind::Podman, false) => {
+                "This session's container is being deleted, so its actions are unavailable"
+            }
+            (ProviderKind::Tensorlake, true) => {
+                "Deleting this session's sandbox failed, so its actions are unavailable. Retry in Hosts finishes the deletion"
+            }
+            (ProviderKind::Podman, true) => {
+                "Deleting this session's container failed, so its actions are unavailable. Retry in Hosts finishes the deletion"
+            }
         }
     }
     /// Host management uses the same whole-resource deletion authority.
@@ -424,6 +520,119 @@ mod tests {
         assert!(!ui.stop_help().contains("billing"));
         assert!(ui.delete_consequence().contains("Every session"));
         assert!(!ui.delete_consequence().contains("snapshot"));
+    }
+
+    /// A session Delete asks the environment's own Farhelm, which alone knows
+    /// whether the session is the last (SPEC.md, "Sandbox sessions"), so the
+    /// confirmation cannot promise either outcome: it must state both, for
+    /// both providers, and only Tensorlake's may mention snapshots. Its answer
+    /// names only the session; the warned whole-environment answer names the
+    /// resource it destroys too.
+    #[test]
+    fn session_delete_states_both_outcomes_for_each_provider() {
+        for (provider, noun, snapshots) in [
+            (ProviderKind::Tensorlake, "sandbox", true),
+            (ProviderKind::Podman, "container", false),
+        ] {
+            let ui = ProviderUi(provider);
+            let both = ui.session_delete_consequence();
+            assert!(
+                both.starts_with("Delete this session and its checkout?"),
+                "{both}"
+            );
+            assert!(
+                both.contains(&format!("last session in its {noun}, the {noun} goes too")),
+                "{both}"
+            );
+            assert_eq!(both.contains("snapshots"), snapshots, "{both}");
+            assert_eq!(ui.session_delete_label(), "Delete session");
+            assert!(
+                ui.session_delete_help()
+                    .contains(&format!("the {noun} goes too"))
+            );
+            assert_eq!(
+                ui.whole_delete_label(),
+                format!("Delete session and {noun}")
+            );
+            assert!(ui.whole_delete_help().contains(&format!("whole {noun}")));
+        }
+    }
+
+    /// The warned whole-environment Delete is the only consent that covers
+    /// sessions no list on this side shows, so its text must name them, say
+    /// what is destroyed, and say how to get the narrower Delete instead. It
+    /// stays distinct from Hosts' own Delete sandbox consequence, which has no
+    /// session to offer the narrower Delete for.
+    #[test]
+    fn whole_delete_warning_names_unlisted_sessions_and_the_way_out() {
+        for (provider, noun, snapshots) in [
+            (ProviderKind::Tensorlake, "sandbox", true),
+            (ProviderKind::Podman, "container", false),
+        ] {
+            let ui = ProviderUi(provider);
+            let warning = ui.whole_delete_warning();
+            assert!(
+                warning.contains(&format!("deletes the whole {noun}")),
+                "{warning}"
+            );
+            assert!(
+                warning.contains("every session, running process, file, checkout"),
+                "{warning}"
+            );
+            assert!(warning.contains("unpushed change"), "{warning}");
+            assert!(
+                warning.contains("sessions Farhelm does not list"),
+                "{warning}"
+            );
+            assert!(
+                warning.contains(&format!("Resuming or updating the {noun} first")),
+                "{warning}"
+            );
+            assert_eq!(warning.contains("snapshot"), snapshots, "{warning}");
+            assert!(!ui.delete_consequence().contains("Resuming"));
+        }
+    }
+
+    /// The kept-environment notice quotes the count the environment's own
+    /// Farhelm reported, worded per provider and in the right number.
+    #[test]
+    fn delete_kept_counts_other_sessions_in_singular_and_plural() {
+        let container = ProviderUi(ProviderKind::Podman);
+        assert_eq!(
+            container.delete_kept(2),
+            "The container stays: 2 other sessions are in it"
+        );
+        assert_eq!(
+            container.delete_kept(1),
+            "The container stays: 1 other session is in it"
+        );
+        let sandbox = ProviderUi(ProviderKind::Tensorlake);
+        assert_eq!(
+            sandbox.delete_kept(3),
+            "The sandbox stays: 3 other sessions are in it"
+        );
+        assert_eq!(
+            sandbox.delete_kept(1),
+            "The sandbox stays: 1 other session is in it"
+        );
+    }
+
+    /// The launcher's footer must state the current rule: the environment
+    /// goes with its last session, not with any Delete.
+    #[test]
+    fn launch_help_describes_deleting_the_last_session() {
+        for (provider, noun) in [
+            (ProviderKind::Tensorlake, "sandbox"),
+            (ProviderKind::Podman, "container"),
+        ] {
+            let help = ProviderUi(provider).launch_help();
+            assert!(
+                help.contains(&format!("deleting its last session removes the {noun}"))
+                    || help.contains(&format!("Deleting its last session removes the {noun}")),
+                "{help}"
+            );
+            assert!(!help.contains("Delete removes the whole"), "{help}");
+        }
     }
 
     /// Generalizing the lifecycle controls must keep Tensorlake's state

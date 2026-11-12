@@ -22,7 +22,9 @@ use farhelm_proto::host_appearance::{HostColor, HostIcon};
 /// carrying unrelated launch settings through the action callback.
 #[derive(Debug, Clone)]
 pub(super) struct DeleteTarget {
-    pub(super) sandbox: Option<HostId>,
+    /// Set for a session of a disposable environment: its host and which
+    /// confirmation the click opens (`sandbox_sessions::delete_scope`).
+    pub(super) environment: Option<crate::sandbox_sessions::EnvironmentDelete>,
     pub(super) id: String,
     pub(super) status: SessionStatus,
     pub(super) tabs: usize,
@@ -34,7 +36,7 @@ impl DeleteTarget {
     /// a visible spelling would address a different session.
     pub(super) fn for_session(session: &Session) -> Self {
         Self {
-            sandbox: None,
+            environment: None,
             id: session.id.raw().to_owned(),
             status: session.status.clone(),
             tabs: session.tabs.len(),
@@ -58,11 +60,25 @@ impl DeleteTarget {
 
     /// What a Delete click on this row does: open the confirmation, or
     /// delete at once with the supervisor-side precondition attached.
+    ///
+    /// An environment session always confirms, whatever the preference: one
+    /// of its confirmations may destroy the environment, the other does.
     pub(super) fn click(&self, skip_confirmations: bool) -> DeleteClick {
-        if self.sandbox.is_some() || self.needs_confirmation() && !skip_confirmations {
+        if self.environment.is_some() || self.needs_confirmation() && !skip_confirmations {
             DeleteClick::Confirm
         } else {
             DeleteClick::DeleteGuarded(crate::status::delete_guard(&self.status, self.tabs))
+        }
+    }
+
+    /// Which Delete question a confirming click opens: the warned
+    /// whole-environment one only when the row was drawn with its environment
+    /// out of reach, the ordinary one (which an environment row words with
+    /// both outcomes) otherwise.
+    pub(super) fn question(&self) -> RowQuestion {
+        match self.environment.map(|environment| environment.scope) {
+            Some(crate::sandbox_sessions::DeleteScope::Whole) => RowQuestion::DeleteWhole,
+            Some(crate::sandbox_sessions::DeleteScope::Session) | None => RowQuestion::Delete,
         }
     }
 }
@@ -91,10 +107,45 @@ pub(super) enum DeleteClick {
 pub(super) enum RowQuestion {
     /// Stop closes the tabs named by the current prompt.
     Stop,
-    /// "confirm delete?": the row's Delete of a session that may be alive.
+    /// "confirm delete?": the row's Delete of a session that may be alive,
+    /// or, for a session of a disposable environment, the confirmation that
+    /// states both outcomes and asks the environment's own Farhelm.
     Delete,
+    /// The warned whole-environment Delete of an environment session: opened
+    /// by a click while the environment was out of reach, or by the helm's
+    /// answer that it could not ask the environment's Farhelm. Its answer
+    /// destroys the whole environment, so it is a lane of its own: an answer
+    /// to the narrower question can never be read as this consent.
+    DeleteWhole,
     /// The row's Replace confirmation.
     Replace,
+}
+
+impl RowQuestion {
+    /// Either of the two Delete questions, which share one prompt slot and
+    /// one set of answers on the row.
+    pub(super) fn is_delete(self) -> bool {
+        match self {
+            Self::Delete | Self::DeleteWhole => true,
+            Self::Stop | Self::Replace => false,
+        }
+    }
+
+    /// The consent a Delete answer to this question carries for an
+    /// environment session drawn as `drawn`. Decided by the question the user
+    /// answered, never by the host's state at answer time.
+    pub(super) fn answered(
+        self,
+        drawn: Option<crate::sandbox_sessions::EnvironmentDelete>,
+    ) -> Option<crate::sandbox_sessions::EnvironmentDelete> {
+        let scope = match self {
+            Self::DeleteWhole => crate::sandbox_sessions::DeleteScope::Whole,
+            Self::Delete | Self::Stop | Self::Replace => {
+                crate::sandbox_sessions::DeleteScope::Session
+            }
+        };
+        drawn.map(|environment| environment.with_scope(scope))
+    }
 }
 
 /// The display state `ListView` derives for one `SessionRow` render.
@@ -750,6 +801,57 @@ pub(super) mod tests {
         );
     }
 
+    /// An environment session's Delete may destroy the environment, so it
+    /// always confirms, even for an ended session with no tabs and "Skip
+    /// session confirmations" on. The click opens the lane the row was drawn
+    /// with, and an answer carries the consent of the lane it answered, not
+    /// the scope the row computes when the answer lands.
+    #[farhelm_testtrace::test]
+    fn environment_deletes_always_confirm_in_the_lane_they_were_drawn_with() {
+        use crate::sandbox_sessions::{DeleteScope, EnvironmentDelete};
+        let drawn = |scope| EnvironmentDelete {
+            host: 7,
+            provider: farhelm_proto::ProviderKind::Podman,
+            scope,
+        };
+        for (scope, question) in [
+            (DeleteScope::Session, RowQuestion::Delete),
+            (DeleteScope::Whole, RowQuestion::DeleteWhole),
+        ] {
+            let target = DeleteTarget {
+                environment: Some(drawn(scope)),
+                id: "ended".into(),
+                status: SessionStatus::Exited { exit_code: Some(0) },
+                tabs: 0,
+            };
+            assert!(!target.needs_confirmation(), "the premise: nothing alive");
+            assert_eq!(target.click(true), DeleteClick::Confirm);
+            assert_eq!(target.question(), question);
+            assert!(question.is_delete());
+        }
+        // A host that reconnected while the warned question was open still
+        // answers with the whole-environment consent the user read, and the
+        // reverse never widens.
+        assert_eq!(
+            RowQuestion::DeleteWhole.answered(Some(drawn(DeleteScope::Session))),
+            Some(drawn(DeleteScope::Whole))
+        );
+        assert_eq!(
+            RowQuestion::Delete.answered(Some(drawn(DeleteScope::Whole))),
+            Some(drawn(DeleteScope::Session))
+        );
+        assert_eq!(RowQuestion::Delete.answered(None), None);
+        assert!(!RowQuestion::Stop.is_delete());
+        assert!(!RowQuestion::Replace.is_delete());
+        let ordinary = DeleteTarget {
+            environment: None,
+            id: "ordinary".into(),
+            status: SessionStatus::Running,
+            tabs: 0,
+        };
+        assert_eq!(ordinary.question(), RowQuestion::Delete);
+    }
+
     /// Skipping asks less, but authorizes only the liveness the clicked row
     /// showed. In particular an ended agent with tabs must retain AgentEnded:
     /// NothingAlive would refuse its tabs, and Unconditional could kill a new agent.
@@ -775,7 +877,7 @@ pub(super) mod tests {
             (SessionStatus::Unknown, 1, crate::DeleteGuard::Unconditional),
         ] {
             let target = DeleteTarget {
-                sandbox: None,
+                environment: None,
                 id: "shown".into(),
                 status,
                 tabs,

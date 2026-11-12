@@ -46,6 +46,16 @@ impl LifecycleAction {
         format!("{label}: not started, another operation is in progress; try again")
     }
 
+    /// The row error of a target left out because its environment is being
+    /// deleted (`sandbox_sessions::deleting_reason`).
+    pub(super) fn unavailable(self, reason: &str) -> String {
+        let label = match self {
+            Self::Stop => "Stop",
+            Self::Delete => "Delete",
+        };
+        format!("{label}: {reason}")
+    }
+
     /// Match the batch question to the consequences this operation introduces.
     pub(super) fn needs_confirmation(self, targets: &[DeleteSnapshot], skip: bool) -> bool {
         (self == Self::Delete && targets.iter().any(|target| target.sandbox))
@@ -55,6 +65,27 @@ impl LifecycleAction {
                     Self::Delete => needs_confirmation(targets, false),
                 }
     }
+}
+
+/// Split a batch into the targets a lifecycle action may still reach and the
+/// ones whose environment is being deleted, each with its reason.
+///
+/// Applied when the batch is drawn and again at admission: a question opened
+/// before a host entered Deleting must not dispatch to it afterwards. The
+/// eligible rest of a mixed selection proceeds unchanged.
+pub(super) fn exclude_unavailable<T>(
+    targets: Vec<T>,
+    reason: impl Fn(&T) -> Option<&'static str>,
+) -> (Vec<T>, Vec<(T, &'static str)>) {
+    let mut eligible = Vec::new();
+    let mut excluded = Vec::new();
+    for target in targets {
+        match reason(&target) {
+            Some(reason) => excluded.push((target, reason)),
+            None => eligible.push(target),
+        }
+    }
+    (eligible, excluded)
 }
 
 /// Reserve every accepted row before the host runner can poll its first request.
@@ -124,6 +155,11 @@ pub(super) async fn run_paced(work: Vec<(Option<HostId>, RowWork)>) {
 #[derive(Clone, PartialEq)]
 pub(super) struct DeleteSnapshot {
     pub(super) sandbox: bool,
+    /// For a session of a disposable environment: the warned
+    /// whole-environment Delete, because the helm was not connected to that
+    /// environment's Farhelm when the question was drawn. Captured then and
+    /// never refreshed, so an answer covers exactly what the modal said.
+    pub(super) whole: bool,
     pub(super) provider: Option<farhelm_proto::ProviderKind>,
     pub(super) id: PeerText,
     pub(super) host: Option<HostId>,
@@ -141,6 +177,7 @@ impl DeleteSnapshot {
     pub(super) fn for_session(session: &Session, local_host: Option<HostId>) -> Self {
         Self {
             sandbox: false,
+            whole: false,
             provider: None,
             id: session.id.clone(),
             host: session.host,
@@ -155,6 +192,9 @@ impl DeleteSnapshot {
     }
 
     /// Every request carries this snapshot's guard, even after waiting in a queue.
+    /// An environment session's Delete sends no guard at all (its consent is
+    /// the confirmation, which is never skipped); `Unconditional` here only
+    /// records that nothing narrower was agreed to.
     pub(super) fn guard(&self) -> crate::DeleteGuard {
         if self.sandbox {
             crate::DeleteGuard::Unconditional
@@ -163,20 +203,41 @@ impl DeleteSnapshot {
         }
     }
 
-    /// Ownership changes the whole-resource consequence, not member inventory.
-    pub(super) fn with_sandbox(mut self, host: Option<&crate::Host>) -> Self {
+    /// Ownership changes the consequence, not member inventory. `scope` is
+    /// `sandbox_sessions::delete_scope` for the host as the modal opens.
+    pub(super) fn with_sandbox(
+        mut self,
+        host: Option<&crate::Host>,
+        scope: crate::sandbox_sessions::DeleteScope,
+    ) -> Self {
         if let Some(host) = host {
             self.sandbox = true;
+            self.whole = scope == crate::sandbox_sessions::DeleteScope::Whole;
             self.provider = host.kind.environment_provider();
             self.host_name = Some(crate::sandbox_sessions::label(host).into());
         }
         self
     }
 
+    /// The environment Delete this row's answer sends, if it is a session of
+    /// a disposable environment.
+    pub(super) fn environment_delete(&self) -> Option<crate::sandbox_sessions::EnvironmentDelete> {
+        let host = self.host.filter(|_| self.sandbox)?;
+        Some(crate::sandbox_sessions::EnvironmentDelete {
+            host,
+            provider: self.provider?,
+            scope: if self.whole {
+                crate::sandbox_sessions::DeleteScope::Whole
+            } else {
+                crate::sandbox_sessions::DeleteScope::Session
+            },
+        })
+    }
+
     /// Preserve the single-row confirmation predicate for mixed batches.
     fn needs_confirmation(&self) -> bool {
         DeleteTarget {
-            sandbox: self.sandbox.then_some(self.host).flatten(),
+            environment: self.environment_delete(),
             id: self.id.raw().to_owned(),
             status: self.status.clone(),
             tabs: self.tabs,
@@ -191,19 +252,111 @@ pub(super) fn needs_confirmation(targets: &[DeleteSnapshot], skip: bool) -> bool
         || !skip && targets.iter().any(DeleteSnapshot::needs_confirmation)
 }
 
-/// Draw a resource consequence once, without changing the identities that consent covers.
-/// A retained session is only an example of what the sandbox contains; this projection
-/// neither discovers peers nor changes ordinary Stop's per-session consequences.
+/// Whether a bulk Delete sends (and draws) this target, given the
+/// whole-environment hosts already taken in `wholes`.
+///
+/// A marked session of an environment the helm could ask is its own request:
+/// its Farhelm takes them one at a time, and the last one seals if nothing
+/// else remains (SPEC.md, "Sandbox sessions"). Marked sessions of an
+/// environment it could not ask share one warned whole-environment Delete,
+/// since the first destroys every other one with it.
+fn sends_delete(target: &DeleteSnapshot, wholes: &mut std::collections::HashSet<HostId>) -> bool {
+    !(target.sandbox && target.whole) || target.host.is_none_or(|host| wholes.insert(host))
+}
+
+/// The targets a confirmed bulk Delete sends one request each for, in order:
+/// every target except the second and later marked sessions of the same
+/// whole-environment Delete ([`sends_delete`]).
+pub(super) fn delete_requests(targets: Vec<DeleteSnapshot>) -> Vec<DeleteSnapshot> {
+    let mut wholes = std::collections::HashSet::new();
+    targets
+        .into_iter()
+        .filter(|target| sends_delete(target, &mut wholes))
+        .collect()
+}
+
+/// Draw a whole-resource consequence once, without changing the identities that consent
+/// covers. A retained session is only an example of what the environment contains; this
+/// projection neither discovers peers nor changes ordinary Stop's per-session consequences.
 fn question_targets(action: LifecycleAction, targets: &[DeleteSnapshot]) -> Vec<&DeleteSnapshot> {
-    let mut sandboxes = std::collections::HashSet::new();
+    let mut wholes = std::collections::HashSet::new();
     targets
         .iter()
-        .filter(|target| {
-            action != LifecycleAction::Delete
-                || !target.sandbox
-                || target.host.is_none_or(|host| sandboxes.insert(host))
-        })
+        .filter(|target| action != LifecycleAction::Delete || sends_delete(target, &mut wholes))
         .collect()
+}
+
+/// The modal's title, confirm answer and its tooltip.
+#[derive(Debug, PartialEq, Eq)]
+struct DialogCopy {
+    label: String,
+    confirm: String,
+    tooltip: String,
+}
+
+impl DialogCopy {
+    /// Word the question for what its answer sends. A whole-environment row
+    /// changes the title and answer, so the destructive scope is never only in
+    /// the rows; environment rows that ask their Farhelm keep the ordinary
+    /// wording, since each still deletes just its session unless it is last.
+    fn new(action: LifecycleAction, targets: &[DeleteSnapshot]) -> Self {
+        let count = targets.len();
+        let noun = if count == 1 { "session" } else { "sessions" };
+        let verb = match action {
+            LifecycleAction::Stop => "Stop",
+            LifecycleAction::Delete => "Delete",
+        };
+        let deletes = action == LifecycleAction::Delete;
+        if deletes && targets.iter().any(|target| target.sandbox && target.whole) {
+            return Self {
+                label: "Delete marked sessions and whole environments?".to_owned(),
+                confirm: "Delete sessions and environments".to_owned(),
+                tooltip: "Delete each listed session, and each environment marked as deleted whole with everything in it".to_owned(),
+            };
+        }
+        Self {
+            label: format!("{verb} {count} {noun}?"),
+            confirm: format!("{verb} {noun}"),
+            tooltip: if deletes && targets.iter().any(|target| target.sandbox) {
+                "Delete the sessions listed in this question; an environment goes too with its last session".to_owned()
+            } else {
+                format!("{verb} the sessions listed in this question")
+            },
+        }
+    }
+}
+
+/// One drawn row's consequence. Environment rows say which Delete they get,
+/// which is how the modal tells the two kinds apart.
+fn row_consequence(action: LifecycleAction, target: &DeleteSnapshot) -> String {
+    let provider = target.provider.map(crate::environment_ui::ProviderUi);
+    match action {
+        LifecycleAction::Stop => format!(
+            "{} {}",
+            crate::status::stop_consequence(&target.status, target.tabs),
+            provider.map(crate::environment_ui::ProviderUi::stop_help).unwrap_or("")
+        ),
+        LifecycleAction::Delete if target.sandbox && target.whole => provider
+            .map(crate::environment_ui::ProviderUi::whole_delete_warning)
+            .unwrap_or("Delete the whole environment and all its sessions, processes and files?")
+            .into(),
+        LifecycleAction::Delete if target.sandbox => provider
+            .map(crate::environment_ui::ProviderUi::session_delete_consequence)
+            .unwrap_or("Delete this session and its checkout? If it is the last session in its environment, the environment goes too.")
+            .into(),
+        LifecycleAction::Delete => confirm_consequence(&target.status, target.tabs),
+    }
+}
+
+/// The browser-visible kind of a drawn Delete row: `environment` for a
+/// whole-environment Delete, `session` for one that asks the environment's
+/// Farhelm, none for an ordinary session.
+fn row_scope_attribute(action: LifecycleAction, target: &DeleteSnapshot) -> Option<&'static str> {
+    (action == LifecycleAction::Delete && target.sandbox).then_some(if target.whole {
+        "environment"
+    } else {
+        "session"
+    })
 }
 
 /// Reword known targets and drop only proven departures; never grow an opening.
@@ -224,6 +377,7 @@ pub(super) fn reconcile(
                 Some(session) => {
                     let mut refreshed = DeleteSnapshot::for_session(session, local_host);
                     refreshed.sandbox = target.sandbox;
+                    refreshed.whole = target.whole;
                     refreshed.provider = target.provider;
                     if target.sandbox {
                         refreshed.host_name = target.host_name.clone();
@@ -274,29 +428,14 @@ pub(super) fn DeleteDialog(
     on_cancel: EventHandler<ConfirmToken<Vec<DeleteSnapshot>>>,
 ) -> Element {
     let targets = shown.key().clone();
-    let count = targets.len();
-    let noun = if count == 1 { "session" } else { "sessions" };
-    let verb = match action {
-        LifecycleAction::Stop => "Stop",
-        LifecycleAction::Delete => "Delete",
-    };
-    let includes_sandbox =
-        action == LifecycleAction::Delete && targets.iter().any(|target| target.sandbox);
-    let label = if includes_sandbox {
-        "Delete marked sessions and their environments?".to_owned()
-    } else {
-        format!("{verb} {count} {noun}?")
-    };
-    let confirm_label = if includes_sandbox {
-        "Delete sessions and environments".to_owned()
-    } else {
-        format!("{verb} {noun}")
-    };
-    let cancel_label = format!("Cancel bulk {}", verb.to_lowercase());
-    let confirm_tooltip = if includes_sandbox {
-        "Delete every session, process and file in each named environment".to_owned()
-    } else {
-        format!("{verb} the sessions listed in this question")
+    let DialogCopy {
+        label,
+        confirm: confirm_label,
+        tooltip: confirm_tooltip,
+    } = DialogCopy::new(action, &targets);
+    let cancel_label = match action {
+        LifecycleAction::Stop => "Cancel bulk stop",
+        LifecycleAction::Delete => "Cancel bulk delete",
     };
     let cancel = shown.clone();
     let escape = shown.clone();
@@ -333,6 +472,7 @@ pub(super) fn DeleteDialog(
                     recovery: RecoveryFocus::new(".bulk-delete-cancel", None, true, RecoveryDelay::OneFrame),
                     for target in question_targets(action, &targets) {
                         div { class: "bulk-delete-row", "data-delete-target": target.id.raw(),
+                            "data-delete-scope": row_scope_attribute(action, target),
                             div { class: "bulk-delete-identity",
                                 if let Some(badge) = status_badge(&target.status, target.annotation.as_ref().map(PeerText::raw), None) {
                                     StatusBadgeView { badge, dot_onclick: |_| {}, dot_title: None }
@@ -348,12 +488,7 @@ pub(super) fn DeleteDialog(
                                     SessionHostName { name: name.clone(), locality: target.locality }
                                 } else { "Host identity unavailable" }
                             }
-                            p { class: "bulk-delete-consequence", {match action {
-                                LifecycleAction::Stop => format!("{} {}", crate::status::stop_consequence(&target.status, target.tabs),
-                                    target.provider.map(|provider| crate::environment_ui::ProviderUi(provider).stop_help()).unwrap_or("")),
-                                LifecycleAction::Delete if target.sandbox => target.provider.map(|provider| crate::environment_ui::ProviderUi(provider).delete_consequence()).unwrap_or("Delete the whole environment and all its sessions, processes and files?").into(),
-                                LifecycleAction::Delete => confirm_consequence(&target.status, target.tabs),
-                            }} }
+                            p { class: "bulk-delete-consequence", {row_consequence(action, target)} }
                             if target.managed && !target.sandbox && action == LifecycleAction::Delete {
                                 p { class: "bulk-delete-consequence",
                                     "The managed checkout stays while another session uses it. When its last session is deleted, its folder moves to the trash; no files are deleted."
@@ -403,8 +538,18 @@ mod tests {
         assert!(!LifecycleAction::Delete.needs_confirmation(&[ordinary], true));
     }
 
-    /// A failed Replace can leave multiple marked peers. Delete asks once for
-    /// their shared resource, whereas Stop must retain each peer's consequence.
+    /// Mark `target` as a session of a disposable environment, drawn with the
+    /// whole-environment Delete when `whole` (its host was not connected).
+    fn environment(mut target: DeleteSnapshot, whole: bool) -> DeleteSnapshot {
+        target.sandbox = true;
+        target.whole = whole;
+        target.provider = Some(farhelm_proto::ProviderKind::Podman);
+        target
+    }
+
+    /// Marked sessions of an environment Farhelm could not ask share one
+    /// warned whole-environment Delete, drawn and sent once, whereas Stop
+    /// must retain each peer's consequence.
     #[farhelm_testtrace::test]
     fn sandbox_delete_question_coalesces_resources_without_shrinking_stop_consent() {
         let rows = [
@@ -413,18 +558,176 @@ mod tests {
             session("ordinary", 8),
         ];
         let mut targets = snapshots(&rows);
-        targets[0].sandbox = true;
-        targets[1].sandbox = true;
+        targets[0] = environment(targets[0].clone(), true);
+        targets[1] = environment(targets[1].clone(), true);
         let drawn = question_targets(LifecycleAction::Delete, &targets);
         assert_eq!(drawn.len(), 2);
         assert_eq!(drawn[0].id.raw(), rows[0].id.raw());
         assert_eq!(drawn[1].id.raw(), rows[2].id.raw());
         assert_eq!(question_targets(LifecycleAction::Stop, &targets).len(), 3);
+        let sent = delete_requests(targets.clone());
+        assert_eq!(
+            sent.iter()
+                .map(|target| target.id.raw())
+                .collect::<Vec<_>>(),
+            [rows[0].id.raw(), rows[2].id.raw()]
+        );
+        assert_eq!(
+            sent[0].environment_delete().map(|delete| delete.scope),
+            Some(crate::sandbox_sessions::DeleteScope::Whole)
+        );
         assert_eq!(
             targets.len(),
             3,
             "the answer must still carry every marked identity"
         );
+    }
+
+    /// SPEC.md, "Sandbox sessions": bulk Delete "sends one such request per
+    /// marked session of a sandbox the helm is connected to"; its Farhelm
+    /// takes them one at a time and the last one seals. Collapsing them into
+    /// one whole-environment Delete would destroy sessions nobody marked.
+    /// Mixed with an unreachable environment on another host, only that
+    /// host's rows collapse.
+    #[farhelm_testtrace::test]
+    fn bulk_delete_sends_one_request_per_session_of_a_reachable_environment() {
+        let rows = [
+            session("a1", 7),
+            session("a2", 7),
+            session("b1", 9),
+            session("b2", 9),
+            session("plain", 8),
+        ];
+        // Host 7 is reachable, host 9 is not, host 8 is an ordinary host.
+        let targets: Vec<_> = snapshots(&rows)
+            .into_iter()
+            .map(|target| match target.host {
+                Some(7) => environment(target, false),
+                Some(9) => environment(target, true),
+                _ => target,
+            })
+            .collect();
+        let sent = delete_requests(targets.clone());
+        let plan: Vec<_> = sent
+            .iter()
+            .map(|target| {
+                (
+                    target.id.raw().to_owned(),
+                    target
+                        .environment_delete()
+                        .map(|delete| (delete.host, delete.scope)),
+                )
+            })
+            .collect();
+        use crate::sandbox_sessions::DeleteScope::{Session, Whole};
+        assert_eq!(
+            plan,
+            [
+                (rows[0].id.raw().to_owned(), Some((7, Session))),
+                (rows[1].id.raw().to_owned(), Some((7, Session))),
+                (rows[2].id.raw().to_owned(), Some((9, Whole))),
+                (rows[4].id.raw().to_owned(), None),
+            ]
+        );
+        let drawn = question_targets(LifecycleAction::Delete, &targets);
+        assert_eq!(drawn.len(), 4, "the modal draws exactly what is sent");
+        // The guard an environment row carries is irrelevant to its request,
+        // which takes none, but the ordinary row keeps its own.
+        assert_eq!(
+            sent[3].guard(),
+            crate::status::delete_guard(&sent[3].status, sent[3].tabs)
+        );
+    }
+
+    /// SPEC.md, "Sandbox sessions": a session whose environment is being
+    /// deleted has its actions unavailable, and that includes batches. A mixed
+    /// batch keeps its eligible targets in order, and every left-out target
+    /// carries its reason for the row's error line.
+    #[farhelm_testtrace::test]
+    fn batches_leave_out_sessions_whose_environment_is_being_deleted() {
+        let rows = [session("a", 7), session("deleting", 9), session("b", 8)];
+        let (eligible, excluded) = exclude_unavailable(snapshots(&rows), |target| {
+            (target.host == Some(9)).then_some("being deleted")
+        });
+        assert_eq!(
+            eligible
+                .iter()
+                .map(|target| target.id.raw())
+                .collect::<Vec<_>>(),
+            [rows[0].id.raw(), rows[2].id.raw()]
+        );
+        assert_eq!(excluded.len(), 1);
+        assert_eq!(excluded[0].0.id.raw(), rows[1].id.raw());
+        assert_eq!(
+            LifecycleAction::Delete.unavailable(excluded[0].1),
+            "Delete: being deleted"
+        );
+        assert_eq!(LifecycleAction::Stop.unavailable("x"), "Stop: x");
+        let (eligible, excluded) = exclude_unavailable(snapshots(&rows), |_| None);
+        assert_eq!((eligible.len(), excluded.len()), (3, 0));
+    }
+
+    /// The modal says which rows are which: an environment row that asks its
+    /// Farhelm states both outcomes, a whole-environment row warns, and the
+    /// browser-visible scope attribute tells them apart. A whole-environment
+    /// row also changes the title and the answer, so the destructive scope is
+    /// never only in the rows.
+    #[farhelm_testtrace::test]
+    fn bulk_delete_modal_labels_session_and_whole_environment_rows() {
+        let rows = [session("asks", 7), session("whole", 9), session("plain", 8)];
+        let targets = snapshots(&rows);
+        let asks = environment(targets[0].clone(), false);
+        let whole = environment(targets[1].clone(), true);
+        let plain = targets[2].clone();
+        let podman = crate::environment_ui::ProviderUi(farhelm_proto::ProviderKind::Podman);
+        assert_eq!(
+            row_consequence(LifecycleAction::Delete, &asks),
+            podman.session_delete_consequence()
+        );
+        assert_eq!(
+            row_consequence(LifecycleAction::Delete, &whole),
+            podman.whole_delete_warning()
+        );
+        assert_eq!(
+            row_consequence(LifecycleAction::Delete, &plain),
+            confirm_consequence(&plain.status, plain.tabs)
+        );
+        assert_eq!(
+            row_scope_attribute(LifecycleAction::Delete, &asks),
+            Some("session")
+        );
+        assert_eq!(
+            row_scope_attribute(LifecycleAction::Delete, &whole),
+            Some("environment")
+        );
+        assert_eq!(row_scope_attribute(LifecycleAction::Delete, &plain), None);
+        assert_eq!(row_scope_attribute(LifecycleAction::Stop, &whole), None);
+
+        let with_whole = DialogCopy::new(
+            LifecycleAction::Delete,
+            &[asks.clone(), whole.clone(), plain.clone()],
+        );
+        assert_eq!(
+            with_whole.label,
+            "Delete marked sessions and whole environments?"
+        );
+        assert_eq!(with_whole.confirm, "Delete sessions and environments");
+        let asking_only = DialogCopy::new(LifecycleAction::Delete, &[asks.clone(), plain.clone()]);
+        assert_eq!(asking_only.label, "Delete 2 sessions?");
+        assert_eq!(asking_only.confirm, "Delete sessions");
+        assert!(
+            asking_only
+                .tooltip
+                .contains("goes too with its last session")
+        );
+        let ordinary = DialogCopy::new(LifecycleAction::Delete, std::slice::from_ref(&plain));
+        assert_eq!(ordinary.label, "Delete 1 session?");
+        assert_eq!(
+            ordinary.tooltip,
+            "Delete the sessions listed in this question"
+        );
+        let stop = DialogCopy::new(LifecycleAction::Stop, &[whole, plain]);
+        assert_eq!(stop.label, "Stop 2 sessions?");
     }
     use crate::list::row::row_specimen;
     use crate::list::view::{begin_row_operation, end_row_operation};

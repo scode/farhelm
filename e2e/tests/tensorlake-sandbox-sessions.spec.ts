@@ -17,7 +17,12 @@ import { hostChoice } from "./helpers/host-rail";
  * Ordinary-host mode exercises Resume-before-create without New choosing the
  * fresh recipe that a session-owned sandbox deliberately defaults to. A host that
  * is not suspended at start offers Suspend and Stop and suspend directly, and
- * `refresh` announces a new revision so the page reads its listings again. */
+ * `refresh` announces a new revision so the page reads its listings again.
+ * `present` shows the host in another phase the fake cannot reach on its own
+ * (a sandbox being deleted after a seal); it takes effect at the page's next
+ * hosts and sessions reads, which then show the host's sessions stale as the
+ * helm does for a host it has no connection to. The real connection and the
+ * sessions themselves are untouched. */
 async function ownedHost(page: Page, request: APIRequestContext, sessionOwned = true, suspendedAtStart = true) {
   const response = await request.get("/api/hosts");
   expect(response.ok()).toBe(true);
@@ -29,19 +34,23 @@ async function ownedHost(page: Page, request: APIRequestContext, sessionOwned = 
   feed.notifyOnConnect(1);
   let revision = 1;
   let suspended = suspendedAtStart;
+  let presented: object | null = null;
+  // Set by `remove`: the hosts read no longer lists the sandbox, as after
+  // its destruction (another window's sealing Delete, or Hosts' Delete).
+  let removed = false;
   const stops: Array<() => Promise<void>> = [];
   const calls: string[] = [];
   stops.push(await drainedRoute(page, "**/api/hosts", async (route) => {
     const reply = await route.fetch();
     const json = await reply.json();
-    json.hosts = json.hosts.map((host: any) => host.id === remote.id ? {
+    json.hosts = json.hosts.filter((host: any) => !(removed && host.id === remote.id)).map((host: any) => host.id === remote.id ? {
       ...host,
       name: "Owned sandbox",
       kind: "tensorlake",
       is_session_owned: sessionOwned,
-      state: suspended
+      state: presented ?? (suspended
         ? { phase: "suspended", observed_at: Date.now(), suspended_by_farhelm_at: null, resume_failed: null }
-        : host.state,
+        : host.state),
       tensorlake: { sandbox: "farhelm-sess-e2e-owned", recipe: "session-ready", size: { cpus: 2, memory_gb: 4, disk_gb: 20 } },
     } : host);
     await route.fulfill({ response: reply, json });
@@ -53,8 +62,9 @@ async function ownedHost(page: Page, request: APIRequestContext, sessionOwned = 
     const json = await reply.json();
     // The actual helm marks a disconnected host's cached sessions stale. The
     // presentation fixture must reproduce that fact as well as the host phase.
+    // Every phase `present` shows (being deleted) has no connection either.
     json.sessions = json.sessions.map((session: any) => session.host === remote.id
-      ? { ...session, stale: suspended || session.stale }
+      ? { ...session, stale: suspended || presented !== null || session.stale }
       : session);
     await route.fulfill({ response: reply, json });
   }));
@@ -68,7 +78,12 @@ async function ownedHost(page: Page, request: APIRequestContext, sessionOwned = 
       feed.notify(++revision);
     }));
   }
-  return { remote, build, calls, stops, refresh: () => feed.notify(++revision) };
+  return {
+    remote, build, calls, stops,
+    refresh: () => feed.notify(++revision),
+    present: (state: object | null) => { presented = state; },
+    remove: () => { removed = true; },
+  };
 }
 
 /** A ready recipe and an unbuilt recipe differ only in the prerequisite the
@@ -596,17 +611,25 @@ test("an owned session's pending Resume survives switching and excludes its comp
 /** Suspension preserves the real session while its owned-machine presentation
  * disables supervisor actions. The card describes preserved processes and
  * Tensorlake's session idle timeout, independently of Suspend's action help.
- * Delete must still ask with the global skip on,
- * and then explicitly authorize whole-resource destruction without Resume. */
+ * Delete must still ask with the global skip on. SPEC.md, "Sandbox sessions":
+ * the helm cannot ask a suspended sandbox's Farhelm, so Delete goes straight
+ * to the warned whole-sandbox confirmation (never the one that asks, and never
+ * Resume), which names unlisted sessions and the way to the narrower Delete,
+ * and then explicitly authorizes whole-resource destruction. */
 test("owned suspended sessions keep Hosts visibility and mandatory whole-sandbox Delete", async ({ page, request }, testInfo) => {
   const fixture = await ownedHost(page, request);
   const previous = await readPreferences(request);
   const session = await createSession(request, { title: "owned-suspended", host: fixture.remote.id });
   let deletes = 0;
+  let asked = 0;
   fixture.stops.push(await drainedRoute(page, `**/api/sessions/${encodeURIComponent(session.id)}?delete_sandbox=true`, async (route) => {
     expect(route.request().method()).toBe("DELETE");
     deletes++;
     await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.build }, body: "sandbox deletion fixture refused" });
+  }));
+  fixture.stops.push(await drainedRoute(page, `**/api/sessions/${encodeURIComponent(session.id)}?delete_environment_session=true`, async (route) => {
+    asked++;
+    await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.build }, body: "unexpected environment Delete" });
   }));
   try {
     await patchPreferences(request, { skip_session_confirmations: true });
@@ -628,14 +651,18 @@ test("owned suspended sessions keep Hosts visibility and mandatory whole-sandbox
       .getByRole("button", { name: "Resume", exact: true })).toHaveClass(/\bbtn-primary\b/);
     await expect(page.locator(".host-rail-avatar").first()).toBeVisible();
     await expect(page.locator(`.host-rail [data-rail-host-id="${fixture.remote.id}"]`)).toHaveCount(0);
+    await expect(page.locator(".header-delete")).toHaveAttribute("data-tooltip", /whole sandbox and everything in it/);
     await page.locator(".header-delete").click();
     const question = page.locator(".header-delete-confirm");
-    await expect(question).toContainText("Every session");
+    await expect(question).toContainText("deletes the whole sandbox: every session");
+    await expect(question).toContainText("including sessions Farhelm does not list");
+    await expect(question).toContainText("Resuming or updating the sandbox first lets Farhelm delete just this session");
     await expect(question).toContainText("snapshot");
     await expect(question).toContainText("farhelm-sess-e2e-owned");
     expect(deletes).toBe(0);
     await question.getByRole("button", { name: "Delete session and sandbox", exact: true }).click();
     await expect.poll(() => deletes).toBe(1);
+    expect(asked, "a suspended sandbox's Delete never asks its Farhelm").toBe(0);
     expect(fixture.calls).toEqual([]);
     await openHostsPanel(page);
     await expect(page.locator(`.host-row[data-host-id="${fixture.remote.id}"]`)).toContainText("Owned sandbox");
@@ -644,6 +671,391 @@ test("owned suspended sessions keep Hosts visibility and mandatory whole-sandbox
       ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`owned route ${index}`, stop]),
       ["session", () => cleanupSession(request, session.id)],
       ["preferences", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+    ]);
+  }
+});
+
+// ===== Environment session Delete ===========================================
+//
+// SPEC.md, "Sandbox sessions": a connected sandbox's Delete asks the
+// sandbox's own Farhelm (`?delete_environment_session=true`), which alone
+// knows whether the session is its last; when the helm cannot ask, it answers
+// 409 with the "unasked" marker and the page offers the warned whole-sandbox
+// Delete (`?delete_sandbox=true`). The owned stack's "sandbox" is really an
+// ordinary remote host, whose helm refuses both of those queries, so the
+// tests below answer them at the HTTP boundary in the helm's own shape. The
+// real helm and supervisor side of both is covered by the Rust tests (the
+// helm's own, and the real-Podman `podman_environments` scenario).
+
+/** The helm's "nothing was decided" marker, `ENVIRONMENT_UNASKED_HEADER`. */
+const UNASKED = { "x-farhelm-environment-unasked": "nothing-decided" };
+
+/** What one faked environment Delete answers: its status, JSON or text body,
+ * whether it carries the unasked marker, and whether the session is really
+ * deleted first (through the ordinary Delete, which the stack's ordinary host
+ * allows), so the listing the page reads next agrees with a success. */
+type EnvironmentAnswer = { status: number; json?: object; body?: string; unasked?: boolean; removes?: boolean };
+
+/** Answer the environment Deletes of `id` with `answer`, recording each one's
+ * scope in `sent`: `session` for the Delete that asks the sandbox's Farhelm,
+ * `whole` for the warned whole-sandbox Delete. A plain DELETE of the session
+ * fails the test: the page must never send one for an environment session.
+ * `answer` gets the scope and how many Deletes this route saw before. */
+async function environmentDeletes(
+  page: Page,
+  request: APIRequestContext,
+  build: string,
+  id: string,
+  answer: (scope: "session" | "whole", earlier: number) => EnvironmentAnswer,
+) {
+  const sent: Array<"session" | "whole"> = [];
+  const path = `/api/sessions/${encodeURIComponent(id)}`;
+  const stop = await drainedRoute(page, (url) => url.pathname === path, async (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback();
+    const query = new URL(route.request().url()).searchParams;
+    const scope = query.get("delete_environment_session") === "true" ? "session"
+      : query.get("delete_sandbox") === "true" ? "whole" : null;
+    expect(scope, `an environment session's Delete names its scope: ${route.request().url()}`).not.toBeNull();
+    const reply = answer(scope!, sent.length);
+    sent.push(scope!);
+    if (reply.removes) await cleanupSession(request, id);
+    const headers = { "x-farhelm-build": build, ...(reply.unasked ? UNASKED : {}) };
+    await route.fulfill(reply.json
+      ? { status: reply.status, headers, json: reply.json }
+      : { status: reply.status, headers, body: reply.body ?? "" });
+  });
+  return { sent, stop };
+}
+
+/** Present `id` as an agent that ended and has no tabs. With "Skip session
+ * confirmations" on, an ordinary session in that state is deleted without a
+ * question, so a question shown for it can only come from the environment rule. */
+async function endedWithoutTabs(page: Page, id: string) {
+  return await drainedRoute(page, /\/api\/sessions(\?|$)/, async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const reply = await route.fetch();
+    if (!reply.ok()) return route.fulfill({ response: reply });
+    const json = await reply.json();
+    json.sessions = json.sessions.map((current: any) => current.id === id
+      ? { ...current, stale: false, status: { state: "exited", exit_code: 0 }, tabs: [] }
+      : current);
+    await route.fulfill({ response: reply, json });
+  });
+}
+
+/** The Delete of a session in a connected sandbox must not decide from the
+ * page's list whether it is the last, so its question states both outcomes
+ * and is never skipped: here it asks even with "Skip session confirmations"
+ * on for an ended agent without tabs, which an ordinary session deletes at
+ * once. The answer asks the sandbox's Farhelm. When the sandbox stays, the
+ * notice quotes the count that Farhelm reported, which the fixture sets above
+ * the one other session the page lists, so the notice cannot come from the
+ * list; and only the deleted session leaves the list. */
+test("a connected sandbox's Delete asks its Farhelm and reports the sandbox that stays", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, true, false);
+  const previous = await readPreferences(request);
+  const owned: string[] = [];
+  try {
+    const kept = await createSession(request, { title: `sandbox-delete-kept-${Date.now()}`, host: fixture.remote.id });
+    owned.push(kept.id);
+    const gone = await createSession(request, { title: `sandbox-delete-gone-${Date.now()}`, host: fixture.remote.id });
+    owned.push(gone.id);
+    fixture.stops.push(await endedWithoutTabs(page, gone.id));
+    const deletes = await environmentDeletes(page, request, fixture.build, gone.id,
+      () => ({ status: 200, json: { environment_remaining: 2 }, removes: true }));
+    fixture.stops.push(deletes.stop);
+    await patchPreferences(request, { skip_session_confirmations: true });
+    await pinAutoSelect(page, kept.id);
+    await page.goto("/");
+    const row = page.locator(`.session-row[data-session-id="${gone.id}"]`);
+    const keptRow = page.locator(`.session-row[data-session-id="${kept.id}"]`);
+    await expect(row).toContainText("Exited");
+    await expect(keptRow, "premise: the page lists one other session in the sandbox").toHaveCount(1);
+    await openRowMenu(row);
+    await expect(row.locator(".session-row-delete")).toContainText("the sandbox goes too if this is its last session");
+    await row.locator(".session-row-delete").click();
+    const prompt = row.locator(".session-row-menu-panel");
+    await expect(prompt).toContainText("Delete this session and its checkout?");
+    await expect(prompt).toContainText(
+      "If this is the last session in its sandbox, the sandbox goes too, with every process and file in it and its snapshots.");
+    await expect(prompt).toContainText("farhelm-sess-e2e-owned");
+    expect(deletes.sent, "the question is never skipped").toEqual([]);
+    await expect(row.locator(".confirm-delete")).toHaveText("Delete session");
+    await row.locator(".confirm-delete").click();
+    await expect.poll(() => deletes.sent).toEqual(["session"]);
+    await expect(page.locator(".delete-notice .status")).toHaveText("The sandbox stays: 2 other sessions are in it");
+    await expect(row).toHaveCount(0);
+    await expect(keptRow, "a Delete that kept the sandbox removes only its own session").toHaveCount(1);
+    expect(deletes.sent).toEqual(["session"]);
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`kept-sandbox route ${index}`, stop]),
+      ...owned.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+      ["preferences", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+    ]);
+  }
+});
+
+/** The "stays" count is true only until the sandbox goes. When it goes some
+ * other way than this page's own Delete (here, standing in for another
+ * window's sealing Delete, its last session is deleted behind the page's
+ * back and the hosts read stops listing the sandbox), the next successful
+ * hosts read must retire the count, leaving the checkout notice that came
+ * with it. SPEC.md accepts only a brief discrepancy before the list shows
+ * the truth. */
+test("a sandbox destroyed elsewhere retires its stays count but keeps the checkout notice", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, true, false);
+  const owned: string[] = [];
+  const checkout = "Farhelm left this session's checkout in place.";
+  try {
+    const kept = await createSession(request, { title: `sandbox-elsewhere-kept-${Date.now()}`, host: fixture.remote.id });
+    owned.push(kept.id);
+    const gone = await createSession(request, { title: `sandbox-elsewhere-gone-${Date.now()}`, host: fixture.remote.id });
+    owned.push(gone.id);
+    const deletes = await environmentDeletes(page, request, fixture.build, gone.id,
+      () => ({ status: 200, json: { environment_remaining: 1, notice: checkout }, removes: true }));
+    fixture.stops.push(deletes.stop);
+    await pinAutoSelect(page, kept.id);
+    await page.goto("/");
+    const row = page.locator(`.session-row[data-session-id="${gone.id}"]`);
+    const keptRow = page.locator(`.session-row[data-session-id="${kept.id}"]`);
+    await expect(keptRow).toHaveCount(1);
+    await openRowMenu(row);
+    await row.locator(".session-row-delete").click();
+    await row.locator(".confirm-delete").click();
+    const band = page.locator(".delete-notice .status");
+    await expect(band).toHaveText(`The sandbox stays: 1 other session is in it. ${checkout}`);
+    // The sandbox's last session goes, and with it the sandbox, elsewhere.
+    await cleanupSession(request, kept.id);
+    fixture.remove();
+    fixture.refresh();
+    await expect(keptRow).toHaveCount(0);
+    await expect(band).toHaveText(checkout);
+    expect(deletes.sent).toEqual(["session"]);
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`elsewhere route ${index}`, stop]),
+      ...owned.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+    ]);
+  }
+});
+
+/** SPEC.md: when the helm cannot ask the sandbox's Farhelm, nothing is
+ * decided and Delete "offers the whole-sandbox Delete instead", never sends it
+ * on its own. From a row: the helm's unasked answer to "Delete session" makes
+ * the row offer the warned question, whose answer alone sends the
+ * whole-sandbox Delete; that success takes the session off the list. */
+test("a row's unasked environment Delete offers the warned whole-sandbox Delete", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, true, false);
+  let session: { id: string } | undefined;
+  try {
+    session = await createSession(request, { title: `sandbox-unasked-row-${Date.now()}`, host: fixture.remote.id });
+    const deletes = await environmentDeletes(page, request, fixture.build, session.id, (scope) => scope === "session"
+      ? { status: 409, unasked: true, body: "Farhelm cannot reach this environment's own Farhelm right now, so nothing was deleted" }
+      : { status: 200, json: {}, removes: true });
+    fixture.stops.push(deletes.stop);
+    await page.goto("/");
+    const row = page.locator(`.session-row[data-session-id="${session.id}"]`);
+    await openRowMenu(row);
+    await row.locator(".session-row-delete").click();
+    const prompt = row.locator(".session-row-menu-panel");
+    await expect(prompt).toContainText("Delete this session and its checkout?");
+    await row.locator(".confirm-delete").click();
+    await expect.poll(() => deletes.sent).toEqual(["session"]);
+    // The warned question waits on the row: shown in its menu, which opens
+    // again here if the answer arrived after it closed.
+    await openRowMenu(row);
+    await expect(prompt).toContainText("deletes the whole sandbox: every session");
+    await expect(prompt).toContainText("including sessions Farhelm does not list");
+    await expect(prompt).toContainText("Resuming or updating the sandbox first lets Farhelm delete just this session");
+    await expect(row.locator(".confirm-delete")).toHaveText("Delete session and sandbox");
+    expect(deletes.sent, "the warned Delete waits for its own answer").toEqual(["session"]);
+    await row.locator(".confirm-delete").click();
+    await expect.poll(() => deletes.sent).toEqual(["session", "whole"]);
+    await expect(row).toHaveCount(0);
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`unasked-row route ${index}`, stop]),
+      ...(session ? [[session.id, () => cleanupSession(request, session!.id)] as [string, () => Promise<void>]] : []),
+    ]);
+  }
+});
+
+/** The header's Delete is a second surface for the same rule: its unasked
+ * answer reopens the header's own question in the warned lane, whose answer
+ * sends the whole-sandbox Delete. A refusal of that Delete is shown and sends
+ * nothing more. */
+test("the header's unasked environment Delete reopens as the warned whole-sandbox Delete", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, true, false);
+  let session: { id: string } | undefined;
+  try {
+    session = await createSession(request, { title: `sandbox-unasked-header-${Date.now()}`, host: fixture.remote.id });
+    const deletes = await environmentDeletes(page, request, fixture.build, session.id, (scope) => scope === "session"
+      ? { status: 409, unasked: true, body: "this environment's own Farhelm did not answer in time" }
+      : { status: 409, body: "sandbox deletion fixture refused" });
+    fixture.stops.push(deletes.stop);
+    await pinAutoSelect(page, session.id);
+    await page.goto("/");
+    await expect(page.locator(`.session-row[data-session-id="${session.id}"]`)).toHaveAttribute("data-session-selected", "true");
+    await expect(page.locator(".header-delete")).toHaveAttribute("data-tooltip", /the sandbox goes too if this is its last session/);
+    await page.locator(".header-delete").click();
+    const question = page.locator(".header-delete-confirm");
+    await expect(question).toContainText("If this is the last session in its sandbox, the sandbox goes too");
+    await question.getByRole("button", { name: "Delete session", exact: true }).click();
+    await expect.poll(() => deletes.sent).toEqual(["session"]);
+    await expect(question).toContainText("deletes the whole sandbox: every session");
+    await expect(question).toContainText("including sessions Farhelm does not list");
+    expect(deletes.sent, "the warned Delete waits for its own answer").toEqual(["session"]);
+    await question.getByRole("button", { name: "Delete session and sandbox", exact: true }).click();
+    await expect.poll(() => deletes.sent).toEqual(["session", "whole"]);
+    await expect(page.locator(".session-action-error, .session-row-error").filter({ hasText: "sandbox deletion fixture refused" }).first())
+      .toBeVisible();
+    expect(deletes.sent).toEqual(["session", "whole"]);
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`unasked-header route ${index}`, stop]),
+      ...(session ? [[session.id, () => cleanupSession(request, session!.id)] as [string, () => Promise<void>]] : []),
+    ]);
+  }
+});
+
+/** SPEC.md: bulk Delete "sends one such request per marked session of a
+ * sandbox the helm is connected to"; its Farhelm takes them one at a time and
+ * the last one seals. Collapsing them into one whole-sandbox Delete, as the
+ * page once did, would destroy sessions nobody marked. The modal marks those
+ * rows as asking their sandbox and states both outcomes. The first reply's
+ * "stays" count is only true until the sealing Delete, so it must be gone
+ * once that one is handled. */
+test("bulk Delete of a connected sandbox's sessions sends one environment Delete each", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, true, false);
+  const owned: string[] = [];
+  try {
+    for (const name of ["first", "second"]) {
+      owned.push((await createSession(request, { title: `sandbox-bulk-${name}-${Date.now()}`, host: fixture.remote.id })).id);
+    }
+    // Whichever request the pacing sends first keeps the sandbox for the
+    // other; the second is the last and answers like a sealed Delete.
+    let answered = 0;
+    const routes = await Promise.all(owned.map((id) => environmentDeletes(page, request, fixture.build, id,
+      () => ++answered === 1
+        ? { status: 200, json: { environment_remaining: 1 }, removes: true }
+        : { status: 200, json: {}, removes: true })));
+    fixture.stops.push(...routes.map((route) => route.stop));
+    await page.goto("/");
+    for (const id of owned) await page.locator(`.session-row[data-session-id="${id}"] .session-row-open`).click({ modifiers: ["Control"] });
+    await expect(page.locator(".marked-bar")).toHaveAttribute("data-marked-count", "2");
+    await page.locator(".marked-delete").click();
+    const dialog = page.getByRole("dialog", { name: "Delete 2 sessions?", exact: true });
+    await expect(dialog.locator('.bulk-delete-row[data-delete-scope="session"]')).toHaveCount(2);
+    for (const id of owned) {
+      await expect(dialog.locator(`[data-delete-target="${id}"] .bulk-delete-consequence`))
+        .toContainText("If this is the last session in its sandbox, the sandbox goes too");
+    }
+    await expect(dialog.locator(".bulk-delete-confirm")).toHaveText("Delete sessions");
+    await expect(dialog.locator(".bulk-delete-confirm")).toHaveAttribute("data-tooltip", /an environment goes too with its last session/);
+    expect(routes.map((route) => route.sent)).toEqual([[], []]);
+    await dialog.locator(".bulk-delete-confirm").click();
+    await expect.poll(() => routes.map((route) => route.sent)).toEqual([["session"], ["session"]]);
+    // Each row leaves only when its own reply has been handled, so with both
+    // gone the first reply's "stays" count has been published and the sealing
+    // reply, which has no count, has retired it: the band must not keep
+    // claiming that the destroyed sandbox stays.
+    for (const id of owned) await expect(page.locator(`.session-row[data-session-id="${id}"]`)).toHaveCount(0);
+    await expect(page.locator(".delete-notice")).toHaveCount(0);
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`bulk route ${index}`, stop]),
+      ...owned.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+    ]);
+  }
+});
+
+/** SPEC.md: while a sealed sandbox is being destroyed, "its sessions show as
+ * being deleted with their actions unavailable". The helm reports that as the
+ * host's `deleting` phase, which the fixture presents; the row says why, and
+ * neither the row nor the header offers Delete or Clone, so nothing is sent
+ * to a sandbox that is already going.
+ *
+ * The marked toolbar is a third way to act on the session, and it must hold
+ * to the same rule: marked alone, the session leaves bulk Stop and Delete
+ * disabled with the reason; marked beside an ordinary session, the batch acts
+ * on that one and leaves the being-deleted row with the reason, still
+ * sending nothing to the sandbox. Skipped session questions keep the ordinary
+ * Delete free of its own dialog, so the batch dispatches as soon as it is
+ * admitted, which is where the deleting row has to be left out. */
+test("a session of a sandbox being deleted shows why its actions are unavailable", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, true, false);
+  const previous = await readPreferences(request);
+  let session: { id: string } | undefined;
+  let other: { id: string } | undefined;
+  try {
+    session = await createSession(request, { title: `sandbox-being-deleted-${Date.now()}`, host: fixture.remote.id });
+    other = await createSession(request, { title: `beside-being-deleted-${Date.now()}`, host: await localHostId(request) });
+    await patchPreferences(request, { skip_session_confirmations: true });
+    const deletes = await environmentDeletes(page, request, fixture.build, session.id,
+      () => ({ status: 409, body: "unexpected Delete of a sandbox being deleted" }));
+    fixture.stops.push(deletes.stop);
+    // A lifecycle request naming the being-deleted session: any Delete, or
+    // a Stop. (Viewing the session may write its seen state; that is not one.)
+    const mutations: string[] = [];
+    const sessionPath = `/api/sessions/${encodeURIComponent(session.id)}`;
+    fixture.stops.push(await drainedRoute(page, (url) => url.pathname.startsWith(sessionPath), async (route) => {
+      const url = new URL(route.request().url());
+      if (route.request().method() === "DELETE" || url.pathname.includes("/stop")) {
+        mutations.push(`${route.request().method()} ${url.pathname}${url.search}`);
+      }
+      await route.fallback();
+    }));
+    fixture.present({ phase: "deleting", failure: null });
+    await pinAutoSelect(page, session.id);
+    await page.goto("/");
+    const row = page.locator(`.session-row[data-session-id="${session.id}"]`);
+    const badge = row.locator(".status-badge.environment-deleting");
+    const reason = "This session's sandbox is being deleted, so its actions are unavailable";
+    await expect(badge).toHaveText("Deleting…");
+    await expect(badge).toHaveAttribute("data-tooltip", reason);
+    await expect(page.locator(".header-delete")).toBeDisabled();
+    await expect(page.locator(".header-clone")).toBeDisabled();
+    await expect(page.locator(".header-stop")).toBeDisabled();
+    await openRowMenu(row);
+    await expect(row.locator(".session-row-delete")).toHaveAttribute("aria-disabled", "true");
+    await expect(row.locator(".session-row-delete")).toContainText("is being deleted, so its actions are unavailable");
+    await expect(row.locator(".session-row-clone")).toHaveAttribute("aria-disabled", "true");
+    await row.locator(".session-row-delete").dispatchEvent("click");
+    await page.locator(".header-delete").dispatchEvent("click");
+    await expect(row.locator(".confirm-delete")).toHaveCount(0);
+    await expect(page.locator(".header-delete-confirm")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(row.locator(".session-row-menu-flyout")).toHaveCount(0);
+
+    // Marked alone: no bulk lifecycle control is available, and each says why.
+    await row.locator(".session-row-open").click({ modifiers: ["Control"] });
+    await expect(page.locator(".marked-bar")).toHaveAttribute("data-marked-count", "1");
+    for (const selector of [".marked-stop", ".marked-delete"]) {
+      await expect(page.locator(selector)).toBeDisabled();
+      await expect(page.locator(selector)).toHaveAttribute("data-tooltip", /environments are being deleted/);
+      await page.locator(selector).dispatchEvent("click");
+    }
+    await expect(page.locator(".bulk-delete-dialog")).toHaveCount(0);
+
+    // Beside an ordinary session: the batch deletes that one and leaves the
+    // being-deleted row with the reason.
+    const otherRow = page.locator(`.session-row[data-session-id="${other.id}"]`);
+    await otherRow.locator(".session-row-open").click({ modifiers: ["Control"] });
+    await expect(page.locator(".marked-bar")).toHaveAttribute("data-marked-count", "2");
+    await expect(page.locator(".marked-delete")).toBeEnabled();
+    await page.locator(".marked-delete").click();
+    await expect(otherRow).toHaveCount(0);
+    await expect(row.locator(".action-error")).toHaveText(`Delete: ${reason}`);
+    await expect(row).toHaveCount(1);
+    expect(deletes.sent).toEqual([]);
+    expect(mutations).toEqual([]);
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`being-deleted route ${index}`, stop]),
+      ["preferences", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+      ...(other ? [[other.id, () => cleanupSession(request, other!.id)] as [string, () => Promise<void>]] : []),
+      ...(session ? [[session.id, () => cleanupSession(request, session!.id)] as [string, () => Promise<void>]] : []),
     ]);
   }
 });

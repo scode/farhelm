@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { drainedRoute } from "./helpers/drained-route";
 import { routeGate } from "./helpers/route-gate";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
-import { cleanupSession, createSession, pinAutoSelect, stubFeed } from "./helpers/fleet";
+import { cleanupSession, createSession, openRowMenu, pinAutoSelect, stubFeed } from "./helpers/fleet";
 import { answerYolo } from "./helpers/term";
 import { openSettings } from "./helpers/settings";
 
@@ -616,6 +616,81 @@ test(
     }
   },
 );
+
+/** SPEC.md, "Container sessions": a user's Delete follows the sandbox rule
+ * with container wording. A connected container's Delete states both outcomes
+ * (no snapshots: containers have none), asks the container's Farhelm with
+ * `?delete_environment_session=true`, and, when the container stays, says so
+ * with the count that Farhelm reported. The stack's remote host is presented
+ * as a session-owned container; its helm would refuse the environment Delete
+ * for what is really an ordinary host, so the answer is given here in the
+ * helm's shape, after the session is really deleted so the next listing
+ * agrees with it. tensorlake-sandbox-sessions.spec.ts covers the unasked
+ * answer, bulk Delete and the being-deleted state for the shared code. */
+test("a connected container's Delete asks its Farhelm and reports the container that stays", async ({ page, request }, testInfo) => {
+  const response = await request.get("/api/hosts");
+  expect(response.ok()).toBe(true);
+  const build = response.headers()["x-farhelm-build"];
+  expect(build).toBeTruthy();
+  const hosts = (await response.json()).hosts;
+  const local = hosts.find((host: any) => host.kind === "local");
+  const remote = hosts.find((host: any) => host.kind === "ssh" && host.state.phase === "connected");
+  expect(remote, "the owned stack has a connected remote supervisor").toBeTruthy();
+  const stops: Array<() => Promise<void>> = [];
+  const owned: string[] = [];
+  const sent: string[] = [];
+  try {
+    const kept = await createSession(request, { title: "container-delete-kept-" + randomUUID(), host: remote.id });
+    owned.push(kept.id);
+    const gone = await createSession(request, { title: "container-delete-gone-" + randomUUID(), host: remote.id });
+    owned.push(gone.id);
+    stops.push(await drainedRoute(page, "**/api/hosts", async (route) => {
+      const reply = await route.fetch();
+      const json = await reply.json();
+      json.hosts = json.hosts.map((host: any) => host.id === remote.id ? {
+        ...host, kind: "podman", name: "New container", is_session_owned: true, tensorlake: null,
+        environment: {
+          name: "owned-container", place_name: "Build machine",
+          target: { kind: "environment", recipe: "dev", place: { kind: "podman_host", host: local.id } },
+          tunnels: null, credential_warning: null,
+        },
+      } : host);
+      await route.fulfill({ response: reply, json });
+    }));
+    const path = "/api/sessions/" + encodeURIComponent(gone.id);
+    stops.push(await drainedRoute(page, (url) => url.pathname === path, async (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback();
+      sent.push(new URL(route.request().url()).search);
+      await cleanupSession(request, gone.id);
+      await route.fulfill({ status: 200, headers: { "x-farhelm-build": build }, json: { environment_remaining: 1 } });
+    }));
+    await page.goto("/");
+    const row = page.locator('.session-row[data-session-id="' + gone.id + '"]');
+    const keptRow = page.locator('.session-row[data-session-id="' + kept.id + '"]');
+    await expect(row).toHaveCount(1);
+    await expect(keptRow).toHaveCount(1);
+    await openRowMenu(row);
+    await expect(row.locator(".session-row-delete")).toContainText("the container goes too if this is its last session");
+    await row.locator(".session-row-delete").click();
+    const prompt = row.locator(".session-row-menu-panel");
+    await expect(prompt).toContainText(
+      "If this is the last session in its container, the container goes too, with every process and file in it.");
+    await expect(prompt).toContainText("container: owned-container");
+    await expect(prompt).not.toContainText("snapshot");
+    expect(sent).toEqual([]);
+    await expect(row.locator(".confirm-delete")).toHaveText("Delete session");
+    await row.locator(".confirm-delete").click();
+    await expect.poll(() => sent).toEqual(["?delete_environment_session=true"]);
+    await expect(page.locator(".delete-notice .status")).toHaveText("The container stays: 1 other session is in it");
+    await expect(row).toHaveCount(0);
+    await expect(keptRow).toHaveCount(1);
+  } finally {
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...stops.map((stop, index): [string, () => Promise<void>] => ["container delete route " + index, stop]),
+      ...owned.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+    ]);
+  }
+});
 
 /** Leftovers remain deliberate whole-container deletion. A refusal must remain
  * visible and retryable, and merely opening or cancelling must send no delete. */

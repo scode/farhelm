@@ -464,6 +464,10 @@ impl Fixture {
     /// no native opener, so this owns one loopback listener and sends its accepted
     /// socket through SupervisorClient::relay_tcp. The SSH variant carries this
     /// exact protocol over ssh localhost followed by podman exec as well.
+    ///
+    /// Returns the kept session the in-container agent created
+    /// ([`Self::agent_requests_stay_inside`]), which stays in the container
+    /// until the scenario's closing Deletes.
     async fn ordinary_features(
         &self,
         container: &str,
@@ -471,7 +475,7 @@ impl Fixture {
         host: &Value,
         agent: &Value,
         token: &str,
-    ) {
+    ) -> farhelm_proto::SessionRef {
         let reference = session.id.parse::<farhelm_proto::SessionRef>().unwrap();
         let bare = reference.bare_id();
         let program = host["remote_farhelm"].as_str().unwrap();
@@ -622,7 +626,8 @@ impl Fixture {
             read_inside_file(&client, bare, &marker).await,
             b"tab-roundtrip"
         );
-        self.agent_requests_stay_inside(&client, &reference, host, tab_channel)
+        let kept = self
+            .agent_requests_stay_inside(&client, &reference, host, tab_channel)
             .await;
         client.detach(tab_channel).await;
         drop(tab_stream);
@@ -683,6 +688,7 @@ impl Fixture {
             .await
             .expect("owned inside protocol client did not exit")
             .unwrap();
+        kept
     }
 
     /// An agent in a real container session acts only within its container
@@ -700,13 +706,20 @@ impl Fixture {
     /// ordinary host outside is refused with the one scope sentence and puts
     /// nothing there, and deleting that second session removes only it while
     /// this session stays listed.
+    ///
+    /// The agent also creates a third, kept session the same way and returns
+    /// its reference. The user's environment Delete at the end of the
+    /// scenario needs a second session in the container to show a Delete
+    /// that keeps the container, and the user cannot put one there: the helm
+    /// refuses ordinary creates on a disposable host, so an agent inside is
+    /// the only way besides Replace.
     async fn agent_requests_stay_inside(
         &self,
         client: &Arc<SupervisorClient>,
         asking: &farhelm_proto::SessionRef,
         host: &Value,
         tab_channel: u32,
-    ) {
+    ) -> farhelm_proto::SessionRef {
         let bare = asking.bare_id();
         let environment = host["id"].as_i64().unwrap();
         let (status, body) = post(
@@ -740,13 +753,19 @@ impl Fixture {
                 .count()
         };
         let outside_before = outside_sessions().await;
-        // First the create, whose session proves it ran by writing a marker
-        // and staying alive; the test sees that before anything deletes it.
+        // First the creates, whose sessions prove they ran by writing a
+        // marker and staying alive; the test sees that before anything
+        // deletes them. The kept one outlives this method (see above); its
+        // sleep may end or be killed by the later container stop, which
+        // leaves it an ended session that still counts as one.
         let line = format!(
             "P={program}; \"$P\" agent hosts > ~/.e2e-hosts 2>&1; \
              \"$P\" agent create --cwd /home/ubuntu \
              --command 'touch ~/.e2e-sibling-alive; exec sleep 600' --no-yolo --title spawned \
-             > ~/.e2e-created 2> ~/.e2e-created.err; echo done > ~/.e2e-create-done\r"
+             > ~/.e2e-created 2> ~/.e2e-created.err; \
+             \"$P\" agent create --cwd /home/ubuntu \
+             --command 'touch ~/.e2e-kept-alive; exec sleep 600' --no-yolo --title kept \
+             > ~/.e2e-kept 2> ~/.e2e-kept.err; echo done > ~/.e2e-create-done\r"
         );
         client.send_keys(tab_channel, line.into_bytes()).await;
         wait_for_listing_with(
@@ -758,15 +777,26 @@ impl Fixture {
             },
         )
         .await;
-        wait_for_listing_with(
-            || client.stat_file(bare, "/home/ubuntu/.e2e-sibling-alive"),
-            60,
-            "the created session's command ran in the container",
-            |info: &farhelm_proto::DownloadFileInfo| {
-                info.status == farhelm_proto::DownloadFileStatus::Ready
-            },
-        )
-        .await;
+        for (marker, what) in [
+            (
+                "/home/ubuntu/.e2e-sibling-alive",
+                "the created session's command ran in the container",
+            ),
+            (
+                "/home/ubuntu/.e2e-kept-alive",
+                "the kept session's command ran in the container",
+            ),
+        ] {
+            wait_for_listing_with(
+                || client.stat_file(bare, marker),
+                60,
+                what,
+                |info: &farhelm_proto::DownloadFileInfo| {
+                    info.status == farhelm_proto::DownloadFileStatus::Ready
+                },
+            )
+            .await;
+        }
         let line = format!(
             "\"$P\" agent create --host {outside_name} --cwd /tmp --command true --no-yolo \
              > /dev/null 2> ~/.e2e-refused; echo $? > ~/.e2e-refused.status; \
@@ -840,6 +870,22 @@ impl Fixture {
             listed.sessions.iter().any(|row| row.id == bare),
             "the asking session carries on in the same container"
         );
+        let kept = text(read_inside_file(client, bare, "/home/ubuntu/.e2e-kept").await);
+        let kept_err = text(read_inside_file(client, bare, "/home/ubuntu/.e2e-kept.err").await);
+        let kept = kept
+            .trim()
+            .parse::<farhelm_proto::SessionRef>()
+            .unwrap_or_else(|error| panic!("a kept session id ({error}): {kept_err}"));
+        assert_eq!(
+            kept.entry_uuid(),
+            asking.entry_uuid(),
+            "the kept session is in this container too"
+        );
+        assert!(
+            listed.sessions.iter().any(|row| row.id == kept.bare_id()),
+            "deleting the first sibling left the kept one"
+        );
+        kept
     }
 
     /// Exercise lifecycle through the public API, using direct Podman only for
@@ -1079,7 +1125,8 @@ impl Fixture {
                 && head.trim().bytes().all(|byte| byte.is_ascii_hexdigit()),
             "the inside checkout must have an actual Git HEAD"
         );
-        self.ordinary_features(&container, &session, &host_view, &initial, &token)
+        let kept = self
+            .ordinary_features(&container, &session, &host_view, &initial, &token)
             .await;
         let session_path = format!("/api/sessions/{}", session.id);
         wait_for_listing_with(
@@ -1098,6 +1145,32 @@ impl Fixture {
         .await;
         assert!(status.is_success(), "Suspend: {body}");
         assert_eq!(self.inspect(&container).await["State"]["Paused"], true);
+        // SPEC.md, "Container sessions": while the container is paused the
+        // helm cannot ask its Farhelm, so a session Delete decides nothing
+        // and says so with the marker that makes the page offer the warned
+        // whole-container Delete instead. Nothing may be deleted or resumed.
+        let (status, unasked, body) = self
+            .delete_session(&session.id, "delete_environment_session=true")
+            .await;
+        assert_eq!(
+            status,
+            reqwest::StatusCode::CONFLICT,
+            "a paused container's session Delete is unasked: {body}"
+        );
+        assert_eq!(
+            unasked.as_deref(),
+            Some(farhelm_proto::http::ENVIRONMENT_UNASKED),
+            "only the helm's marker offers the warned Delete: {body}"
+        );
+        assert_eq!(
+            self.inspect(&container).await["State"]["Paused"],
+            true,
+            "an unasked Delete never resumes the container"
+        );
+        assert!(
+            self.listed(&session.id).await,
+            "an unasked Delete deleted nothing"
+        );
         let (status, body) = post(
             &self.http,
             &self.url(&format!("/api/hosts/{host}/resume")),
@@ -1239,29 +1312,8 @@ impl Fixture {
         );
 
         let held = self.hold_image(&image).await;
-        let response = self
-            .http
-            .delete(self.url(&format!("{session_path}?delete_sandbox=true")))
-            .send()
-            .await
-            .unwrap();
-        let status = response.status();
-        let body = response.text().await.unwrap();
-        assert!(
-            status.is_success(),
-            "confirmed whole-environment Delete: {body}"
-        );
-        assert!(
-            !exists("container", &container).await.unwrap(),
-            "Delete must confirm the canonical container absent"
-        );
-        assert!(
-            self.observe("/api/hosts").await.unwrap()["hosts"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|row| row["id"] != host)
-        );
+        self.delete_sessions_until_sealed(host, &container, &session.id, &kept.to_string())
+            .await;
         let recipe_path = format!("/api/tensorlake/recipes/{}", self.recipe);
         let response = self
             .http
@@ -1313,6 +1365,126 @@ impl Fixture {
         .await;
         self.assert_agent_alive(container, &agent).await;
         agent
+    }
+
+    /// Send the user's `DELETE /api/sessions/{reference}?{query}` and return
+    /// its status, the helm's "unasked" marker if any, and the bounded body.
+    /// The marker is returned apart from the text because it, not any prose,
+    /// is what tells a page that nothing was decided.
+    async fn delete_session(
+        &self,
+        reference: &str,
+        query: &str,
+    ) -> (reqwest::StatusCode, Option<String>, String) {
+        let response = self
+            .http
+            .delete(self.url(&format!("/api/sessions/{reference}?{query}")))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status();
+        let unasked = response
+            .headers()
+            .get(farhelm_proto::http::ENVIRONMENT_UNASKED_HEADER)
+            .map(|value| value.to_str().unwrap().to_owned());
+        let body = response.text().await.unwrap();
+        assert!(
+            body.len() <= OUTPUT_CAP as usize,
+            "Delete answer exceeded its bound"
+        );
+        (status, unasked, body)
+    }
+
+    /// Whether the helm's merged session listing names `reference`. The
+    /// listing keeps a disconnected host's cached sessions, so this also
+    /// answers for a paused container.
+    async fn listed(&self, reference: &str) -> bool {
+        self.observe("/api/sessions").await.unwrap()["sessions"]
+            .as_array()
+            .expect("the session listing answered")
+            .iter()
+            .any(|row| row["id"] == reference)
+    }
+
+    /// The user's environment Delete, through the helm's REST route, of the
+    /// container's two sessions in turn (SPEC.md, "Sandbox sessions" and
+    /// "Container sessions"): the container's own Farhelm decides which
+    /// Delete is the last, so the first keeps the container and reports the
+    /// count it made, and the second seals it and the helm destroys it before
+    /// answering.
+    ///
+    /// The count must be exactly the one session left; a helm that counted
+    /// its own list, or a supervisor that sealed with a session remaining,
+    /// fails here. The final checks are independent of the helm's answer:
+    /// Podman's own view of the container and the hosts listing.
+    async fn delete_sessions_until_sealed(
+        &self,
+        host: i64,
+        container: &str,
+        last: &str,
+        first: &str,
+    ) {
+        self.connected(host).await;
+        assert!(
+            self.listed(first).await && self.listed(last).await,
+            "premise: both sessions are in the container before either Delete"
+        );
+        let (status, _, body) = self
+            .delete_session(first, "delete_environment_session=true")
+            .await;
+        assert!(
+            status.is_success(),
+            "the first session's environment Delete: {status}: {body}"
+        );
+        let reply: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            reply["environment_remaining"], 1,
+            "the container's Farhelm reports the one session left: {reply}"
+        );
+        assert!(
+            exists("container", container).await.unwrap(),
+            "a Delete that leaves a session keeps the container"
+        );
+        assert_eq!(self.inspect(container).await["State"]["Running"], true);
+        self.connected(host).await;
+        assert!(
+            !self.listed(first).await,
+            "the deleted session left the listing"
+        );
+        assert!(self.listed(last).await, "the other session is still listed");
+
+        let (status, _, body) = self
+            .delete_session(last, "delete_environment_session=true")
+            .await;
+        assert!(
+            status.is_success(),
+            "the last session's environment Delete: {status}: {body}"
+        );
+        let reply: Value = serde_json::from_str(&body).unwrap();
+        assert!(
+            reply.get("environment_remaining").is_none(),
+            "the last session's Delete reports no remaining sessions: {reply}"
+        );
+        assert!(
+            !exists("container", container).await.unwrap(),
+            "the last session's Delete sealed and destroyed the container before answering"
+        );
+        assert!(
+            self.observe("/api/hosts").await.unwrap()["hosts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["id"] != host),
+            "the destroyed container's host is forgotten"
+        );
+        assert!(
+            self.observe("/api/sessions").await.unwrap()["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["host"] != host),
+            "no session of the destroyed container is listed"
+        );
     }
 
     /// Query only the unguessable recipe label allocated by this fixture.
@@ -1471,6 +1643,9 @@ async fn run_managed_acceptance(via_ssh: bool) {
 /// The real local place covers a public managed checkout, credential delivery,
 /// ordinary tabs/files/transfers/TCP relay and the full owned lifecycle. Its
 /// stand-in preserves the exact conversation across both explicit Restarts.
+/// It ends with the user's environment Deletes: an unasked one while paused,
+/// one that keeps the container for the agent-created session, and the last
+/// session's, which seals and destroys the container.
 #[farhelm_testtrace::test]
 async fn real_local_environment_lifecycle_and_owned_image_cleanup() {
     run_managed_acceptance(false).await;
