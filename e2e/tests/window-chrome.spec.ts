@@ -29,7 +29,7 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./helpers/evidence";
 import { cleanupSession, createSession, SESSION_LISTING } from "./helpers/fleet";
-import { waitForSessionRevealed } from "./helpers/terminal-readiness";
+import { waitForSessionReady, waitForSessionRevealed } from "./helpers/terminal-readiness";
 
 /**
  * macOS aligns the merged top row with the native app bar, while the
@@ -141,6 +141,22 @@ test("the forced-class spacer fills only the gap before the version", async ({
   expect(pageErrors, "no page error while measuring the spacer").toEqual([]);
 });
 
+/**
+ * Header text stays selectable and the spacer's presses stay ordinary with
+ * the macOS class forced on.
+ *
+ * The page selects the newest session on load (every test stack has one),
+ * and revealing its terminal moves focus into the terminal's input while
+ * focus is still on the page body, which a double-click on plain text
+ * leaves it on. In Chromium that focus move replaces the text selection
+ * with the input's empty one. A reveal landing just after the double-click
+ * failed this test 12 to 19 times in 100 on Tensorlake sandboxes
+ * (2026-11-12, both before and after nonblocking-session-actions), with the
+ * terminal's focus recorded 12 to 28 ms after the double-click in every
+ * instrumented failure. So the test waits for that session's terminal to
+ * take focus before it double-clicks; the page's own behavior (a late
+ * reveal clearing a selection) is left as it is.
+ */
 test("header controls stay interactive and text stays selectable beside the forced-class spacer", async ({
   page,
 }) => {
@@ -153,6 +169,13 @@ test("header controls stay interactive and text stays selectable beside the forc
   const version = bar.locator(".app-version");
   const spacer = bar.locator(".window-drag-region");
   await expect(version).not.toHaveText("");
+  // Fixture premise: the page auto-selected a session. Its terminal's reveal
+  // takes focus, and with it the selection, so it must be over first.
+  const selected = page.locator('.session-row[data-session-selected="true"]');
+  await expect(selected).toHaveCount(1, { timeout: 20_000 });
+  const selectedId = await selected.getAttribute("data-session-id");
+  if (!selectedId) throw new Error("the auto-selected row names no session");
+  await waitForSessionReady(page, selectedId);
   await shell.evaluate((element) => element.classList.add("macos-window"));
   await expect(spacer).toBeVisible();
 
