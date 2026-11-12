@@ -887,6 +887,18 @@ impl ProvisioningService {
                 "this Tensorlake host was removed or changed; probe again",
             ));
         }
+        // A sandbox whose Farhelm sealed it is being deleted, and setting it
+        // up again (reinstalling Farhelm into a machine about to be
+        // destroyed) can only get in the way of that. Checked under the
+        // provisioning lock the deletion takes too.
+        if self.manager.is_sealed(host) {
+            let mut memory = self.memory.lock().await;
+            memory.busy.remove(&host);
+            memory.runs.remove(&host);
+            return Err(refused(
+                "this sandbox is being deleted, so it cannot be set up again; use Retry to finish deleting it",
+            ));
+        }
         // A fleet-wide run slot can stay queued for minutes. Stop dialing
         // now, before that wait, so a copied supervisor cannot be claimed
         // while this add is still waiting to check its state.

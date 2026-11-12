@@ -91,6 +91,10 @@ pub(crate) fn classify(
                 }
             };
             (AttentionKind::Working, verb.into(), counts)
+        } else if matches!(host.state, HostPhase::Deleting { failure: None }) {
+            // The destruction of a sealed environment, or of one the user
+            // deleted from Hosts: work under way, not a problem.
+            (AttentionKind::Working, "Deleting".into(), None)
         } else if let Some(words) = problem_words(
             host,
             update,
@@ -146,6 +150,7 @@ fn problem_words(host: &Host, update: Option<bool>, unseen: bool) -> Option<Stri
         | HostPhase::Duplicate { .. }
         | HostPhase::Retired { .. }
         | HostPhase::Stopped { .. }
+        | HostPhase::Deleting { failure: Some(_) }
         | HostPhase::Unrecognized => Some(phase_display_label(&host.state)),
         HostPhase::VersionSkew {
             peer_protocol,
@@ -167,7 +172,8 @@ fn problem_words(host: &Host, update: Option<bool>, unseen: bool) -> Option<Stri
         // still qualify below; live tunnel failures retain their connected-host gate.
         HostPhase::TensorlakeChanging { .. }
         | HostPhase::Connecting { .. }
-        | HostPhase::Connected { .. } => None,
+        | HostPhase::Connected { .. }
+        | HostPhase::Deleting { failure: None } => None,
     };
     let mut words: Vec<_> = phase.into_iter().collect();
     if super::credential_delivery_failed(host) {

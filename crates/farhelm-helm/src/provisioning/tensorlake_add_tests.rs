@@ -2030,6 +2030,43 @@ async fn prepared_create_recovers_its_exact_install_facts_after_restart() {
     }
 }
 
+/// Why: a sandbox whose Farhelm sealed it is being deleted, and setting it
+/// up again would replace its deleting state, and with it a failed
+/// deletion's reason and Retry, with the setup's own hold. Spec: a setup plan
+/// captured for an existing sandbox is refused once the host is known
+/// sealed, before any hold or provider work, and leaves no run behind.
+#[farhelm_testtrace::test]
+async fn setup_of_a_sealed_sandbox_is_refused_before_it_takes_the_host() {
+    let f = fixture(false).await;
+    let host = f.legacy_host().await;
+    let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
+        f.probe(ProbeDestination::TensorlakeHost { host }).await
+    else {
+        panic!("ordinary recovery offer")
+    };
+    f.harness.manager.note_sealed(host);
+    let state_before = f.harness.manager.state(host);
+    let refusal = f
+        .service
+        .start_add(ProvisionRequest { probe_id })
+        .await
+        .expect_err("a sealed sandbox cannot be set up again");
+    assert!(
+        format!("{refusal:#}").contains("being deleted"),
+        "{refusal:#}"
+    );
+    assert_eq!(
+        f.harness.manager.state(host),
+        state_before,
+        "no setup hold replaced the host's state"
+    );
+    assert!(
+        f.backend_events().is_empty(),
+        "no provider work started: {:?}",
+        f.backend_events()
+    );
+}
+
 /// Migrated image and snapshot recipes have no built snapshot, but their old
 /// hosts already own a sandbox. Rerun must skip the builder by durable ID and
 /// by name while the pending-create marker survives a lost ID write,

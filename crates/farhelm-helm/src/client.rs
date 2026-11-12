@@ -3958,6 +3958,37 @@ impl SupervisorClient {
         }
     }
 
+    /// The environment Delete: delete session `id` on this supervisor and,
+    /// if no other session remains there, seal it
+    /// (`farhelm_proto::ControlMsg::DeleteSessionOrSeal`). Only for the
+    /// supervisor of a disposable environment: a seal is permanent, and on an
+    /// ordinary host it would refuse every create for good.
+    ///
+    /// Like every request here this waits as long as the connection lives;
+    /// the caller bounds it. `Ok` carries the supervisor's own outcome and
+    /// any notice about what its teardown could not finish.
+    pub(crate) async fn delete_session_or_seal(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<(farhelm_proto::SealOutcome, Option<String>)> {
+        let req_id = self.req_id();
+        match self
+            .request(
+                req_id,
+                ControlMsg::DeleteSessionOrSeal {
+                    req_id,
+                    session_id: id.to_string(),
+                },
+            )
+            .await?
+        {
+            ControlMsg::SessionDeletedOrSealed {
+                outcome, notice, ..
+            } => Ok((outcome, notice)),
+            other => Err(wrong_reply("DeleteSessionOrSeal", &other)),
+        }
+    }
+
     /// Open a terminal tab on a session (PLAN_M4.md item 2), returning the
     /// supervisor-minted tab identity to attach it by.
     ///

@@ -1245,6 +1245,11 @@ pub enum HostPhase {
     /// honest to name — and because retry is what brings it back.
     #[serde(rename = "retired")]
     Retired { reason: PeerText },
+    /// The host's sandbox or container is being destroyed, or its
+    /// destruction failed (`failure`, the provider's reason) and waits for
+    /// Retry. Nothing is routed to it meanwhile.
+    #[serde(rename = "deleting")]
+    Deleting { failure: Option<PeerText> },
     /// A phase this build does not know. Not a state the helm can be in —
     /// it is what a UI one version behind sees, and it exists so that host
     /// costs the rest of the panel nothing (see the type's own docs).

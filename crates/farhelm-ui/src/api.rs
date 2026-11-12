@@ -5647,6 +5647,18 @@ pub(crate) async fn retry_host(base: &str, host: HostId) -> Result<(), String> {
     Ok(())
 }
 
+/// Delete again a sealed sandbox or container whose destruction failed (the
+/// helm refuses unless the host shows that failure). Answers once the attempt
+/// is over; a new failure shows on the host again.
+pub(crate) async fn retry_environment_delete(base: &str, host: HostId) -> Result<(), String> {
+    let url = format!("{base}/api/hosts/{host}/retry-delete");
+    let resp = send(client().post(&url)).await?;
+    if !resp.status().is_success() {
+        return Err(refusal_text("POST", &url, resp).await);
+    }
+    Ok(())
+}
+
 /// Suspend a Tensorlake host; the helm owns the operation through completion.
 pub(crate) async fn suspend_host(base: &str, host: HostId) -> Result<(), String> {
     host_lifecycle(base, host, "suspend").await

@@ -83,6 +83,16 @@ pub const UNINSTALL_REMEDY_REMOVE: &str = "remove-host";
 pub const HOST_BUSY_HEADER: &str = "x-farhelm-host-busy";
 /// The one value of [`HOST_BUSY_HEADER`].
 pub const HOST_BUSY_OPERATION: &str = "operation-in-progress";
+/// Marks an environment session Delete on which nothing was decided because
+/// the environment's own Farhelm could not be asked (the sandbox or container
+/// is suspended, paused or unreachable, or runs a Farhelm this helm cannot
+/// talk to) or did not answer in time. The page answers it by offering the
+/// warned whole-environment Delete; it never destroys anything on its own.
+/// Only the helm sets this header, from its own typed refusal. The only value
+/// it carries is [`ENVIRONMENT_UNASKED`].
+pub const ENVIRONMENT_UNASKED_HEADER: &str = "x-farhelm-environment-unasked";
+/// The one value of [`ENVIRONMENT_UNASKED_HEADER`].
+pub const ENVIRONMENT_UNASKED: &str = "nothing-decided";
 /// The host-list `cause` for a local row whose supervisor is not running.
 ///
 /// The one unreachable cause a user can fix with a command on the machine they

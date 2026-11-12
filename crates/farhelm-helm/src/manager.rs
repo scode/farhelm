@@ -643,6 +643,22 @@ pub enum HostState {
     /// something a timer can restart — but both are visible, which is the
     /// whole point.
     Retired { reason: String },
+    /// The host's disposable machine (a sandbox or container) is being
+    /// destroyed, or its destruction failed (`failure`, the provider's
+    /// reason). Published through [`ConnectionManager::hold_connection`] by
+    /// every removal that deletes a machine, so nothing is routed to the host
+    /// and no dial runs while it lasts.
+    ///
+    /// A failed destruction releases the hold like any other, and the actor
+    /// reconnects. For most machine-deleting removals that replaces this
+    /// state. When the machine's supervisor is sealed (SPEC_impl.md,
+    /// "Environment Delete and the seal"), the failure stays shown anyway:
+    /// the actor reconnects to the sealed supervisor and keeps listing it,
+    /// but the manager's in-memory seal record (`ConnectionManager::sealed`)
+    /// makes `status` and `snapshots` report this state, with the failure
+    /// and no client, until a later removal (Retry, or Delete in Hosts)
+    /// destroys the machine.
+    Deleting { failure: Option<String> },
 }
 
 impl HostState {
@@ -667,6 +683,7 @@ impl HostState {
             HostState::Stopped { .. } => "stopped",
             HostState::Suspended { .. } => "suspended",
             HostState::Retired { .. } => "retired",
+            HostState::Deleting { .. } => "deleting",
         }
     }
 
@@ -872,6 +889,16 @@ pub async fn drain_sessions(
 }
 
 // ---- The manager -----------------------------------------------------
+
+/// Where a sealed host stands (`ConnectionManager::sealed`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SealedHost {
+    /// Its environment is to be destroyed.
+    Pending,
+    /// The last destruction failed, for this reason; the host shows it and
+    /// waits for Retry.
+    Failed(String),
+}
 
 /// The per-host provisioning locks, keyed by host id; see
 /// `ConnectionManager::provision_locks`.
@@ -1225,6 +1252,26 @@ pub struct ConnectionManager {
     /// exists, so a map that kept every requested id would grow with
     /// whatever ids an authenticated client chose to ask about.
     provision_locks: Arc<Mutex<ProvisionLocks>>,
+    /// One turn at a time per host for the user's environment session
+    /// Deletes ([`Self::environment_delete_turn`]), kept like
+    /// `provision_locks`.
+    environment_delete_turns: Arc<Mutex<ProvisionLocks>>,
+    /// Hosts whose supervisor said it is sealed and whose environment is not
+    /// destroyed yet, with the last destruction's failure (which then waits
+    /// for Retry). Filled by the actors from their drains and by the
+    /// environment Delete, emptied by a successful removal (SPEC_impl.md,
+    /// "Environment Delete and the seal"). Not durable: after a helm restart
+    /// the next listing reports the seal again.
+    ///
+    /// Also what such a host SHOWS: [`Self::status`] and [`Self::snapshots`]
+    /// report every host in it as `HostState::Deleting` with no client,
+    /// whatever its connection actor last published. Holding, releasing,
+    /// retiring or retargeting the connection therefore cannot lose a failed
+    /// deletion's reason and Retry, and nothing is routed to a supervisor
+    /// that takes no new sessions.
+    sealed: Mutex<HashMap<HostId, SealedHost>>,
+    /// Woken when a seal is noted, so the finisher need not poll.
+    sealed_wake: tokio::sync::Notify,
     /// Per-host cache-write locks shared by every actor incarnation. Keeping
     /// these outside the actor handles preserves write serialization while a
     /// dead connection worker is replaced. Spawning takes the actor-map mutex
@@ -1556,6 +1603,9 @@ impl ConnectionManager {
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             provision_locks: Arc::new(Mutex::new(HashMap::new())),
+            environment_delete_turns: Arc::new(Mutex::new(HashMap::new())),
+            sealed: Mutex::new(HashMap::new()),
+            sealed_wake: tokio::sync::Notify::new(),
             cache_locks: Mutex::new(HashMap::new()),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         })
@@ -2000,6 +2050,7 @@ impl ConnectionManager {
             attempts: Arc::clone(&self.attempts),
             events: Arc::clone(&self.events),
             agent_requests: Arc::clone(&self.agent_requests),
+            foreign_seal: std::sync::atomic::AtomicBool::new(false),
         };
         // One span per actor, entered for the task's whole life: SPEC.md
         // wants a reconnection trail whose every line names the host, and
@@ -2129,7 +2180,11 @@ impl ConnectionManager {
                     is_session_owned: handle.row.is_session_owned(),
                     destination: handle.row.destination.clone(),
                     alias: handle.row.alias.clone(),
-                    state: published.state.clone(),
+                    // A sealed host shows its deletion, whatever its
+                    // connection last published (see `sealed`).
+                    state: self
+                        .sealed_state(handle.row.id)
+                        .unwrap_or_else(|| published.state.clone()),
                     live_sessions: published.live_sessions.clone(),
                     list_truncated: published.list_truncated,
                     incarnation: published.incarnation,
@@ -2156,11 +2211,17 @@ impl ConnectionManager {
         let map = self.actors.lock().expect("actor map mutex poisoned");
         let handle = map.actors.get(&host)?;
         let published = handle.status.borrow();
+        // A sealed host shows its deletion and routes nothing, whatever its
+        // connection last published (see `sealed`).
+        let sealed = self.sealed_state(host);
         Some(HostStatus {
             entry_uuid: handle.row.entry_uuid.clone(),
             is_session_owned: handle.row.is_session_owned(),
-            state: published.state.clone(),
-            client: published.client.clone(),
+            client: match sealed {
+                Some(_) => None,
+                None => published.client.clone(),
+            },
+            state: sealed.unwrap_or_else(|| published.state.clone()),
             live_sessions: published.live_sessions.clone(),
             list_truncated: published.list_truncated,
             incarnation: published.incarnation,
@@ -2539,6 +2600,149 @@ impl ConnectionManager {
             host,
             locks: Arc::clone(&self.provision_locks),
             guard: Some(provision_lock.lock_owned().await),
+        }
+    }
+
+    /// Record that `host`'s supervisor reported a seal, and wake the
+    /// finisher. A host already recorded keeps its state: a failed
+    /// destruction stays failed until Retry, however often the seal is
+    /// reported again.
+    pub(crate) fn note_sealed(&self, host: HostId) {
+        let fresh = {
+            let mut sealed = self.sealed.lock().expect("sealed host map mutex poisoned");
+            let fresh = !sealed.contains_key(&host);
+            sealed.entry(host).or_insert(SealedHost::Pending);
+            fresh
+        };
+        if fresh {
+            self.sealed_wake.notify_one();
+            self.events.bump();
+        }
+    }
+
+    /// Record that an attempt to destroy `host`'s sealed environment is
+    /// starting: shown as deleting, with no failure, until its outcome is
+    /// recorded. Unlike [`Self::note_sealed`], this clears an earlier failure,
+    /// which only an actual attempt (the user's Delete, Retry, the finisher)
+    /// may do; a listing reporting the seal again never retries on its own.
+    pub(crate) fn sealed_attempt(&self, host: HostId) {
+        self.sealed
+            .lock()
+            .expect("sealed host map mutex poisoned")
+            .insert(host, SealedHost::Pending);
+        self.events.bump();
+    }
+
+    /// Record how destroying a sealed host's environment went: a failure
+    /// (its reason) is shown and waits for Retry; `None`, the host is gone
+    /// and forgotten here too.
+    pub(crate) fn sealed_outcome(&self, host: HostId, failure: Option<String>) {
+        {
+            let mut sealed = self.sealed.lock().expect("sealed host map mutex poisoned");
+            match failure {
+                Some(reason) => {
+                    sealed.insert(host, SealedHost::Failed(reason));
+                }
+                None => {
+                    sealed.remove(&host);
+                }
+            }
+        }
+        self.events.bump();
+    }
+
+    /// Whether `host` is sealed and its last destruction failed: the one
+    /// state in which the deletion Retry may destroy it without a fresh
+    /// confirmation.
+    pub(crate) fn sealed_failed(&self, host: HostId) -> bool {
+        matches!(
+            self.sealed
+                .lock()
+                .expect("sealed host map mutex poisoned")
+                .get(&host),
+            Some(SealedHost::Failed(_))
+        )
+    }
+
+    /// What a host in the seal record shows instead of its connection's own
+    /// state (see `sealed`), or `None` for every other host.
+    fn sealed_state(&self, host: HostId) -> Option<HostState> {
+        self.sealed
+            .lock()
+            .expect("sealed host map mutex poisoned")
+            .get(&host)
+            .map(|sealed| HostState::Deleting {
+                failure: match sealed {
+                    SealedHost::Pending => None,
+                    SealedHost::Failed(reason) => Some(reason.clone()),
+                },
+            })
+    }
+
+    /// Whether `host`'s supervisor has reported a seal this helm has not yet
+    /// finished acting on: its environment is to be destroyed.
+    ///
+    /// Only setting a Tensorlake sandbox up again consults this, and refuses.
+    /// Suspend and Resume do not: they are refused as busy while a
+    /// destruction holds the host's provisioning lock, but once a destruction
+    /// has failed nothing on the helm stops one sent by an API client. The
+    /// page offers neither for a host being deleted, and the seal record
+    /// keeps the host shown as being deleted and destroyable by Retry
+    /// whatever its machine's state.
+    pub(crate) fn is_sealed(&self, host: HostId) -> bool {
+        self.sealed
+            .lock()
+            .expect("sealed host map mutex poisoned")
+            .contains_key(&host)
+    }
+
+    /// Whether a seal reported by `host` is one the helm acts on: the host is
+    /// a session-owned environment whose removal deletes its machine. Any
+    /// other host's seal is shown as a problem and never acted on.
+    fn seal_is_actionable(&self, host: HostId) -> bool {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        map.actors.get(&host).is_some_and(|handle| {
+            handle.row.is_session_owned() && handle.row.kind.removal_deletes_machine()
+        })
+    }
+
+    /// The sealed hosts waiting for their environment's destruction, in no
+    /// particular order; failed ones wait for Retry and are not listed.
+    pub(crate) fn sealed_pending(&self) -> Vec<HostId> {
+        self.sealed
+            .lock()
+            .expect("sealed host map mutex poisoned")
+            .iter()
+            .filter(|(_, state)| matches!(state, SealedHost::Pending))
+            .map(|(host, _)| *host)
+            .collect()
+    }
+
+    /// Wait until a seal is noted or a sealed host is put back in line.
+    pub(crate) async fn sealed_noted(&self) {
+        self.sealed_wake.notified().await;
+    }
+
+    /// Wait for this host's turn among the user's environment session
+    /// Deletes. Two windows deleting sessions of one sandbox or container
+    /// then reach its supervisor one after the other, so each is decided
+    /// there, where the count is (one "deleted", then one "sealed" for the
+    /// last two), instead of the second meeting the first's provisioning lock
+    /// and being told to try again. Anything else that takes the
+    /// provisioning lock (a setup, an update, Suspend, Resume, the
+    /// whole-environment Delete) still refuses an environment Delete at once.
+    pub async fn environment_delete_turn(&self, host: HostId) -> ProvisionLockGuard {
+        let turn = {
+            let mut turns = self
+                .environment_delete_turns
+                .lock()
+                .expect("environment delete turn map mutex poisoned");
+            Self::provision_lock_entry_in(&mut turns, host)
+        };
+        ProvisionLockGuard {
+            host,
+            locks: Arc::clone(&self.environment_delete_turns),
+            guard: Some(turn.lock_owned().await),
         }
     }
 
@@ -3217,6 +3421,10 @@ struct HostActor {
     /// handed to each connection this one opens. See
     /// [`ConnectionManager::set_agent_requests`].
     agent_requests: crate::agent_requests::AgentRequestSlot,
+    /// Set by a refresh whose listing reported a seal this host cannot have
+    /// legitimately (it is not a disposable environment); the serve loop
+    /// shows it as a failed refresh. See `ConnectionManager::note_sealed`.
+    foreign_seal: std::sync::atomic::AtomicBool,
 }
 
 /// An actor episode owns one automatic attempt, never a timed retry loop.
@@ -4614,13 +4822,27 @@ impl HostActor {
             if hints_at_start > answered {
                 last_hint_refresh = Some(tokio::time::Instant::now());
             }
-            let step = tokio::select! {
+            let mut step = tokio::select! {
                 _ = next_nudge(nudge) => {
                     ended = "the host was reconfigured or an immediate retry was requested";
                     break;
                 }
                 step = self.refresh_once(&client, identity.as_deref()) => step,
             };
+            // A supervisor that says it is sealed refuses every new session
+            // for good. On a host that is not a disposable environment the
+            // helm destroys nothing, so the host must not read as healthy.
+            if self
+                .foreign_seal
+                .swap(false, std::sync::atomic::Ordering::Relaxed)
+            {
+                step.health = RefreshHealth::Failed {
+                    error: "Farhelm on this host reports that it was closed to new sessions (sealed), \
+                            which only happens to a sandbox or container being deleted; it will refuse \
+                            every new session, Restart and terminal tab"
+                        .to_string(),
+                };
+            }
             // A nudge that landed while the refresh was finishing means the
             // same thing as one that arrived a moment earlier; publishing
             // this connection's health now would overwrite the state the
@@ -4833,10 +5055,7 @@ impl HostActor {
         let SessionListing {
             sessions: mut entries,
             truncated,
-            // Nothing on this helm sends the request that seals a
-            // supervisor yet, so no listing it reads can carry a seal of its
-            // making; acting on one comes with the environment Delete.
-            sealed: _,
+            sealed,
         } = match drained.await {
             Err(_) => {
                 warn!(
@@ -4895,6 +5114,22 @@ impl HostActor {
                 };
             }
         };
+        // A sealed supervisor's environment is to be destroyed. The seal is
+        // acted on only by the helm's finisher, and only for a host whose
+        // removal deletes a disposable machine (`hosts::
+        // finish_sealed_environment` checks); a listing says nothing else.
+        if sealed && let Some(manager) = self.manager.upgrade() {
+            if manager.seal_is_actionable(self.id) {
+                manager.note_sealed(self.id);
+            } else {
+                warn!(
+                    host = self.id,
+                    "a host that is not a disposable environment reports a seal; nothing is destroyed"
+                );
+                self.foreign_seal
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         let Some(identity) = identity else {
             // Live-only: the walk succeeded, so the count is real, but
             // there is nothing to bind a cache write to. See this method's
@@ -12067,6 +12302,9 @@ mod tests {
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             provision_locks: Arc::new(Mutex::new(HashMap::new())),
+            environment_delete_turns: Arc::new(Mutex::new(HashMap::new())),
+            sealed: Mutex::new(HashMap::new()),
+            sealed_wake: tokio::sync::Notify::new(),
             cache_locks: Mutex::new(HashMap::new()),
             agent_requests: Arc::new(std::sync::OnceLock::new()),
         };
