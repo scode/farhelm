@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`xhigh-effort-label`](reports/xhigh-effort-label.report.md) landed 2026-11-09 in #3232: The extra-high effort level reads "xhigh" instead of "Xhigh" wherever effort labels show
 - [`settings-dialog-fixed-size`](reports/settings-dialog-fixed-size.report.md) landed 2026-11-09 in #3231: The Settings dialog keeps one fixed height across sections (about 640px, capped by the window), its body scrolling for taller sections
 - [`stop-start-message`](reports/stop-start-message.report.md) landed 2026-11-09 in #3210: A Stop while the agent is still starting shows "Exited — stopped before the agent finished starting" instead of a launch failure blaming systemd; Restart and Replace get the same fix
 - [`upgrade-epochs`](reports/upgrade-epochs.report.md) landed 2026-11-09 in #3236, #3239, #3241, #3242: Upgrade epochs as an upgrade floor: installations and hosts below the floor are told to uninstall and reinstall; the SPEC.md freeze becomes the floor rule
