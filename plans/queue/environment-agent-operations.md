@@ -382,3 +382,59 @@ passed its code review gate, every significant change to the core abstractions p
 updates TODO.md as described. Open, not merged. If a `## Decisions` section exists, its latest entry must also be
 satisfied. Then close the plan per `plans/.agents/executing.md`, "Executing one plan" (steps 11 and 12). Never edit
 `plans/` yourself.
+
+## Blocked
+
+Blocked on 2026-11-12 (claim 428cce).
+
+### Should deleting one of several sessions in a sandbox or container keep the environment?
+
+This plan lets an agent inside a sandbox or container session start more sessions in that same environment (each asking
+you through an approval card, under the same approval settings as any other host), and lets agents elsewhere start
+sessions in new sandboxes and containers behind a card that always asks. That part is built and up for review (#3334,
+#3338, #3348 and #3354, the last holding the end-to-end tests and the TODO update), and it can land whatever you answer
+here. One part of the plan is not built, because the plan's premise for it turned out to be wrong and its decision now
+contradicts a later one of yours.
+
+**What the plan says.** When you planned this on 2026-11-08, you answered that an environment should stay until the last
+session in it is deleted. The plan describes that rule as already existing (from the sandbox-sessions plan) and asks
+only to make it normal: deleting one session would remove just that session and say the other sessions and the
+environment remain, deleting the last session would remove the sandbox or container and its files, and deleting a
+session that is not the last would be refused while the environment is suspended or unreachable.
+
+**What actually landed.** On 2026-11-09, while finishing sandbox sessions, you replaced that rule: "deleting a sandbox
+session destroys its whole sandbox. This was the original intent." Delete now always removes the whole sandbox or
+container, every session and process in it, and its files. Its confirmation lists the other sessions Farhelm knows about
+but makes no claim that the list is complete, and nothing counts sessions or tracks which ones remain. You also said
+then that losing a leftover session this way is an accepted consequence, and that a reviewer must not bring back
+"peer-preservation or finality machinery". At the time a second session in an environment could only appear after a rare
+failed Replace. Container sessions follow the same rule. So today, if an agent starts a second session in a container
+and you later delete either session from the session list, the whole container goes, including the other session.
+
+**What this plan built meanwhile.** When an agent inside the environment deletes another session there, only that
+session is removed, never the environment, because the asking agent's own session is still in it. Your own Delete is
+unchanged.
+
+**The question:** now that agents can put several sessions into one sandbox or container routinely, should your Delete
+of one of them keep the environment while other sessions remain? Choosing yes reverses the 2026-11-09 instruction for
+this case.
+
+- **Keep the environment until its last listed session is deleted** (the plan's 2026-11-08 answer). Delete of a session
+  that has other sessions in Farhelm's list removes only that session; Delete of the last one removes the sandbox or
+  container and its files, as today. The count comes from the sessions Farhelm already lists for that environment, with
+  no new tracking, so a session Farhelm does not list (one a failed Replace left behind, say) can still be destroyed
+  with the last listed one. Removing a single session needs the Farhelm running inside the environment to do it, so that
+  Delete is refused while the environment is suspended or unreachable; removing the whole environment goes straight to
+  Tensorlake or Podman and keeps working then. Cost: a second Delete path and new confirmation wording ("the container
+  stays: 2 other sessions use it"), roughly a medium-sized PR with tests for both providers.
+- **Keep Delete as it is: one Delete removes the whole environment.** Nothing more is built. An agent can still remove a
+  sibling session without destroying the environment. Cost: deleting a session an agent spawned, once you are done with
+  it, also destroys the session that spawned it, unless you ask the agent to delete it instead.
+- **Ask each time.** When other sessions are listed, the confirmation offers both "Delete this session only" and "Delete
+  session and sandbox". This keeps the current consequence one click away, but it puts a choice in front of every such
+  Delete and still needs the second Delete path, so it costs at least as much as the first option.
+
+**Recommendation:** keep the environment until its last listed session is deleted. With agents now creating sessions
+inside environments, a sandbox or container routinely holds several sessions, and deleting a finished helper session
+should not destroy the work in the session that started it. Counting the sessions Farhelm already lists avoids the
+membership tracking you removed on 2026-11-09.
