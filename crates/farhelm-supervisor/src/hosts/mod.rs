@@ -33,14 +33,16 @@
 //!   owns its connection and the terminal's emulator: output fed and
 //!   queries answered, the child's liveness, input, resizes and shutdown,
 //!   and adapters to the types the supervisor decides with for tmux panes.
+//! - `test_program` (unit tests only): this crate's test binary as a host
+//!   program, so that its unit tests run their sessions in real hosts.
 //!
 //! The service's terminal switch points handle a session whose terminal is
 //! a [`terminal::HostTerminal`] (`service::terminals::Terminal::Host`). A
 //! create starts its agent in a host, and a new tab opens in one, only under
 //! the supervisor's switch (`service::SupervisorSeams::new_terminals`), on
 //! in every supervisor `farhelm supervisor run` starts unless its hidden
-//! `--new-terminals tmux` asks for the old kind, and off in the in-process
-//! test harnesses unless a test turns it on. A restarted supervisor finds
+//! `--new-terminals tmux` asks for the old kind, and in the in-process test
+//! harnesses unless a test asks for old terminals. A restarted supervisor finds
 //! the hosts of its host rows again with [`registry`] and adopts them
 //! ([`terminal::HostTerminal::adopt_found`]), in
 //! `service::core::host_handover`, and its sessions' tab hosts in
@@ -49,7 +51,8 @@
 //! start real hosts live beside the real `farhelm` binary
 //! (`crates/farhelm/tests/terminal_host_spawn.rs`, `terminal_host_client.rs`,
 //! `terminal_host_registry.rs` and `terminal_host_runtime.rs`): a host forks,
-//! so it is never started inside a test process.
+//! so it is never started inside a test process. (This crate's own unit
+//! tests start real hosts too, as processes of their own: `test_program`.)
 
 pub mod client;
 pub mod dir;
@@ -60,6 +63,8 @@ pub mod spawn;
 pub mod stop;
 pub mod tag;
 pub mod terminal;
+#[cfg(test)]
+pub(crate) mod test_program;
 
 pub use client::{
     ClientDeadlines, ClientError, ConnectError, Gone, HostConnection, HostEvent, InputCounts,

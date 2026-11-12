@@ -1243,8 +1243,9 @@ pub struct SupervisorSeams {
     /// supervisor inside a test binary has no `internal terminal-host` of
     /// its own, so creating a host terminal there also takes `host_program`
     /// (below): the Rust e2e harness points it at the built `farhelm`, and
-    /// the supervisor's own unit tests, which have no such binary, create
-    /// old terminals by name when their subject needs a real terminal.
+    /// the supervisor's own unit tests, which have no such binary, point it
+    /// at their own test binary, which runs a host when started as one
+    /// (`hosts::test_program`).
     pub new_terminals: NewTerminals,
     /// The program terminal hosts are started from, in place of the
     /// supervisor's own executable
@@ -1397,9 +1398,7 @@ impl SupervisorSeams {
     /// a reader can tell from the construction alone that a test runs on
     /// them: the default is the release's kind, terminal hosts. For tests
     /// whose subject exists only for old terminals (the tmux driver, tmux
-    /// tabs, moving old sessions into hosts), and for this crate's unit
-    /// tests that need a real terminal, which a unit test binary cannot
-    /// start a host for.
+    /// tabs, moving old sessions into hosts).
     pub fn tmux_terminals() -> Self {
         SupervisorSeams {
             new_terminals: NewTerminals::Tmux,
@@ -20532,14 +20531,9 @@ pub(crate) mod tests {
     /// its private tmux server: [`Supervisor::new_with_exe`] with
     /// [`SupervisorSeams::tmux_terminals`].
     ///
-    /// For the unit tests that create real terminals. The default kind is
-    /// the release's, terminal hosts, but a unit test binary has no
-    /// `farhelm` to start a host from (`Supervisor::host_program`), so these
-    /// tests run their launches in tmux, and what they check is checked on
-    /// old terminals only. Some of the same behavior is pinned on new
-    /// terminals by the Rust e2e suite, whose harness has the built binary,
-    /// and by this crate's stand-in host tests (`tests::host_terminals`);
-    /// that coverage is not complete for every test that uses this.
+    /// Only for the unit tests whose subject is tmux itself (its windows as
+    /// tabs, its markers, its panes); every other test that needs a real
+    /// terminal uses [`host_supervisor`].
     pub(crate) async fn tmux_supervisor(
         state_dir: &Path,
         farhelm_exe: PathBuf,
@@ -20551,6 +20545,143 @@ pub(crate) mod tests {
             SupervisorSeams::tmux_terminals(),
         )
         .await
+    }
+
+    /// The default seams with real terminal hosts for a unit test: new
+    /// terminals, as a shipped supervisor creates, started from this test
+    /// binary ([`crate::hosts::test_program`]), which runs a host when the
+    /// supervisor starts it as one.
+    ///
+    /// For the unit tests that create real terminals. The hosts are real
+    /// processes running the real host code, so a test's agent, tab or
+    /// Restart behaves as it does under `farhelm supervisor run`; the state
+    /// directory's teardown (`farhelm_teststate::TestDir`) ends whatever
+    /// hosts a test leaves.
+    pub(crate) fn host_seams() -> SupervisorSeams {
+        SupervisorSeams {
+            host_program: Some(crate::hosts::test_program::unit_test_host_program()),
+            ..SupervisorSeams::default()
+        }
+    }
+
+    /// A host program for a unit test that can be told to refuse every later
+    /// start: a script in `state`'s directory that runs this test binary as
+    /// a host ([`crate::hosts::test_program`]) until [`HostStarts::refuse`]
+    /// is called, and from then on exits 1 with one line on stderr, as a
+    /// host whose start failed does.
+    ///
+    /// For the tests whose subject is what a create, Restart or tab open
+    /// does when its host cannot start, after a session that needed a host
+    /// to exist was created with one. The script is the first stage itself
+    /// and `exec`s the test binary, so a host it starts carries the command
+    /// line a real one does.
+    pub(crate) fn refusable_host_program(state: &StateDir) -> (PathBuf, HostStarts) {
+        let program = state.path().join("refusable-host");
+        let flag = state.path().join("refuse-host-starts");
+        let test_binary = crate::hosts::test_program::unit_test_host_program();
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\nif [ -e {flag} ]; then\n  echo 'terminal-host: refused by the test' >&2\n  exit 1\nfi\nexec {binary} \"$@\"\n",
+                flag = shell_words::quote(flag.to_str().expect("UTF-8 state dir")),
+                binary = shell_words::quote(test_binary.to_str().expect("UTF-8 test binary")),
+            ),
+        )
+        .expect("write the refusable host program");
+        std::fs::set_permissions(
+            &program,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("make the refusable host program executable");
+        (program, HostStarts { flag })
+    }
+
+    /// The switch of a [`refusable_host_program`].
+    pub(crate) struct HostStarts {
+        flag: PathBuf,
+    }
+
+    impl HostStarts {
+        /// Make every later host start through the program fail.
+        pub(crate) fn refuse(&self) {
+            std::fs::write(&self.flag, b"").expect("write the refusal flag");
+        }
+    }
+
+    /// A supervisor with default timeouts whose sessions and tabs run in
+    /// real terminal hosts ([`host_seams`]), with `farhelm_exe` as its
+    /// launch shim program: [`Supervisor::new_with_seams`] for the unit
+    /// tests that create real terminals.
+    pub(crate) async fn host_supervisor(
+        state_dir: &Path,
+        farhelm_exe: PathBuf,
+    ) -> anyhow::Result<Arc<Supervisor>> {
+        Supervisor::new_with_seams(
+            state_dir,
+            farhelm_exe,
+            SupervisorTimeouts::default(),
+            host_seams(),
+        )
+        .await
+    }
+
+    /// A session created by a unit test's supervisor runs in a real terminal
+    /// host started from the test binary itself.
+    ///
+    /// Why: the unit tests that create real terminals rest on this; without
+    /// it they could only create old terminals, in tmux, and what they check
+    /// would hold for a kind of terminal no shipped supervisor creates.
+    /// Spec: a create of a long-running command on [`host_supervisor`]
+    /// publishes a host terminal whose child is running and whose host
+    /// process is a separate process started from this binary (its command
+    /// line ends with `--socket` and the socket's path), and Delete ends the
+    /// host.
+    #[farhelm_testtrace::test(flavor = "multi_thread")]
+    async fn a_unit_test_supervisor_creates_its_sessions_in_real_hosts() {
+        let state = StateDir::new();
+        // A launch shim that runs a long-lived program, so the host's child
+        // is still running when the test looks at it.
+        let launcher = state.path().join("launcher");
+        std::fs::write(&launcher, "#!/bin/sh\nexec sleep 300\n").expect("write the launcher");
+        std::fs::set_permissions(
+            &launcher,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("make the launcher executable");
+        let sup = host_supervisor(state.path(), launcher)
+            .await
+            .expect("supervisor");
+        let created = sup
+            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
+            .await
+            .expect("create");
+        let host = sup
+            .agent_host_for_test(&created.id)
+            .await
+            .expect("the agent runs in a host");
+        assert!(
+            matches!(host.liveness(), crate::hosts::Liveness::Running { .. }),
+            "the host's child runs: {:?}",
+            host.liveness()
+        );
+        let peer = host
+            .adopted_process()
+            .expect("the host's process is pinned")
+            .pid;
+        assert_ne!(peer, std::process::id(), "the host is a process of its own");
+        let argv = crate::procs::read_process_argv(peer).expect("the host's argv");
+        assert!(argv.len() >= 2, "the host's argv: {argv:?}");
+        assert_eq!(argv[argv.len() - 2], b"--socket");
+        assert_eq!(
+            argv[argv.len() - 1],
+            host.socket().as_os_str().as_encoded_bytes()
+        );
+        let entry = sup.sessions.lock().await.get(&created.id).cloned().unwrap();
+        let deleted = sup
+            .teardown_session(&entry, &created.id, test_admission(&sup).await)
+            .await;
+        assert!(deleted.is_ok(), "Delete succeeds");
+        assert!(!host.socket().exists(), "Delete ended the host");
     }
 
     /// A natural detach's wait for a Delete in progress ends exactly when
@@ -20996,8 +21127,9 @@ pub(crate) mod tests {
 
     /// An ambiguous create restarts without consent.
     ///
-    /// When tmux errors on create but the session may exist anyway, the row
-    /// is left `Launching` with no terminal and reads unknown. Restart used
+    /// When a create's terminal start fails ambiguously (the terminal may
+    /// exist anyway), the row is left `Launching` with no terminal and reads
+    /// unknown. Restart used
     /// to demand stop consent for that row, and once the GUI stopped asking
     /// for unknown-status agents that made it impossible to restart from the
     /// GUI at all: every click was refused, with no way to consent. Specified
@@ -21012,7 +21144,7 @@ pub(crate) mod tests {
             .expect("canonical cwd")
             .to_string_lossy()
             .into_owned();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let id = "0b4f3c1e-5a52-4d1c-9d0e-2f6a1c7b8e90";
@@ -21043,7 +21175,7 @@ pub(crate) mod tests {
                         ]),
                     },
                     terminal_address: String::new(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
+                    terminal_kind: crate::store::TerminalKind::Host,
                     outcome: LastOutcome::Launching,
                     // Restart only resumes, so the row carries a captured
                     // conversation and the resume command to enter it.
@@ -21484,207 +21616,6 @@ pub(crate) mod tests {
                 .expect("read the marker"),
             TabScope::Unknown,
             "the marker must not answer for a different tab"
-        );
-    }
-
-    /// On a host without a usable systemd user manager, Delete reaps the
-    /// processes of a tab whose shell the environment-marker scan cannot see.
-    ///
-    /// Why it matters: Delete once rooted its process walk at the agent pane
-    /// alone and trusted the marker scan to find every tab process, starting
-    /// from the tab's shell. On macOS the kernel withholds the environment of
-    /// platform binaries, the tab's own login shell included, so the shell
-    /// read as unmarked, the walk never started from it, and a nohup'd job
-    /// started in the tab outlived a Delete that reported success. Specified:
-    /// with the tab's pane process replaced by a HUP-ignoring shell with an
-    /// emptied environment (standing in for the unreadable one) and a
-    /// HUP-ignoring child under it, and no scope to hold either, both are
-    /// gone once Delete returns.
-    #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn delete_reaps_an_unmarked_process_under_a_tab_shell() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            tab_capable_dummy_exe(&state),
-            SupervisorTimeouts::default(),
-            SupervisorSeams {
-                scopes: Arc::new(crate::scope::ScopeManager::fake_reprobing(
-                    false,
-                    false,
-                    Arc::new(|_| {}),
-                )),
-                ..SupervisorSeams::tmux_terminals()
-            },
-        )
-        .await
-        .expect("supervisor");
-        let created = sup
-            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
-            .await
-            .expect("agent session");
-        let tab = sup.open_tab(&created.id).await.expect("terminal tab");
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&created.id)
-            .cloned()
-            .expect("session entry");
-        let tmux_name = agent_tmux(&entry).tmux_name;
-        let tab_pane = sup
-            .tmux
-            .pane_states_with_markers()
-            .await
-            .expect("pane states")
-            .into_iter()
-            .find(|(_, state)| state.tab.as_deref() == Some(tab.id.as_str()))
-            .map(|(pane, _)| pane)
-            .expect("the opened tab's pane");
-        let TerminalProbe::Owned(tab_shell) = sup
-            .tmux
-            .pane_process(&tmux_name, &tab_pane)
-            .await
-            .expect("probe the tab pane")
-        else {
-            panic!("the tab pane must belong to its session");
-        };
-        let tab_shell_pid = tab_shell
-            .live_pid()
-            .expect("fixture premise: the tab shell is live and tmux reports its pid");
-
-        /// Clean up the unmarked, HUP-resistant fixture even before its
-        /// pidfile has been read. The pane shell leads its process group;
-        /// its non-interactive background job stays in that group. Once
-        /// discovered, the job also has an independent identity so cleanup
-        /// still reaches it after Delete has killed the shell.
-        ///
-        /// Re-check start time and non-zombie state immediately before every
-        /// signal. As in tmux's portable teardown, the remaining read/signal
-        /// window is accepted: pidfd would close it only on Linux. These
-        /// identities come solely from this fixture's owned pane and child.
-        struct UnmarkedFixture {
-            shell: (u32, u64),
-            job: Option<(u32, u64)>,
-        }
-
-        impl UnmarkedFixture {
-            /// A disappeared or recycled pid no longer belongs to us.
-            fn still_owned((pid, start): (u32, u64)) -> bool {
-                matches!(
-                    crate::procs::read_process(pid),
-                    Ok(Some((_, observed, state)))
-                        if observed == start && state != crate::procs::ProcessState::Zombie
-                )
-            }
-        }
-
-        impl Drop for UnmarkedFixture {
-            fn drop(&mut self) {
-                if let Some(job) = self.job
-                    && Self::still_owned(job)
-                {
-                    // SAFETY: kill has no memory preconditions; identity was
-                    // re-checked against this fixture immediately above.
-                    unsafe { libc::kill(job.0 as libc::pid_t, libc::SIGKILL) };
-                }
-                if Self::still_owned(self.shell) {
-                    // SAFETY: the fixture established this pane as the group
-                    // leader before starting its unmarked background job.
-                    unsafe { libc::killpg(self.shell.0 as libc::pid_t, libc::SIGKILL) };
-                }
-            }
-        }
-
-        let (_, shell_start, shell_state) = crate::procs::read_process(tab_shell_pid)
-            .expect("read the owned tab shell")
-            .expect("the owned tab shell exists");
-        let mut fixture = UnmarkedFixture {
-            shell: (tab_shell_pid, shell_start),
-            job: None,
-        };
-        assert!(!tab_shell.dead, "fixture premise: the tab shell is live");
-        assert_ne!(shell_state, crate::procs::ProcessState::Zombie);
-        // SAFETY: getpgid only queries the process identified by the pane.
-        assert_eq!(
-            unsafe { libc::getpgid(tab_shell_pid as libc::pid_t) },
-            tab_shell_pid as libc::pid_t,
-            "fixture premise: the tab shell leads the group holding its background job"
-        );
-
-        // `exec env -i` turns the tab's pane process itself into a shell
-        // with no session marker, and `trap "" HUP` (inherited by the job)
-        // keeps the hangup tmux sends when Delete kills the session from
-        // ending either. Only a walk rooted at the tab pane reaches them.
-        let pidfile = state.path().join("unmarked.pid");
-        sup.tmux
-            .type_line_for_test(
-                &tab_pane,
-                &format!(
-                    "exec env -i sh -c 'trap \"\" HUP; sleep 1000 & echo $! > \"$1.tmp\"; \
-                     mv \"$1.tmp\" \"$1\"; wait' sh {}",
-                    pidfile.display()
-                ),
-            )
-            .await
-            .expect("start the unmarked job in the tab");
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-        let pid: u32 = loop {
-            if let Ok(text) = std::fs::read_to_string(&pidfile) {
-                break text.trim().parse().expect("the job writes its pid");
-            }
-            assert!(
-                tokio::time::Instant::now() < deadline,
-                "the tab never started the unmarked job"
-            );
-            // sleep-ok: the tab's shell starts the job asynchronously; poll for its pidfile inside the deadline.
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        };
-        let (ppid, job_start, _) = crate::procs::read_process(pid)
-            .expect("read the job")
-            .expect("the job is running");
-        // A malformed pidfile must not grant cleanup authority over an
-        // unrelated process. The group guard already covers our real job
-        // if this premise fails before an independent identity is admitted.
-        if ppid == tab_shell_pid {
-            fixture.job = Some((pid, job_start));
-        }
-        assert_eq!(
-            ppid, tab_shell_pid,
-            "fixture premise: the job is a direct child of the tab's pane process"
-        );
-        for (what, process) in [("tab shell", tab_shell_pid), ("job", pid)] {
-            let environ = crate::procs::read_environ(process).unwrap_or_default();
-            assert!(
-                !environ
-                    .windows(b"FARHELM_SESSION_ID".len())
-                    .any(|window| window == b"FARHELM_SESSION_ID"),
-                "fixture premise: the {what} carries no session marker"
-            );
-        }
-
-        let deleted = sup
-            .teardown_session(&entry, &created.id, test_admission(&sup).await)
-            .await;
-
-        // A zombie counts as gone (`procs::ProcessState`): the sweep may
-        // kill the shell before it reaps the job, leaving the job an orphan
-        // zombie until its adopter reaps it, which this test cannot force.
-        let mut survivors = Vec::new();
-        for (what, process, start) in [
-            ("tab shell", tab_shell_pid, shell_start),
-            ("job", pid, job_start),
-        ] {
-            match crate::procs::read_process(process).expect("read the fixture process") {
-                Some((_, still, crate::procs::ProcessState::Running)) if still == start => {
-                    survivors.push(what);
-                }
-                _ => {}
-            }
-        }
-        assert!(deleted.is_ok(), "Delete must succeed");
-        assert!(
-            survivors.is_empty(),
-            "Delete must reap the tab's processes; survivors: {survivors:?}"
         );
     }
 
@@ -23716,7 +23647,7 @@ pub(crate) mod tests {
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
                     launch_shell: Some("/bin/sh".into()),
-                    ..SupervisorSeams::tmux_terminals()
+                    ..host_seams()
                 },
             )
             .await
@@ -23729,11 +23660,21 @@ pub(crate) mod tests {
                 .get(&created.id)
                 .cloned()
                 .expect("session entry");
-            let agent = agent_tmux(&entry);
+            // The agent's process in whatever terminal the session holds
+            // now: a Restart starts its new launch in a new terminal host.
             let live_pid = || async {
-                match sup
-                    .tmux
-                    .pane_process(&agent.tmux_name, &agent.pane)
+                let current = sup
+                    .sessions
+                    .lock()
+                    .await
+                    .get(&created.id)
+                    .cloned()
+                    .expect("session entry");
+                match current
+                    .terminal
+                    .as_ref()
+                    .expect("agent terminal")
+                    .probe_process(&sup)
                     .await
                     .expect("agent process probe")
                 {
@@ -23819,7 +23760,7 @@ pub(crate) mod tests {
                 }
             })
         });
-        let mut seams = SupervisorSeams::tmux_terminals();
+        let mut seams = host_seams();
         seams.faults.restart_window_gate = Some(gate);
         let state = StateDir::new();
         let sup = Supervisor::new_with_seams(
@@ -24261,7 +24202,7 @@ pub(crate) mod tests {
         fail_reporter: bool,
     ) {
         let state = StateDir::new();
-        // This existing fixture pattern supplies a live pane without an
+        // This existing fixture pattern supplies a live agent without an
         // installed vendor agent. It stands in for the launch shim, not
         // the agent's reporting or resume implementation; capture is seeded
         // through the supervisor's generation-fenced reporting seam.
@@ -24419,13 +24360,18 @@ pub(crate) mod tests {
         }
         let before = sup.store.session(&created.id).await.unwrap().unwrap();
         let entry = sup.sessions.lock().await[&created.id].clone();
-        let agent = agent_tmux(&entry);
         assert!(
             matches!(
-                sup.tmux.pane_process(&agent.tmux_name, &agent.pane).await.expect("agent probe"),
+                entry
+                    .terminal
+                    .as_ref()
+                    .expect("agent terminal")
+                    .probe_process(&sup)
+                    .await
+                    .expect("agent probe"),
                 TerminalProbe::Owned(process) if !process.dead
             ),
-            "fixture premise: a live agent pane must reach the ordinary restart path"
+            "fixture premise: a live agent must reach the ordinary restart path"
         );
         assert_eq!(
             before.captured_conversation.as_deref(),
@@ -24438,7 +24384,7 @@ pub(crate) mod tests {
             "fixture premise: the old capture exists in memory"
         );
         // A launch-spec collision happens after begin_relaunch cleared
-        // capture, before tmux can spawn. The advanced generation below
+        // capture, before the new terminal can start. The advanced generation below
         // distinguishes rollback from a refusal during admission.
         let obstruction =
             crate::launch::spec_path_for_launch(state.path(), &created.id, before.generation + 1);
@@ -31808,7 +31754,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_pre_launch_kinds_reservation_refuses_its_retry() {
         let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let old_claim = |key: &str| IntentClaim {
@@ -31921,7 +31867,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_created_session_dates_its_activity_to_creation_everywhere() {
         let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let created = sup
@@ -31979,7 +31925,7 @@ exit 0
         let state = StateDir::new();
         let work = tempfile::tempdir().expect("workdir");
         let cwd = work.path().to_string_lossy().to_string();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
 
@@ -32553,7 +32499,7 @@ exit 0
                 !absent_shim.exists(),
                 "the fixture must not launch a vendor"
             );
-            let sup = tmux_supervisor(state.path(), absent_shim)
+            let sup = host_supervisor(state.path(), absent_shim)
                 .await
                 .expect("supervisor");
             let created = sup
@@ -33219,8 +33165,8 @@ exit 0
     ///
     /// The race is the one item 6 of the review batch names, forced
     /// deterministically through the create-lifecycle seam: the delete is
-    /// performed from inside the `DuringLaunch` stage, i.e. after tmux has
-    /// the session and before the launch is confirmed — the exact window in
+    /// performed from inside the `DuringLaunch` stage, i.e. after the
+    /// session's terminal host runs and before the launch is confirmed — the exact window in
     /// which the create is about to write a row that no longer exists.
     /// Without the vanished-row check, that write is a silent no-op and the
     /// create returns success for a session with no record, leaving a real
@@ -33279,7 +33225,7 @@ exit 0
                         })),
                         ..FaultHooks::default()
                     },
-                    ..SupervisorSeams::tmux_terminals()
+                    ..host_seams()
                 },
             )
             .await
@@ -33314,11 +33260,10 @@ exit 0
             sup.store.load_all().await.expect("load").is_empty(),
             "the delete's removal must stand — the create must not have re-created a row"
         );
-        let names = sup.tmux.pane_states().await.expect("pane states");
+        let left = host_sockets(state.path());
         assert!(
-            names.is_empty(),
-            "the create must have torn its own tmux session down rather than orphaning it: \
-             {names:?}"
+            left.is_empty(),
+            "the create must have ended its own terminal host rather than orphaning it: {left:?}"
         );
         // Delete prunes even the pending key. Only this fixture's first
         // launch is interrupted, so the retry can prove a new identity is used.
@@ -33707,7 +33652,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_title_with_control_characters_is_rejected_before_anything_is_stored() {
         let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
@@ -33827,7 +33772,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_title_derived_from_a_control_character_cwd_is_sanitized_not_refused() {
         let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
@@ -34132,82 +34077,75 @@ exit 0
     }
 
     /// A confirmed-absent create must remove the whole attempt before its
-    /// Failed reservation makes the error final. The fake refuses tmux only
-    /// after witnessing the real published spec and planting its companion
-    /// files, so a missing waypoint cannot pass merely because none was made.
-    /// It never executes the window command: no shim can consume the evidence
-    /// or turn this preterminal refusal into an accepted session.
+    /// Failed reservation makes the error final. The fake host program
+    /// refuses the start only after witnessing the real published spec and
+    /// the launch's host record and planting the spec's companion files, so
+    /// a missing waypoint cannot pass merely because none was made. It never
+    /// starts a host or runs the child: no shim can consume the evidence or
+    /// turn this preterminal refusal into an accepted session. Its exit
+    /// status with a line on stderr is a definitive refusal
+    /// (`SpawnError::Refused`), the host start's proof that nothing was left,
+    /// so no further absence check follows.
     /// The witnessed executable spec must contain Bash and the unchanged
     /// command source; literal agent words belong to launch metadata instead.
-    /// A blocked sentinel unlink must not skip the waypoint, and its exact
-    /// removal context must become part of the same durable replayed refusal.
+    /// A blocked sentinel unlink must not skip the waypoint or the host
+    /// record, and its exact removal context must become part of the same
+    /// durable replayed refusal.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_confirmed_absent_create_cleans_every_artifact_before_replaying_failure() {
         for obstruct_status in [false, true] {
             let state = StateDir::new();
-            let failing_tmux = state.path().join("failing-tmux");
-            // Match command words anywhere after the driver's private socket and
-            // config flags, as the existing post-allocation refusal fixture does.
-            // Only new-session and has-session fail; startup/preflight commands
-            // retain their ordinary empty successful answers.
+            let refusing_host = state.path().join("refusing-host");
+            // The first stage reads its spec to the end first: the launch's
+            // host record is written before the spec is sent, so once stdin
+            // ends the record is there to witness. Every check failing exits
+            // with its own status, which the refusal then names.
             std::fs::write(
-                &failing_tmux,
+                &refusing_host,
                 br#"#!/bin/sh
 fixture_dir=${0%/*}
-for arg in "$@"; do
-  if [ "$arg" = -V ]; then echo "tmux 3.7c"; exit 0; fi
-  if [ "$arg" = '#{version}' ]; then echo "3.7c"; exit 0; fi
-  if [ "$arg" = new-session ]; then
-    found=0
-    for spec in "$fixture_dir"/launch/*.json; do
-      [ -f "$spec" ] || continue
-      found=$((found + 1))
-      [ "$found" -eq 1 ] || exit 91
-      stem=${spec%.json}
-      cat "$spec" > "$fixture_dir/refused-launch.json" || exit 92
-      printf '%s\n' 'exec_failed argv0=fixture-agent errno=2' > "$stem.status" || exit 93
-      : > "$stem.waypoint" || exit 94
-      [ -f "$spec" ] && [ -f "$stem.status" ] && [ -f "$stem.waypoint" ] || exit 95
-      if [ -f "$fixture_dir/obstruct-status" ]; then
-        rm "$stem.status" || exit 99
-        mkdir "$stem.status" || exit 100
-        [ -f "$spec" ] && [ -d "$stem.status" ] && [ -f "$stem.waypoint" ] || exit 101
-      fi
-      printf '%s\n' "$spec" >> "$fixture_dir/new-session-attempts" || exit 96
-    done
-    [ "$found" -eq 1 ] || exit 97
-    exit 1
+cat > /dev/null || exit 90
+found=0
+for spec in "$fixture_dir"/launch/*.json; do
+  [ -f "$spec" ] || continue
+  found=$((found + 1))
+  [ "$found" -eq 1 ] || exit 91
+  stem=${spec%.json}
+  [ -f "$stem.host" ] || exit 102
+  cat "$spec" > "$fixture_dir/refused-launch.json" || exit 92
+  printf '%s\n' 'exec_failed argv0=fixture-agent errno=2' > "$stem.status" || exit 93
+  : > "$stem.waypoint" || exit 94
+  [ -f "$spec" ] && [ -f "$stem.status" ] && [ -f "$stem.waypoint" ] || exit 95
+  if [ -f "$fixture_dir/obstruct-status" ]; then
+    rm "$stem.status" || exit 99
+    mkdir "$stem.status" || exit 100
+    [ -f "$spec" ] && [ -d "$stem.status" ] && [ -f "$stem.waypoint" ] || exit 101
   fi
-  if [ "$arg" = has-session ]; then
-    if [ -f "$fixture_dir/new-session-attempts" ]; then
-      printf '%s\n' absent >> "$fixture_dir/absence-probes" || exit 98
-    fi
-    echo "no current target" >&2
-    exit 1
-  fi
+  printf '%s\n' "$spec" >> "$fixture_dir/host-start-attempts" || exit 96
 done
-exit 0
+[ "$found" -eq 1 ] || exit 97
+echo 'terminal-host: refused by the test' >&2
+exit 1
 "#,
             )
             .unwrap();
-            {
-                use std::os::unix::fs::PermissionsExt as _;
-                std::fs::set_permissions(&failing_tmux, std::fs::Permissions::from_mode(0o755))
-                    .unwrap();
-            }
+            std::fs::set_permissions(
+                &refusing_host,
+                std::os::unix::fs::PermissionsExt::from_mode(0o755),
+            )
+            .unwrap();
             let sup = Supervisor::new_with_seams(
                 state.path(),
                 dummy_exe(),
                 SupervisorTimeouts::default(),
                 SupervisorSeams {
-                    tmux_program: failing_tmux,
+                    host_program: Some(refusing_host),
                     ..scopeless_seams()
                 },
             )
             .await
             .unwrap();
-            let attempts = state.path().join("new-session-attempts");
-            let probes = state.path().join("absence-probes");
+            let attempts = state.path().join("host-start-attempts");
             assert!(
                 !attempts.exists(),
                 "startup must not attempt the fixture create"
@@ -34231,23 +34169,26 @@ exit 0
             let refusal = sup
                 .create_session_without_overrides("/", "agent", None, 80, 24, Some(claim.clone()))
                 .await
-                .expect_err("the fake refuses new-session and confirms absence");
+                .expect_err("the fake refuses the host start");
             let first_kind = error_kind(&refusal);
             let first_message = format!("{refusal:#}");
+            assert!(
+                first_message.contains("refused by the test"),
+                "the refusal is the fake host's own: {first_message}"
+            );
             let reservation = sup
                 .store
                 .reservation(&claim.intent_key)
                 .await
                 .unwrap()
                 .unwrap();
-            let spec =
-                crate::launch::spec_path_for_launch(state.path(), &reservation.session_id, 0);
-            let sentinel = crate::launch::status_path_for_spec(&spec);
-            let waypoint = crate::launch::waypoint_path_for_spec(&spec);
-            let attempted = std::fs::read(&attempts).expect("the fake witnessed all three files");
+            let artifacts = LaunchArtifacts::for_launch(state.path(), &reservation.session_id, 0);
+            let spec = artifacts.spec().to_path_buf();
+            let sentinel = artifacts.status().to_path_buf();
+            let waypoint = artifacts.waypoint().to_path_buf();
+            let host_record = artifacts.host().to_path_buf();
+            let attempted = std::fs::read(&attempts).expect("the fake witnessed every file");
             assert_eq!(attempted, format!("{}\n", spec.display()).as_bytes());
-            let probed = std::fs::read(&probes).expect("the failed spawn was probed for absence");
-            assert_eq!(probed, b"absent\n");
             let published: LaunchSpec = serde_json::from_slice(
                 &std::fs::read(state.path().join("refused-launch.json")).unwrap(),
             )
@@ -34259,7 +34200,7 @@ exit 0
                 published.preparation.is_none(),
                 "this is an ordinary create"
             );
-            assert!(!spec.exists() && !waypoint.exists());
+            assert!(!spec.exists() && !waypoint.exists() && !host_record.exists());
             if obstruct_status {
                 assert!(
                     sentinel.is_dir(),
@@ -34302,12 +34243,7 @@ exit 0
             assert_eq!(
                 std::fs::read(&attempts).unwrap(),
                 attempted,
-                "retry must not spawn"
-            );
-            assert_eq!(
-                std::fs::read(&probes).unwrap(),
-                probed,
-                "retry must not reconcile a spent key"
+                "retry must not start a host"
             );
             assert_eq!(
                 sup.store
@@ -34319,7 +34255,7 @@ exit 0
             );
             assert!(sup.store.load_all().await.unwrap().is_empty());
             assert!(sup.sessions.lock().await.is_empty());
-            assert!(!spec.exists() && !waypoint.exists());
+            assert!(!spec.exists() && !waypoint.exists() && !host_record.exists());
             assert_eq!(sentinel.is_dir(), obstruct_status);
             if !obstruct_status {
                 assert!(!sentinel.exists());
@@ -34747,8 +34683,8 @@ exit 0
     /// session, not one per launch.
     ///
     /// The bug this pins is a lost update with no symptom at the moment it
-    /// happens. `sample_pass` clones an entry, awaits a `capture-pane`
-    /// round trip, and only then dates what it saw; a restart landing in
+    /// happens. `sample_pass` clones an entry, awaits a read of its
+    /// terminal's screen, and only then dates what it saw; a restart landing in
     /// that window republishes a new entry under the same id. With a
     /// per-launch cell the late write would advance the ABANDONED entry
     /// while the same sampler's durable write advanced the row, leaving
@@ -34768,7 +34704,7 @@ exit 0
     #[farhelm_testtrace::test]
     async fn a_late_activity_write_from_a_pre_restart_entry_reaches_the_live_reply() {
         let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         let cwd = state.path().to_string_lossy().to_string();
@@ -37501,7 +37437,7 @@ exit 0
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn a_claude_create_carries_the_hook_flags_into_its_launch_spec() {
         let state = StateDir::new();
-        let sup = tmux_supervisor(state.path(), dummy_exe())
+        let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor");
         // A command launch declaring Claude: an undeclared command gets no
@@ -37580,10 +37516,9 @@ exit 0
     // -------------------------------------------------------------------------
 
     /// Default seams with the scope manager disabled, for create and
-    /// lifecycle tests whose contract is independent of cgroup scopes. Old
-    /// terminals ([`SupervisorSeams::tmux_terminals`]): these tests launch
-    /// real terminals, which a unit test can only start in tmux
-    /// ([`tmux_supervisor`]).
+    /// lifecycle tests whose contract is independent of cgroup scopes. Their
+    /// launches run in real terminal hosts started from this test binary
+    /// ([`host_seams`]).
     ///
     /// Even a create that fails before spawning probes availability while
     /// choosing its durable scope policy. A test's reply deadline must not
@@ -37602,12 +37537,12 @@ exit 0
     /// failed the v0.20.0 release gate on the first path (FLAKES.md,
     /// 2026-09-30). A disabled manager never asks the host's systemd
     /// anything and never records a scoped launch, so teardown takes the
-    /// plain process-tree sweep and a retry relies on the sentinel and tmux
-    /// evidence alone.
+    /// plain process-tree sweep and a retry relies on the sentinel and
+    /// terminal evidence alone.
     fn scopeless_seams() -> SupervisorSeams {
         SupervisorSeams {
             scopes: Arc::new(crate::scope::ScopeManager::disabled()),
-            ..SupervisorSeams::tmux_terminals()
+            ..host_seams()
         }
     }
 
@@ -38629,7 +38564,7 @@ exit 0
                         create_intent_waiting: Some(Arc::new(move |_| signal.notify_one())),
                         ..FaultHooks::default()
                     },
-                    ..SupervisorSeams::tmux_terminals()
+                    ..host_seams()
                 },
             )
             .await
@@ -38689,18 +38624,11 @@ exit 0
                 assert_eq!(stored[0].id, winner.id);
                 assert_eq!(sup.store.working_copy_rows().await.unwrap().len(), 1);
                 assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
-                sup.tmux
-                    .kill_session(&session_tmux_name(&stored[0].id))
-                    .await
-                    .unwrap();
-                assert!(
-                    !sup.tmux
-                        .pane_states()
-                        .await
-                        .unwrap()
-                        .values()
-                        .any(|pane| pane.session_name == session_tmux_name(&stored[0].id))
-                );
+                // The winner's agent runs in a real host; end it here, as
+                // the fixture's own cleanup, rather than leave it to the
+                // state directory's teardown.
+                let ended = crate::hosts::stop_terminal_hosts(state.path()).await;
+                assert!(ended.all_stopped(), "end the winner's host: {ended:?}");
             }
         }
     }
@@ -39288,7 +39216,7 @@ exit 0
             test -z \"${{FARHELM_SESSION_TOKEN-}}${{FARHELM_SESSION_ID-}}${{FARHELM_AGENT_ID-}}${{FARHELM_TAB_ID-}}${{FARHELM_SUPERVISOR_SOCK-}}\" || exit 97\n\
             printf '%s\\n' \"$$\" >> {}\nread lifetime\n", quote(starts.to_str().unwrap()))).unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let sup = tmux_supervisor(state.path(), std::env::current_exe().unwrap())
+        let sup = host_supervisor(state.path(), std::env::current_exe().unwrap())
             .await
             .unwrap();
         let mut first_checkout = checkout_fixture(&first_root);
@@ -39441,7 +39369,7 @@ exit 0
             fingerprint: checkout_fingerprint(&checkout),
             dedup_scope: DedupScope::Permanent,
         };
-        let sup = tmux_supervisor(state.path(), std::env::current_exe().unwrap())
+        let sup = host_supervisor(state.path(), std::env::current_exe().unwrap())
             .await
             .expect("supervisor");
 
@@ -39519,7 +39447,7 @@ exit 0
             fingerprint: checkout_fingerprint(&checkout),
             dedup_scope: DedupScope::Permanent,
         };
-        let sup = tmux_supervisor(state.path(), dummy_exe()).await.unwrap();
+        let sup = host_supervisor(state.path(), dummy_exe()).await.unwrap();
         let origin = fresh_create(&sup, &checkout, Some(claim.clone()))
             .await
             .unwrap();
@@ -39550,7 +39478,7 @@ exit 0
         assert!(ordinary.github_repo.is_none() && ordinary.working_copy.is_none());
         for supervisor in [
             Arc::clone(&sup),
-            tmux_supervisor(state.path(), dummy_exe()).await.unwrap(),
+            host_supervisor(state.path(), dummy_exe()).await.unwrap(),
         ] {
             let listed = super::super::listing::list_all(&supervisor).await.unwrap();
             let fresh = listed
@@ -39735,8 +39663,8 @@ exit 0
     }
 
     /// The accepted-before-confirmation boundary whose only surviving proof
-    /// will be the shim's sentinel. The fixture owns its private terminal and
-    /// database; no system scope may supply a second source of acceptance.
+    /// will be the shim's sentinel. The fixture owns its private terminal host
+    /// and database; no system scope may supply a second source of acceptance.
     struct PendingSentinelFixture {
         state: StateDir,
         sup: Arc<Supervisor>,
@@ -39747,18 +39675,100 @@ exit 0
 
     /// Pin startup identity and exclude cgroup evidence so these tests prove
     /// sentinel preservation rather than succeeding through another witness.
-    /// Old terminals, for [`tmux_supervisor`]'s reason.
+    /// Launches run in real terminal hosts started from this test binary
+    /// ([`host_seams`]), as a shipped supervisor's do.
     fn sentinel_recovery_seams() -> SupervisorSeams {
         SupervisorSeams {
             boot_id: Arc::new(|| Ok(Some("sentinel-test-boot".into()))),
             scopes: Arc::new(crate::scope::ScopeManager::disabled()),
-            ..SupervisorSeams::tmux_terminals()
+            ..host_seams()
         }
     }
 
-    /// Accept a real tmux terminal but interrupt before durable confirmation.
-    /// Callers choose which physical evidence survives; the dummy executable
-    /// cannot itself write a shim report or run checkout preparation.
+    /// The socket of the terminal host that `row`'s launch started, as the
+    /// launch record of its generation names it.
+    ///
+    /// For a launch interrupted before its confirmation the record is the
+    /// only durable pointer to its host (`host_launch`, "The launch record"):
+    /// the row's `terminal_address` is still empty, as an unconfirmed tmux
+    /// launch's pane id is.
+    async fn launch_host_socket(sup: &Supervisor, row: &StoredSession) -> PathBuf {
+        let artifacts = LaunchArtifacts::for_launch(&sup.state_dir, &row.id, row.generation);
+        let record = super::host_launch::read_launch_record(artifacts.host())
+            .await
+            .expect("read the launch's host record")
+            .expect("premise: the launch recorded the host it started");
+        sup.recorded_socket(&record)
+            .expect("the recorded socket's path")
+    }
+
+    /// The sockets in `state_dir`'s socket directory, one per terminal host
+    /// that has not ended (a host ended through its protocol removes its own
+    /// socket). Empty when the directory does not exist.
+    ///
+    /// The replay assertions use this to say that nothing started a host: a
+    /// create that relaunched would have to bind a new socket here.
+    fn host_sockets(state_dir: &Path) -> Vec<PathBuf> {
+        match std::fs::read_dir(crate::hosts::hosts_dir(state_dir)) {
+            Ok(entries) => entries
+                .map(|entry| entry.expect("list the socket directory").path())
+                .collect(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => panic!("listing the socket directory: {error}"),
+        }
+    }
+
+    /// Adopt the host at `socket` as a reload adopts a host it finds, and
+    /// wait until its runtime has processed the child's exit record.
+    ///
+    /// The fixtures' dummy launch shim does not exist, so the host's login
+    /// shell fails to run it and exits at once, and the host keeps serving
+    /// the exit record until it is told to stop (`crates/terminal-host/SPEC.md`,
+    /// "Child exit and end of output"). That record is what a runtime reads
+    /// as a dead terminal, the host counterpart of a dead tmux pane; until
+    /// the runtime has replayed it the host reads as running
+    /// (`HostStatus::evidence`), so a classification before this wait would
+    /// test a live terminal instead. The handle returned is the only runtime
+    /// of the host; a test that wants a supervisor's reload to find the host
+    /// again first aborts it ([`crate::hosts::HostTerminal::abort`]), since two runtimes
+    /// would keep taking the host over from each other.
+    async fn adopt_exited_launch_host(
+        socket: &Path,
+        description: &str,
+    ) -> crate::hosts::HostTerminal {
+        let host = crate::hosts::HostTerminal::adopt(
+            socket,
+            crate::hosts::Adoption::Recovered,
+            crate::hosts::HostTerminalOptions::default(),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("adopt the fixture's host ({description}): {error}"));
+        wait_for_host_exit(&host, description).await;
+        host
+    }
+
+    /// Wait until `host`'s runtime has processed its child's exit record
+    /// (`host_terminals::wait_for`, the shared wait on a host's status).
+    async fn wait_for_host_exit(host: &crate::hosts::HostTerminal, description: &str) {
+        host_terminals::wait_for(
+            host,
+            &format!("the fixture host's child exiting ({description})"),
+            |host| matches!(host.liveness(), crate::hosts::Liveness::Exited { .. }),
+        )
+        .await;
+    }
+
+    /// Accept a real terminal host launch but interrupt before durable
+    /// confirmation. Callers choose which physical evidence survives; the
+    /// dummy executable cannot itself write a shim report or run checkout
+    /// preparation.
+    ///
+    /// The interruption is the create's `DuringLaunch` crash: the host and its
+    /// child were started and adopted, and the host's launch record names its
+    /// socket, but the row is still `Launching` with no terminal address and
+    /// the reservation still pending. The create's runtime goes with the
+    /// create's error, so the host keeps running with no runtime attached, as
+    /// after a supervisor crash.
     async fn accepted_pending_launch_fixture(fresh: bool) -> PendingSentinelFixture {
         let state = StateDir::new();
         let checkout = if fresh {
@@ -39826,16 +39836,14 @@ exit 0
             .unwrap();
         assert_eq!(row.generation, 0);
         assert_eq!(row.outcome, LastOutcome::Launching);
+        assert_eq!(row.terminal_kind, crate::store::TerminalKind::Host);
         assert!(row.terminal_address.is_empty());
         assert!(!row.launch_scoped);
+        let socket = launch_host_socket(&sup, &row).await;
         assert!(
-            sup.tmux
-                .pane_states()
-                .await
-                .unwrap()
-                .values()
-                .any(|p| p.session_name == session_tmux_name(&row.id)),
-            "premise: tmux actually accepted this session before its durable pane was recorded"
+            socket.exists(),
+            "premise: a host actually accepted this launch before its socket was recorded \
+             in the row"
         );
         PendingSentinelFixture {
             state,
@@ -39849,6 +39857,11 @@ exit 0
     /// Leave the fixture sentinel as the accepted launch's only witness.
     /// The report is supplied at its production path after actual terminal
     /// acceptance, so this tests evidence consumption rather than shim exec.
+    ///
+    /// The host is ended through its protocol, as a reboot ends it
+    /// ([`crate::hosts::stop_terminal_hosts`]), which removes its socket. Its
+    /// launch record stays, as the cleanup after a launch error leaves it,
+    /// but names a socket nothing serves, which proves no host there.
     async fn pending_sentinel_fixture(fresh: bool) -> PendingSentinelFixture {
         let PendingSentinelFixture {
             state,
@@ -39857,17 +39870,11 @@ exit 0
             checkout,
             row,
         } = accepted_pending_launch_fixture(fresh).await;
-        sup.tmux
-            .kill_session(&session_tmux_name(&row.id))
-            .await
-            .unwrap();
+        let socket = launch_host_socket(&sup, &row).await;
+        let ended = crate::hosts::stop_terminal_hosts(state.path()).await;
+        assert!(ended.all_stopped(), "end the fixture's host: {ended:?}");
         assert!(
-            !sup.tmux
-                .pane_states()
-                .await
-                .unwrap()
-                .values()
-                .any(|p| p.session_name == session_tmux_name(&row.id)),
+            !socket.exists() && host_sockets(state.path()).is_empty(),
             "premise: the sentinel must become the only remaining launch witness"
         );
         let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
@@ -39888,27 +39895,31 @@ exit 0
     }
 
     /// Freeze the exact evidence Stop can leave before its final write.
-    /// The accepted dummy terminal dies without consuming its spec. Scoped
-    /// cases plant the wrapper waypoint for observation and reload; unscoped
-    /// cases retain the real fixture's launch so Stop can run its cleanup.
-    /// A fresh checkout additionally has genuine accepted preparation duty.
-    /// Stop is recorded through the store rather than only in the entry.
+    /// The accepted dummy terminal's child exits without consuming its spec,
+    /// and the entry holds a runtime that has read that exit (see
+    /// [`adopt_exited_launch_host`]). Scoped cases plant the wrapper
+    /// waypoint for observation and reload; unscoped cases retain the real
+    /// fixture's launch so Stop can run its cleanup. A fresh checkout
+    /// additionally has genuine accepted preparation duty. Stop is recorded
+    /// through the store rather than only in the entry.
     async fn pending_startup_stop_fixture(
         fresh: bool,
         scoped: bool,
     ) -> (PendingSentinelFixture, Arc<SessionEntry>) {
         let fixture = accepted_pending_launch_fixture(fresh).await;
         let row = &fixture.row;
-        wait_for_dead_fixture_pane(&fixture.sup, "pending startup Stop", |_, pane| {
-            pane.session_name == session_tmux_name(&row.id)
-        })
-        .await;
-        let states = fixture.sup.tmux.pane_states().await.unwrap();
-        let (address, pane) = states
-            .iter()
-            .find(|(_, pane)| pane.session_name == session_tmux_name(&row.id))
-            .unwrap();
-        assert!(pane.dead, "premise: startup stopped before classification");
+        let socket = launch_host_socket(&fixture.sup, row).await;
+        let host = adopt_exited_launch_host(&socket, "pending startup Stop").await;
+        assert!(
+            matches!(
+                host.evidence(),
+                crate::hosts::HostEvidence::Owned { dead: true, .. }
+            ),
+            "premise: startup stopped before classification"
+        );
+        let exit_code = host.exit_code();
+        let terminal = Terminal::Host(host);
+        let address = terminal.recorded_address().to_string();
         let spec = crate::launch::spec_path_for_launch(fixture.state.path(), &row.id, 0);
         if scoped {
             let mut value: serde_json::Value =
@@ -39924,17 +39935,10 @@ exit 0
             "your login shell exited"
         };
         assert!(
-            wrapper_failure_detail(
-                fixture.state.path(),
-                &row.id,
-                0,
-                scoped,
-                true,
-                pane.exit_code
-            )
-            .await
-            .unwrap()
-            .is_some_and(|detail| detail.contains(competing_detail)),
+            wrapper_failure_detail(fixture.state.path(), &row.id, 0, scoped, true, exit_code)
+                .await
+                .unwrap()
+                .is_some_and(|detail| detail.contains(competing_detail)),
             "premise: the competing startup inference applies before Stop is recorded"
         );
         if fresh {
@@ -39983,10 +39987,7 @@ exit 0
             .transition(&row.id, 0, Transition::StopRequested)
             .await
             .unwrap();
-        let mut entry = entry_with(
-            Some(Terminal::tmux(session_tmux_name(&row.id), address.clone())),
-            LastOutcome::StopRequested,
-        );
+        let mut entry = entry_with(Some(terminal), LastOutcome::StopRequested);
         entry.info.id = row.id.clone();
         // A planted scope is classification evidence only. Handler cases keep
         // the actual unscoped launch: a disabled manager cannot verify a fake
@@ -40021,18 +40022,64 @@ exit 0
         (fixture, Arc::new(entry))
     }
 
+    /// Stop the test's own runtime of `entry`'s host without ending the
+    /// host, so that a reload's scan can adopt the host, as a supervisor
+    /// restart finds it with no runtime attached.
+    fn release_fixture_host(entry: &SessionEntry) {
+        match &entry.terminal {
+            Some(Terminal::Host(host)) => host.abort(),
+            other => panic!("premise: the fixture entry holds a host terminal: {other:?}"),
+        }
+    }
+
+    /// Run the ticker's observation over the host entries a reload returned
+    /// once each one's runtime has processed its child's exit record.
+    ///
+    /// A reload reads an adopted host's status once, right after adoption,
+    /// and a host whose child exited while no supervisor was attached reads
+    /// as running until its runtime has replayed the exit record; the ticker
+    /// records that exit once it has (`reload_sessions_with_hosts`, "Host
+    /// rows"). So for a found host the reload's decision is completed by
+    /// this observation, which is how the shipped ticker completes it (its
+    /// host path needs no pane states). A reload that already read the
+    /// exit recorded it itself, and the observation then proposes nothing.
+    async fn observe_reloaded_host_exits(
+        sup: &Supervisor,
+        reloaded: &HashMap<String, Arc<SessionEntry>>,
+    ) {
+        let entries: Vec<Arc<SessionEntry>> = reloaded
+            .values()
+            .filter(|entry| matches!(entry.terminal, Some(Terminal::Host(_))))
+            .cloned()
+            .collect();
+        for entry in &entries {
+            if let Some(Terminal::Host(host)) = &entry.terminal {
+                wait_for_host_exit(host, "the reloaded host").await;
+            }
+        }
+        super::super::ticker::observe_entries(
+            sup,
+            &entries,
+            &HashMap::new(),
+            &super::super::status::KnownTmuxNames::default(),
+        )
+        .await;
+    }
+
     /// The observer must skip both wrapper and checkout-preparation inference
-    /// during a pending Stop. The exact dead/spec/waypoint shape is present,
+    /// during a pending Stop. The exact shape those inferences read is
+    /// present (a host whose child exited, an unconsumed spec, a waypoint),
     /// so an Exited result cannot pass by avoiding the original failure mode.
+    /// The observation reads the host's own runtime, with no pane states, as
+    /// the ticker's host path does.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn pending_stop_observation_ignores_inferred_startup_failures() {
         for fresh in [false, true] {
             let (fixture, entry) = pending_startup_stop_fixture(fresh, true).await;
-            let states = fixture.sup.tmux.pane_states().await.unwrap();
             let observed = super::super::status::observe_entry(
                 &fixture.sup,
                 &entry,
-                &states,
+                &HashMap::new(),
                 &super::super::status::KnownTmuxNames::default(),
             )
             .await
@@ -40054,20 +40101,33 @@ exit 0
     /// Reload must make the same Stop decision with a dead terminal or no
     /// terminal at all. Both preserve the unread spec until the annotation
     /// commits; incomplete accepted preparation cannot turn either into Error.
+    ///
+    /// The dead terminal is the fixture's host, its child exited, which the
+    /// reload finds again by its tag (unconfirmed) or the socket its row
+    /// names (fresh, confirmed); no terminal is that host ended. A found
+    /// host may read as running until its runtime replays the exit record,
+    /// in which case the ticker's observation records the exit the reload
+    /// left to it ([`observe_reloaded_host_exits`]): the decision checked is
+    /// the one the reload and that observation make together.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn pending_stop_reload_keeps_startup_annotation_with_and_without_terminal() {
         for fresh in [false, true] {
             for absent in [false, true] {
                 let (fixture, entry) = pending_startup_stop_fixture(fresh, true).await;
+                let Some(Terminal::Host(host)) = &entry.terminal else {
+                    panic!("premise: the fixture's entry holds its host");
+                };
                 if absent {
-                    fixture
-                        .sup
-                        .tmux
-                        .kill_session(&session_tmux_name(&entry.info.id))
-                        .await
-                        .unwrap();
+                    let ended = host.shutdown().await.expect("end the fixture's host");
+                    assert!(ended.ended, "premise: the host confirmed its end");
+                    assert!(
+                        host_sockets(fixture.state.path()).is_empty(),
+                        "premise: no host is left for the reload to find"
+                    );
+                } else {
+                    release_fixture_host(&entry);
                 }
-                Supervisor::reload_sessions(
+                let (reloaded, _) = Supervisor::reload_sessions(
                     fixture.state.path(),
                     &fixture.sup.store,
                     &fixture.sup.tmux,
@@ -40076,6 +40136,12 @@ exit 0
                 )
                 .await
                 .unwrap();
+                assert_eq!(
+                    matches!(reloaded[&entry.info.id].terminal, Some(Terminal::Host(_))),
+                    !absent,
+                    "premise: the reload found the host exactly when it still runs"
+                );
+                observe_reloaded_host_exits(&fixture.sup, &reloaded).await;
                 assert!(
                     matches!(fixture.sup.store.session(&entry.info.id).await.unwrap().unwrap().outcome,
                     LastOutcome::Exited { annotation: Some(annotation), .. }
@@ -40088,6 +40154,7 @@ exit 0
 
     /// Retrying Stop after a sweep failed sees an already-dead startup, but
     /// that must remain the pending Stop's outcome rather than login-shell Error.
+    /// The dead startup is a host whose child exited before the shim ran.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn pending_stop_ended_agent_branch_keeps_startup_annotation() {
         let (fixture, entry) = pending_startup_stop_fixture(false, false).await;
@@ -40107,7 +40174,9 @@ exit 0
 
     /// Direct shim reports retain their stronger evidence while Stop is only
     /// pending. Exercise every classifier, so an early pending-stop gate cannot
-    /// accidentally hide the sentinel with the pane-based inferences.
+    /// accidentally hide the sentinel with the terminal-based inferences. The
+    /// reload case finds the fixture's host again, with no runtime of the
+    /// test's attached, as a restarted supervisor does.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn pending_stop_preserves_direct_shim_failure_in_every_classifier() {
         for classifier in ["observer", "reload", "stop"] {
@@ -40120,11 +40189,10 @@ exit 0
             .unwrap();
             match classifier {
                 "observer" => {
-                    let states = fixture.sup.tmux.pane_states().await.unwrap();
                     let observed = super::super::status::observe_entry(
                         &fixture.sup,
                         &entry,
-                        &states,
+                        &HashMap::new(),
                         &super::super::status::KnownTmuxNames::default(),
                     )
                     .await
@@ -40137,6 +40205,7 @@ exit 0
                         .unwrap();
                 }
                 "reload" => {
+                    release_fixture_host(&entry);
                     Supervisor::reload_sessions(
                         fixture.state.path(),
                         &fixture.sup.store,
@@ -40168,6 +40237,8 @@ exit 0
 
     /// An identical retry must replay the retained Error without creating a
     /// terminal or a new spec after cleanup has removed all physical proof.
+    /// A created terminal would be a host bound in the state directory's
+    /// socket directory, which every caller leaves empty before the replay.
     async fn assert_sentinel_replay(
         sup: &Arc<Supervisor>,
         claim: &IntentClaim,
@@ -40204,13 +40275,10 @@ exit 0
         assert_eq!(durable.generation, 0);
         assert!(durable.terminal_address.is_empty());
         assert!(!crate::launch::spec_path_for_launch(&sup.state_dir, &row.id, 0).exists());
-        assert!(
-            !sup.tmux
-                .pane_states()
-                .await
-                .unwrap()
-                .values()
-                .any(|p| p.session_name == session_tmux_name(&row.id))
+        assert_eq!(
+            host_sockets(&sup.state_dir),
+            Vec::<PathBuf>::new(),
+            "the replay started no terminal host"
         );
     }
 
@@ -40272,9 +40340,14 @@ exit 0
         }
     }
 
-    /// A known Terminal may precede its durable pane record. When the
+    /// A known Terminal may precede its durable terminal record. When the
     /// never-started classifier has no sentinel, persisting that accepted
-    /// pane with Error is what keeps replay safe after tmux disappears.
+    /// host's socket name with Error is what keeps replay safe after the
+    /// host disappears.
+    ///
+    /// The known Terminal is the interrupted create's host, adopted as a
+    /// reload adopts it and holding its child's exit, while the row still
+    /// has no terminal address.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn pre_shim_error_observation_preserves_unconfirmed_terminal_provenance() {
         let PendingSentinelFixture {
@@ -40284,31 +40357,23 @@ exit 0
             row,
             ..
         } = accepted_pending_launch_fixture(false).await;
-        wait_for_dead_fixture_pane(&sup, "unconfirmed wrapper-shaped launch", |_, state| {
-            state.session_name == session_tmux_name(&row.id)
-        })
-        .await;
-        let states = sup.tmux.pane_states().await.unwrap();
-        let (pane, observed) = states
-            .iter()
-            .find(|(_, state)| state.session_name == session_tmux_name(&row.id))
-            .unwrap();
-        assert!(observed.dead);
+        let socket = launch_host_socket(&sup, &row).await;
+        let host = adopt_exited_launch_host(&socket, "unconfirmed wrapper-shaped launch").await;
         assert!(row.terminal_address.is_empty());
         let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
         assert!(spec.exists());
         assert!(!crate::launch::status_path_for_spec(&spec).exists());
-        let mut entry = entry_with(
-            Some(Terminal::tmux(session_tmux_name(&row.id), pane.clone())),
-            LastOutcome::Launching,
-        );
+        let terminal = Terminal::Host(host.clone());
+        let address = terminal.recorded_address().to_string();
+        let mut entry = entry_with(Some(terminal), LastOutcome::Launching);
         entry.info.id = row.id.clone();
         // This fixture selected no scope: an unconsumed spec under its
-        // dead pane now proves that its login shell never reached the shim.
+        // exited host child now proves that its login shell never reached
+        // the shim.
         let observed = super::super::status::observe_entry(
             &sup,
             &Arc::new(entry),
-            &states,
+            &HashMap::new(),
             &super::super::status::KnownTmuxNames::default(),
         )
         .await
@@ -40329,15 +40394,14 @@ exit 0
             .unwrap();
         let durable = sup.store.session(&row.id).await.unwrap().unwrap();
         assert_eq!(
-            durable.terminal_address, *pane,
-            "the known accepted pane must survive classification"
+            durable.terminal_address, address,
+            "the known accepted host's socket must survive classification"
         );
         assert!(matches!(durable.outcome, LastOutcome::Error { .. }));
-        sup.tmux
-            .kill_session(&session_tmux_name(&row.id))
-            .await
-            .unwrap();
-        assert!(!sup.tmux.pane_states().await.unwrap().contains_key(pane));
+        let ended = host.shutdown().await.expect("end the fixture's host");
+        assert!(ended.ended, "the host confirmed its end");
+        assert!(!socket.exists(), "premise: the host is gone");
+        drop(host);
         drop(sup);
         let reopened = Supervisor::new_with_seams(
             state.path(),
@@ -40363,14 +40427,10 @@ exit 0
             .unwrap();
         assert_eq!(replay.id, row.id);
         assert!(!spec.exists());
-        assert!(
-            !reopened
-                .tmux
-                .pane_states()
-                .await
-                .unwrap()
-                .values()
-                .any(|state| state.session_name == session_tmux_name(&row.id))
+        assert_eq!(
+            host_sockets(state.path()),
+            Vec::<PathBuf>::new(),
+            "the replay started no terminal host"
         );
     }
 
@@ -41489,17 +41549,67 @@ exit 0
         }
     }
 
+    /// A launch shim for tests that need a session's agent terminal to stay
+    /// live: a script that ignores its arguments and runs `sleep 300`, so the
+    /// host's child runs until the test kills it or ends the host.
+    ///
+    /// It neither consumes the launch spec nor runs checkout preparation, as
+    /// the nonexistent [`dummy_exe`] does not either; the difference is only
+    /// that the terminal stays live, which a classification of a live
+    /// terminal needs now that liveness comes from the host's own runtime
+    /// rather than from a pane-state map a test could edit.
+    fn long_lived_launcher(state: &StateDir) -> PathBuf {
+        let launcher = state.path().join("long-lived-launcher");
+        std::fs::write(&launcher, "#!/bin/sh\nexec sleep 300\n").expect("write the launcher");
+        std::fs::set_permissions(
+            &launcher,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("make the launcher executable");
+        launcher
+    }
+
+    /// `sup`'s published host terminal for session `id`, checked to be the
+    /// agent host of that session's launch `generation` by its tag: the host
+    /// counterpart of a pane found under the session's own tmux name.
+    async fn own_agent_host(
+        sup: &Supervisor,
+        id: &str,
+        generation: i64,
+    ) -> crate::hosts::HostTerminal {
+        let host = sup
+            .agent_host_for_test(id)
+            .await
+            .expect("premise: the session's agent runs in a host");
+        let tag = host.tag().expect("premise: the host's tag was read");
+        assert_eq!(
+            (tag.session_id.as_str(), &tag.role),
+            (id, &crate::hosts::HostRole::Agent { generation }),
+            "premise: the accepted host is the session's own"
+        );
+        host
+    }
+
     /// Startup's cleanup authority comes from the accepted generation, its
-    /// preparation record and owned-pane evidence together. Supply pane samples
-    /// explicitly: the dummy shim creates provenance but is not a live clone.
+    /// preparation record and owned-terminal evidence together.
+    ///
+    /// The terminal is the session's real host, kept live by a launcher that
+    /// sleeps ([`long_lived_launcher`]): the launcher creates provenance but
+    /// is not a live clone, so the preparation states are written by the
+    /// test. Spec: while the host's child runs, NotStarted and CloneStarted
+    /// protect the claim and HookStarted, Ready and Failed do not; only the
+    /// accepted generation is ever protected; unreadable preparation
+    /// protects; a runtime that cannot read its host (unattributed evidence)
+    /// protects; a host whose child exited and a host that ended both
+    /// release the claim.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn spare_claim_cleanup_requires_exact_clone_and_owned_pane_evidence() {
+    async fn spare_claim_cleanup_requires_exact_clone_and_owned_terminal_evidence() {
         let state = StateDir::new();
         let root = state.path().join("checkouts");
         std::fs::create_dir(&root).unwrap();
         let sup = Supervisor::new_with_seams(
             state.path(),
-            dummy_exe(),
+            long_lived_launcher(&state),
             SupervisorTimeouts::default(),
             scopeless_seams(),
         )
@@ -41516,16 +41626,13 @@ exit 0
             .unwrap()
             .unwrap();
         let path = crate::launch::preparation_state_path(state.path(), &plan.id);
-        let mut panes = sup.tmux.pane_states().await.unwrap();
-        let pane = panes
-            .get_mut(&row.terminal_address)
-            .expect("accepted pane exists");
-        assert_eq!(
-            pane.session_name,
-            session_tmux_name(&row.id),
-            "premise: the accepted pane is the session's own"
+        let host = own_agent_host(&sup, &origin.id, row.generation).await;
+        assert!(
+            matches!(host.liveness(), crate::hosts::Liveness::Running { .. }),
+            "premise: the accepted host's child runs: {:?}",
+            host.liveness()
         );
-        pane.dead = false;
+        let claims = || async { sup.spare_claims_from_panes(&HashMap::new()).await };
         for (preparation, protect) in [
             (crate::launch::PreparationState::NotStarted, true),
             (crate::launch::PreparationState::CloneStarted, true),
@@ -41546,7 +41653,7 @@ exit 0
                 &crate::files::RealFs,
             )
             .unwrap();
-            let observed = sup.spare_claims_from_panes(&panes).await;
+            let observed = claims().await;
             assert_eq!(
                 observed
                     .protected
@@ -41563,7 +41670,7 @@ exit 0
         std::fs::write(&path, b"corrupt fixture state").unwrap();
         assert!(crate::launch::read_preparation_state(&path, &plan.id).is_err());
         assert!(
-            sup.spare_claims_from_panes(&panes)
+            claims()
                 .await
                 .protected
                 .contains(&(origin.id.clone(), row.generation))
@@ -41575,40 +41682,84 @@ exit 0
             &crate::files::RealFs,
         )
         .unwrap();
-        panes.get_mut(&row.terminal_address).unwrap().session_name =
-            "unattributed-fixture-owner".into();
+
+        // A runtime that cannot read its host, in place of the live one: the
+        // host may still run, so its evidence is unattributed, never gone.
+        let entry = sup.sessions.lock().await[&origin.id].clone();
+        let with_terminal = |terminal: crate::hosts::HostTerminal| {
+            Arc::new(SessionEntry {
+                info: entry.info.clone(),
+                terminal: Some(Terminal::Host(terminal)),
+                run: entry.run.clone(),
+                session: entry.session.clone(),
+                snapshot: entry.snapshot.clone(),
+                canonical_cwd: entry.canonical_cwd.clone(),
+                generation: entry.generation,
+                scope: entry.scope.clone(),
+            })
+        };
+        sup.sessions.lock().await.insert(
+            origin.id.clone(),
+            with_terminal(crate::hosts::HostTerminal::unavailable(
+                host.socket(),
+                crate::hosts::Unavailability::Busy,
+                None,
+            )),
+        );
         assert!(
-            sup.spare_claims_from_panes(&panes)
+            claims()
                 .await
                 .protected
-                .contains(&(origin.id.clone(), row.generation))
+                .contains(&(origin.id.clone(), row.generation)),
+            "an unreadable host protects"
         );
-        panes.get_mut(&row.terminal_address).unwrap().session_name = session_tmux_name(&row.id);
-        panes.get_mut(&row.terminal_address).unwrap().dead = true;
-        assert!(
-            sup.spare_claims_from_panes(&panes)
-                .await
-                .protected
-                .is_empty()
-        );
-        panes.remove(&row.terminal_address);
-        assert!(
-            sup.spare_claims_from_panes(&panes)
-                .await
-                .protected
-                .is_empty()
-        );
-        sup.tmux
-            .kill_session(&session_tmux_name(&row.id))
+        sup.sessions
+            .lock()
             .await
-            .unwrap();
+            .insert(origin.id.clone(), with_terminal(host.clone()));
+
+        // The host's child exits: a dead terminal, as a dead pane is.
+        let child = host
+            .child_root()
+            .expect("premise: the host's running child is pinned");
+        // SAFETY: kill has no memory preconditions. The pid is the host's
+        // own child, `sleep 300` from the long-lived launcher, which cannot
+        // have exited (and so been reaped and its pid reused) this soon.
+        assert_eq!(
+            unsafe { libc::kill(child.pid as libc::pid_t, libc::SIGKILL) },
+            0,
+            "kill the host's child"
+        );
+        wait_for_host_exit(&host, "the killed launcher").await;
+        assert!(
+            claims().await.protected.is_empty(),
+            "a host whose child exited releases the claim"
+        );
+
+        // The host ends: no terminal is left at all.
+        let ended = host.shutdown().await.expect("end the host");
+        assert!(ended.ended, "premise: the host confirmed its end");
+        assert!(
+            matches!(host.evidence(), crate::hosts::HostEvidence::Absent),
+            "premise: the ended host reads as absent"
+        );
+        assert!(
+            claims().await.protected.is_empty(),
+            "an ended host releases the claim"
+        );
     }
 
     /// A stopped accepted terminal with incomplete setup must not look like
     /// an ordinary agent exit. Polling and startup use the same evidence;
     /// Ready and borrower sessions retain ordinary exit classification.
-    /// The dummy shim is deliberately not an at-most-once execution oracle:
-    /// this test supplies preparation records and consumes its spec explicitly.
+    /// The launch shim is deliberately not an at-most-once execution oracle:
+    /// this test supplies preparation records and consumes its spec
+    /// explicitly.
+    ///
+    /// The terminal is the session's real host, kept live by a launcher that
+    /// sleeps ([`long_lived_launcher`]), so the first observation reads a
+    /// live terminal from the host's runtime; ending the host is what stops
+    /// it, and leaves the session with no terminal to find.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
     async fn checkout_interruption_status_matches_reload() {
         for evidence in [
@@ -41622,7 +41773,9 @@ exit 0
             let state = StateDir::new();
             let root = state.path().join("checkouts");
             std::fs::create_dir(&root).unwrap();
-            let sup = tmux_supervisor(state.path(), dummy_exe()).await.unwrap();
+            let sup = host_supervisor(state.path(), long_lived_launcher(&state))
+                .await
+                .unwrap();
             let origin = fresh_create(&sup, &checkout_fixture(&root), None)
                 .await
                 .unwrap();
@@ -41677,7 +41830,7 @@ exit 0
                 "another generation cannot supply acceptance evidence"
             );
             let spec = crate::launch::spec_path_for_launch(state.path(), &info.id, row.generation);
-            assert!(spec.exists(), "dummy shim leaves the spec unconsumed");
+            assert!(spec.exists(), "the launcher leaves the spec unconsumed");
             std::fs::remove_file(spec).unwrap();
             assert!(
                 read_launch_sentinel(state.path(), &info.id, row.generation)
@@ -41686,23 +41839,17 @@ exit 0
                     .is_none()
             );
             let entry = sup.sessions.lock().await[&info.id].clone();
-            let mut live = sup.tmux.pane_states().await.unwrap();
-            let pane = live
-                .get_mut(&row.terminal_address)
-                .expect("accepted pane exists");
-            assert_eq!(
-                pane.session_name,
-                session_tmux_name(&row.id),
-                "premise: the accepted pane is the session's own"
+            let host = own_agent_host(&sup, &info.id, row.generation).await;
+            assert!(
+                matches!(host.liveness(), crate::hosts::Liveness::Running { .. }),
+                "premise: the accepted host's child runs: {:?}",
+                host.liveness()
             );
-            // This supplied observation tests the classifier's liveness gate,
-            // not the dummy process's lifetime or preparation execution.
-            pane.dead = false;
             assert!(
                 super::super::status::observe_entry(
                     &sup,
                     &entry,
-                    &live,
+                    &HashMap::new(),
                     &super::super::status::KnownTmuxNames::default()
                 )
                 .await
@@ -41710,19 +41857,16 @@ exit 0
                 .sentinel
                 .is_none()
             );
-            sup.tmux
-                .kill_session(&session_tmux_name(&row.id))
-                .await
-                .unwrap();
-            let absent = sup.tmux.pane_states().await.unwrap();
+            let ended = host.shutdown().await.expect("end the session's host");
+            assert!(ended.ended, "premise: the host confirmed its end");
             assert!(
-                !absent.contains_key(&row.terminal_address),
+                matches!(host.evidence(), crate::hosts::HostEvidence::Absent),
                 "premise: terminal is gone"
             );
             let observed = super::super::status::observe_entry(
                 &sup,
                 &entry,
-                &absent,
+                &HashMap::new(),
                 &super::super::status::KnownTmuxNames::default(),
             )
             .await
@@ -41754,15 +41898,21 @@ exit 0
         }
     }
 
-    /// Ready preparation and missing launch failure are final once an owned
-    /// pane has died. Corrupting preparation afterward makes a repeated parse
-    /// observable as Error, independently of the sentinel's negative result.
+    /// Ready preparation and missing launch failure are final once the
+    /// session's own terminal has died. Corrupting preparation afterward
+    /// makes a repeated parse observable as Error, independently of the
+    /// sentinel's negative result.
+    ///
+    /// The terminal is the session's host, whose child exits at once because
+    /// the dummy launch shim does not exist; the observation, as the
+    /// ticker's host path makes it, reads that exit from the host's runtime
+    /// and needs no pane states.
     #[farhelm_testtrace::test]
     async fn settled_launch_reads_do_not_reparse_ready_preparation() {
         let state = StateDir::new();
         let root = state.path().join("checkouts");
         std::fs::create_dir(&root).unwrap();
-        let sup = tmux_supervisor(state.path(), dummy_exe()).await.unwrap();
+        let sup = host_supervisor(state.path(), dummy_exe()).await.unwrap();
         let info = fresh_create(&sup, &checkout_fixture(&root), None)
             .await
             .unwrap();
@@ -41783,7 +41933,7 @@ exit 0
         let row = sup.store.session(&info.id).await.unwrap().unwrap();
         assert!(
             !row.terminal_address.is_empty(),
-            "premise: accepted pane owns preparation duty"
+            "premise: accepted host owns preparation duty"
         );
         assert!(
             sup.store
@@ -41799,22 +41949,15 @@ exit 0
         ))
         .unwrap();
         let entry = sup.sessions.lock().await[&info.id].clone();
-        let mut states = sup.tmux.pane_states().await.unwrap();
-        let pane = states.get_mut(&row.terminal_address).unwrap();
-        assert_eq!(
-            pane.session_name,
-            session_tmux_name(&row.id),
-            "premise: the accepted pane is the session's own"
-        );
-        // The dummy executable does not run preparation or the shim. Supply
-        // the classification boundary explicitly, as in the preparation tests
-        // above, so this proof depends on neither process timing nor Git.
-        pane.dead = true;
-        let known = super::super::status::KnownTmuxNames::from_sessions([(
-            info.id.as_str(),
-            Some(session_tmux_name(&row.id).as_str()),
-        )]);
-        super::super::ticker::observe_entries(&sup, &[Arc::clone(&entry)], &states, &known).await;
+        let host = own_agent_host(&sup, &info.id, row.generation).await;
+        // The dummy executable does not run preparation or the shim; the
+        // classification boundary is its host's child exiting, which the
+        // test waits for rather than racing, so this proof depends on
+        // neither process timing nor Git.
+        wait_for_host_exit(&host, "the missing launch shim").await;
+        let known = super::super::status::KnownTmuxNames::default();
+        super::super::ticker::observe_entries(&sup, &[Arc::clone(&entry)], &HashMap::new(), &known)
+            .await;
         assert!(
             entry
                 .run
@@ -41835,7 +41978,7 @@ exit 0
             crate::launch::read_preparation_state(&path, &plan.id).is_err(),
             "premise: another parse would fail"
         );
-        let observed = super::super::status::observe_entry(&sup, &entry, &states, &known)
+        let observed = super::super::status::observe_entry(&sup, &entry, &HashMap::new(), &known)
             .await
             .unwrap();
         assert!(
@@ -41848,13 +41991,15 @@ exit 0
     /// Corrupting only its preparation after a successful negative observation
     /// proves that the boot proof settles both evidence inputs, not just the
     /// launch-failure file. No real host reboot is needed: the boot-id seam
-    /// drives the same durable startup transaction.
+    /// drives the same durable startup transaction. The run's host is ended
+    /// before the reload, as a reboot ends it, so the reloaded session has
+    /// no terminal.
     #[farhelm_testtrace::test]
     async fn pre_reboot_exited_reads_do_not_reparse_ready_preparation() {
         let state = StateDir::new();
         let root = state.path().join("checkouts");
         std::fs::create_dir(&root).unwrap();
-        let sup = tmux_supervisor(state.path(), dummy_exe()).await.unwrap();
+        let sup = host_supervisor(state.path(), dummy_exe()).await.unwrap();
         let info = fresh_create(&sup, &checkout_fixture(&root), None)
             .await
             .unwrap();
@@ -41891,21 +42036,13 @@ exit 0
         ))
         .unwrap();
         let entry = sup.sessions.lock().await[&info.id].clone();
-        let mut states = sup.tmux.pane_states().await.unwrap();
-        let pane = states.get_mut(&row.terminal_address).unwrap();
-        assert_eq!(
-            pane.session_name,
-            session_tmux_name(&row.id),
-            "premise: the accepted pane is the session's own"
-        );
-        // The dummy shim never performs setup. Supply the owned-dead boundary
-        // explicitly so this test concerns evidence caching, not process timing.
-        pane.dead = true;
-        let known = super::super::status::KnownTmuxNames::from_sessions([(
-            info.id.as_str(),
-            Some(session_tmux_name(&row.id).as_str()),
-        )]);
-        super::super::ticker::observe_entries(&sup, &[entry], &states, &known).await;
+        let host = own_agent_host(&sup, &info.id, row.generation).await;
+        // The dummy shim never performs setup; its host's child exits at
+        // once. Wait for that owned-dead boundary so this test concerns
+        // evidence caching, not process timing.
+        wait_for_host_exit(&host, "the missing launch shim").await;
+        let known = super::super::status::KnownTmuxNames::default();
+        super::super::ticker::observe_entries(&sup, &[entry], &HashMap::new(), &known).await;
         let exited = sup.store.session(&info.id).await.unwrap().unwrap().outcome;
         assert!(matches!(
             exited,
@@ -41914,14 +42051,12 @@ exit 0
                 ..
             }
         ));
-        sup.tmux
-            .kill_session(&session_tmux_name(&row.id))
-            .await
-            .unwrap();
-        assert!(sup.tmux.pane_states().await.unwrap().is_empty());
+        let ended = host.shutdown().await.expect("end the session's host");
+        assert!(ended.ended, "premise: the host confirmed its end");
+        assert!(host_sockets(state.path()).is_empty());
         let seams = SupervisorSeams {
             boot_id: Arc::new(|| Ok(Some("preparation-next-boot".into()))),
-            ..SupervisorSeams::tmux_terminals()
+            ..host_seams()
         };
         let (reloaded, _) =
             Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
@@ -42672,15 +42807,20 @@ exit 0
         );
     }
 
-    /// C2, the post-mkdir launch failure: a tmux that refuses the session
-    /// AFTER the checkout was allocated leaves a LISTED retained error
+    /// C2, the post-mkdir launch failure: a terminal host that refuses to
+    /// start AFTER the checkout was allocated leaves a LISTED retained error
     /// session, keeps the registry row and its membership (the last
     /// ownership record after an allocation is never dropped), settles the
     /// intent `Failed`, and a reopen preserves all of it — a same-key
     /// retry replays the refusal without a second mkdir. The retained row
     /// is hinted to connected helms: the create itself replies with an
-    /// error, and an already-terminal row with no pane gets no later
+    /// error, and an already-terminal row with no terminal gets no later
     /// ticker transition that could hint it instead.
+    ///
+    /// The refusal is a host program that reads its spec, prints one line on
+    /// stderr and exits 1, which the spawn reports as a definitive refusal
+    /// (`SpawnError::Refused`): a host start that left nothing, the
+    /// post-allocation failure class this test exists for.
     ///
     /// The first supervisor runs with a disabled scope manager
     /// ([`scopeless_seams`]): on the real one the launch is set up to run
@@ -42690,7 +42830,7 @@ exit 0
     /// answering. The reopened
     /// supervisor only replays the settled refusal and keeps the defaults.
     #[farhelm_testtrace::test(flavor = "multi_thread")]
-    async fn a_tmux_failure_after_allocation_retains_the_error_session_and_ownership() {
+    async fn a_host_start_failure_after_allocation_retains_the_error_session_and_ownership() {
         let state = StateDir::new();
         let root = state.path().join("checkouts");
         std::fs::create_dir_all(&root).expect("fixture root");
@@ -42700,41 +42840,48 @@ exit 0
             fingerprint: checkout_fingerprint(&checkout),
             dedup_scope: DedupScope::Permanent,
         };
-        let failing_tmux = state.path().join("failing-tmux");
-        // The fake tmux answers the version probe (a create's preparation
-        // asks it once) and refuses EVERYTHING else — new-session,
-        // has-session — which is the post-allocation failure class. The
-        // driver prefixes its own socket/config arguments, so the flags
-        // are matched anywhere in the argument list, not at $1.
+        let refusing_host = state.path().join("refusing-host");
+        // Each start is counted, so the test can tell that the refusal came
+        // from a host start and that the replay starts none.
+        let starts = state.path().join("host-starts");
         std::fs::write(
-            &failing_tmux,
-            b"#!/bin/sh\n# The create's preparation runs a benign version probe (-V) that must\n# succeed before its new-session runs. Only the session-shaped commands\n# are refused: new-session -- the command the create path itself issues --\n# fails, and has-session reports absence (exit 1), so the failure\n# classifies as a genuine session-creation failure, the post-allocation\n# class this test exists for.\nfor arg in \"$@\"; do\n  if [ \"$arg\" = -V ]; then echo \"tmux 3.7c\"; exit 0; fi\n  if [ \"$arg\" = \"#{version}\" ]; then echo \"3.7c\"; exit 0; fi\n  if [ \"$arg\" = new-session ]; then exit 1; fi\n  if [ \"$arg\" = has-session ]; then echo \"no current target\" >&2; exit 1; fi\ndone\nexit 0\n",
+            &refusing_host,
+            format!(
+                "#!/bin/sh\necho start >> {starts}\ncat > /dev/null\necho 'terminal-host: refused by the test' >&2\nexit 1\n",
+                starts = shell_words::quote(starts.to_str().expect("UTF-8 state dir")),
+            ),
         )
-        .expect("failing tmux fixture");
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&failing_tmux, std::fs::Permissions::from_mode(0o755))
-                .expect("executable fixture");
-        }
-        let sup = {
-            Supervisor::new_with_seams(
-                state.path(),
-                dummy_exe(),
-                SupervisorTimeouts::default(),
-                SupervisorSeams {
-                    tmux_program: failing_tmux.clone(),
-                    ..scopeless_seams()
-                },
-            )
-            .await
-            .expect("supervisor")
-        };
+        .expect("refusing host fixture");
+        std::fs::set_permissions(
+            &refusing_host,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("executable fixture");
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            SupervisorSeams {
+                host_program: Some(refusing_host),
+                ..scopeless_seams()
+            },
+        )
+        .await
+        .expect("supervisor");
         let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
         let refusal = fresh_create(&sup, &checkout, Some(claim.clone()))
             .await
-            .expect_err("the tmux failure fails the create");
+            .expect_err("the host start failure fails the create");
         hints.expect_hint("the retained error session").await;
-        eprintln!("DEBUG refusal: {refusal:#}");
+        assert_eq!(
+            std::fs::read_to_string(&starts).expect("the fake host was started"),
+            "start\n",
+            "premise: the create's one host start is what refused"
+        );
+        assert!(
+            format!("{refusal:#}").contains("refused by the test"),
+            "the refusal carries the host's own line: {refusal:#}"
+        );
         assert!(
             format!("{refusal:#}").contains("allocated and is kept for inspection"),
             "the refusal must say the checkout itself survived: {refusal:#}"
@@ -42748,6 +42895,7 @@ exit 0
             .next()
             .expect("the error session row is retained, listed");
         assert_eq!(row.terminal_address, "", "nothing was ever launched");
+        assert_eq!(row.terminal_kind, crate::store::TerminalKind::Host);
         assert!(
             matches!(row.outcome, LastOutcome::Error { .. }),
             "the retained refusal is a visible error row"
@@ -42781,6 +42929,11 @@ exit 0
         assert!(
             format!("{replay:#}").contains("allocated and is kept for inspection"),
             "the replay is the SAME refusal: {replay:#}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&starts).expect("the fake host's start count"),
+            "start\n",
+            "the replay starts no host"
         );
         assert_eq!(
             sup.store

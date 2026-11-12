@@ -1655,7 +1655,7 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::{mpsc, oneshot, watch};
 
-    use super::super::core::tests::{StateDir, dummy_exe, entry_with, test_admission};
+    use super::super::core::tests::{StateDir, dummy_exe, entry_with, host_seams, test_admission};
     use super::super::core::{CreateInputs, SupervisorSeams, SupervisorTimeouts};
     use super::super::terminals::{SessionSinkHandle, SessionSinkLease, SinkRegistryState};
     use super::*;
@@ -4739,7 +4739,7 @@ mod tests {
                     create_directory_waiting: Some(Arc::new(move || signal.notify_one())),
                     ..crate::service::FaultHooks::default()
                 },
-                ..SupervisorSeams::tmux_terminals()
+                ..host_seams()
             },
         )
         .await
