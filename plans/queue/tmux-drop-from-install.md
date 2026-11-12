@@ -115,8 +115,9 @@ Settled by the maintainer while planning on 2026-11-11:
 - **Reviewer:** a single fresh-context agent on Opus 5.5 at high effort (see Review gate). If it cannot be reached when
   a review is due and is still unreachable after a reasonable retry, block the plan; no substitute reviewer.
 - **No-workhorse mode**, the plans default.
-- **Size gate:** about 1,200 added lines across the stack (code, tests and docs; deletions, changelog fragments and
-  review-queue removals not counted). Over it, block and bring it back.
+- **No line-count limit** (the maintainer, 2026-11-12, overriding the size gate this plan was written with): do not
+  block or bring the plan back because of how many lines it adds. Lines the work legitimately needs are fine; scope
+  still follows the outline, the Fallbacks and the scope reassessment.
 - **The maintainer's off-repo signing and publishing tooling** may expect six payloads per release; this plan makes a
   release publish four archives and `install.sh`. Agents never author that tooling. The maintainer was told while
   planning. Also state it prominently in the payload PR's description and in the report's "things you should know", with

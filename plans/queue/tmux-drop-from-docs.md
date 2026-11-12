@@ -111,8 +111,9 @@ Settled by the maintainer while planning on 2026-11-11:
 - **Reviewer:** a single fresh-context agent on Opus 5.5 at high effort (see Review gate). If it cannot be reached when
   a review is due and is still unreachable after a reasonable retry, block the plan; no substitute reviewer.
 - **No-workhorse mode**, the plans default.
-- **Size gate:** about 3,000 added lines across the stack (mostly rewritten docs and comments; deletions not counted).
-  Over it, block and bring it back.
+- **No line-count limit** (the maintainer, 2026-11-12, overriding the size gate this plan was written with): do not
+  block or bring the plan back because of how many lines it adds. Lines the work legitimately needs are fine; scope
+  still follows the outline, the Fallbacks and the scope reassessment.
 
 ## Requirement sources
 
