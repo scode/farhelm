@@ -1783,6 +1783,19 @@ pub(crate) fn ListView(
             // carries none at all, so it can neither confirm nor contradict
             // an optimistic rename.
             settle_optimistic_renames(&mut renamed.write(), &listing.sessions, index);
+            // A remembered Restart outcome is retired on any committed listing
+            // that positively shows the session past it. The open view's
+            // detail read retires it the same way, but a session restarted
+            // while another one was open has no view to do that, and its
+            // outcome would stay until a second reboot made a newly opened
+            // view attach to a dead pane. Like the rename settling above, this
+            // reads the reply's own rows, so it needs no `authoritative` and
+            // runs outside the absence cleanup below: a filtered, truncated
+            // or one-session read that shows the session is evidence enough.
+            // It takes this read's gate `generation`, never `index` (the poll
+            // sequence the rename settling uses): the outcome's floor is a
+            // `ReadGate` generation.
+            operations.retire_confirmed_restarts(&listing.sessions, generation);
             // A changed consequence is a replacement question, not authority
             // for an answer already queued from the previous rendered opening.
             if let Some(drawn) = bulk_delete_question.peek_key() {
@@ -2495,7 +2508,7 @@ pub(crate) fn ListView(
         }
         operations.stopping.write().insert(id.clone());
         operations.errors.write().remove(&id);
-        operations.boundary(&id, None);
+        operations.boundary(&id);
         // Acceptance completes the menu interaction; a later stop failure
         // belongs in the row's error line. Close here so async completion
         // cannot dismiss a menu the user opens while the request is pending.
@@ -2520,7 +2533,7 @@ pub(crate) fn ListView(
                 stop_session(&base, &id, refuse_if_tabs_open, refuse_if_agent_running).await
             };
             operations.stopping.write().remove(&id);
-            operations.boundary(&id, None);
+            operations.boundary(&id);
             match outcome {
                 Err(e) => {
                     errors.write().insert(id.clone(), format!("Stop: {e}"));
@@ -3109,7 +3122,7 @@ pub(crate) fn ListView(
                 .restarting
                 .write()
                 .insert(id.clone(), pending.clone());
-            operations.boundary(&id, None);
+            operations.boundary(&id);
             let base = header_base.clone();
             let refresh = header_listing.clone();
             spawn(async move {
@@ -3125,7 +3138,11 @@ pub(crate) fn ListView(
                         .insert(id.clone(), format!("Restart: {reason}"));
                 }
                 operations.restarting.write().remove(&id);
-                operations.boundary(&id, Some(RestartOutcome::of(&result)));
+                operations.finish_restart(
+                    &id,
+                    RestartOutcome::of(&result),
+                    listing_reads.peek().latest_started(),
+                );
                 refresh(Trigger::Explicit);
                 end_row_op(&id);
             });
@@ -3340,7 +3357,7 @@ pub(crate) fn ListView(
                 None,
             ),
         );
-        operations.boundary(source.id.raw(), None);
+        operations.boundary(source.id.raw());
         restart_claim.set(Some(claim));
         Ok(())
     });
@@ -3348,7 +3365,11 @@ pub(crate) fn ListView(
         if let Some(source) = restart_source.peek().as_ref() {
             operations.restarting.write().remove(source.id.raw());
             operations.pending.write().remove(source.id.raw());
-            operations.boundary(source.id.raw(), Some(outcome));
+            operations.finish_restart(
+                source.id.raw(),
+                outcome,
+                listing_reads.peek().latest_started(),
+            );
         }
         restart_claim.set(None);
         header_refresh.set(true);
