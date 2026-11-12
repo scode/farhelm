@@ -472,6 +472,10 @@ function layoutRequests(): Approval[] {
     { kind: "host_edit", host_name: host, destination: `operator@${"destination".repeat(30)}.invalid`,
       alias: { old: title, new: `${title} revised` }, icon: { old: "cloud", new: "rocket" }, color: { old: "default", new: "teal" } },
     { kind: "host_remove", host_name: host, destination: `operator@${"destination".repeat(30)}.invalid` },
+    { kind: "launch_environment", verb: "create", recipe: title, place: { kind: "tensorlake_account" },
+      place_name: null, cwd: "~", repo, title, launch, source: null, prompt },
+    { kind: "launch_environment", verb: "clone", recipe: title, place: { kind: "podman_host", host: 3 },
+      place_name: host, cwd: "", repo, title, launch, source: target, prompt: null },
   );
   for (const preapproved of [false, true]) {
     for (const local_network of [false, true]) {
@@ -548,7 +552,7 @@ for (const paneWidth of [960, 650, 320]) {
   test(`every approval kind keeps its header and answers visible in a ${paneWidth}px pane`, async ({ page }) => {
     const fixtures = layoutRequests();
     expect([...new Set(fixtures.map(card => (card.action as { kind: string }).kind))].sort(), "premise: the audit includes every wire kind")
-      .toEqual(["delete", "host_add", "host_edit", "host_remove", "launch", "launch_with_agent_wrapper", "launch_with_prompt", "open_url", "prompt", "rename", "restart", "stop", "template_delete", "template_write", "template_write_with_shortcuts"]);
+      .toEqual(["delete", "host_add", "host_edit", "host_remove", "launch", "launch_environment", "launch_with_agent_wrapper", "launch_with_prompt", "open_url", "prompt", "rename", "restart", "stop", "template_delete", "template_write", "template_write_with_shortcuts"]);
     const staged = await stageApprovals(page, [launchRequest("audit-start")]);
     await openSelected(page);
     await setPaneWidth(page, paneWidth);
@@ -1280,6 +1284,60 @@ test("a running prompt card keeps its full message and target facts readable", a
   await card.getByRole("button", { name: "Allow", exact: true }).click();
   await expect(card).toHaveCount(0);
   expect(staged.answers).toEqual([{ id: "running-prompt", answer: "allow" }]);
+});
+
+/** An agent's request for a new sandbox or container is the creation
+ * confirmation the session launcher would otherwise show (SPEC.md, "Agents and
+ * environments"), so its card must say a new machine is created, where, and
+ * for Tensorlake that it bills, and it must offer only Allow and Deny: no host
+ * setting may approve it, so no Always allow choice may appear either.
+ */
+test("an environment launch card names the new machine and asks only Allow or Deny", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const launch = {
+    kind: "agent",
+    selection: { harness: "claude", permissions: "guarded" },
+    start: ["claude", "--permission-mode", "auto", "{farhelm_args}"],
+    resume: null,
+  };
+  const staged = await stageApprovals(page, [
+    { ...launchRequest("new-sandbox"), action: {
+      kind: "launch_environment", verb: "create", recipe: "dev-box", place: { kind: "tensorlake_account" },
+      place_name: null, cwd: "~", repo: null, title: "sandbox work", launch, source: null, prompt: null,
+    } },
+    { ...launchRequest("new-container"), action: {
+      kind: "launch_environment", verb: "clone", recipe: "dev-box", place: { kind: "podman_host", host: 3 },
+      place_name: "build-box", cwd: "", repo: "acme/web", title: "copy", launch,
+      source: { id: "11111111-2222-4333-8444-555555555555:source", title: "original", host_name: "dev-box container" },
+      prompt: null,
+    } },
+  ]);
+  await openSelected(page);
+  const card = page.locator(".approval-card");
+  await expect(card).toHaveAttribute("data-approval-kind", "launch_environment");
+  await expect(card).toHaveAttribute("data-approval-id", "new-sandbox");
+  await expect(approvalValue(page, "recipe")).toHaveText("dev-box");
+  await expect(card).toContainText("a new Tensorlake sandbox");
+  await expect(card).toContainText("bills while running");
+  await expect(approvalValue(page, "folder")).toHaveText("~");
+  await expect(card.getByRole("button", { name: /Always allow/ })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Deny", exact: true })).toBeVisible();
+  await card.getByRole("button", { name: "Allow", exact: true }).click();
+
+  await expect(card).toHaveAttribute("data-approval-id", "new-container");
+  await expect(approvalValue(page, "new container on host")).toHaveText("build-box");
+  await expect(card).toContainText("creates a new container");
+  await expect(card).not.toContainText("bills");
+  await expect(approvalValue(page, "managed checkout of")).toHaveText("GitHub: acme/web");
+  await expect(card).toContainText("original");
+  await expect(card.getByRole("button", { name: /Always allow/ })).toHaveCount(0);
+  await expect(card.locator(".approval-allow")).toBeEnabled();
+  await card.getByRole("button", { name: "Deny", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  expect(staged.answers).toEqual([
+    { id: "new-sandbox", answer: "allow" },
+    { id: "new-container", answer: "deny" },
+  ]);
 });
 
 /** Read semantic requester roles or a labelled fact without confusing their hosts.

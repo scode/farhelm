@@ -622,6 +622,8 @@ impl Fixture {
             read_inside_file(&client, bare, &marker).await,
             b"tab-roundtrip"
         );
+        self.agent_requests_stay_inside(&client, &reference, host, tab_channel)
+            .await;
         client.detach(tab_channel).await;
         drop(tab_stream);
         client.close_tab(bare, &tab.id).await.unwrap();
@@ -681,6 +683,163 @@ impl Fixture {
             .await
             .expect("owned inside protocol client did not exit")
             .unwrap();
+    }
+
+    /// An agent in a real container session acts only within its container
+    /// (SPEC.md, "Agents and environments"), driven the way an agent drives
+    /// it: `farhelm agent` typed into a terminal tab of the session, whose
+    /// environment carries the session's credential, against the real helm.
+    ///
+    /// The container's host is set to run commands without asking first, so
+    /// nothing waits for a card nobody answers here; that setting is the
+    /// ordinary one, which the helm unit tests check is honored. Files the
+    /// shell writes are the oracle, as for the tab roundtrip above: the hosts
+    /// listing shows only this container, a create with no `--host` makes a
+    /// second session in it whose command really runs (it writes a marker the
+    /// test waits for before anything deletes it), a create naming the real
+    /// ordinary host outside is refused with the one scope sentence and puts
+    /// nothing there, and deleting that second session removes only it while
+    /// this session stays listed.
+    async fn agent_requests_stay_inside(
+        &self,
+        client: &Arc<SupervisorClient>,
+        asking: &farhelm_proto::SessionRef,
+        host: &Value,
+        tab_channel: u32,
+    ) {
+        let bare = asking.bare_id();
+        let environment = host["id"].as_i64().unwrap();
+        let (status, body) = post(
+            &self.http,
+            &self.url(&format!("/api/hosts/{environment}/commands-without-asking")),
+            json!({"commands_without_asking": true}),
+        )
+        .await;
+        assert!(
+            status.is_success(),
+            "let the container's agents act: {body}"
+        );
+        let program = farhelm_proto::text::shell_quote(host["remote_farhelm"].as_str().unwrap());
+        // A real host outside the container, so the refusal is the scope rule
+        // and not an unknown name: the connected ordinary host the place is on.
+        let hosts_now = self.observe("/api/hosts").await.unwrap();
+        let outside = hosts_now["hosts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["is_session_owned"] == false && row["state"]["phase"] == "connected")
+            .expect("premise: a connected host outside the container")
+            .clone();
+        assert_ne!(outside["id"], host["id"]);
+        let outside_sessions = || async {
+            self.observe("/api/sessions").await.unwrap()["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|row| row["host"] == outside["id"])
+                .count()
+        };
+        let outside_before = outside_sessions().await;
+        // First the create, whose session proves it ran by writing a marker
+        // and staying alive; the test sees that before anything deletes it.
+        let line = format!(
+            "P={program}; \"$P\" agent hosts > ~/.e2e-hosts 2>&1; \
+             \"$P\" agent create --cwd /home/ubuntu \
+             --command 'touch ~/.e2e-sibling-alive; exec sleep 600' --no-yolo --title spawned \
+             > ~/.e2e-created 2> ~/.e2e-created.err; echo done > ~/.e2e-create-done\r"
+        );
+        client.send_keys(tab_channel, line.into_bytes()).await;
+        wait_for_listing_with(
+            || client.stat_file(bare, "/home/ubuntu/.e2e-create-done"),
+            120,
+            "the create typed in the container's tab finished",
+            |info: &farhelm_proto::DownloadFileInfo| {
+                info.status == farhelm_proto::DownloadFileStatus::Ready
+            },
+        )
+        .await;
+        wait_for_listing_with(
+            || client.stat_file(bare, "/home/ubuntu/.e2e-sibling-alive"),
+            60,
+            "the created session's command ran in the container",
+            |info: &farhelm_proto::DownloadFileInfo| {
+                info.status == farhelm_proto::DownloadFileStatus::Ready
+            },
+        )
+        .await;
+        let line = format!(
+            "\"$P\" agent create --host {outside_name} --cwd /tmp --command true --no-yolo \
+             > /dev/null 2> ~/.e2e-refused; echo $? > ~/.e2e-refused.status; \
+             \"$P\" agent delete --session \"$(cat ~/.e2e-created)\" --stop-if-running \
+             > ~/.e2e-deleted 2>&1; echo $? > ~/.e2e-deleted.status; echo done > ~/.e2e-agent-done\r",
+            outside_name = farhelm_proto::text::shell_quote(outside["name"].as_str().unwrap()),
+        );
+        client.send_keys(tab_channel, line.into_bytes()).await;
+        wait_for_listing_with(
+            || client.stat_file(bare, "/home/ubuntu/.e2e-agent-done"),
+            120,
+            "the refused create and the delete typed in the container's tab finished",
+            |info: &farhelm_proto::DownloadFileInfo| {
+                info.status == farhelm_proto::DownloadFileStatus::Ready
+            },
+        )
+        .await;
+        let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
+        let hosts = text(read_inside_file(client, bare, "/home/ubuntu/.e2e-hosts").await);
+        let own_name = host["name"].as_str().unwrap();
+        assert!(
+            hosts.contains(own_name),
+            "the container lists itself: {hosts}"
+        );
+        assert!(
+            !hosts.contains("this machine"),
+            "the container lists no other host: {hosts}"
+        );
+        let created = text(read_inside_file(client, bare, "/home/ubuntu/.e2e-created").await);
+        let created_err =
+            text(read_inside_file(client, bare, "/home/ubuntu/.e2e-created.err").await);
+        let created = created
+            .trim()
+            .parse::<farhelm_proto::SessionRef>()
+            .unwrap_or_else(|error| panic!("a created session id ({error}): {created_err}"));
+        assert_eq!(
+            created.entry_uuid(),
+            asking.entry_uuid(),
+            "the new session is in this container, the asking session's own host entry"
+        );
+        let refused = text(read_inside_file(client, bare, "/home/ubuntu/.e2e-refused").await);
+        let refused_status =
+            text(read_inside_file(client, bare, "/home/ubuntu/.e2e-refused.status").await);
+        assert_ne!(refused_status.trim(), "0", "another host is refused");
+        assert!(
+            refused.contains("can only act within their own sandbox or container"),
+            "{refused}"
+        );
+        assert_eq!(
+            outside_sessions().await,
+            outside_before,
+            "the refused create put no session on the outside host"
+        );
+        let deleted = text(read_inside_file(client, bare, "/home/ubuntu/.e2e-deleted").await);
+        let deleted_status =
+            text(read_inside_file(client, bare, "/home/ubuntu/.e2e-deleted.status").await);
+        assert_eq!(
+            deleted_status.trim(),
+            "0",
+            "the sibling is deleted: {deleted}"
+        );
+        let listed = client.list_sessions().await.unwrap();
+        assert!(
+            listed
+                .sessions
+                .iter()
+                .all(|row| row.id != created.bare_id()),
+            "deleting the sibling removed it"
+        );
+        assert!(
+            listed.sessions.iter().any(|row| row.id == bare),
+            "the asking session carries on in the same container"
+        );
     }
 
     /// Exercise lifecycle through the public API, using direct Podman only for

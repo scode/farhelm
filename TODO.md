@@ -65,22 +65,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   provider or a documented provider fixture protocol that can ask a real question. Plan:
   `plans/queue/muse-session-tracking.md`.
 
-- **Container launch approval cards.** Launch approval cards must show the container settings, reusing the template
-  card's rows. Container-bearing approval cards must use a card kind older pages cannot decode, as prompt-bearing and
-  shortcut-moving cards already do, before or together with "Containerized sessions: `farhelm spawn` and CLI flags".
-  These findings were assessed from source during the 2026-11-04 triage. Plan:
-  `plans/queue/environment-agent-operations.md`.
-
-- **Containerized sessions: Farhelm integration inside the container.** The first, experimental containerized sessions
-  (rootless podman) run like a launch with conversation hooks turned off: no hooks, no conversation capture for Restart,
-  no `farhelm agent` commands or spawning, no attachments from inside. Add the full integration, restricted so a
-  containerized agent cannot ask for a session outside its container. Plan:
-  `plans/queue/environment-agent-operations.md`.
-
-- **Containerized sessions: `farhelm spawn` and CLI flags.** Let `farhelm spawn` and the other CLI entry points request
-  a containerized launch directly; today only the launcher, templates and launches copied from another session carry the
-  settings. Plan: `plans/queue/environment-agent-operations.md`.
-
 - **Stop containers an agent started through podman before killing processes.** Today Stop, tab close and Delete end a
   podman container that an agent or tab started (`podman run -d`, say) only by killing its processes, because the
   container's host-side helpers (podman's conmon and its network helper, pasta) stay in the scope of whatever started
@@ -259,15 +243,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   home and also checks a separate onboarding-completion setting. The fix the maintainer deferred: have Farhelm write the
   smallest set of non-secret first-run settings Claude needs, found by an isolated probe, keeping the user's other
   settings and the normal agent home, and check it with a valid subscription login.
-
-- **Let agents in sandbox sessions ask Farhelm to act.** The first version of sandbox sessions (a session in a
-  Tensorlake sandbox of its own, `plans/queue/sandbox-sessions.md`) refuses every agent request from such a session:
-  `farhelm spawn` and every `farhelm agent …` verb. The maintainer kept that refusal, without a notification, when
-  simplifying the first version on 2026-11-09. Decide what an agent in a disposable sandbox may ask for. It should not
-  reach the user's other hosts any further than it could from anywhere else (the trust questions in
-  `lore/2026-09-29-per-session-sandboxes-as-the-remote-host-goal.md` and SPEC.md's "Local authority and trust between
-  hosts"). Then allow that much. Spawning another sandbox session from the same recipe is the obvious first candidate.
-  Plan: `plans/queue/environment-agent-operations.md`.
 
 - **Deep dive on SQLite compaction settings.** Review how Farhelm's databases handle compaction: WAL checkpointing
   (nothing sets `wal_autocheckpoint`, so SQLite's default of 1000 pages applies, and the supervisor's database module
