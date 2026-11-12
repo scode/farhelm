@@ -374,6 +374,7 @@ pub(crate) fn phase_label(state: &HostPhase) -> &'static str {
         HostPhase::Suspended { .. } => "suspended",
         HostPhase::Stopped { .. } => "stopped",
         HostPhase::Retired { .. } => "retired",
+        HostPhase::Deleting { .. } => "deleting",
         HostPhase::Unrecognized => "unrecognized",
     }
 }
@@ -406,6 +407,8 @@ pub(crate) fn phase_display_label(state: &HostPhase) -> &'static str {
         HostPhase::Suspended { .. } => "Suspended",
         HostPhase::Stopped { .. } => "Stopped",
         HostPhase::Retired { .. } => "Retired",
+        HostPhase::Deleting { failure: None } => "Deleting…",
+        HostPhase::Deleting { failure: Some(_) } => "Deleting failed",
         HostPhase::Unrecognized => "Unrecognized",
     }
 }
@@ -623,6 +626,7 @@ pub(crate) fn phase_class(state: &HostPhase) -> &'static str {
         HostPhase::Connected { .. } => "connected",
         HostPhase::Connecting { .. } => "connecting",
         HostPhase::TensorlakeChanging { .. } => "connecting",
+        HostPhase::Deleting { failure: None } => "connecting",
         HostPhase::Unreachable { .. } => "unreachable",
         // Grey: nothing is wrong and nothing will change by itself until the
         // sandbox is resumed; neither the amber of a host that comes back
@@ -634,6 +638,7 @@ pub(crate) fn phase_class(state: &HostPhase) -> &'static str {
         | HostPhase::Duplicate { .. }
         | HostPhase::Retired { .. }
         | HostPhase::Stopped { .. }
+        | HostPhase::Deleting { failure: Some(_) }
         | HostPhase::Unrecognized => "needs-attention",
     }
 }
@@ -1122,6 +1127,19 @@ pub(crate) fn state_detail(state: &HostPhase) -> Vec<DetailPart> {
                 vec![DetailPart::peer(reason)]
             }
         }
+        // Without a provider to word it for (`host_state_detail` words it
+        // per provider when the host says which it is).
+        HostPhase::Deleting { failure: None } => {
+            vec![DetailPart::text(
+                "Farhelm is deleting this host's environment",
+            )]
+        }
+        HostPhase::Deleting {
+            failure: Some(reason),
+        } => vec![
+            DetailPart::text("Deleting this host's environment failed: "),
+            DetailPart::peer(reason),
+        ],
         HostPhase::Suspended {
             observed_at,
             suspended_by_farhelm_at,
@@ -1215,6 +1233,16 @@ fn host_state_detail(host: &Host) -> Vec<DetailPart> {
             crate::environment_ui::ProviderUi(provider)
                 .lifecycle_request_detail(lifecycle_verb(*direction), *requested_at),
         )],
+        (Some(provider), HostPhase::Deleting { failure }) => {
+            let mut parts = vec![DetailPart::text(
+                crate::environment_ui::ProviderUi(provider).deleting_detail(failure.is_some()),
+            )];
+            if let Some(reason) = failure {
+                parts.push(DetailPart::text(": "));
+                parts.push(DetailPart::peer(reason));
+            }
+            parts
+        }
         _ => state_detail(&host.state),
     }
 }
@@ -1337,6 +1365,10 @@ pub(crate) fn state_remedy(state: &HostPhase) -> Option<Vec<DetailPart>> {
         HostPhase::Retired { .. } => Some(vec![DetailPart::text(
             "Retry to start a fresh connection actor for this entry",
         )]),
+        HostPhase::Deleting { failure: Some(_) } => {
+            Some(vec![DetailPart::text("Retry to delete it again")])
+        }
+        HostPhase::Deleting { failure: None } => None,
     }
 }
 
@@ -1637,6 +1669,7 @@ pub(crate) fn session_unavailable_cause(lookup: HostLookup<'_>) -> &'static str 
                 LifecycleDirection::Resuming => "Host resuming",
             },
             HostPhase::Retired { .. } => "Host connection stopped",
+            HostPhase::Deleting { .. } => "Host being deleted",
             HostPhase::Unrecognized => "Host state unknown",
         },
     }
@@ -2325,9 +2358,20 @@ pub(crate) fn HostsPanel(
         // nothing to undo.
         // Retry and adopt answer with an empty object, so a 200 is the whole
         // answer and there is nothing for a decode to fail on.
+        // A sealed environment whose destruction failed waits on this same
+        // Retry; for it, Retry deletes again rather than reconnecting.
+        let deleting = matches!(snapshot.state, HostPhase::Deleting { failure: Some(_) });
         run(
             host,
-            Box::pin(async move { retry_host(&base, host).await.map(|()| Commit::Confirmed) }),
+            Box::pin(async move {
+                if deleting {
+                    crate::api::retry_environment_delete(&base, host)
+                        .await
+                        .map(|()| Commit::Confirmed)
+                } else {
+                    retry_host(&base, host).await.map(|()| Commit::Confirmed)
+                }
+            }),
             HostRequestDisplay::Refusal {
                 host: Box::new(snapshot),
                 action: HostRefusalAction::Retry,
@@ -4445,7 +4489,12 @@ fn HostRow(
     );
     let lifecycle_changing = matches!(host.state, HostPhase::TensorlakeChanging { .. });
     let offers_resume = suspended || lifecycle_changing;
-    let lifecycle_action = if host.kind.suspends() {
+    // A sandbox or container being deleted offers neither: Retry or Delete
+    // is what a failed deletion needs. The helm answers both as busy only
+    // while a destruction runs and does not refuse them after one failed,
+    // so leaving them off this menu is what keeps them out of the way.
+    let deleting = matches!(host.state, HostPhase::Deleting { .. });
+    let lifecycle_action = if host.kind.suspends() && !deleting {
         Some(if offers_resume {
             HostMenuAction::Resume
         } else {

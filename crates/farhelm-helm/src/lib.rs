@@ -1061,6 +1061,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(hosts::retry_host),
         )
         .route(
+            "/api/hosts/{id}/retry-delete",
+            axum::routing::post(sessions::retry_environment_delete),
+        )
+        .route(
             "/api/hosts/{id}/suspend",
             axum::routing::post(tensorlake::lifecycle::suspend),
         )
@@ -2512,6 +2516,9 @@ async fn serve_with_ready(
     state
         .manager
         .set_agent_requests(agent_requests::HelmAgentRequests::for_state(&state));
+    // Started here for the same reason: it needs the state the manager is a
+    // field of. A seal noted before this point is kept and acted on at once.
+    let _seal_finisher = sessions::spawn_seal_finisher(Arc::clone(&state));
     // The control socket's flock (claimed above as `ownership`) comes FIRST,
     // and only then is the bootstrap token read into its cache. Taking them
     // in the other order left a gap:
@@ -2678,6 +2685,7 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
     }
     if find_cause::<precondition::IncarnationStale>(e).is_some()
         || find_cause::<environment::lifecycle::HostBusy>(e).is_some()
+        || find_cause::<sessions::EnvironmentUnasked>(e).is_some()
     {
         return ErrorKind::Conflict;
     }
@@ -2704,7 +2712,9 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
 /// won. Consulting both, per family, in the family's own turn, is what
 /// makes that order hold regardless of the attachment style — which matters
 /// because nothing at a call site marks which style it used.
-fn find_cause<T: std::error::Error + Send + Sync + 'static>(e: &anyhow::Error) -> Option<&T> {
+pub(crate) fn find_cause<T: std::error::Error + Send + Sync + 'static>(
+    e: &anyhow::Error,
+) -> Option<&T> {
     e.downcast_ref::<T>()
         .or_else(|| e.chain().find_map(|c| c.downcast_ref::<T>()))
 }
@@ -2788,6 +2798,14 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
             axum::http::HeaderValue::from_static(farhelm_proto::http::HOST_BUSY_OPERATION),
         );
     }
+    // Helm-only too: it is what makes the page offer the warned
+    // whole-environment Delete, so nothing a supervisor says may set it.
+    if find_cause::<sessions::EnvironmentUnasked>(&e).is_some() {
+        response.headers_mut().insert(
+            farhelm_proto::http::ENVIRONMENT_UNASKED_HEADER,
+            axum::http::HeaderValue::from_static(farhelm_proto::http::ENVIRONMENT_UNASKED),
+        );
+    }
     if unaccepted {
         response.headers_mut().insert(
             farhelm_proto::http::CREATE_OUTCOME_HEADER,
@@ -2832,7 +2850,7 @@ fn helm_status(kind: ErrorKind) -> axum::http::StatusCode {
 /// Mirrors `error_kind`'s precedence: a helm store or manager refusal
 /// anywhere in the chain is the helm's classification, whatever supervisor
 /// error sits beneath it.
-fn error_kind_is_a_supervisor_reply(e: &anyhow::Error) -> bool {
+pub(crate) fn error_kind_is_a_supervisor_reply(e: &anyhow::Error) -> bool {
     find_cause::<store::HostStoreError>(e).is_none()
         && find_cause::<manager::ManagerError>(e).is_none()
         && find_cause::<SupervisorError>(e)

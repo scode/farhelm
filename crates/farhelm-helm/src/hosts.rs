@@ -273,6 +273,10 @@ pub(crate) enum HostStateView {
     /// refused against it has something honest to name.
     #[serde(rename = "retired")]
     Retired { reason: String },
+    /// The host's sandbox or container is being destroyed; `failure` is the
+    /// provider's reason when that failed and waits for Retry.
+    #[serde(rename = "deleting")]
+    Deleting { failure: Option<String> },
 }
 
 impl HostStateView {
@@ -303,6 +307,7 @@ impl HostStateView {
             HostStateView::Suspended { .. } => "suspended",
             HostStateView::Stopped { .. } => "stopped",
             HostStateView::Retired { .. } => "retired",
+            HostStateView::Deleting { .. } => "deleting",
         }
     }
 }
@@ -430,6 +435,9 @@ impl From<&HostState> for HostStateView {
             },
             HostState::Retired { reason } => HostStateView::Retired {
                 reason: reason.clone(),
+            },
+            HostState::Deleting { failure } => HostStateView::Deleting {
+                failure: failure.clone(),
             },
         }
     }
@@ -1429,6 +1437,40 @@ pub(crate) async fn remove_host_checked(
     .await
 }
 
+/// Destroy a sealed environment and forget its host: the one path for the
+/// user's Delete that sealed it and for the helm finishing a seal it found
+/// in a listing (after a lost reply, a failed destruction or a restart).
+///
+/// Re-reads the row under `provisioning`, which the caller holds, and acts
+/// only on a host that is session-owned and whose removal deletes its
+/// machine: a seal is permanent and closes a supervisor to new sessions,
+/// so it is never the reason to destroy anything else. The caller records
+/// the outcome in the manager's seal record, which is what keeps a failure
+/// shown until Retry.
+pub(crate) async fn finish_sealed_environment(
+    state: &AppState,
+    host: HostId,
+    provisioning: crate::manager::ProvisionLockGuard,
+) -> anyhow::Result<()> {
+    let row = registry_row(state, host).await?;
+    if !row.is_session_owned() || !row.kind.removal_deletes_machine() {
+        return Err(anyhow::Error::new(crate::SupervisorError::helm(
+            farhelm_proto::ErrorKind::Conflict,
+            format!(
+                "host {host} reported a seal but is not a disposable environment; nothing was \
+                 destroyed"
+            ),
+        )));
+    }
+    forget_host_locked(
+        state,
+        host,
+        provisioning,
+        crate::provisioning::RunTask::Abort,
+    )
+    .await
+}
+
 /// The host's provisioning lock, taken without waiting, or removal's
 /// "busy" refusal while a setup, update or uninstall holds it; see
 /// [`remove_host`] for why removal never waits.
@@ -1471,7 +1513,7 @@ pub(crate) async fn forget_host_locked(
     let deleted = if row.kind.removal_deletes_machine() {
         state
             .manager
-            .hold_connection(host, deleting_sandbox_state())
+            .hold_connection(host, crate::manager::HostState::Deleting { failure: None })
             .await;
         state
             .manager
@@ -1495,6 +1537,9 @@ pub(crate) async fn forget_host_locked(
         match result {
             Ok(deleted) => Some(deleted),
             Err(error) => {
+                // A sealed host keeps showing its deletion and this failure
+                // through the manager's seal record (`sealed_outcome`, which
+                // its caller writes), however the connection goes on.
                 state.manager.release_hold(host, true);
                 return Err(error);
             }
@@ -1509,7 +1554,10 @@ pub(crate) async fn forget_host_locked(
     {
         Ok(stopped) => stopped,
         Err(error) => {
-            // Only a sandbox host was held; any other is left as it was.
+            // Only a machine-deleting host was held; any other is left as it
+            // was. The machine is gone here, so even a sealed one's host is
+            // released: what remains is forgetting its row, which a reconnect
+            // cannot disturb and removing again finishes.
             if deleted.is_some() {
                 state.manager.release_hold(host, true);
             }
@@ -1523,6 +1571,8 @@ pub(crate) async fn forget_host_locked(
         let _mutation = state.tunnels.mutation.lock().await;
         state.tunnels.close_host_locked(host).await;
     }
+    // Gone, so nothing is left to finish for a seal it reported.
+    state.manager.sealed_outcome(host, None);
     drop(provisioning);
     tracing::info!(
         host,
@@ -1530,15 +1580,6 @@ pub(crate) async fn forget_host_locked(
         "host removed from the registry and its connection actor stopped"
     );
     Ok(())
-}
-
-/// What a Tensorlake host shows while its removal holds its connection and
-/// deletes its sandbox: not connected, with the reason in the usual place.
-fn deleting_sandbox_state() -> crate::manager::HostState {
-    crate::manager::HostState::Unreachable {
-        cause: crate::manager::UnreachableCause::TransportFailure,
-        last_error: "Farhelm is deleting this host's Tensorlake sandbox".to_string(),
-    }
 }
 
 /// The body of `POST /api/hosts/{id}/adopt`: the identity the user was

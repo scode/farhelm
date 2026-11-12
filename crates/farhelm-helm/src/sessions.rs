@@ -70,6 +70,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 mod sandbox;
+pub(crate) use sandbox::{EnvironmentUnasked, retry_environment_delete, spawn_seal_finisher};
 pub(crate) use sandbox::{create_environment_session, create_sandbox_session, stop_and_suspend};
 
 /// Query parameters for `GET /api/sessions`: the filters and order. There is
@@ -1011,6 +1012,14 @@ fn refusal_text(host: store::HostId, state: &manager::HostState) -> String {
             ),
         },
         manager::HostState::Retired { reason } => reason.clone(),
+        // Neutral about the provider: the helm names no provider in shared
+        // text, and the UI words this state per provider.
+        manager::HostState::Deleting { failure: None } => {
+            "the host's environment is being deleted".to_string()
+        }
+        manager::HostState::Deleting {
+            failure: Some(reason),
+        } => format!("deleting the host's environment failed and waits for Retry: {reason}"),
         // Unreachable in practice — a connected host has a client and
         // never reaches this function — but stated rather than
         // `unreachable!()`: a panic on the refusal path would turn a
@@ -3563,10 +3572,20 @@ pub(crate) struct DeleteQuery {
     only_if_nothing_alive: bool,
     #[serde(default)]
     only_if_agent_ended: bool,
-    /// The caller showed the always-on whole-sandbox confirmation. Omission
-    /// must not let an older page's ordinary session Delete destroy a machine.
+    /// The caller showed the warned whole-environment confirmation (offered
+    /// when the environment's own Farhelm cannot be asked). Omission must not
+    /// let an older page's ordinary session Delete destroy a machine.
     #[serde(default)]
     delete_sandbox: bool,
+    /// The caller showed the environment Delete's confirmation, which states
+    /// both outcomes (only this session, or this session and the whole
+    /// environment if it is the last): ask the environment's own supervisor
+    /// (`sandbox::delete_environment_session`). Only pages that show that
+    /// confirmation send it; a plain DELETE of an environment session is
+    /// still refused, so an older page cannot reach a Delete it never warned
+    /// about.
+    #[serde(default)]
+    delete_environment_session: bool,
 }
 
 /// `DELETE /api/sessions/{id}` — remove a session and all its stored state
@@ -3613,6 +3632,27 @@ pub(crate) async fn delete_session(
         query.only_if_nothing_alive,
         query.only_if_agent_ended,
     );
+    if query.delete_environment_session {
+        if query.delete_sandbox {
+            return http_error(invalid_request(
+                "ask either for the environment Delete or for the whole-environment Delete, not both"
+                    .into(),
+            ));
+        }
+        // The supervisor's delete-or-seal request carries no guard, so the
+        // environment Delete cannot honour "only if nothing is alive" or
+        // "only if the agent ended": it would delete a live session and might
+        // seal and destroy the environment. Refused as the whole-environment
+        // Delete refuses a guarded request, before any card is denied or the
+        // supervisor is asked.
+        if guard != farhelm_proto::DeleteGuard::Unconditional {
+            return http_error(sandbox::user_only_delete());
+        }
+        return match sandbox::delete_environment_session(&state, &key).await {
+            Ok(outcome) => axum::Json(outcome).into_response(),
+            Err(error) => http_error(error),
+        };
+    }
     match sandbox::delete_if_owned(&state, &key, query.delete_sandbox, guard).await {
         Ok(Some(outcome)) => return axum::Json(outcome).into_response(),
         Ok(None) => {}
@@ -3652,7 +3692,8 @@ pub(crate) async fn do_delete_session(
 /// The caller is responsible for that pairing: the asking session lives on
 /// `key.host`, so the environment keeps at least one session and destroying
 /// it would end the asker. This therefore never reaches the user's
-/// whole-environment Delete (`sandbox::delete_if_owned`); it is the ordinary
+/// environment Deletes (`sandbox::delete_environment_session`, which can seal
+/// the environment, and `sandbox::delete_if_owned`); it is the ordinary
 /// supervisor teardown, the same one Replace uses for its source, with every
 /// guard and connection check [`do_delete_session`] applies.
 pub(crate) async fn delete_session_within_environment(
@@ -4176,8 +4217,18 @@ pub(crate) async fn do_replace_session(
                 .filter(|row| row.is_session_owned())
                 .and_then(|row| row.kind.environment_view(row))
             {
+                // The environment's supervisor refuses every new session once
+                // a Delete sealed it (SPEC.md, "Sandbox sessions"): the user's
+                // Delete of the source got there first and took the last
+                // session, so the environment is about to be destroyed.
+                if crate::error_kind(&error) == ErrorKind::Sealed {
+                    return Err(error.context(format!(
+                        "Replace did not start: environment {} is being deleted, so it takes no new session",
+                        binding.name
+                    )));
+                }
                 Err(error.context(format!(
-                    "Replace did not finish. Environment {} and its files were retained. User-confirmed Delete destroys the whole environment",
+                    "Replace did not finish. Environment {} and its files were retained",
                     binding.name
                 )))
             } else {
@@ -4528,6 +4579,20 @@ async fn finish_replacement(
                 state.trash_requests.changed(claim.host);
             }
             outcome.notice
+        }
+        // In a disposable environment the user's own Delete of the source can
+        // land between Replace's create and this removal: the replacement
+        // was counted there, so that Delete removed only the source (SPEC.md,
+        // "Sandbox sessions"). The source is gone and the replacement lives,
+        // which is what Replace set out to do.
+        Err(delete_error)
+            if crate::error_kind_is_a_supervisor_reply(&delete_error)
+                && crate::error_kind(&delete_error) == ErrorKind::NotFound
+                && crate::hosts::registry_row(state, claim.host)
+                    .await
+                    .is_ok_and(|row| row.is_session_owned()) =>
+        {
+            None
         }
         Err(delete_error) => {
             // Two shapes of failure here, and they earn different words because

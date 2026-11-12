@@ -124,6 +124,10 @@ pub(crate) struct HostScript {
     /// list's length, because what the REST tests pin is the flag's journey
     /// to the reply body, not the supervisor's arithmetic.
     pub(crate) truncated: bool,
+    /// The `sealed` flag that reply carries: the supervisor saying a Delete
+    /// sealed it (its environment's last session went), which the helm
+    /// answers by destroying the environment.
+    pub(crate) sealed: bool,
     /// A test-owned peer to splice this host's connection to (module
     /// docs). Taken on the first dial; a reconnect after that falls back to
     /// standalone behavior, which is the honest thing to do — the test's
@@ -145,6 +149,7 @@ impl Default for HostScript {
             identity: None,
             sessions: Vec::new(),
             truncated: false,
+            sealed: false,
             peer: None,
             panic_on_dial: false,
         }
@@ -217,6 +222,7 @@ struct ListGate {
 struct ScriptedList {
     sessions: Vec<SessionInfo>,
     truncated: bool,
+    sealed: bool,
 }
 
 impl ScriptedList {
@@ -224,6 +230,7 @@ impl ScriptedList {
         Arc::new(ScriptedList {
             sessions: script.sessions.clone(),
             truncated: script.truncated,
+            sealed: script.sealed,
         })
     }
 }
@@ -466,7 +473,7 @@ impl PeerBehavior {
     fn list_reply(&self, gate: &ListGate, host: HostId, req_id: u64) -> ControlMsg {
         let list = gate.lists.lock().expect("list mutex").get(&host).cloned();
         ControlMsg::SessionList {
-            sealed: false,
+            sealed: list.as_ref().is_some_and(|l| l.sealed),
             req_id,
             sessions: list
                 .as_ref()

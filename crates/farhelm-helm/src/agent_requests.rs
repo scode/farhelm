@@ -2793,7 +2793,8 @@ async fn agent_prompt(
 /// A confined origin's deletion is session-only: the target shares the
 /// asker's environment, which therefore keeps at least the asker and must not
 /// be destroyed. It uses the supervisor delete Replace uses for its source,
-/// never the user's whole-environment Delete.
+/// which never seals, never the user's environment Delete, which can seal
+/// the environment and destroy it.
 async fn agent_delete(
     state: &AppState,
     origin: AgentOrigin,
@@ -14126,6 +14127,10 @@ mod tests {
     struct RunningContainers {
         place: std::sync::OnceLock<HostId>,
         builds: std::sync::atomic::AtomicUsize,
+        /// Makes `destroy` fail, for the environment Delete's failure path.
+        fail_destroy: std::sync::atomic::AtomicBool,
+        /// How many times `destroy` was asked, failed or not.
+        destroys: std::sync::atomic::AtomicUsize,
     }
 
     /// What the stand-in's refused build says, so a test can find it in the
@@ -14213,6 +14218,11 @@ mod tests {
             &self,
             binding: &crate::environment::EnvironmentBinding,
         ) -> anyhow::Result<crate::environment::Destroyed> {
+            self.destroys
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail_destroy.load(std::sync::atomic::Ordering::SeqCst) {
+                anyhow::bail!("the stand-in container host refused the removal");
+            }
             Ok(binding.handle.never_created(binding.host))
         }
         async fn connected(
@@ -17550,5 +17560,552 @@ mod tests {
             other => panic!("expected retired source refusal, got {other:?}"),
         }
         assert!(seen.lock().expect("seen mutex").is_empty());
+    }
+
+    /// The user's Delete of a session in a sandbox or container (SPEC.md,
+    /// "Sandbox sessions"; SPEC_impl.md, "Environment Delete and the seal"),
+    /// through the protected REST route, against a scripted environment
+    /// supervisor. Kept beside the confinement tests for their fixtures: a
+    /// connected environment of either provider, and a container stand-in
+    /// whose destruction can be made to fail.
+    mod user_environment_delete {
+        use super::*;
+        use crate::manager::HostState;
+
+        /// What the scripted environment supervisor answers to the
+        /// environment Delete.
+        #[derive(Clone, Copy)]
+        enum Answer {
+            Deleted(u32),
+            Sealed,
+            NotFound,
+            /// Ends the connection instead of answering.
+            Hangs,
+        }
+
+        /// Script an environment supervisor that answers every
+        /// `DeleteSessionOrSeal` with `answer`, recording `seal-delete:<id>`
+        /// for each. Listing is the splice's, as for
+        /// [`spawn_environment_responder`].
+        fn spawn_seal_responder(
+            peer: tokio::io::DuplexStream,
+            answer: Answer,
+        ) -> EnvironmentRequests {
+            use farhelm_proto::ControlMsg;
+            use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+            let seen: EnvironmentRequests = Default::default();
+            let recorded = std::sync::Arc::clone(&seen);
+            tokio::spawn(async move {
+                let (r, w) = tokio::io::split(peer);
+                let mut reader = FrameReader::new(r);
+                let mut writer = FrameWriter::new(w);
+                handshake(&mut reader, &mut writer, "supervisor")
+                    .await
+                    .expect("handshake");
+                while let Ok(Some(frame)) = reader.read_frame().await {
+                    let ControlMsg::DeleteSessionOrSeal { req_id, session_id } =
+                        parse_control(&frame).expect("decode request")
+                    else {
+                        continue;
+                    };
+                    recorded
+                        .lock()
+                        .unwrap()
+                        .push(format!("seal-delete:{session_id}"));
+                    let reply = match answer {
+                        Answer::Deleted(remaining) => ControlMsg::SessionDeletedOrSealed {
+                            req_id,
+                            outcome: farhelm_proto::SealOutcome::Deleted { remaining },
+                            notice: None,
+                        },
+                        Answer::Sealed => ControlMsg::SessionDeletedOrSealed {
+                            req_id,
+                            outcome: farhelm_proto::SealOutcome::Sealed,
+                            notice: None,
+                        },
+                        Answer::NotFound => ControlMsg::Error {
+                            req_id,
+                            kind: ErrorKind::NotFound,
+                            message: format!("no such session: {session_id}"),
+                            create_unaccepted: false,
+                        },
+                        Answer::Hangs => return,
+                    };
+                    if writer.write_control(&reply).await.is_err() {
+                        return;
+                    }
+                }
+            });
+            seen
+        }
+
+        /// `DELETE /api/sessions/{ref}{query}` through the protected router:
+        /// status, the "nothing decided" marker, and the body.
+        async fn delete(
+            h: &Harness,
+            host: HostId,
+            id: &str,
+            query: &str,
+        ) -> (axum::http::StatusCode, bool, String) {
+            use tower::ServiceExt as _;
+            let request = axum::http::Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/sessions/{}{query}", h.session_ref(host, id)))
+                .header("host", "127.0.0.1:7433")
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let response = h.router().oneshot(request).await.unwrap();
+            let status = response.status();
+            let unasked = response
+                .headers()
+                .get(farhelm_proto::http::ENVIRONMENT_UNASKED_HEADER)
+                .is_some();
+            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (status, unasked, String::from_utf8(body.to_vec()).unwrap())
+        }
+
+        /// `POST /api/hosts/{id}/retry-delete` through the protected router.
+        async fn retry_delete(h: &Harness, host: HostId) -> (axum::http::StatusCode, String) {
+            host_post(h, host, "retry-delete").await
+        }
+
+        /// `DELETE /api/hosts/{id}` (Hosts' Delete sandbox/container) through
+        /// the protected router.
+        async fn host_delete(h: &Harness, host: HostId) -> (axum::http::StatusCode, String) {
+            use tower::ServiceExt as _;
+            let request = axum::http::Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/hosts/{host}"))
+                .header("host", "127.0.0.1:7433")
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let response = h.router().oneshot(request).await.unwrap();
+            let status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (status, String::from_utf8(body.to_vec()).unwrap())
+        }
+
+        /// Wait until what `host` SHOWS (`ConnectionManager::state`, which
+        /// a sealed host's record overrides) satisfies `predicate`. Polled,
+        /// because the override does not pass through the connection's own
+        /// state channel that `Harness::await_state` watches.
+        async fn shown_state(
+            h: &Harness,
+            host: HostId,
+            mut predicate: impl FnMut(&HostState) -> bool,
+        ) -> HostState {
+            tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                loop {
+                    if let Some(state) = h.manager.state(host)
+                        && predicate(&state)
+                    {
+                        return state;
+                    }
+                    // The seal record has no change channel of its own, and the timeout above bounds this.
+                    // sleep-ok: polling interval for the shown state of a sealed host.
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "host {host} never showed the expected state; last {:?}",
+                    h.manager.state(host)
+                )
+            })
+        }
+
+        /// `POST /api/hosts/{id}/{verb}` through the protected router.
+        async fn host_post(
+            h: &Harness,
+            host: HostId,
+            verb: &str,
+        ) -> (axum::http::StatusCode, String) {
+            use tower::ServiceExt as _;
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/api/hosts/{host}/{verb}"))
+                .header("host", "127.0.0.1:7433")
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let response = h.router().oneshot(request).await.unwrap();
+            let status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), 1 << 20)
+                .await
+                .unwrap();
+            (status, String::from_utf8(body.to_vec()).unwrap())
+        }
+
+        const ENVIRONMENT_DELETE: &str = "?delete_environment_session=true";
+
+        async fn registered(h: &Harness, host: HostId) -> bool {
+            h.store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .any(|row| row.id == host)
+        }
+
+        /// Why: deleting a finished helper session must keep the environment
+        /// the session that started it still works in, and say how many
+        /// sessions the environment's own Farhelm counted. Spec: for both
+        /// providers, a supervisor answering `Deleted { remaining: 1 }` makes
+        /// the Delete succeed with that count, forget only that session, and
+        /// keep the host; a plain DELETE of the same session is still refused
+        /// before the supervisor is asked.
+        #[farhelm_testtrace::test]
+        async fn a_delete_with_other_sessions_left_keeps_the_environment() {
+            for provider in [
+                farhelm_proto::ProviderKind::Tensorlake,
+                farhelm_proto::ProviderKind::Podman,
+            ] {
+                let (h, _, _) = environment_fleet().await;
+                let (client_side, peer) = tokio::io::duplex(64 * 1024);
+                let seen = spawn_seal_responder(peer, Answer::Deleted(1));
+                let owned = owned_environment(
+                    &h,
+                    provider,
+                    client_side,
+                    vec![session("helper", 50), session("starter", 51)],
+                )
+                .await;
+
+                let (status, _, text) = delete(&h, owned, "helper", "").await;
+                assert_eq!(
+                    status,
+                    axum::http::StatusCode::CONFLICT,
+                    "{provider:?}: {text}"
+                );
+                assert!(
+                    seen.lock().unwrap().is_empty(),
+                    "a plain DELETE asks no supervisor"
+                );
+
+                let (status, unasked, text) = delete(&h, owned, "helper", ENVIRONMENT_DELETE).await;
+                assert_eq!(status, axum::http::StatusCode::OK, "{provider:?}: {text}");
+                assert!(!unasked);
+                let outcome: farhelm_proto::SessionDeleteOutcome =
+                    serde_json::from_str(&text).unwrap();
+                assert_eq!(outcome.environment_remaining, Some(1), "{provider:?}");
+                assert_eq!(
+                    *seen.lock().unwrap(),
+                    ["seal-delete:helper"],
+                    "{provider:?}"
+                );
+                assert!(
+                    registered(&h, owned).await,
+                    "{provider:?}: the environment stays"
+                );
+                let cached: Vec<String> = h
+                    .store
+                    .cached_sessions(owned)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|row| row.id)
+                    .collect();
+                assert!(
+                    !cached.contains(&"helper".to_string()),
+                    "{provider:?}: {cached:?}"
+                );
+            }
+        }
+
+        /// Why: the last session's Delete is what removes the environment,
+        /// and only after its own Farhelm sealed it. Spec: a supervisor
+        /// answering `Sealed` makes the Delete destroy the container through
+        /// its provider and forget the host.
+        #[farhelm_testtrace::test]
+        async fn the_last_sessions_delete_destroys_the_environment() {
+            let (h, _, _, containers) = container_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let seen = spawn_seal_responder(peer, Answer::Sealed);
+            let owned = owned_environment(
+                &h,
+                farhelm_proto::ProviderKind::Podman,
+                client_side,
+                vec![session("last", 50)],
+            )
+            .await;
+
+            let (status, _, text) = delete(&h, owned, "last", ENVIRONMENT_DELETE).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+            assert_eq!(*seen.lock().unwrap(), ["seal-delete:last"]);
+            assert_eq!(
+                containers
+                    .destroys
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                1
+            );
+            assert!(
+                !registered(&h, owned).await,
+                "the environment's host is forgotten"
+            );
+        }
+
+        /// Why: when the environment's own Farhelm cannot be asked, or does
+        /// not answer, nothing may be destroyed that the user did not confirm
+        /// in the warned whole-environment Delete. Spec: with the supervisor
+        /// ending the connection instead of answering, and with the host held
+        /// as suspended so nothing is connected, the Delete answers 409 with
+        /// the "nothing decided" marker, and the environment stays.
+        #[farhelm_testtrace::test]
+        async fn a_delete_that_cannot_be_decided_offers_nothing_but_the_warning() {
+            let (h, _, _, containers) = container_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let seen = spawn_seal_responder(peer, Answer::Hangs);
+            let owned = owned_environment(
+                &h,
+                farhelm_proto::ProviderKind::Podman,
+                client_side,
+                vec![session("one", 50), session("two", 51)],
+            )
+            .await;
+
+            let (status, unasked, text) = delete(&h, owned, "one", ENVIRONMENT_DELETE).await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+            assert!(unasked, "a lost answer is marked nothing-decided: {text}");
+            assert_eq!(*seen.lock().unwrap(), ["seal-delete:one"]);
+
+            assert!(
+                h.manager
+                    .hold_connection(
+                        owned,
+                        HostState::Stopped {
+                            start_failed: None,
+                            waiting_for_place: false,
+                        },
+                    )
+                    .await
+            );
+            let (status, unasked, text) = delete(&h, owned, "two", ENVIRONMENT_DELETE).await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT, "{text}");
+            assert!(
+                unasked,
+                "an environment the helm cannot ask is marked too: {text}"
+            );
+            assert_eq!(
+                *seen.lock().unwrap(),
+                ["seal-delete:one"],
+                "nothing more was sent"
+            );
+            assert_eq!(
+                containers
+                    .destroys
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0
+            );
+            assert!(registered(&h, owned).await);
+        }
+
+        /// Why: a retry of a Delete whose reply was lost finds its session
+        /// gone; the earlier attempt deleted only that session, and a refresh
+        /// may already have dropped it from the helm's list. Spec: with the
+        /// helm's list no longer holding the session, the helm still asks the
+        /// environment's supervisor, and its `NotFound` is a successful Delete
+        /// that keeps the environment.
+        #[farhelm_testtrace::test]
+        async fn a_session_already_gone_counts_as_deleted() {
+            let (h, _, _) = environment_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            let seen = spawn_seal_responder(peer, Answer::NotFound);
+            let owned = owned_environment(
+                &h,
+                farhelm_proto::ProviderKind::Podman,
+                client_side,
+                vec![session("kept", 51)],
+            )
+            .await;
+            let (status, unasked, text) = delete(&h, owned, "gone", ENVIRONMENT_DELETE).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+            assert!(!unasked);
+            assert_eq!(
+                *seen.lock().unwrap(),
+                ["seal-delete:gone"],
+                "the supervisor was asked"
+            );
+            assert!(registered(&h, owned).await);
+        }
+
+        /// Why: the guard flags say "only if nothing is alive" or "only if
+        /// the agent ended", and the environment Delete cannot honour them,
+        /// since its supervisor request carries no guard. Accepting one would
+        /// delete a live session and, for the last session, seal and destroy
+        /// the environment for a caller that asked for neither. Spec: with
+        /// either flag beside `delete_environment_session=true`, the Delete
+        /// answers 409 with the user-only refusal the whole-environment
+        /// Delete gives a guarded request, without the "nothing decided"
+        /// marker; the environment's supervisor is asked nothing, and the
+        /// environment is neither destroyed nor forgotten.
+        #[farhelm_testtrace::test]
+        async fn a_guarded_environment_delete_is_refused_before_anything_is_asked() {
+            let (h, _, _, containers) = container_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            // Answers sealed, so a guard that was ignored would show as a
+            // request seen here and a container destroyed.
+            let seen = spawn_seal_responder(peer, Answer::Sealed);
+            let owned = owned_environment(
+                &h,
+                farhelm_proto::ProviderKind::Podman,
+                client_side,
+                vec![session("last", 50)],
+            )
+            .await;
+
+            for flag in ["only_if_nothing_alive", "only_if_agent_ended"] {
+                let query = format!("{ENVIRONMENT_DELETE}&{flag}=true");
+                let (status, unasked, text) = delete(&h, owned, "last", &query).await;
+                assert_eq!(status, axum::http::StatusCode::CONFLICT, "{flag}: {text}");
+                assert!(!unasked, "{flag}: a refusal is not a lost answer");
+                assert!(
+                    text.contains("Only the user can delete a session in a disposable environment"),
+                    "{flag}: {text}"
+                );
+            }
+            assert!(seen.lock().unwrap().is_empty(), "no supervisor was asked");
+            assert_eq!(
+                containers
+                    .destroys
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0
+            );
+            assert!(registered(&h, owned).await, "the environment stays");
+        }
+
+        /// Why: a seal can only legitimately come from a disposable
+        /// environment's Farhelm; from any other host it means that host
+        /// refuses every new session for good, which must be visible, and it
+        /// must never make the helm destroy or forget anything. Spec: an
+        /// ordinary host whose listing says sealed stays registered and
+        /// connected, with its refresh shown as failed and naming the seal.
+        #[farhelm_testtrace::test]
+        async fn a_seal_from_an_ordinary_host_is_shown_and_never_acted_on() {
+            let (h, _, remote, containers) = container_fleet().await;
+            let _finisher = crate::sessions::spawn_seal_finisher(Arc::clone(&h.state));
+            h.fleet.edit(remote, |script| script.sealed = true);
+            h.manager.refresh_now(remote);
+            let state = h
+                .await_state(remote, |state| {
+                    matches!(
+                        state,
+                        HostState::Connected {
+                            last_refresh: crate::manager::RefreshHealth::Failed { .. },
+                            ..
+                        }
+                    )
+                })
+                .await;
+            assert!(
+                matches!(
+                    &state,
+                    HostState::Connected {
+                        last_refresh: crate::manager::RefreshHealth::Failed { error },
+                        ..
+                    } if error.contains("sealed")
+                ),
+                "{state:?}"
+            );
+            assert!(registered(&h, remote).await);
+            assert!(!h.manager.is_sealed(remote), "never queued for destruction");
+            assert_eq!(
+                containers
+                    .destroys
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0
+            );
+        }
+
+        /// Why: a seal reported in a listing (after a lost reply, a failed
+        /// destruction or a helm restart) must still end with the
+        /// environment destroyed, and a failure must wait for the user
+        /// instead of looping. Spec: with the finisher running, a listing
+        /// that says sealed makes the helm destroy the container; when that
+        /// fails, the host shows `Deleting` with the reason; Retry is refused
+        /// for a host not in that state, and succeeds once destruction does.
+        #[farhelm_testtrace::test]
+        async fn a_listed_seal_is_finished_by_the_helm_and_a_failure_waits_for_retry() {
+            let (h, _, _, containers) = container_fleet().await;
+            let (client_side, peer) = tokio::io::duplex(64 * 1024);
+            spawn_seal_responder(peer, Answer::Sealed);
+            let owned = owned_environment(
+                &h,
+                farhelm_proto::ProviderKind::Podman,
+                client_side,
+                vec![session("left-behind", 50)],
+            )
+            .await;
+            let (status, text) = retry_delete(&h, owned).await;
+            assert_eq!(
+                status,
+                axum::http::StatusCode::CONFLICT,
+                "Retry needs a failed deletion: {text}"
+            );
+
+            containers
+                .fail_destroy
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            let _finisher = crate::sessions::spawn_seal_finisher(Arc::clone(&h.state));
+            h.fleet.edit(owned, |script| script.sealed = true);
+            h.manager.refresh_now(owned);
+            let failed = shown_state(&h, owned, |state| {
+                matches!(state, HostState::Deleting { failure: Some(_) })
+            })
+            .await;
+            assert!(
+                matches!(&failed, HostState::Deleting { failure: Some(reason) } if reason.contains("refused the removal")),
+                "{failed:?}"
+            );
+            assert!(
+                registered(&h, owned).await,
+                "a failed destruction keeps the host"
+            );
+            // Whatever the connection does next (here: reconnecting to the
+            // sealed supervisor and listing again), the host keeps showing
+            // its deletion and the failure, and routes nothing.
+            h.manager.retry_now(owned).await.unwrap();
+            h.await_refreshed(owned).await;
+            let status = h.manager.status(owned).unwrap();
+            assert!(
+                matches!(&status.state, HostState::Deleting { failure: Some(_) }),
+                "the failure and its Retry stay shown: {:?}",
+                status.state
+            );
+            assert!(
+                status.client.is_none(),
+                "nothing is routed to a sealed supervisor"
+            );
+            // The host-level Delete stays available, and its own failure must
+            // not release the host: that would reconnect to the sealed Farhelm
+            // and lose the deletion Retry.
+            let (status, text) = host_delete(&h, owned).await;
+            assert!(
+                !status.is_success(),
+                "premise: the destruction still fails: {text}"
+            );
+            assert!(
+                matches!(
+                    h.manager.state(owned),
+                    Some(HostState::Deleting { failure: Some(_) })
+                ),
+                "a failed whole-environment Delete keeps the deletion failure: {:?}",
+                h.manager.state(owned)
+            );
+
+            containers
+                .fail_destroy
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            let (status, text) = retry_delete(&h, owned).await;
+            assert_eq!(status, axum::http::StatusCode::OK, "{text}");
+            assert!(
+                !registered(&h, owned).await,
+                "Retry finishes the destruction"
+            );
+        }
     }
 }

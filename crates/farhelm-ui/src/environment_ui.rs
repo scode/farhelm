@@ -21,6 +21,22 @@ pub(crate) enum AgentLaunchPlace {
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl ProviderUi {
+    /// What a host whose sandbox or container is being destroyed says; with
+    /// `failed`, that the destruction failed and Retry tries it again.
+    pub(crate) fn deleting_detail(self, failed: bool) -> &'static str {
+        match (self.0, failed) {
+            (ProviderKind::Tensorlake, false) => {
+                "Farhelm is deleting this sandbox, its files and its snapshots"
+            }
+            (ProviderKind::Podman, false) => "Farhelm is deleting this container and its files",
+            (ProviderKind::Tensorlake, true) => {
+                "Farhelm could not finish deleting this sandbox and its snapshots; some of them may remain and bill. Retry finishes the deletion"
+            }
+            (ProviderKind::Podman, true) => {
+                "Farhelm could not finish deleting this container; it may remain. Retry finishes the deletion"
+            }
+        }
+    }
     /// Resource words describe the provider, never a supervisor implementation.
     pub(crate) fn noun(self) -> &'static str {
         match self.0 {
