@@ -639,12 +639,17 @@ impl Supervisor {
         // A verb the helm may hold for the user's approval gets the helm's
         // whole approval wait on top of the ordinary budget, so its own "not
         // answered" refusal arrives before this side gives up and reports an
-        // unknown outcome. Listings keep the short budget: nothing holds them.
-        let answer = if request.may_wait_for_user() {
-            self.timeouts.agent_upcall + self.timeouts.agent_approval_wait
-        } else {
-            self.timeouts.agent_upcall
-        };
+        // unknown outcome. One that may then launch a new disposable
+        // environment gets that launch's allowance too, in the same span
+        // (SPEC.md, "Agents and environments"). Listings keep the short
+        // budget: nothing holds them.
+        let mut answer = self.timeouts.agent_upcall;
+        if request.may_wait_for_user() {
+            answer += self.timeouts.agent_approval_wait;
+        }
+        if request.may_launch_environment() {
+            answer += self.timeouts.agent_environment_launch;
+        }
         let outcome = link
             .upcall(
                 session_id.clone(),

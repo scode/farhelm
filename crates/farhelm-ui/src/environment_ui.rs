@@ -8,6 +8,17 @@ use farhelm_proto::{LaunchTarget, Place, ProviderKind};
 #[derive(Clone, Copy)]
 pub(crate) struct ProviderUi(pub(crate) ProviderKind);
 
+/// The place row of an agent's environment-launch card, as
+/// [`ProviderUi::agent_launch_place`] words it for each provider.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AgentLaunchPlace {
+    /// A labelled row whose value is the name of the host the place is on,
+    /// which the card supplies as peer data.
+    NamedHost(&'static str),
+    /// A label and this UI's own words, for a place with no host to name.
+    Note(&'static str, &'static str),
+}
+
 #[warn(clippy::wildcard_enum_match_arm)]
 impl ProviderUi {
     /// Resource words describe the provider, never a supervisor implementation.
@@ -40,6 +51,33 @@ impl ProviderUi {
             ProviderKind::Podman => {
                 "A new container for this session, built from the recipe on its container host. The checkout and files live inside it. Suspend freezes processes while keeping memory in use; Delete removes the whole container and its files."
             }
+        }
+    }
+    /// What an agent's environment-launch card says Allow will create. The
+    /// card is the creation confirmation (SPEC.md, "Agents and environments"),
+    /// so it carries the same consequence the launcher's own footer does,
+    /// billing included, in this UI's words rather than the helm's.
+    pub(crate) fn agent_launch_consequence(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Allow creates a new Tensorlake sandbox for this session. It bills while running; Suspend stops CPU and memory billing, and deleting its last session removes the sandbox and its files."
+            }
+            ProviderKind::Podman => {
+                "Allow creates a new container for this session on the container host. Deleting its last session removes the container and its files."
+            }
+        }
+    }
+    /// How an agent's environment-launch card names where the new environment
+    /// goes. Decided here rather than from whether the card's place carries a
+    /// host, so that a new provider has to choose its own words: a container
+    /// lands on a container host the card names, while a Tensorlake sandbox
+    /// has no host of the user's to name.
+    pub(crate) fn agent_launch_place(self) -> AgentLaunchPlace {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                AgentLaunchPlace::Note("creates", "a new Tensorlake sandbox")
+            }
+            ProviderKind::Podman => AgentLaunchPlace::NamedHost("new container on host"),
         }
     }
     /// Stopping one agent leaves the environment and unrelated processes alive.

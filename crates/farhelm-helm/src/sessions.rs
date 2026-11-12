@@ -1065,6 +1065,12 @@ pub(crate) struct CreateReq {
     /// It survives fresh-checkout reconciliation as trusted reusable intent.
     #[serde(skip)]
     environment_target: Option<farhelm_proto::LaunchTarget>,
+    /// Set only for an agent's environment launch ([`Self::for_agent_environment`]);
+    /// never accepted from JSON. The create then runs exactly the launch the
+    /// user approved on the agent's card, under the agent origin, rather than
+    /// composing one again and recording it as the user's own choice.
+    #[serde(skip)]
+    agent: Option<AgentEnvironmentCreate>,
     /// Sent only by this create, never retained as a recent setup or launch.
     prompt: Option<String>,
     /// A selector for this start only, never part of history or templates.
@@ -1147,12 +1153,103 @@ pub(crate) struct CreateReq {
     github_checkout: Option<farhelm_proto::GithubCheckoutRequest>,
 }
 
+/// What an agent's environment launch carries into the launcher's create:
+/// the launch exactly as its card showed it, workspace trust already decided,
+/// and the agent's wrapper facts. Carried rather than recomputed because the
+/// create runs minutes later, after the environment is built, and neither a
+/// Settings change in between nor the user-create path's history bookkeeping
+/// may change or claim what the user approved.
+#[derive(Clone)]
+pub(crate) struct AgentEnvironmentCreate {
+    launch: TrustResolvedLaunch,
+    agent_wrapper_supplied: bool,
+    wrapper_approved: bool,
+}
+
 impl CreateReq {
     /// Attach placement captured by the helm before resource creation. Ordinary
     /// HTTP callers cannot deserialize this authority or manufacture recents.
     pub(crate) fn with_environment_target(mut self, target: farhelm_proto::LaunchTarget) -> Self {
         self.environment_target = Some(target);
         self
+    }
+
+    /// The create a new environment's first session runs when an agent asked
+    /// for it (SPEC.md, "Agents and environments"), in the shape the
+    /// launcher's own environment launch sends: the new home as its folder,
+    /// or a managed checkout of `repo` there, and no host, which the launch
+    /// task supplies once the environment exists.
+    ///
+    /// `launch` is what the agent's templates and flags resolved to, or a
+    /// clone source's stored launch, with workspace trust already decided.
+    /// It travels in the private agent field and is what validation and the
+    /// create use directly: it is never compiled again from its selection
+    /// (which could refuse a clone's historical choices) and its trust is
+    /// never decided again. The public selection or command fields carry the
+    /// same launch's shape for the code that reads the request. A launch from
+    /// before launch kinds has neither and is refused, as Clone and Replace
+    /// refuse it.
+    pub(crate) fn for_agent_environment(
+        launch: TrustResolvedLaunch,
+        agent_wrapper_supplied: bool,
+        prompt: Option<String>,
+        title: Option<String>,
+        repo: Option<String>,
+    ) -> anyhow::Result<CreateReq> {
+        let (selection, command) = match launch.as_launch() {
+            farhelm_proto::SessionLaunch::Agent { selection, .. } => {
+                (Some(selection.clone()), None)
+            }
+            farhelm_proto::SessionLaunch::Command(command) => (None, Some(command.clone())),
+            farhelm_proto::SessionLaunch::Legacy { .. } => {
+                return Err(invalid_request(
+                    "this launch predates launch kinds, so it cannot start in a new sandbox or \
+                     container; use farhelm agent create --recipe with launch flags instead"
+                        .into(),
+                ));
+            }
+        };
+        Ok(CreateReq {
+            environment_target: None,
+            agent: Some(AgentEnvironmentCreate {
+                launch,
+                // The environment card always needs the user's own Allow and
+                // shows the whole launch, so an agent-supplied wrapper on it
+                // has had the direct answer the wrapper rule asks for.
+                agent_wrapper_supplied,
+                wrapper_approved: agent_wrapper_supplied,
+            }),
+            prompt,
+            conversation: None,
+            cwd: "~".into(),
+            launch: selection,
+            command,
+            retired: RetiredCreateFields::default(),
+            confirm_yolo: false,
+            title: title.clone(),
+            host: None,
+            cols: default_cols(),
+            rows: default_rows(),
+            intent_key: None,
+            expected_incarnation: None,
+            github_checkout: repo.map(|repo| farhelm_proto::GithubCheckoutRequest {
+                repo,
+                title,
+                preview: None,
+            }),
+        })
+    }
+
+    /// The origin this create speaks with: the agent's, for an agent's
+    /// environment launch, so it records no GUI selection; otherwise the user's.
+    fn origin(&self) -> CreateOrigin {
+        match &self.agent {
+            Some(agent) => CreateOrigin::Agent {
+                agent_wrapper_supplied: agent.agent_wrapper_supplied,
+                wrapper_approved: agent.wrapper_approved,
+            },
+            None => CreateOrigin::User,
+        }
     }
 
     /// Refuse an invalid recipe launch before any sandbox can start billing.
@@ -1213,7 +1310,13 @@ impl CreateReq {
         }
         // Ordinary create consumes its selectors. Validate a copy here so a
         // future local refusal applies before billing as well as before RPC.
-        let launch = create_mode(&mut self.clone())?;
+        // An agent's environment launch is already composed (a clone copies
+        // its source's stored launch, which today's catalog need not offer
+        // any more); only a fresh browser choice is compiled here.
+        let launch = match &self.agent {
+            Some(agent) => agent.launch.as_launch().clone(),
+            None => create_mode(&mut self.clone())?,
+        };
         launch
             .validate_initial_prompt(self.prompt.as_deref(), self.conversation.is_some())
             .map_err(invalid_request)?;
@@ -1731,7 +1834,9 @@ async fn create_session_request(
     // Mode compilation consumes selector fields. Retain the original request
     // first so later reconciliation does not depend on mutable catalogs.
     let client_identity = fresh_create_request_identity(&req);
-    let ordinary_mode = if req.github_checkout.is_none() {
+    // An agent's environment launch arrives composed and approved; compiling
+    // its selection again could refuse a clone's historical choices.
+    let ordinary_mode = if req.github_checkout.is_none() && req.agent.is_none() {
         Some(create_mode(&mut req)?)
     } else {
         None
@@ -1740,16 +1845,22 @@ async fn create_session_request(
         Some(host) => host_client(state, host)?,
         None => create_target(state, req.host)?,
     };
+    let origin = req.origin();
+    let approved = req.agent.take().map(|agent| agent.launch);
     if req.github_checkout.is_some() {
         let intent_key = req.intent_key.clone();
-        let session = create_fresh_session(
+        let session = create_fresh_session_resolved(
             state,
             &claim,
             &client,
             req,
-            intent_key,
-            client_identity,
-            None,
+            FreshCreateContext {
+                intent_key,
+                client_identity,
+                accept_result: None,
+                origin,
+                resolved_mode: approved,
+            },
         )
         .await?;
         return Ok((claim, session));
@@ -1763,8 +1874,16 @@ async fn create_session_request(
     // default does not, by design: it is a helm-wide suggestion rather than
     // a claim about the install currently behind this registry row.
     crate::precondition::incarnation_holds(&claim, req.expected_incarnation)?;
-    let mode = ordinary_mode.expect("fresh requests returned through their shared admission path");
-    let mode = normalize_launch_workspace_trust(state, &client, mode, &mut req.cwd, false).await?;
+    // An agent's approved launch keeps the trust its card showed; a user's
+    // create decides trust now, for the folder it lands in.
+    let mode = match approved {
+        Some(approved) => approved,
+        None => {
+            let mode = ordinary_mode
+                .expect("fresh and agent requests returned or took their own launch above");
+            normalize_launch_workspace_trust(state, &client, mode, &mut req.cwd, false).await?
+        }
+    };
     let named_start = req
         .conversation
         .take()
@@ -1785,7 +1904,7 @@ async fn create_session_request(
             cols: req.cols,
             rows: req.rows,
             intent_key: req.intent_key,
-            origin: CreateOrigin::User,
+            origin,
             // A REST create takes whatever session the target answers with,
             // replays included: the client asked for a session on that host
             // and the reply names one. Only the relay's clone has a result
@@ -2516,6 +2635,7 @@ pub(crate) async fn create_agent_checkout(
 ) -> anyhow::Result<farhelm_proto::SessionInfo> {
     let req = CreateReq {
         environment_target: None,
+        agent: None,
         prompt: resolution.prompt,
         conversation: None,
         cwd: String::new(),
@@ -2607,6 +2727,75 @@ pub(crate) fn resolve_launch_request(request: LaunchRequest) -> anyhow::Result<S
 mod workspace_trust_tests {
     use super::*;
     use farhelm_proto::{LaunchHarness, LaunchSelection};
+
+    /// Spec: an agent's environment launch request carries the launch its card
+    /// showed, workspace trust included, and speaks with the agent's origin,
+    /// its direct-Allow answering any wrapper the agent supplied; a request
+    /// decoded from a browser body carries neither (SPEC.md, "Agents and
+    /// environments").
+    ///
+    /// Why: the create runs minutes after the Allow, through the launcher's
+    /// user path. Recomposing there would let a Settings change alter the
+    /// approved command, and the user origin would record the agent's choices
+    /// as the user's remembered launcher defaults.
+    #[farhelm_testtrace::test]
+    fn agent_environment_requests_carry_the_approved_launch_and_agent_origin() {
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+            permission_flags: None,
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        };
+        let launch = launches::compile(selection).unwrap();
+        let settings = crate::checkout_config::ResolvedCheckoutConfig {
+            keep_spare: false,
+            claude_trust: false,
+            codex_trust: true,
+            muse_trust: false,
+            pi_trust: false,
+            root: Some("~/checkouts".into()),
+            post_clone: None,
+            config_revision: 1,
+        };
+        let approved =
+            crate::workspace_trust::configured_launch_workspace_trust(launch, &settings, true)
+                .unwrap();
+        let trusted = approved.as_launch().clone();
+        assert_eq!(
+            trusted.agent_selection().unwrap().workspace_trust,
+            Some(true),
+            "premise: Settings trust a managed Codex checkout"
+        );
+        let req =
+            CreateReq::for_agent_environment(approved, true, None, None, Some("acme/web".into()))
+                .unwrap();
+        assert!(matches!(
+            req.origin(),
+            CreateOrigin::Agent {
+                agent_wrapper_supplied: true,
+                wrapper_approved: true,
+            }
+        ));
+        assert_eq!(
+            req.agent.as_ref().map(|agent| agent.launch.as_launch()),
+            Some(&trusted),
+            "the approved launch, trust included, is what the create will run"
+        );
+        let browser: CreateReq = serde_json::from_value(serde_json::json!({
+            "cwd": "~",
+            "agent": { "launch": "ignored" },
+        }))
+        .unwrap();
+        assert!(
+            browser.agent.is_none(),
+            "no JSON body can claim agent origin"
+        );
+        assert!(matches!(browser.origin(), CreateOrigin::User));
+    }
 
     /// Fresh resolution reads the saved global spare choice once, alongside
     /// root/hook/trust; later saves cannot mutate the already resolved payload.

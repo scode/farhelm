@@ -241,7 +241,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_74` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_75` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -252,7 +252,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 74;
+pub const PROTOCOL_VERSION: u32 = 75;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -2089,6 +2089,28 @@ pub enum AgentVerb {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         confirm_yolo: bool,
     },
+    /// `farhelm agent create --recipe`: a session in a NEW disposable
+    /// environment built from `recipe`, a Tensorlake sandbox or, with
+    /// `container_host`, a container on the host of that display name
+    /// (protocol 75). Answered with [`AgentReply::Created`].
+    ///
+    /// A verb of its own rather than a field on [`AgentVerb::Create`]: a
+    /// helm that predates it must fail to decode the request, never ignore
+    /// the placement and create an ordinary session instead. `templates` and
+    /// `edits` are [`AgentVerb::Create`]'s, applied the same way; the recipe
+    /// replaces any placement a template carries. There is no host and no
+    /// idempotency key: the environment does not exist until the user allows
+    /// the launch, so nothing could hold a key for a retry (SPEC.md, "Agents
+    /// and environments").
+    CreateEnvironment {
+        recipe: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        container_host: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        templates: Vec<String>,
+        #[serde(default)]
+        edits: crate::launcher::TemplateFields,
+    },
     /// `farhelm agent template create`: a new launch template named `name`
     /// setting `fields`, refused if one of that name exists (protocol 42).
     /// Answered with [`AgentReply::TemplateWritten`].
@@ -2217,6 +2239,7 @@ impl AgentVerb {
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
             | AgentVerb::Clone { .. }
+            | AgentVerb::CreateEnvironment { .. }
             // A template write changes helm state that every later launch
             // from the template reads, so a lost answer is an unknown
             // outcome, not a free retry.
@@ -2255,6 +2278,7 @@ impl AgentVerb {
             | AgentVerb::Restart { .. }
             | AgentVerb::Create { .. }
             | AgentVerb::Clone { .. }
+            | AgentVerb::CreateEnvironment { .. }
             | AgentVerb::TemplateCreate { .. }
             | AgentVerb::TemplateEdit { .. }
             | AgentVerb::TemplateDelete { .. }
@@ -2262,6 +2286,43 @@ impl AgentVerb {
             | AgentVerb::HostEdit { .. }
             | AgentVerb::HostRemove { .. }
             | AgentVerb::OpenUrl { .. } => true,
+        }
+    }
+
+    /// Whether answering this verb may also wait for a new disposable
+    /// environment to be built and started after the user allows it
+    /// (SPEC.md, "Agents and environments"), which the relay covers with
+    /// [`approvals::ENVIRONMENT_LAUNCH_WAIT`] on top of the approval wait.
+    ///
+    /// `Create` and `Clone` are included whatever they name: only the helm
+    /// knows whether a template carries a recipe or a clone's source lives in
+    /// an environment, so the relay cannot tell one that launches an
+    /// environment from one that does not. The longer bound costs an ordinary
+    /// create nothing, because the helm answers it as soon as it is done; it
+    /// only moves the point where the relay would give up on a helm that
+    /// never answers.
+    ///
+    /// Exhaustive for the reason `is_mutating` is.
+    pub fn may_launch_environment(&self) -> bool {
+        match self {
+            AgentVerb::CreateEnvironment { .. }
+            | AgentVerb::Create { .. }
+            | AgentVerb::Clone { .. } => true,
+            AgentVerb::Hosts {}
+            | AgentVerb::Sessions {}
+            | AgentVerb::Templates {}
+            | AgentVerb::OpenUrl { .. }
+            | AgentVerb::Rename { .. }
+            | AgentVerb::Stop { .. }
+            | AgentVerb::Prompt { .. }
+            | AgentVerb::Delete { .. }
+            | AgentVerb::Restart { .. }
+            | AgentVerb::TemplateCreate { .. }
+            | AgentVerb::TemplateEdit { .. }
+            | AgentVerb::TemplateDelete { .. }
+            | AgentVerb::HostAdd { .. }
+            | AgentVerb::HostEdit { .. }
+            | AgentVerb::HostRemove { .. } => false,
         }
     }
 }
@@ -5775,8 +5836,71 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_74() {
-        assert_eq!(PROTOCOL_VERSION, 74);
+    fn protocol_version_is_pinned_at_75() {
+        assert_eq!(PROTOCOL_VERSION, 75);
+    }
+
+    /// Spec: `farhelm agent create --recipe` travels as its own verb tag,
+    /// carries the container host only when given, and is a mutation that
+    /// may wait for the user and then for an environment launch; `create`
+    /// and `clone` may launch one too, while lifecycle verbs and listings do
+    /// not (SPEC.md, "Agents and environments").
+    ///
+    /// Why: the tag is what makes a helm from before it refuse the request
+    /// instead of creating an ordinary session, and the launch classification
+    /// is what keeps the relay from giving up on a launch the user allowed.
+    #[farhelm_testtrace::test]
+    fn create_environment_has_its_own_tag_and_the_launch_wait() {
+        let tensorlake = AgentVerb::CreateEnvironment {
+            recipe: "dev".into(),
+            container_host: None,
+            templates: Vec::new(),
+            edits: crate::launcher::TemplateFields::default(),
+        };
+        let wire = serde_json::json!({"verb": "create_environment", "recipe": "dev", "edits": {}});
+        assert_eq!(serde_json::to_value(&tensorlake).unwrap(), wire);
+        assert_eq!(
+            serde_json::from_value::<AgentVerb>(wire).unwrap(),
+            tensorlake
+        );
+        let container = AgentVerb::CreateEnvironment {
+            recipe: "dev".into(),
+            container_host: Some("build-box".into()),
+            templates: vec!["base".into()],
+            edits: crate::launcher::TemplateFields::default(),
+        };
+        let wire = serde_json::to_value(&container).unwrap();
+        assert_eq!(wire["container_host"], "build-box");
+        assert_eq!(
+            serde_json::from_value::<AgentVerb>(wire).unwrap(),
+            container
+        );
+        for verb in [&tensorlake, &container] {
+            assert!(verb.is_mutating(), "{verb:?}");
+            assert!(verb.may_wait_for_user(), "{verb:?}");
+            assert!(verb.may_launch_environment(), "{verb:?}");
+        }
+        assert!(
+            AgentVerb::Clone {
+                source_session_id: None,
+                host: None,
+                cwd: None,
+                title: None,
+                intent_key: None,
+                confirm_yolo: false,
+            }
+            .may_launch_environment()
+        );
+        for verb in [
+            AgentVerb::Hosts {},
+            AgentVerb::Stop { session_id: None },
+            AgentVerb::Delete {
+                session_id: None,
+                stop_if_running: false,
+            },
+        ] {
+            assert!(!verb.may_launch_environment(), "{verb:?}");
+        }
     }
 
     /// A follow-up is an approved mutation even though its success has no

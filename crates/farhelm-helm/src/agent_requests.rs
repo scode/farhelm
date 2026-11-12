@@ -523,6 +523,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 | ParsedAgentVerb::HostEdit { .. }
                 | ParsedAgentVerb::HostRemove { .. }
                 | ParsedAgentVerb::Clone { .. }
+                | ParsedAgentVerb::CreateEnvironment { .. }
         ) && let Err(refusal) = scope.admit_fleet_verb()
         {
             return outcome_of(Err(refusal), mutating);
@@ -903,6 +904,25 @@ impl AgentRequestHandler for HelmAgentRequests {
                 )
                 .await
             }
+            ParsedAgentVerb::CreateEnvironment {
+                recipe,
+                container_host,
+                templates,
+                edits,
+            } => {
+                create_environment_for_agent(
+                    &state,
+                    origin,
+                    session_id,
+                    templates,
+                    edits,
+                    ExplicitEnvironment {
+                        recipe: recipe.into_string(),
+                        container_host: container_host.map(NonEmptyString::into_string),
+                    },
+                )
+                .await
+            }
             ParsedAgentVerb::Clone {
                 source_session_id,
                 host,
@@ -917,7 +937,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                     session_id,
                     CloneRequest {
                         source_session_id: source_session_id.into_string(),
-                        host: host.into_string(),
+                        host: host.map(NonEmptyString::into_string),
                         cwd: cwd.map(NonEmptyString::into_string),
                         title,
                         intent_key,
@@ -1194,9 +1214,18 @@ enum ParsedAgentVerb {
         intent_key: Option<String>,
         spawn: Option<farhelm_proto::SpawnPlacement>,
     },
+    /// `farhelm agent create --recipe`: a new environment's first session.
+    CreateEnvironment {
+        recipe: NonEmptyString,
+        container_host: Option<NonEmptyString>,
+        templates: Vec<String>,
+        edits: farhelm_proto::launcher::TemplateFields,
+    },
+    /// The host is required unless the source lives in an environment, which
+    /// only the helm can tell, so it is checked in [`clone_for_agent`].
     Clone {
         source_session_id: NonEmptyString,
-        host: NonEmptyString,
+        host: Option<NonEmptyString>,
         cwd: Option<NonEmptyString>,
         title: Option<String>,
         intent_key: Option<String>,
@@ -1321,7 +1350,7 @@ impl ParsedAgentVerb {
             } => {
                 let source_session_id =
                     NonEmptyString::required(source_session_id, "--source-session")?;
-                let host = NonEmptyString::required(host, "--host")?;
+                let host = optional_host(host)?;
                 let cwd = cwd.map(|cwd| NonEmptyString::new(cwd,
                     "--cwd must not be empty; omit it to use the source session's directory"
                 )).transpose()?;
@@ -1333,6 +1362,19 @@ impl ParsedAgentVerb {
                     intent_key,
                 }
             }
+            AgentVerb::CreateEnvironment {
+                recipe,
+                container_host,
+                templates,
+                edits,
+            } => Self::CreateEnvironment {
+                recipe: NonEmptyString::new(recipe, "--recipe must not be empty")?,
+                container_host: container_host
+                    .map(|host| NonEmptyString::new(host, "--container-host must not be empty"))
+                    .transpose()?,
+                templates,
+                edits,
+            },
             AgentVerb::TemplateCreate {
                 name,
                 fields,
@@ -1605,7 +1647,9 @@ struct ResolvedCreate<L = farhelm_proto::SessionLaunch> {
 /// `title` would compile and be wrong.
 struct CloneRequest {
     source_session_id: String,
-    host: String,
+    /// Required for an ordinary source; refused for a source in an
+    /// environment, whose clone targets a new environment instead.
+    host: Option<String>,
     cwd: Option<String>,
     title: Option<String>,
     intent_key: Option<String>,
@@ -1678,9 +1722,10 @@ async fn resolve_host(
     }
 }
 
-/// Billed sandbox creation and destruction remain deliberate user actions,
-/// even when an agent on an ordinary host names a sandbox session by full ID.
-/// This preflight also works while that sandbox's supervisor is suspended.
+/// Destroying a disposable environment stays a deliberate user action, even
+/// when an agent on an ordinary host names one of its sessions by full ID.
+/// This preflight also works while that environment's supervisor is
+/// suspended.
 async fn refuse_sandbox_target(state: &AppState, host: HostId) -> anyhow::Result<()> {
     if crate::hosts::registry_row(state, host)
         .await?
@@ -1688,7 +1733,7 @@ async fn refuse_sandbox_target(state: &AppState, host: HostId) -> anyhow::Result
     {
         return Err(anyhow::Error::new(crate::SupervisorError::helm(
             ErrorKind::Unauthorized,
-            "Only the user can delete or clone a sandbox session in Farhelm".to_string(),
+            "Only the user can delete a sandbox or container session in Farhelm".to_string(),
         )));
     }
     Ok(())
@@ -1908,7 +1953,7 @@ fn asker_scoped_intent_key(
 /// path's own recheck (`approved`) is about the REQUESTING host's connection,
 /// not the target's.
 async fn create_for_agent(
-    state: &AppState,
+    state: &Arc<AppState>,
     origin: AgentOrigin,
     asking_host_entry: &str,
     asking_session: &str,
@@ -1943,6 +1988,25 @@ async fn create_for_agent(
     // Fingerprints below still read the unmodified request. The supervisor
     // receives only the resolved parent's bare suffix on this spawn's own entry.
     let parent = parent.map(|key| key.session_id);
+    // A template whose target is a recipe asks for a new environment, which
+    // is its own path with its own card. `--host` replaces a template's
+    // placement, and a spawn stays on its own host (its recipe templates are
+    // refused as unavailable there), so only a hostless ordinary create goes.
+    // Only the final placement decides: a later template may replace a
+    // recipe target with an installed host, which leaves an ordinary create.
+    if scope == AgentScope::Fleet
+        && !spawned
+        && edits.host.is_none()
+        && names_recipe_template(state, &edits.templates).await?
+        && let Some(plan) =
+            plan_environment_create(state, origin, &edits.templates, edits.edits.clone(), None)
+                .await?
+    {
+        if intent_key.is_some() {
+            return Err(keyed_environment_refusal());
+        }
+        return launch_environment_for_agent(state, origin, asking_session, plan).await;
+    }
     // A key's record lives only on the host the first attempt reached, so a
     // retry has to reach that same host to be matched against it. A host
     // taken from a template could change between the attempt and its retry
@@ -2370,14 +2434,51 @@ async fn resolve_agent_create(
         return inherited_spawn_resolution(&views, origin, edits, placement);
     }
     let templates = state.store.launch_templates().await?;
-    let resolution = crate::agent_launch::resolve(
-        &templates,
-        &edits.templates,
-        &edits.edits,
-        &crate::agent_launch::template_host_identities(&views),
-        edits.spawn.is_some(),
-        edits.host.is_some(),
-    )?;
+    let resolution = if edits.spawn.is_some() {
+        crate::agent_launch::resolve(
+            &templates,
+            &edits.templates,
+            &edits.edits,
+            &crate::agent_launch::template_host_identities(&views),
+            true,
+            edits.host.is_some(),
+        )?
+    } else {
+        // An ordinary create may stack a recipe template under an
+        // installed-host one, which replaces it; the recipes must be known for
+        // that earlier template to apply at all. A final recipe target never
+        // reaches here: `create_for_agent` sends it to the environment path,
+        // and `--host` drops template placements.
+        let rows = state.store.list_hosts().await?;
+        let recipes: Vec<String> = state
+            .store
+            .tensorlake_recipe_rows()
+            .await?
+            .into_iter()
+            .map(|(name, ..)| name)
+            .collect();
+        let places: Vec<farhelm_proto::Place> = rows
+            .iter()
+            .filter(|row| row.kind.can_host_environments())
+            .map(|row| farhelm_proto::Place::PodmanHost(row.id))
+            .collect();
+        let (resolution, target) = crate::agent_launch::resolve_placed(
+            &templates,
+            &edits.templates,
+            &edits.edits,
+            &crate::agent_launch::Placement {
+                known_hosts: &crate::agent_launch::template_host_identities(&views),
+                known_recipes: &recipes,
+                known_places: &places,
+            },
+            edits.host.is_some(),
+        )?;
+        anyhow::ensure!(
+            target.is_none(),
+            "a recipe target reached the ordinary create path"
+        );
+        resolution
+    };
     let mut template_identity = None;
     let (host, host_name) = if edits.spawn.is_some() {
         if edits.host.is_some() {
@@ -3753,25 +3854,12 @@ async fn template_listing(state: &AppState, caller_entry_uuid: &str) -> anyhow::
 /// the copy is still read live on every attempt, and a retry whose source is
 /// gone, unreachable or legacy is refused before anything is sent.
 async fn clone_for_agent(
-    state: &AppState,
+    state: &Arc<AppState>,
     origin: AgentOrigin,
     asking_host_entry: &str,
     asking_session: &str,
     request: CloneRequest,
 ) -> anyhow::Result<AgentReply> {
-    let request_fingerprint = request
-        .intent_key
-        .as_ref()
-        .map(|_| {
-            AgentRequestDigest::Clone {
-                source: &request.source_session_id,
-                host: &request.host,
-                cwd: request.cwd.as_deref(),
-                title: request.title.as_deref(),
-            }
-            .digest()
-        })
-        .transpose()?;
     let source_key = resolve_target(
         state,
         origin,
@@ -3780,7 +3868,34 @@ async fn clone_for_agent(
         "clone",
     )
     .await?;
-    refuse_sandbox_target(state, source_key.host).await?;
+    // A copy of a session in a disposable environment is a new environment,
+    // never a session on an existing host (SPEC.md, "Agents and
+    // environments"), so it leaves this path before the host is required.
+    if crate::hosts::registry_row(state, source_key.host)
+        .await?
+        .is_session_owned()
+    {
+        return clone_environment_for_agent(state, origin, asking_session, &source_key, request)
+            .await;
+    }
+    let Some(target_host) = request.host.clone() else {
+        return Err(crate::sessions::invalid_request(
+            "--host is required and must not be empty".to_string(),
+        ));
+    };
+    let request_fingerprint = request
+        .intent_key
+        .as_ref()
+        .map(|_| {
+            AgentRequestDigest::Clone {
+                source: &request.source_session_id,
+                host: &target_host,
+                cwd: request.cwd.as_deref(),
+                title: request.title.as_deref(),
+            }
+            .digest()
+        })
+        .transpose()?;
     let (source_claim, source_client) = crate::sessions::route_session(state, &source_key).await?;
     // Marked as the read-only phase it is: this listing runs before any
     // create is dispatched, so a transport failure here is retry-safe and
@@ -3807,7 +3922,7 @@ async fn clone_for_agent(
         &source,
         "the user can start a copy with Clone or Replace with, which choose a launch",
     )?;
-    let (host, host_name) = resolve_host(state, origin, request.host).await?;
+    let (host, host_name) = resolve_host(state, origin, target_host).await?;
     let mut cwd = request.cwd.unwrap_or(source.cwd);
     let (claim, client) = crate::sessions::host_client(state, host)?;
     // The source's words must be vouched for before changing any of them.
@@ -3961,6 +4076,524 @@ fn reject_clone_replay(
         ErrorKind::Conflict,
         "the idempotency key replayed the create that made the source or caller session, so no copy was made; retry the clone with a key that has not been used on this host, or with none at all".to_string(),
     )))
+}
+
+// ---------------------------------------------------------------------
+// Launching new environments (SPEC.md, "Agents and environments")
+// ---------------------------------------------------------------------
+
+/// `farhelm agent create --recipe NAME [--container-host HOST]` as the agent
+/// sent it: the recipe by name and the container host by display name.
+struct ExplicitEnvironment {
+    recipe: String,
+    container_host: Option<String>,
+}
+
+/// One new environment's first session, decided and ready for its card.
+///
+/// Both front ends, a create (with `--recipe` or a recipe template) and a
+/// clone of a session in an environment, produce one of these, so the card,
+/// the launch and the reply have one implementation.
+struct PlannedEnvironmentLaunch {
+    verb: LaunchVerb,
+    target: farhelm_proto::LaunchTarget,
+    launch: farhelm_proto::SessionLaunch,
+    prompt: Option<String>,
+    /// `owner/repo` for a managed checkout cloned inside the new environment;
+    /// `None` starts in its home.
+    repo: Option<String>,
+    title: Option<String>,
+    title_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
+    source: Option<farhelm_proto::approvals::ApprovalSession>,
+    /// The launch carries a wrapper prefix the agent chose (its own flag, or
+    /// a clone source's), which the direct-Allow card then answers.
+    agent_wrapper_supplied: bool,
+    /// For a clone: the source and the owner connection its launch was read
+    /// from, rechecked after the Allow as ordinary clone rechecks it.
+    source_owner: Option<SourceOwner>,
+}
+
+/// The source pair a clone read, and the owner claim and connection it read
+/// it from. A clone may act on that read only while the same connection still
+/// owns the same pair: the read is the authority for what the copy runs.
+struct SourceOwner {
+    key: SessionKey,
+    claim: crate::manager::SessionClaim,
+    client: Arc<crate::SupervisorClient>,
+}
+
+/// Whether any template a create names carries a recipe target, which makes
+/// it an environment launch. An unknown name is not this function's to
+/// refuse; template resolution reports it.
+async fn names_recipe_template(state: &AppState, names: &[String]) -> anyhow::Result<bool> {
+    if names.is_empty() {
+        return Ok(false);
+    }
+    Ok(state
+        .store
+        .launch_templates()
+        .await?
+        .iter()
+        .any(|template| {
+            names.contains(&template.name) && template.fields.launch_target().is_some()
+        }))
+}
+
+/// The refusal a keyed environment launch gets, before anything else: the
+/// key would have to live in a supervisor that exists only once the launch
+/// has run, so a retry could never find it and would build a second
+/// environment instead of returning the first.
+fn keyed_environment_refusal() -> anyhow::Error {
+    crate::sessions::invalid_request(
+        "an idempotency key cannot be used when a new sandbox or container is created: the key \
+         would be kept inside the environment the first attempt creates, where a retry could \
+         not find it; retry without a key, and check farhelm agent sessions first"
+            .to_string(),
+    )
+}
+
+/// `create --recipe`: a session in a new environment, whatever placement
+/// the named templates carry. Only an ordinary origin gets here (a confined
+/// origin's `--recipe` is refused with every other fleet verb).
+async fn create_environment_for_agent(
+    state: &Arc<AppState>,
+    origin: AgentOrigin,
+    asking_session: &str,
+    templates: Vec<String>,
+    edits: farhelm_proto::launcher::TemplateFields,
+    explicit: ExplicitEnvironment,
+) -> anyhow::Result<AgentReply> {
+    let plan = plan_environment_create(state, origin, &templates, edits, Some(explicit))
+        .await?
+        .context("an explicit recipe always leaves a recipe target")?;
+    launch_environment_for_agent(state, origin, asking_session, plan).await
+}
+
+/// Resolve a create that may land in a new environment, `None` when its
+/// final placement is an installed host instead (a hostless create naming a
+/// recipe template that a later template overrides).
+///
+/// An explicit recipe replaces whatever placement the named templates carry,
+/// as any flag wins over a template. The container host is named by display
+/// name and must be a host that can hold containers; everything else about
+/// the recipe and the place is checked by template application, which knows
+/// the installed hosts, the recipes and the container places, and then
+/// again before the card and by the launch task.
+async fn plan_environment_create(
+    state: &Arc<AppState>,
+    origin: AgentOrigin,
+    templates: &[String],
+    mut edits: farhelm_proto::launcher::TemplateFields,
+    explicit: Option<ExplicitEnvironment>,
+) -> anyhow::Result<Option<PlannedEnvironmentLaunch>> {
+    let rows = state.store.list_hosts().await?;
+    let explicit_given = explicit.is_some();
+    if let Some(explicit) = explicit {
+        let place = match explicit.container_host {
+            None => farhelm_proto::Place::TensorlakeAccount,
+            Some(name) => {
+                let (host, host_name) = resolve_host(state, origin, name).await?;
+                if !rows
+                    .iter()
+                    .any(|row| row.id == host && row.kind.can_host_environments())
+                {
+                    return Err(crate::sessions::invalid_request(format!(
+                        "{host_name} cannot hold containers; choose a local or SSH Linux host from \
+                         farhelm agent hosts"
+                    )));
+                }
+                farhelm_proto::Place::PodmanHost(host)
+            }
+        };
+        edits.host = None;
+        edits.recipe = None;
+        edits.target = Some(farhelm_proto::LaunchTarget::Environment {
+            recipe: explicit.recipe,
+            place,
+        });
+    }
+    let stored: Vec<_> = state
+        .store
+        .launch_templates()
+        .await?
+        .into_iter()
+        .map(|mut template| {
+            if explicit_given {
+                template.fields.host = None;
+                template.fields.recipe = None;
+                template.fields.target = None;
+            }
+            template
+        })
+        .collect();
+    let recipes: Vec<String> = state
+        .store
+        .tensorlake_recipe_rows()
+        .await?
+        .into_iter()
+        .map(|(name, ..)| name)
+        .collect();
+    let places: Vec<farhelm_proto::Place> = rows
+        .iter()
+        .filter(|row| row.kind.can_host_environments())
+        .map(|row| farhelm_proto::Place::PodmanHost(row.id))
+        .collect();
+    let views = crate::hosts::host_views(state).await?;
+    let (resolution, target) = crate::agent_launch::resolve_placed(
+        &stored,
+        templates,
+        &edits,
+        &crate::agent_launch::Placement {
+            known_hosts: &crate::agent_launch::template_host_identities(&views),
+            known_recipes: &recipes,
+            known_places: &places,
+        },
+        false,
+    )?;
+    let Some(target) = target else {
+        return Ok(None);
+    };
+    Ok(Some(PlannedEnvironmentLaunch {
+        verb: LaunchVerb::Create,
+        target,
+        launch: resolution.launch,
+        prompt: resolution.prompt,
+        repo: resolution.github_repo,
+        title: resolution.title,
+        title_kind: resolution.title_kind,
+        source: None,
+        agent_wrapper_supplied: resolution.agent_wrapper_supplied,
+        source_owner: None,
+    }))
+}
+
+/// The session an environment launch task answered with, with its own ID
+/// back in the bare supervisor form every agent reply projection qualifies.
+///
+/// The launch task answers as the launcher's REST route does, with references
+/// already qualified by the new host's entry; qualifying again would panic
+/// on a real 36-byte ID and mangle a short one. The prefix must be the entry
+/// this launch created, which `claim` names, or the reply would route the
+/// agent's next command to some other host.
+fn unqualified_launch_session(
+    claim: &crate::manager::SessionClaim,
+    mut session: farhelm_proto::SessionInfo,
+) -> anyhow::Result<farhelm_proto::SessionInfo> {
+    let reference: SessionRef = session
+        .id
+        .parse()
+        .context("the launch task answered with an unreadable session reference")?;
+    anyhow::ensure!(
+        reference.entry_uuid() == claim.entry_uuid,
+        "the launch task answered with a session of another host"
+    );
+    session.id = reference.bare_id().to_string();
+    Ok(session)
+}
+
+/// `clone` of a session in a disposable environment: a new environment from
+/// the same recipe at the same place, with the source's launch, title and
+/// repository, never a copy of its disk (SPEC.md, "Agents and environments",
+/// as GUI Clone does).
+///
+/// The source's launch is read live from its owning supervisor, as ordinary
+/// clone reads it: [`crate::sessions::mode_from_source`] must never copy a
+/// launch from the helm's cache, which can describe one the session no longer
+/// has. A suspended or unreachable source is therefore refused until it is
+/// resumed. A host or folder override is refused instead of ignored: the copy
+/// cannot land on an existing host, and it starts in its new home or its own
+/// checkout.
+async fn clone_environment_for_agent(
+    state: &Arc<AppState>,
+    origin: AgentOrigin,
+    asking_session: &str,
+    source_key: &SessionKey,
+    request: CloneRequest,
+) -> anyhow::Result<AgentReply> {
+    if request.intent_key.is_some() {
+        return Err(keyed_environment_refusal());
+    }
+    if request.host.is_some() {
+        return Err(crate::sessions::invalid_request(
+            "a copy of a sandbox or container session is a new sandbox or container, so clone \
+             takes no --host for it"
+                .to_string(),
+        ));
+    }
+    if request.cwd.is_some() {
+        return Err(crate::sessions::invalid_request(
+            "a copy of a sandbox or container session starts in the new environment's home or \
+             its own checkout, so clone takes no --cwd for it"
+                .to_string(),
+        ));
+    }
+    let row = crate::hosts::registry_row(state, source_key.host).await?;
+    let target = row
+        .kind
+        .environment_view(&row)
+        .map(|view| view.target)
+        .context("the source's environment has no recorded recipe")?;
+    let (source_claim, source_client) = crate::sessions::route_session(state, source_key).await?;
+    // A read-only phase of a mutating verb: nothing has been created yet,
+    // so a transport failure here is a free retry (see [`ReadOnlyPhase`]).
+    let source = crate::manager::drain_sessions(&source_client, source_claim.host)
+        .await
+        .map_err(|error| error.context(ReadOnlyPhase("reading the session to clone")))?
+        .sessions
+        .into_iter()
+        .map(crate::store::CachedRow::into_info)
+        .find(|session| session.id == source_key.session_id)
+        .ok_or_else(|| {
+            anyhow::Error::new(crate::SupervisorError::helm(
+                ErrorKind::NotFound,
+                format!(
+                    "the source's environment no longer lists session {:?}, so there is nothing \
+                     to clone",
+                    request.source_session_id
+                ),
+            ))
+        })?;
+    let launch = crate::sessions::mode_from_source(
+        &source,
+        "the user can start a copy with Clone, which chooses a launch",
+    )?;
+    let repo = source
+        .github_repo
+        .as_ref()
+        .map(|repo| format!("{}/{}", repo.owner, repo.name));
+    let agent_wrapper_supplied = launch
+        .agent_selection()
+        .is_some_and(|selection| selection.wrapper_prefix.is_some());
+    let description = crate::approvals::describe_session(state, source_key, &row.entry_uuid).await;
+    launch_environment_for_agent(
+        state,
+        origin,
+        asking_session,
+        PlannedEnvironmentLaunch {
+            verb: LaunchVerb::Clone,
+            target,
+            launch,
+            prompt: None,
+            repo,
+            // Copied verbatim, as an ordinary clone copies it.
+            title: Some(request.title.unwrap_or(source.title)),
+            title_kind: None,
+            source: Some(description),
+            agent_wrapper_supplied,
+            source_owner: Some(SourceOwner {
+                key: source_key.clone(),
+                claim: source_claim,
+                client: source_client,
+            }),
+        },
+    )
+    .await
+}
+
+/// Ask on the always-asking card, then run the launcher's own environment
+/// launch task and wait for its session.
+///
+/// Before the card: the place must still be able to run environments (the
+/// provider's cached availability, so a Tensorlake account with no key or a
+/// container host whose Podman is unusable is refused without a card), and
+/// the create must pass the same validation the launcher's environment
+/// route applies, so the user is never asked to approve something that is
+/// then refused before anything starts.
+///
+/// The card's Allow is the creation confirmation: the launch task is called
+/// directly, as the confirmation-checking route calls it after its own
+/// check. `own_host_session_action` is false and the kind requires the
+/// user's direct Allow, so no host setting skips it. The task belongs to the
+/// helm: if this request's relay gives up first, the launch carries on.
+async fn launch_environment_for_agent(
+    state: &Arc<AppState>,
+    origin: AgentOrigin,
+    asking_session: &str,
+    plan: PlannedEnvironmentLaunch,
+) -> anyhow::Result<AgentReply> {
+    let recipe = plan.target.recipe().to_string();
+    let place = plan.target.place();
+    let provider = state
+        .manager
+        .providers()
+        .get(place.provider())
+        .map_err(|error| {
+            anyhow::Error::new(crate::SupervisorError::helm(
+                ErrorKind::Unavailable,
+                error.0,
+            ))
+        })?;
+    let available = provider
+        .places()
+        .await?
+        .into_iter()
+        .find(|candidate| candidate.place == place);
+    match available {
+        None => {
+            return Err(anyhow::Error::new(crate::SupervisorError::helm(
+                ErrorKind::Unavailable,
+                "that place cannot run sandboxes or containers right now; nothing was started"
+                    .to_string(),
+            )));
+        }
+        Some(available) => {
+            if let Some(reason) = available.reason {
+                return Err(anyhow::Error::new(crate::SupervisorError::helm(
+                    ErrorKind::Unavailable,
+                    format!("{reason}; nothing was started"),
+                )));
+            }
+        }
+    }
+    // The recipe checks the launch task makes before it registers anything,
+    // made here too so a launch that is already impossible never gets a card.
+    // The task makes them again after the Allow, for a recipe changed since.
+    let (definition, saved) = state
+        .store
+        .tensorlake_recipe_row(&recipe)
+        .await?
+        .ok_or_else(|| {
+            crate::sessions::invalid_request(format!("there is no recipe named {recipe:?}"))
+        })?;
+    if !definition.base.supports(place.provider()) {
+        return Err(crate::sessions::invalid_request(format!(
+            "recipe {recipe:?} cannot run there; its base does not support that kind of \
+             environment"
+        )));
+    }
+    saved
+        .require_launch_source(place)
+        .map_err(|error| crate::sessions::invalid_request(format!("{error:#}")))?;
+    // Workspace trust is decided now, from the Settings the new environment
+    // will start with, and the launch carrying it is what the card shows and
+    // what the create runs: the user approves a fixed command, not one a
+    // Settings change during the wait or the build could alter.
+    let launch = crate::workspace_trust::configured_launch_workspace_trust(
+        plan.launch,
+        &state.store.resolve_checkout_config(None).await?,
+        plan.repo.is_some(),
+    )?;
+    let shown = launch.as_launch().clone();
+    let request = crate::sessions::CreateReq::for_agent_environment(
+        launch,
+        plan.agent_wrapper_supplied,
+        plan.prompt.clone(),
+        plan.title.clone(),
+        plan.repo.clone(),
+    )?;
+    request.validate_sandbox_launch(state).await?;
+    let place_name = match place.host() {
+        Some(host) => crate::hosts::host_views(state)
+            .await?
+            .into_iter()
+            .find(|view| view.id == host)
+            .map(|view| view.name),
+        None => None,
+    };
+    approved(
+        state,
+        origin,
+        asking_session,
+        false,
+        ApprovalAction::LaunchEnvironment {
+            verb: plan.verb,
+            recipe: recipe.clone(),
+            place,
+            place_name,
+            cwd: if plan.repo.is_some() {
+                String::new()
+            } else {
+                "~".to_string()
+            },
+            repo: plan.repo.clone(),
+            title: plan.title.clone(),
+            launch: shown,
+            source: plan.source.clone(),
+            prompt: plan.prompt.clone(),
+        },
+    )
+    .await?;
+    // A clone's source read is authority only while its owner is unchanged;
+    // the user may have taken minutes to answer. Re-route rather than reread,
+    // so the launch that runs is exactly the one the card showed.
+    if let Some(owner) = &plan.source_owner {
+        let (claim, client) = crate::sessions::route_session(state, &owner.key).await?;
+        if claim != owner.claim || !Arc::ptr_eq(&client, &owner.client) {
+            return Err(anyhow::Error::new(crate::SupervisorError::helm(
+                ErrorKind::Conflict,
+                "the source session's owner changed while it was being read; run discovery \
+                 again before retrying the clone"
+                    .to_string(),
+            )));
+        }
+    }
+    info!(
+        asking = escape_for_log(asking_session).as_str(),
+        recipe = escape_for_log(&recipe).as_str(),
+        "an agent is launching a session in a new environment"
+    );
+    // Registration runs on a helm-owned task, as the user's REST route does.
+    // This handler runs on the asking connection's agent task, which the
+    // client aborts when that connection drops; aborted between registering
+    // the row and spawning the provisioning task, it would leave a row that
+    // nothing creates or cleans up, or a host held busy until the helm
+    // restarts. Once the work is owned, a drop only loses the reply.
+    let (accepted, result) =
+        crate::run_owned(Arc::clone(&state.provisioning).start_session_environment(
+            Arc::clone(state),
+            recipe,
+            place,
+            request,
+            plan.title_kind,
+        ))
+        .await?;
+    // Bounded here as well as at the relay: the relay's budget covers the
+    // approval wait plus this allowance, so answering by the end of the
+    // allowance after the Allow reaches the agent before its relay gives up,
+    // with the honest "still launching" instead of a lost answer. The launch
+    // task is not cancelled; its progress stays in the host's attention area.
+    let session =
+        match tokio::time::timeout(farhelm_proto::approvals::ENVIRONMENT_LAUNCH_WAIT, result).await
+        {
+            Ok(Ok(outcome)) => outcome?,
+            Ok(Err(_)) => anyhow::bail!(
+                "the launch task ended without a result; check farhelm agent sessions and the host \
+             list before launching again"
+            ),
+            Err(_) => {
+                return Err(anyhow::Error::new(crate::SupervisorError::helm(
+                    ErrorKind::Timeout,
+                    format!(
+                        "the new sandbox or container is still being set up after {} minutes; it \
+                     carries on, and its session will appear in farhelm agent sessions once it \
+                     exists. Do not launch it again",
+                        farhelm_proto::approvals::ENVIRONMENT_LAUNCH_WAIT.as_secs() / 60
+                    ),
+                )));
+            }
+        };
+    // The new host normally has a published connection by now. If it was
+    // lost in the moments since, the reply keeps the entry prefix and marks
+    // itself stale rather than naming a host it cannot vouch for.
+    let claim = match crate::sessions::host_client(state, accepted.host_id) {
+        Ok((claim, _)) => claim,
+        Err(_) => crate::manager::SessionClaim {
+            host: accepted.host_id,
+            entry_uuid: crate::hosts::registry_row(state, accepted.host_id)
+                .await?
+                .entry_uuid,
+            incarnation: u64::MAX,
+            identity: None,
+        },
+    };
+    let session = unqualified_launch_session(&claim, session)?;
+    Ok(agent_created_reply(
+        state,
+        &claim,
+        session,
+        origin.host,
+        asking_session,
+    ))
 }
 
 /// Project a session a lifecycle verb just mutated into the same
@@ -4492,14 +5125,14 @@ mod tests {
                 clone(Some(""), Some("")),
                 "--source-session is required and must not be empty",
             ),
+            // A missing host is the helm's to refuse once it knows the source
+            // is not in an environment (`clone_for_agent`), so parsing moves
+            // on to the next field.
             (
                 clone(Some("source"), None),
-                "--host is required and must not be empty",
+                "--cwd must not be empty; omit it to use the source session's directory",
             ),
-            (
-                clone(Some("source"), Some("")),
-                "--host is required and must not be empty",
-            ),
+            (clone(Some("source"), Some("")), "--host must not be empty"),
             (
                 clone(Some("source"), Some("host")),
                 "--cwd must not be empty; omit it to use the source session's directory",
@@ -4606,7 +5239,7 @@ mod tests {
             panic!("a valid clone remains a clone")
         };
         assert_eq!(source_session_id.as_str(), " source ");
-        assert_eq!(host.as_str(), " host ");
+        assert_eq!(host.unwrap().as_str(), " host ");
         assert_eq!(cwd.unwrap().as_str(), " /work ");
         assert_eq!(title.as_deref(), Some(""));
         assert_eq!(intent_key.as_deref(), Some(""));
@@ -10238,6 +10871,36 @@ mod tests {
         card.unwrap_or_else(|| panic!("the request ended without a card"))
     }
 
+    /// [`await_card`], but a request that ends without a card fails the test
+    /// with its own outcome, which is the diagnosis the bare panic lacks.
+    async fn await_card_or_outcome(
+        h: &Harness,
+        task: &mut tokio::task::JoinHandle<AgentOutcome>,
+    ) -> farhelm_proto::approvals::PendingApproval {
+        let mut changes = h.state.manager.events().subscribe();
+        let card = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                if let Some(card) = h.state.approvals.list().into_iter().next() {
+                    return Some(card);
+                }
+                if task.is_finished() {
+                    return None;
+                }
+                tokio::select! {
+                    _ = changes.changed() => {}
+                    // sleep-ok: polling interval for the task's own ending, beside the feed wake-up.
+                    () = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
+                }
+            }
+        })
+        .await
+        .expect("a card or an ending within the bound");
+        match card {
+            Some(card) => card,
+            None => panic!("the request ended without a card: {:?}", task.await),
+        }
+    }
+
     /// Ordinary agent create and spawn both compose choices rather than
     /// inheriting a stored launch. Approval and dispatch must receive the
     /// same destination-normalized trust, including when an old client's
@@ -13448,13 +14111,25 @@ mod tests {
     // Agents and environments (SPEC.md, "Agents and environments")
     // -----------------------------------------------------------------
 
-    /// A Podman provider that only ever says a container is running and asks
-    /// for no connection resources: just enough for a planted container row
-    /// to dial its scripted supervisor, as the real Tensorlake service's
-    /// "dial anyway" policy already lets a planted sandbox row do. Every other
-    /// provider operation fails the test, since nothing in these tests may
-    /// create, suspend or destroy an environment.
-    struct RunningContainers;
+    /// A Podman provider that says every container is running and asks for no
+    /// connection resources: just enough for a planted container row to dial
+    /// its scripted supervisor, as the real Tensorlake service's "dial
+    /// anyway" policy already lets a planted sandbox row do.
+    ///
+    /// For the launch tests it also offers one container place once `place`
+    /// is set, and refuses every image build, counting the attempts: a launch
+    /// the user allowed reaches the launcher's real task and fails there, so a
+    /// test can tell "Allow ran the launch" from "nothing ran" without a real
+    /// container. Every other operation fails the test.
+    #[derive(Default)]
+    struct RunningContainers {
+        place: std::sync::OnceLock<HostId>,
+        builds: std::sync::atomic::AtomicUsize,
+    }
+
+    /// What the stand-in's refused build says, so a test can find it in the
+    /// launch's failure.
+    const STAND_IN_BUILD_REFUSAL: &str = "the stand-in container provider builds no images";
 
     #[async_trait::async_trait]
     impl crate::environment::EnvironmentProvider for RunningContainers {
@@ -13474,7 +14149,15 @@ mod tests {
             unreachable!("agent-request fixture")
         }
         async fn places(&self) -> anyhow::Result<Vec<crate::environment::EnvironmentPlace>> {
-            unreachable!("agent-request fixture")
+            Ok(self
+                .place
+                .get()
+                .map(|host| crate::environment::EnvironmentPlace {
+                    place: farhelm_proto::Place::PodmanHost(*host),
+                    reason: None,
+                })
+                .into_iter()
+                .collect())
         }
         async fn ensure_prepared(
             &self,
@@ -13484,7 +14167,9 @@ mod tests {
             _: Arc<crate::feed::FleetEvents>,
             _: &dyn crate::environment::PreparationProgress,
         ) -> anyhow::Result<crate::environment::PreparedArtifact> {
-            unreachable!("agent-request fixture")
+            self.builds
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            anyhow::bail!(STAND_IN_BUILD_REFUSAL)
         }
         async fn create(
             &self,
@@ -13521,11 +14206,13 @@ mod tests {
         ) -> anyhow::Result<()> {
             unreachable!("agent-request fixture")
         }
+        /// A launch the stand-in refused to build never created a
+        /// container, so its cleanup's proof is the never-created one.
         async fn destroy(
             &self,
-            _: &crate::environment::EnvironmentBinding,
+            binding: &crate::environment::EnvironmentBinding,
         ) -> anyhow::Result<crate::environment::Destroyed> {
-            unreachable!("agent-request fixture")
+            Ok(binding.handle.never_created(binding.host))
         }
         async fn connected(
             &self,
@@ -13540,9 +14227,17 @@ mod tests {
     /// [`host_fleet`] with [`RunningContainers`] in the Podman slot, so a
     /// test can add a connected environment of either provider beside it.
     async fn environment_fleet() -> (Harness, HostId, HostId) {
+        let (h, local, remote, _) = container_fleet().await;
+        (h, local, remote)
+    }
+
+    /// [`environment_fleet`], also returning its stand-in provider, whose one
+    /// container place is the local host.
+    async fn container_fleet() -> (Harness, HostId, HostId, Arc<RunningContainers>) {
+        let containers = Arc::new(RunningContainers::default());
         let (builder, remote) = FleetBuilder::new()
             .await
-            .podman(Arc::new(RunningContainers))
+            .podman(Arc::clone(&containers) as Arc<dyn crate::environment::EnvironmentProvider>)
             .local(HostScript {
                 identity: Some("identity-local".to_string()),
                 sessions: vec![scripted("local-live", 30, farhelm_proto::AgentKind::Claude)],
@@ -13560,10 +14255,11 @@ mod tests {
             .await;
         let h = builder.start().await;
         let local = local_id(&h.store).await;
+        containers.place.set(local).unwrap();
         h.await_refreshed(local).await;
         h.await_refreshed(remote).await;
         trust_without_asking(&h).await;
-        (h, local, remote)
+        (h, local, remote, containers)
     }
 
     /// What a scripted environment supervisor was asked to do, in order:
@@ -13906,6 +14602,12 @@ mod tests {
                 command_create(&remote_name, "/work", "true", None, None),
                 with_template("elsewhere"),
                 with_template("recipe-template"),
+                AgentVerb::CreateEnvironment {
+                    recipe: "dev".into(),
+                    container_host: None,
+                    templates: Vec::new(),
+                    edits: command_template("true"),
+                },
             ] {
                 let shown = format!("{verb:?}");
                 let (kind, message) = refused(handler.handle(origin, "asker", verb).await);
@@ -14183,7 +14885,7 @@ mod tests {
             );
             assert_eq!(kind, ErrorKind::Unauthorized, "{provider:?}");
             assert_eq!(
-                message, "Only the user can delete or clone a sandbox session in Farhelm",
+                message, "Only the user can delete a sandbox or container session in Farhelm",
                 "{provider:?}"
             );
             let (kind, message) = refused(
@@ -14247,6 +14949,650 @@ mod tests {
             assert!(seen.lock().unwrap().is_empty(), "{provider:?}");
             assert!(host_row(&h, owned).await.is_some(), "{provider:?}");
         }
+    }
+
+    /// Store the managed-Ubuntu fixture recipe as `name`, which every provider
+    /// can run, so a launch test can target it at the stand-in container place.
+    async fn put_recipe(h: &Harness, name: &str) {
+        assert!(
+            h.store
+                .create_tensorlake_recipe(
+                    name.into(),
+                    crate::tensorlake::recipes::tests_support::save()
+                )
+                .await
+                .unwrap()
+                .is_ok(),
+            "premise: the fixture recipe is stored"
+        );
+    }
+
+    /// The session-owned rows the registry holds: what a launch would have
+    /// registered before building anything.
+    async fn owned_rows(h: &Harness) -> Vec<HostId> {
+        h.store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|row| row.is_session_owned())
+            .map(|row| row.id)
+            .collect()
+    }
+
+    /// A command launch into a new environment's home, the flags every
+    /// environment-launch test sends.
+    fn environment_edits() -> farhelm_proto::launcher::TemplateFields {
+        farhelm_proto::launcher::TemplateFields {
+            destination: Some(farhelm_proto::launcher::TemplateDestination::Folder(
+                "~".into(),
+            )),
+            ..command_template("true")
+        }
+    }
+
+    /// A new environment requested by an agent always waits for the user's
+    /// own Allow, even from a host the user lets run every command without
+    /// asking: the card is the creation confirmation for a new machine, and
+    /// for Tensorlake a bill (SPEC.md, "Agents and environments"). If any
+    /// host setting could skip it, an agent could create machines silently.
+    ///
+    /// Spec: `create --recipe` with `--container-host`, a plain create naming
+    /// a recipe template, and a clone of a container session each show one
+    /// `LaunchEnvironment` card that requires a direct Allow and names the
+    /// recipe and place; Deny creates nothing (no environment row, no build).
+    #[farhelm_testtrace::test]
+    async fn environment_launches_always_ask_and_deny_creates_nothing() {
+        let (h, local, _, containers) = container_fleet().await;
+        assert!(
+            h.store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .find(|row| row.id == local)
+                .unwrap()
+                .commands_without_asking,
+            "premise: the asking host runs every command without asking"
+        );
+        put_recipe(&h, "dev").await;
+        put_template(
+            &h,
+            "dev-container",
+            farhelm_proto::launcher::TemplateFields {
+                target: Some(farhelm_proto::LaunchTarget::Environment {
+                    recipe: "dev".into(),
+                    place: farhelm_proto::Place::PodmanHost(local),
+                }),
+                ..environment_edits()
+            },
+        )
+        .await;
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let _seen = spawn_environment_responder(peer);
+        let owned = owned_environment(
+            &h,
+            farhelm_proto::ProviderKind::Podman,
+            client_side,
+            vec![session("contained", 50)],
+        )
+        .await;
+        let before = owned_rows(&h).await;
+        let _gui = h.manager.events().admit(1).unwrap();
+        let local_name = listed_name(&h, local).await;
+        let mut from_template = command_create("unused", "~", "true", None, None);
+        if let AgentVerb::Create {
+            host, templates, ..
+        } = &mut from_template
+        {
+            *host = None;
+            templates.push("dev-container".into());
+        }
+        for (verb, expected_verb, copies) in [
+            (
+                AgentVerb::CreateEnvironment {
+                    recipe: "dev".into(),
+                    container_host: Some(local_name.clone()),
+                    templates: Vec::new(),
+                    edits: environment_edits(),
+                },
+                LaunchVerb::Create,
+                false,
+            ),
+            (from_template, LaunchVerb::Create, false),
+            (
+                AgentVerb::Clone {
+                    source_session_id: Some(full_id(&h, owned, "contained")),
+                    host: None,
+                    cwd: None,
+                    title: None,
+                    intent_key: None,
+                    confirm_yolo: false,
+                },
+                LaunchVerb::Clone,
+                true,
+            ),
+        ] {
+            let shown = format!("{verb:?}");
+            let handler = HelmAgentRequests::for_state(&h.state);
+            let origin = origin_of(&h, local);
+            let mut task =
+                tokio::spawn(async move { handler.handle(origin, "local-live", verb).await });
+            let card = await_card_or_outcome(&h, &mut task).await;
+            let ApprovalAction::LaunchEnvironment {
+                verb,
+                recipe,
+                place,
+                place_name,
+                source,
+                ..
+            } = &card.action
+            else {
+                panic!("{shown}: an environment launch card, got {:?}", card.action)
+            };
+            assert_eq!(*verb, expected_verb, "{shown}");
+            assert_eq!(recipe, "dev", "{shown}");
+            assert_eq!(*place, farhelm_proto::Place::PodmanHost(local), "{shown}");
+            assert_eq!(place_name.as_deref(), Some(local_name.as_str()), "{shown}");
+            assert_eq!(source.is_some(), copies, "{shown}");
+            assert!(card.action.requires_direct_allow(), "{shown}");
+            assert!(!card.own_host_session_action, "{shown}");
+            assert_eq!(
+                answer_card(&h, "deny").await,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            let (kind, message) = refused(task.await.unwrap());
+            assert_eq!(kind, ErrorKind::Unauthorized, "{shown}: {message}");
+            assert!(message.contains("declined"), "{shown}: {message}");
+            assert_eq!(
+                owned_rows(&h).await,
+                before,
+                "{shown}: Deny registered nothing"
+            );
+        }
+        assert_eq!(
+            containers.builds.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "Deny started no build"
+        );
+    }
+
+    /// Allow on an environment card runs the launcher's own launch task, the
+    /// one path that registers, builds and cleans up environments; an agent
+    /// must not get a second, weaker implementation of it.
+    ///
+    /// Spec: after Allow the task registers the environment, asks the
+    /// provider to prepare the recipe (here refused by the stand-in), and on
+    /// that failure removes the environment it registered and reports
+    /// "Not launched." with the provider's reason to the agent.
+    #[farhelm_testtrace::test]
+    async fn an_allowed_environment_launch_runs_the_launch_task() {
+        let (h, local, _, containers) = container_fleet().await;
+        put_recipe(&h, "dev").await;
+        let before = owned_rows(&h).await;
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let local_name = listed_name(&h, local).await;
+        let task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::CreateEnvironment {
+                        recipe: "dev".into(),
+                        container_host: Some(local_name),
+                        templates: Vec::new(),
+                        edits: environment_edits(),
+                    },
+                )
+                .await
+        });
+        let card = await_card(&h, &task).await;
+        assert!(matches!(
+            card.action,
+            ApprovalAction::LaunchEnvironment { .. }
+        ));
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let (_, message) = refused(task.await.unwrap());
+        assert!(message.contains("Not launched."), "{message}");
+        assert!(message.contains(STAND_IN_BUILD_REFUSAL), "{message}");
+        assert_eq!(
+            containers.builds.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "Allow reached the provider's preparation exactly once"
+        );
+        assert_eq!(
+            owned_rows(&h).await,
+            before,
+            "the failed launch removed the environment it registered"
+        );
+    }
+
+    /// The refusals that keep an environment launch honest come before any
+    /// card: a key a retry could never find, overrides a copy into a new
+    /// environment cannot honor, and a place that cannot run one. A card for
+    /// any of these would ask the user to approve something that then fails
+    /// or quietly does something else.
+    #[farhelm_testtrace::test]
+    async fn environment_launches_refuse_what_they_cannot_honor_without_a_card() {
+        let (h, local, remote, containers) = container_fleet().await;
+        put_recipe(&h, "dev").await;
+        put_template(
+            &h,
+            "dev-container",
+            farhelm_proto::launcher::TemplateFields {
+                target: Some(farhelm_proto::LaunchTarget::Environment {
+                    recipe: "dev".into(),
+                    place: farhelm_proto::Place::PodmanHost(local),
+                }),
+                ..environment_edits()
+            },
+        )
+        .await;
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let _seen = spawn_environment_responder(peer);
+        let owned = owned_environment(
+            &h,
+            farhelm_proto::ProviderKind::Podman,
+            client_side,
+            vec![session("contained", 50)],
+        )
+        .await;
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let remote_name = listed_name(&h, remote).await;
+        let own_name = listed_name(&h, owned).await;
+        let mut keyed = command_create("unused", "~", "true", None, Some("key"));
+        if let AgentVerb::Create {
+            host, templates, ..
+        } = &mut keyed
+        {
+            *host = None;
+            templates.push("dev-container".into());
+        }
+        let clone = |host: Option<&str>, cwd: Option<&str>, key: Option<&str>| AgentVerb::Clone {
+            source_session_id: Some(full_id(&h, owned, "contained")),
+            host: host.map(str::to_string),
+            cwd: cwd.map(str::to_string),
+            title: None,
+            intent_key: key.map(str::to_string),
+            confirm_yolo: false,
+        };
+        let on = |container_host: &str| AgentVerb::CreateEnvironment {
+            recipe: "dev".into(),
+            container_host: Some(container_host.to_string()),
+            templates: Vec::new(),
+            edits: environment_edits(),
+        };
+        for (verb, expected) in [
+            (keyed, "an idempotency key cannot be used"),
+            (clone(Some(&remote_name), None, None), "takes no --host"),
+            (clone(None, Some("/work"), None), "takes no --cwd"),
+            (
+                clone(None, None, Some("key")),
+                "an idempotency key cannot be used",
+            ),
+            (
+                on(&remote_name),
+                "cannot run sandboxes or containers right now",
+            ),
+            (on(&own_name), "no host named"),
+            (
+                AgentVerb::Clone {
+                    source_session_id: Some(full_id(&h, local, "local-live")),
+                    host: None,
+                    cwd: None,
+                    title: None,
+                    intent_key: None,
+                    confirm_yolo: false,
+                },
+                "--host is required",
+            ),
+        ] {
+            let shown = format!("{verb:?}");
+            let (_, message) = refused(handler.handle(origin, "local-live", verb).await);
+            assert!(message.contains(expected), "{shown}: {message}");
+            assert!(h.state.approvals.list().is_empty(), "{shown}: no card");
+        }
+        assert_eq!(
+            containers.builds.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+    }
+
+    /// Spec: a launch task's session comes back to the agent under the full
+    /// reference of the host the launch created, qualified exactly once; a
+    /// reference naming another entry, or one that is not a reference, is an
+    /// error rather than a reply.
+    ///
+    /// Why: the launch task answers with qualified IDs, as the launcher's
+    /// route does, and the agent reply qualifies again. Doing that twice
+    /// panicked on every real (36-byte) session ID after the environment was
+    /// already built.
+    #[farhelm_testtrace::test]
+    fn a_launch_reply_is_qualified_once_by_its_own_entry() {
+        let claim = crate::manager::SessionClaim {
+            host: 7,
+            entry_uuid: "11111111-1111-4111-8111-111111111111".into(),
+            incarnation: 1,
+            identity: None,
+        };
+        let bare = "22222222-2222-4222-8222-222222222222";
+        let qualified = SessionRef::new(&claim.entry_uuid, bare)
+            .unwrap()
+            .to_string();
+        let answered = SessionInfo {
+            id: qualified.clone(),
+            ..session("unused", 1)
+        };
+        let back = unqualified_launch_session(&claim, answered).unwrap();
+        assert_eq!(back.id, bare);
+        assert_eq!(
+            SessionRef::new(&claim.entry_uuid, &back.id)
+                .unwrap()
+                .to_string(),
+            qualified,
+            "the reply projection reproduces the launch's own reference"
+        );
+        let elsewhere = SessionRef::new("33333333-3333-4333-8333-333333333333", bare)
+            .unwrap()
+            .to_string();
+        for id in [elsewhere, bare.to_string()] {
+            let answered = SessionInfo {
+                id,
+                ..session("unused", 1)
+            };
+            assert!(unqualified_launch_session(&claim, answered).is_err());
+        }
+    }
+
+    /// Spec: a recipe that cannot run at the chosen place is refused before
+    /// any card (SPEC.md, "Agents and environments"; the launch task's own
+    /// recipe checks, made early).
+    ///
+    /// Why: the card is a creation confirmation; asking the user to approve
+    /// a launch the task will refuse at once wastes their answer and teaches
+    /// them that Allow does not mean what it says.
+    #[farhelm_testtrace::test]
+    async fn a_recipe_that_cannot_run_there_is_refused_without_a_card() {
+        let (h, local, _, containers) = container_fleet().await;
+        let mut save = crate::tensorlake::recipes::tests_support::save();
+        save.base = farhelm_proto::tensorlake::recipes::RecipeBase::TensorlakeImage {
+            image: "example/systemd".into(),
+        };
+        assert!(
+            h.store
+                .create_tensorlake_recipe("cloud-only".into(), save)
+                .await
+                .unwrap()
+                .is_ok(),
+            "premise: a recipe whose base only Tensorlake can run"
+        );
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let local_name = listed_name(&h, local).await;
+        let (_, message) = refused(
+            handler
+                .handle(
+                    origin_of(&h, local),
+                    "local-live",
+                    AgentVerb::CreateEnvironment {
+                        recipe: "cloud-only".into(),
+                        container_host: Some(local_name),
+                        templates: Vec::new(),
+                        edits: environment_edits(),
+                    },
+                )
+                .await,
+        );
+        assert!(message.contains("cannot run there"), "{message}");
+        assert!(h.state.approvals.list().is_empty());
+        assert_eq!(
+            containers.builds.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+    }
+
+    /// Script an environment supervisor that answers every create with an
+    /// echo of it, recording the launch each create carried, so a test can
+    /// compare what was dispatched with what was approved.
+    fn spawn_launch_recording_responder(
+        peer: tokio::io::DuplexStream,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<Option<farhelm_proto::SessionLaunch>>>> {
+        use farhelm_proto::ControlMsg;
+        use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = std::sync::Arc::clone(&seen);
+        tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .expect("handshake");
+            while let Ok(Some(frame)) = reader.read_frame().await {
+                let ControlMsg::CreateSession {
+                    req_id,
+                    cwd,
+                    launch,
+                    ..
+                } = parse_control(&frame).expect("decode request")
+                else {
+                    continue;
+                };
+                recorded.lock().unwrap().push(launch.clone());
+                let reply = ControlMsg::SessionCreated {
+                    req_id,
+                    session: SessionInfo {
+                        cwd,
+                        launch: launch
+                            .unwrap_or_else(|| farhelm_proto::SessionLaunch::plain_command("")),
+                        ..session("env-created", 100)
+                    },
+                };
+                if writer.write_control(&reply).await.is_err() {
+                    return;
+                }
+            }
+        });
+        seen
+    }
+
+    /// Spec: an environment clone carries its source's stored launch as
+    /// stored (only destination trust may change), even when today's catalog
+    /// would refuse to compose that selection: it gets its card, and the
+    /// create in the new environment runs exactly that launch (SPEC.md,
+    /// "Agents and environments": the source's launch, as Clone copies it).
+    ///
+    /// Why: compiling a copied selection again refuses a session started
+    /// under an older catalog, so an agent could not copy it into a new
+    /// environment although ordinary clone and the GUI's Clone can. Both the
+    /// pre-card check and the create itself used to compile it.
+    #[farhelm_testtrace::test]
+    async fn an_environment_clone_keeps_a_launch_todays_catalog_would_refuse() {
+        let (h, local, _, _) = container_fleet().await;
+        put_recipe(&h, "dev").await;
+        let mut selection = farhelm_proto::LaunchSelection {
+            harness: farhelm_proto::LaunchHarness::Codex,
+            model: Some("gpt-6-astra".into()),
+            effort: Some(farhelm_proto::LaunchEffort::High),
+            permissions: None,
+            permission_flags: None,
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        };
+        let mut historical = crate::launches::compile(selection.clone()).unwrap();
+        // The same commands, recorded when the model still offered medium
+        // effort: structurally valid, but not what today's catalog composes.
+        selection.effort = Some(farhelm_proto::LaunchEffort::Medium);
+        if let farhelm_proto::SessionLaunch::Agent {
+            selection: stored, ..
+        } = &mut historical
+        {
+            *stored = selection.clone();
+        }
+        assert!(
+            crate::sessions::resolve_launch_request(farhelm_proto::LaunchRequest::Agent {
+                selection: selection.clone(),
+            })
+            .is_err(),
+            "premise: today's catalog refuses this stored selection"
+        );
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let created = spawn_launch_recording_responder(peer);
+        let source = SessionInfo {
+            launch: historical.clone(),
+            ..session("contained", 50)
+        };
+        let owned = owned_environment(
+            &h,
+            farhelm_proto::ProviderKind::Podman,
+            client_side,
+            vec![source.clone()],
+        )
+        .await;
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let source_ref = full_id(&h, owned, "contained");
+        let mut task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::Clone {
+                        source_session_id: Some(source_ref),
+                        host: None,
+                        cwd: None,
+                        title: None,
+                        intent_key: None,
+                        confirm_yolo: false,
+                    },
+                )
+                .await
+        });
+        let card = await_card_or_outcome(&h, &mut task).await;
+        let ApprovalAction::LaunchEnvironment { launch, .. } = &card.action else {
+            panic!("an environment launch card, got {:?}", card.action)
+        };
+        assert_eq!(
+            launch, &historical,
+            "the card shows the stored launch, uncompiled"
+        );
+        assert_eq!(
+            answer_card(&h, "deny").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let _ = task.await.unwrap();
+
+        // The create half, through the launch task's own entry point on a
+        // planted environment: what the supervisor is asked to run is the
+        // approved launch itself.
+        let approved =
+            crate::workspace_trust::retain_stored_launch_workspace_trust(&source).unwrap();
+        let request = crate::sessions::CreateReq::for_agent_environment(
+            approved,
+            false,
+            None,
+            Some("copy".into()),
+            None,
+        )
+        .unwrap();
+        let created_session =
+            crate::sessions::create_in_session_sandbox(&h.state, owned, request, None)
+                .await
+                .unwrap();
+        assert_eq!(created_session.launch, historical);
+        assert_eq!(*created.lock().unwrap(), [Some(historical)]);
+    }
+
+    /// Spec: an environment clone acts on its source read only while the same
+    /// owner still has the same source: a source gone by the time the user
+    /// answers refuses the clone after Allow, and nothing is registered or
+    /// built (SPEC_impl.md, "Clone resolves the explicitly named source's
+    /// live owner").
+    ///
+    /// Why: the read is what the new environment runs, and approval can take
+    /// minutes; launching from a read of a session that no longer exists, or
+    /// that another installation now answers for, would copy a launch and
+    /// repository nobody is looking at any more.
+    #[farhelm_testtrace::test]
+    async fn an_environment_clone_rechecks_its_source_owner_after_the_allow() {
+        let (h, local, _, containers) = container_fleet().await;
+        put_recipe(&h, "dev").await;
+        let (client_side, peer) = tokio::io::duplex(64 * 1024);
+        let _seen = spawn_environment_responder(peer);
+        let owned = owned_environment(
+            &h,
+            farhelm_proto::ProviderKind::Podman,
+            client_side,
+            vec![session("contained", 50)],
+        )
+        .await;
+        let before = owned_rows(&h).await;
+        let _gui = h.manager.events().admit(1).unwrap();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let origin = origin_of(&h, local);
+        let source = full_id(&h, owned, "contained");
+        let mut task = tokio::spawn(async move {
+            handler
+                .handle(
+                    origin,
+                    "local-live",
+                    AgentVerb::Clone {
+                        source_session_id: Some(source),
+                        host: None,
+                        cwd: None,
+                        title: None,
+                        intent_key: None,
+                        confirm_yolo: false,
+                    },
+                )
+                .await
+        });
+        let card = await_card_or_outcome(&h, &mut task).await;
+        assert!(matches!(
+            card.action,
+            ApprovalAction::LaunchEnvironment { .. }
+        ));
+        let key = SessionKey::new(owned, "contained");
+        let (claim, _) = crate::sessions::route_session(&h.state, &key)
+            .await
+            .unwrap();
+        h.manager
+            .forget_session(&claim, "contained")
+            .await
+            .expect("remove the source's ownership while the card waits");
+        assert!(
+            crate::sessions::route_session(&h.state, &key)
+                .await
+                .is_err(),
+            "premise: the source pair is gone before the Allow"
+        );
+        assert_eq!(
+            answer_card(&h, "allow").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        let (_, message) = refused(task.await.unwrap());
+        assert!(
+            !message.contains(STAND_IN_BUILD_REFUSAL),
+            "the launch never started: {message}"
+        );
+        assert_eq!(
+            containers.builds.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(
+            owned_rows(&h).await,
+            before,
+            "no environment was registered"
+        );
     }
 
     /// The registry row for `host`, which these tests read to see what a

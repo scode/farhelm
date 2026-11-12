@@ -107,7 +107,8 @@ can start more sessions in that same container.
 
 An agent in a container **can ask Farhelm to act only within its own container**, as
 [Agents in sandboxes and containers](/docs/using/approve-agent-requests/#agents-in-sandboxes-and-containers) explains.
-Farhelm refuses agents' requests from other hosts to Delete or Clone container sessions.
+Agents on other hosts cannot delete container sessions, and they start new containers only behind a card that always
+asks ([New sandboxes and containers](/docs/using/approve-agent-requests/#new-sandboxes-and-containers)).
 
 ### Proxies and containment
 

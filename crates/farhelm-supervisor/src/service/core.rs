@@ -427,6 +427,13 @@ pub struct SupervisorTimeouts {
     /// answered" refusal always arrives first. Injectable so a test of the
     /// longer budget need not sit through nine minutes.
     pub agent_approval_wait: Duration,
+    /// How much longer still the relay waits for a verb that may launch a
+    /// new disposable environment once allowed
+    /// (`AgentVerb::may_launch_environment`):
+    /// [`farhelm_proto::approvals::ENVIRONMENT_LAUNCH_WAIT`], since building
+    /// and starting one can take many minutes after the Allow. Injectable for
+    /// the reason [`Self::agent_approval_wait`] is.
+    pub agent_environment_launch: Duration,
     /// See [`AGENT_DELIVER_TIMEOUT`]: how long the relay waits for room on
     /// the helm connection's writer queue before reporting the request as
     /// undelivered.
@@ -468,6 +475,7 @@ impl Default for SupervisorTimeouts {
             delete_sink_reap: super::terminals::DELETE_SINK_REAP_WAIT,
             agent_upcall: AGENT_UPCALL_TIMEOUT,
             agent_approval_wait: farhelm_proto::approvals::APPROVAL_WAIT,
+            agent_environment_launch: farhelm_proto::approvals::ENVIRONMENT_LAUNCH_WAIT,
             agent_deliver: AGENT_DELIVER_TIMEOUT,
             agent_fence_retain: AGENT_FENCE_RETAIN_TIMEOUT,
             delete_host_end: super::session_hosts::DELETE_HOST_END_BUDGET,
