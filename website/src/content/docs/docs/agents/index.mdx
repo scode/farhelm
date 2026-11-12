@@ -16,7 +16,8 @@ close the window, [clone and replace with](/docs/using/stop-restart-resume/) car
 and files [works](/docs/using/work-in-a-session/#copy-paste-and-links), and so do downloads from the terminal.
 
 [Container sessions](/docs/agents/containerized-sessions/) support the same conversation and Restart features as an
-ordinary host. Farhelm refuses `$farhelm` requests from agents in containers and session-owned sandboxes.
+ordinary host. Agents in containers and session-owned sandboxes can make `$farhelm` requests only within their own
+container or sandbox ([Agents in sandboxes and containers](/docs/using/approve-agent-requests/#agents-in-sandboxes-and-containers)).
 
 export const groups = [
   { name: 'Launch choices', caps: [

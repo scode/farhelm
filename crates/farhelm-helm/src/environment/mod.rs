@@ -506,6 +506,13 @@ impl Providers {
         }
     }
 
+    /// Fill the Podman slot of a fixture's providers before its actors start.
+    /// Fixtures otherwise leave it empty, which keeps container rows offline.
+    #[cfg(test)]
+    pub(crate) fn set_test_podman(&mut self, podman: Arc<dyn EnvironmentProvider>) {
+        self.podman = Some(podman);
+    }
+
     #[cfg(test)]
     pub(crate) fn set_test_tensorlake(&self, actual: Arc<dyn EnvironmentProvider>) {
         let adapter = self

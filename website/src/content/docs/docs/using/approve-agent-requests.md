@@ -14,10 +14,10 @@ another, rename, stop, restart, or delete sessions, change your [launch template
 your browser ([Open links from a remote session](#open-links-from-a-remote-session)). Farhelm asks you before any of
 those changes happens by default, whoever typed the command; a command you type yourself in a session's terminal is
 asked about the same way. You can [stop asking for a host](/docs/using/approve-agent-requests/#stop-asking-for-a-host).
-Looking on ordinary hosts never asks. Farhelm refuses these requests from agents in
-[container sessions](/docs/agents/containerized-sessions/) and
-[session-owned sandboxes](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox). It also refuses agents'
-requests from other hosts to Delete or Clone those sessions or launch into new environments.
+Looking never asks. An agent in a [container session](/docs/agents/containerized-sessions/) or a
+[session-owned sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) can act only within its own
+container or sandbox ([Agents in sandboxes and containers](#agents-in-sandboxes-and-containers)). Farhelm refuses
+agents' requests from other hosts to Delete or Clone those sessions or launch into new environments.
 
 An agent starting another session can supply its first message with `--prompt` or `--prompt-file` (`-` reads stdin). The
 approval card shows the full message. It is sent once when the new agent starts; restarting, copying or replacing that
@@ -77,6 +77,21 @@ The rest of Farhelm stays usable while requests wait, and several can wait at on
 are waiting, that host's agents are turned away until you answer one. Cards stay clickable even over an open dialog.
 When the waiting requests change or you switch to another request, the answer buttons pause for a moment, so a
 double-click cannot answer a request you have not read.
+
+## Agents in sandboxes and containers
+
+An agent in a [container session](/docs/agents/containerized-sessions/) or a
+[session-owned sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) can ask Farhelm to act on
+its own container or sandbox and nothing else. It can start more sessions there with `farhelm spawn` or
+`farhelm agent create`, and rename, stop, restart or delete the sessions there. Its lists of hosts and sessions show
+only that container or sandbox. Deleting another session there removes just that session: the container or sandbox
+stays, since the agent's own session is still in it.
+
+It can also ask to [open links](#open-links-from-a-remote-session), under the container's or sandbox's own link
+permissions, and start a session from a launch template that names no host. Farhelm refuses, with "Agents in sandbox and
+container sessions can only act within their own sandbox or container.", anything aimed at another host, copying a
+session, listing or changing launch templates, and host changes. Its requests ask you the same way as anywhere else,
+using the container's or sandbox's own [settings](#stop-asking-for-a-host), which start out asking.
 
 ## Host changes
 

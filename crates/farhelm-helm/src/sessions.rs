@@ -3454,6 +3454,35 @@ pub(crate) async fn do_delete_session(
     {
         return Err(sandbox::user_only_delete());
     }
+    delete_session_teardown(state, key, guard, agent_connection).await
+}
+
+/// Session-only deletion inside a disposable environment, for an agent that
+/// runs in that same environment (SPEC.md, "Agents and environments").
+///
+/// The caller is responsible for that pairing: the asking session lives on
+/// `key.host`, so the environment keeps at least one session and destroying
+/// it would end the asker. This therefore never reaches the user's
+/// whole-environment Delete (`sandbox::delete_if_owned`); it is the ordinary
+/// supervisor teardown, the same one Replace uses for its source, with every
+/// guard and connection check [`do_delete_session`] applies.
+pub(crate) async fn delete_session_within_environment(
+    state: &AppState,
+    key: &store::SessionKey,
+    guard: farhelm_proto::DeleteGuard,
+    agent_connection: Option<u64>,
+) -> anyhow::Result<farhelm_proto::SessionDeleteOutcome> {
+    delete_session_teardown(state, key, guard, agent_connection).await
+}
+
+/// The teardown both deletion entry points share once they have decided the
+/// target's host may lose this session without losing the host itself.
+async fn delete_session_teardown(
+    state: &AppState,
+    key: &store::SessionKey,
+    guard: farhelm_proto::DeleteGuard,
+    agent_connection: Option<u64>,
+) -> anyhow::Result<farhelm_proto::SessionDeleteOutcome> {
     let id = key.session_id.as_str();
     let (claim, client) = route_session(state, key).await?;
     if agent_connection.is_some_and(|expected| expected != client.connection_id()) {

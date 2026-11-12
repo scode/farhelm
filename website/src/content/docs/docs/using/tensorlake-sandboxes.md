@@ -203,8 +203,9 @@ snapshots. It always asks, including while suspended. If Replace failed and left
 that session too. A failed Replace itself preserves the sandbox; its error identifies the machine to recover work from.
 
 These sandboxes appear in **Hosts** and the sidebar's update and problem notices, without permanent navigation rail
-icons. A sandbox left by interrupted setup or failed cleanup stays listed there. Agents in sandbox sessions cannot ask
-Farhelm to act.
+icons. A sandbox left by interrupted setup or failed cleanup stays listed there. Agents in sandbox sessions can ask
+Farhelm to act only within their own sandbox
+([Agents in sandboxes and containers](/docs/using/approve-agent-requests/#agents-in-sandboxes-and-containers)).
 
 ## Add a sandbox host
 
