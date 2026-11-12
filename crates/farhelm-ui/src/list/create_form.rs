@@ -3150,7 +3150,7 @@ pub(super) fn CreateSessionForm(
     let base = use_context::<ApiBase>().0;
     let launch_activity = use_context::<LaunchActivity>();
     let mut session_operations = use_context::<crate::session_ops::SessionOps>();
-    let mut shared_replace_progress = use_context::<crate::replace::ReplaceProgress>();
+    let shared_replace_progress = use_context::<crate::replace::ReplaceProgress>();
     // Catalog reads retain complete targets while the existing draft owner
     // controls edits and launch admission. History joins only reusable intent.
     let (environment_catalog, _refresh_environment_places) =
@@ -6984,12 +6984,17 @@ pub(super) fn CreateSessionForm(
                             // Publish the create wait before ending wake preparation, so
                             // no render can restore modality between these owned steps.
                             resuming_host.set(None);
-                            if let Some(source) = &bound.replace_source {
-                                shared_replace_progress
-                                    .0
-                                    .write()
-                                    .insert(source.clone(), pending.clone());
-                            }
+                            // Owned by a guard, as plain Replace's is: if the
+                            // launcher unmounts mid-request, this task is dropped
+                            // at its await and the guard still clears "Replacing…"
+                            // from the source's row and header.
+                            let replace_progress = bound.replace_source.as_ref().map(|source| {
+                                crate::replace::ReplaceProgressGuard::start(
+                                    shared_replace_progress,
+                                    source.clone(),
+                                    pending.clone(),
+                                )
+                            });
                             let create_result = if let Some(checkout) = &bound.github_checkout {
                                 let attempt = github_attempt
                                     .peek()
@@ -7108,8 +7113,11 @@ pub(super) fn CreateSessionForm(
                             // Shared source progress/errors must settle independently of
                             // Return admission. Only the local pill, draft and launch
                             // token wait behind another modal; the source is usable now.
+                            // No await between this drop and `on_settled` below, the
+                            // same handoff plain Replace keeps: a fleet read must not
+                            // retire the selected source in between.
+                            drop(replace_progress);
                             if let Some(source) = &bound.replace_source {
-                                shared_replace_progress.0.write().remove(source);
                                 if let Err(refusal) = &create_result
                                     && !refusal.outcome.requires_yolo()
                                 {

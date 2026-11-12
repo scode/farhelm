@@ -107,11 +107,38 @@ fn pending_progress(source: &Session) -> PendingLaunch {
 ///
 /// Navigation leaves the persistent request running, but dropping its future
 /// must still clear the page-owned status. The captured value also prevents
-/// an old task clearing a later run.
-struct ReplaceProgressGuard {
+/// an old task clearing a later run: a guard removes the entry only while it
+/// is still the exact `PendingLaunch` this guard published, and each one is
+/// stamped with its own start time.
+///
+/// Both Replace surfaces own their progress through one: plain Replace's
+/// controller (`ReplaceController::start_progress`) and Replace with's launcher
+/// in `list/create_form.rs`, whose spawned request is dropped mid-await if the
+/// launcher unmounts. Without the guard, that would leave "Replacing…" on the
+/// source's row and header for the life of the page.
+pub(crate) struct ReplaceProgressGuard {
     progress: ReplaceProgress,
     source: String,
     pending: PendingLaunch,
+}
+
+impl ReplaceProgressGuard {
+    /// Publish `pending` as the Replace progress of the session `source` and
+    /// return the owner that clears it again. Replaces whatever entry the
+    /// source had; the caller's source claim is what keeps two requests for
+    /// one source from overlapping.
+    pub(crate) fn start(
+        mut progress: ReplaceProgress,
+        source: String,
+        pending: PendingLaunch,
+    ) -> Self {
+        progress.0.write().insert(source.clone(), pending.clone());
+        Self {
+            progress,
+            source,
+            pending,
+        }
+    }
 }
 
 impl Drop for ReplaceProgressGuard {
@@ -187,15 +214,12 @@ impl ReplaceController {
     /// Publish request-local timing after preparation and own its cleanup.
     /// The source snapshot supplies the host; a later listing cannot relabel
     /// a request already dispatched to a different host.
-    fn start_progress(mut self, source: &Session) -> ReplaceProgressGuard {
-        let pending = pending_progress(source);
-        let id = source.id.raw().to_owned();
-        self.progress.0.write().insert(id.clone(), pending.clone());
-        ReplaceProgressGuard {
-            progress: self.progress,
-            source: id,
-            pending,
-        }
+    fn start_progress(self, source: &Session) -> ReplaceProgressGuard {
+        ReplaceProgressGuard::start(
+            self.progress,
+            source.id.raw().to_owned(),
+            pending_progress(source),
+        )
     }
 
     /// Render unanswered sources in stable order, with each lane's drawn token.
@@ -1002,6 +1026,51 @@ mod tests {
             assert!(sidebar.progress("B") == Some(other.pending.clone()));
             drop(other);
             assert!(sidebar.progress("B").is_none());
+        });
+    }
+
+    /// Why this matters: Replace with's launcher used to insert its progress
+    /// directly and remove it only after the reply, so a request abandoned
+    /// mid-await (its launcher unmounted) would have left "Replacing…" on the
+    /// source for the life of the page. It now owns the entry through this
+    /// guard. Today the source's claim keeps two requests for one source from
+    /// overlapping, so an older guard never meets a newer request's entry; the
+    /// identity check is what keeps a stray older guard from clearing the
+    /// newer request's progress if that ordering ever changes.
+    ///
+    /// What: dropping a guard removes the entry it published; an older guard
+    /// dropped after a newer request published for the same source leaves the
+    /// newer entry in place, and the newer guard still clears it. Distinct
+    /// titles make the two entries unequal deterministically; real requests
+    /// differ by their own start time, which back-to-back `Instant::now()`
+    /// calls in a test need not separate.
+    #[farhelm_testtrace::test]
+    fn an_older_replace_progress_guard_leaves_a_newer_request_alone() {
+        with_controllers(|sidebar, header| {
+            let pending = |title: &str| {
+                PendingLaunch::new(
+                    LaunchAction::Replace,
+                    "build box".into(),
+                    Some(title.into()),
+                )
+            };
+            let abandoned =
+                ReplaceProgressGuard::start(sidebar.progress, "A".into(), pending("abandoned"));
+            assert!(header.progress("A").is_some(), "premise: progress is shown");
+            drop(abandoned);
+            assert!(
+                header.progress("A").is_none(),
+                "an abandoned request clears its progress"
+            );
+            let older = ReplaceProgressGuard::start(sidebar.progress, "A".into(), pending("older"));
+            let newer = ReplaceProgressGuard::start(sidebar.progress, "A".into(), pending("newer"));
+            drop(older);
+            assert!(
+                header.progress("A") == Some(newer.pending.clone()),
+                "the older guard leaves the newer request's progress alone"
+            );
+            drop(newer);
+            assert!(header.progress("A").is_none());
         });
     }
 
