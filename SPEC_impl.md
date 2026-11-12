@@ -207,20 +207,23 @@ aborting, retrying or settling work. Native requests use reqwest's typed timeout
 inference supplies deadline evidence; request deadlines and the helm's work stay unchanged.
 
 The submitted launcher stays mounted so its request, draft and retry identity outlive session navigation. Pending
-mutation and submitted host-resume state hide its presentation independently of quick-launch provenance. The hidden
-pending root releases its existing dialog isolation, drops `aria-modal` and leaves no backdrop hit area; the progress
-pill takes no input. Preparation and unanswered confirmations keep their isolation. Revealing an outcome or question
-restores isolation and focus through the same dialog handle and opening generation. A return that needs a modal waits
-inside the same request task until other modal roots and admitted host results leave. It retains its pending state and
-operation guard through that handoff, then reserves the captured root before revealing it. Opening Rename or the
-switcher during this wait preserves the composer's opening identity. A retired opening still settles the request's
-pending state and shared Restart or Replace outcome without revealing its old draft. The mounted form's opening id is
-separate from that revocation counter: denied admission removes only the matching form owner, without cancelling a newer
-draft or restoring focus. This is a presentation transition, not a second owner or another launch queue; the existing
-operation token continues to exclude competing composer openings and host mutations. An admitted launch pins its
-resolved host into the existing host choice before releasing the page. This keeps navigation from changing an implicit
-target or retiring its retry binding, including after a returned refusal. It is owner bookkeeping rather than a
-placement edit; genuine registry changes still reconcile that host's installation.
+mutation and submitted host-resume state hide its presentation independently of quick-launch provenance. A woken fresh
+checkout's wait to see its host connect ends at most 60 seconds after the wake (see "Tensorlake hosts"). The limit is
+checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the
+host connect and lost it again before that point, while a host that shows a connection pending again only after that
+point is not bounded by it. The hidden pending root releases its existing dialog isolation, drops `aria-modal` and
+leaves no backdrop hit area; the progress pill takes no input. Preparation and unanswered confirmations keep their
+isolation. Revealing an outcome or question restores isolation and focus through the same dialog handle and opening
+generation. A return that needs a modal waits inside the same request task until other modal roots and admitted host
+results leave. It retains its pending state and operation guard through that handoff, then reserves the captured root
+before revealing it. Opening Rename or the switcher during this wait preserves the composer's opening identity. A
+retired opening still settles the request's pending state and shared Restart or Replace outcome without revealing its
+old draft. The mounted form's opening id is separate from that revocation counter: denied admission removes only the
+matching form owner, without cancelling a newer draft or restoring focus. This is a presentation transition, not a
+second owner or another launch queue; the existing operation token continues to exclude competing composer openings and
+host mutations. An admitted launch pins its resolved host into the existing host choice before releasing the page. This
+keeps navigation from changing an implicit target or retiring its retry binding, including after a returned refusal. It
+is owner bookkeeping rather than a placement edit; genuine registry changes still reconcile that host's installation.
 
 Motivation: the project's standing constraints — recorded here, because SPEC.md deliberately stays
 implementation-neutral and does not contain them: as much Rust as possible, one implementation for web and native, and a
@@ -7105,11 +7108,14 @@ failure releases the hold. The launcher's existing-folder path binds the fresh c
 checkouts arm the form's one-shot pending submission, bound to the returned connection. The old connection is only a
 waiting state while the form's independent host read catches up; its preview never authorizes creation. The form's own
 Ready preview on the returned connection submits once, spending the pending submission before dispatch. Draft or opening
-changes cancel it. Automatic template/Clone name candidates may advance under the unchanged naming policy, while typed
-and fixed names remain exact. Resumed auto-allocation does not pin the old checkout configuration epoch, which the
-host's history may not have revealed when a shortcut pressed; the current Ready preview still matches the full live
-authority and the server validates its configuration. Ordinary guarded answers keep their exact epoch comparison. A lost
-create race refreshes the preview but never submits again automatically.
+changes cancel it. That waiting state ends after 60 seconds (`WOKEN_CONNECTION_WAIT_MS` in `list/create_form.rs`): a
+press still short of the returned connection then is discarded through the same path as a draft change, with its own
+error, while a press already waiting for its preview is left alone. A per-press counter keeps an earlier attempt's timer
+from discarding a later attempt in the same opening. Automatic template/Clone name candidates may advance under the
+unchanged naming policy, while typed and fixed names remain exact. Resumed auto-allocation does not pin the old checkout
+configuration epoch, which the host's history may not have revealed when a shortcut pressed; the current Ready preview
+still matches the full live authority and the server validates its configuration. Ordinary guarded answers keep their
+exact epoch comparison. A lost create race refreshes the preview but never submits again automatically.
 
 `resume_host_connected` tolerates the Suspend and Resume other surfaces may run beside a launch. The helm marks the one
 lifecycle refusal that waiting can clear, another operation holding the host's provisioning lock, with the helm-only

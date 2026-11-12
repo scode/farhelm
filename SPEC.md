@@ -1344,7 +1344,10 @@ moved on since submitting it. Otherwise a notice offers it, and the launcher ret
 is not settled yet. Switching to a session on another host does not change the submitted launch's destination or retry
 identity. The acted-on session's progress, actions, terminal attachment and row outcome settle as soon as the reply
 arrives; only the launcher's return depends on the user. Successfully waking a suspended sandbox continues to create
-without revealing the launcher, restoring its page isolation or waiting for another dialog.
+without revealing the launcher, restoring its page isolation or waiting for another dialog. A fresh GitHub checkout then
+waits for this window to see the woken host connect, for at most 60 seconds. When that runs out, nothing is created: the
+launcher returns with its draft and says the window did not see the host connect, and a connection that shows up later
+creates nothing. The wait for the checkout's preview that follows is not part of that limit.
 
 Once the request has waited about two seconds, a small pill at the bottom of the window shows a spinner and a status:
 Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second, including

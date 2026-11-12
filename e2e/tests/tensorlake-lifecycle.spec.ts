@@ -1818,6 +1818,174 @@ test("a quick launch refused without an error after its wake returns visibly", a
   }
 });
 
+/** After a successful wake, a fresh checkout waits for this window's own host
+ * list to show the woken host connected. That wait used to have no limit, and
+ * while it lasted the hidden launcher had no Cancel and New, quick launches and
+ * host changes stayed refused. It now ends after 60 seconds with the launcher
+ * back and an error, and a connection that shows up later creates nothing.
+ * The limit covers only that wait: a press that saw its connection within the
+ * limit goes on to create, and its create may outlast the 60 seconds.
+ *
+ * The page clock is paused from the press on, so both the limit and the
+ * requests' own deadlines move only when the test runs the clock. The wake
+ * helper reads the host list through the same request as the page, so the
+ * fixture tells them apart by order: the page's read is held first, which
+ * leaves the next read to the helper. */
+for (const mode of ["connection never seen", "connection seen within the limit"] as const) {
+  test(`a woken fresh checkout waits at most 60 s to see its host connect: ${mode}`, async ({ page, request }) => {
+    await page.clock.install();
+    const fixture = await fleet(page, request);
+    const createGate = routeGate();
+    const stops: Array<() => Promise<void>> = [];
+    const creates: unknown[] = [];
+    let lag: ReturnType<typeof fixture.holdNextRead> | undefined;
+    let helperRead: ReturnType<typeof fixture.holdNextRead> | undefined;
+    let resumes = 0;
+    let freshPreviews = 0;
+    let configRevision = 0;
+    let bodyFailed = true;
+    stops.push(await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async (route) => {
+      resumes++;
+      await fixture.publishState({ phase: "tensorlake-changing", direction: "resuming", requested_at: Date.now() });
+      lag = fixture.holdNextRead();
+      await fixture.publishState({ phase: "connecting", attempt: 0, stage: null, last_error: null });
+      await lag.entered;
+      // The page's reader is held on Connecting; the wake's own read, next,
+      // sees the host connected.
+      await fixture.publishState();
+      if (mode === "connection never seen") helperRead = fixture.holdNextRead();
+      await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {} });
+    }));
+    stops.push(await drainedRoute(page, "**/api/github-repositories", async (route) => {
+      const input = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        headers: { "x-farhelm-build": fixture.buildStamp },
+        json: {
+          host: String(input.host),
+          incarnation: input.expected_incarnation,
+          installation_identity: fixture.remote.identity,
+          repos: [],
+          truncated: true,
+          scan_error: "fixture scan unavailable",
+        },
+      });
+    }));
+    stops.push(await drainedRoute(page, "**/api/github-checkout-preview", async (route) => {
+      const input = route.request().postDataJSON();
+      if (input.expected_incarnation === fixture.remote.incarnation) freshPreviews++;
+      await route.fulfill({
+        status: 200,
+        headers: { "x-farhelm-build": fixture.buildStamp },
+        json: {
+          canonical_root: "/tmp",
+          basename: "bar-1",
+          cwd: "/tmp/bar-1",
+          config_revision: configRevision,
+          host: String(input.host),
+          incarnation: input.expected_incarnation,
+          installation_identity: fixture.remote.identity,
+        },
+      });
+    }));
+    stops.push(await drainedRoute(page, "**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      creates.push(route.request().postDataJSON());
+      await createGate.wait();
+      await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.buildStamp,
+        "x-farhelm-create-outcome": "definitely-unaccepted" }, json: { error: "woken create boundary" } });
+    }));
+    try {
+      const history = await request.get(`/api/launch-history?host=${fixture.remote.id}`);
+      expect(history.ok()).toBe(true);
+      configRevision = (await history.json()).checkout_config_revision;
+      await page.goto("/");
+      await page.locator(".new-session-button").click();
+      const form = page.locator(".create-session-form");
+      await form.locator(".launch-composer-harness-choice").getByRole("button", { name: "Codex", exact: true }).click();
+      await chooseLauncherHost(form.getByRole("combobox", { name: "Host", exact: true }), String(fixture.remote.id));
+      const search = form.locator('.launch-composer-search input[role="combobox"]');
+      await search.fill("gh:acme/bar");
+      await expect(form.getByRole("option", { name: "Managed checkout: acme/bar", exact: true })).toBeVisible();
+      await search.press("Enter");
+      await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "ready");
+      await page.clock.pauseAt(new Date(Date.now() + 5_000));
+      await form.locator(".create-session-submit").click();
+      await expect.poll(() => resumes).toBe(1);
+      if (mode === "connection never seen") {
+        await expect.poll(() => helperRead !== undefined, { message: "the wake's own read is next" }).toBe(true);
+        await helperRead!.entered;
+        // Every later page read, including retries after the held one's
+        // deadline, keeps showing a connection still pending.
+        await fixture.publishState({ phase: "connecting", attempt: 1, stage: null, last_error: null });
+        helperRead!.release();
+      }
+      // Premise: the wake succeeded and its press is parked in the bounded
+      // wait, with the launcher hidden and other launches refused.
+      await expect(form).toHaveAttribute("data-awaiting-woken-connection", "true");
+      await expect(form).toBeHidden();
+      await expect(page.locator(".launch-progress-pill .host-resume-progress")).toBeVisible();
+      await expect(page.locator(".new-session-button")).toBeDisabled();
+      if (mode === "connection never seen") {
+        await page.clock.runFor(59_000);
+        await expect(form).toHaveAttribute("data-awaiting-woken-connection", "true");
+        await expect(form).toBeHidden();
+        await expect(form.getByRole("alert", { includeHidden: true })).toHaveCount(0);
+        await page.clock.runFor(1_000);
+        await expect(form).toBeVisible();
+        await expect(form).toHaveAttribute("aria-modal", "true");
+        await expect(form.getByRole("alert")).toHaveText(
+          /^\W*Not launched\. The host resumed, but this window did not see it connect within 60 seconds\. The session was not launched; try again\.$/,
+        );
+        await expect(form.locator(".launch-composer-checkout-preview")).toBeVisible();
+        await expect(page.locator(".launch-progress-pill .host-resume-progress")).toHaveCount(0);
+        // The host now connects for the page; the discarded press stays
+        // discarded even once the fresh connection's preview is ready.
+        await fixture.publishState();
+        await expect(form.getByRole("combobox", { name: "Host", exact: true })).not.toContainText("Connecting");
+        await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "ready");
+        await expect.poll(() => freshPreviews).toBeGreaterThan(0);
+        expect(creates, "a connection after the limit creates nothing").toHaveLength(0);
+        // The reveal focuses the launcher on its next frame, which runs only
+        // when the paused clock moves.
+        await page.clock.runFor(20);
+        await expect.poll(() => form.evaluate((node) => node.contains(document.activeElement)),
+          { message: "the returned launcher owns the keyboard" }).toBe(true);
+        await page.keyboard.press("Escape");
+        await expect(form).toBeHidden();
+        await expect(page.locator(".new-session-button")).toBeEnabled();
+        expect(creates, "nor did it create anything while the returned launcher was open").toHaveLength(0);
+      } else {
+        // The page's held read runs out its own 10 s deadline during these
+        // 30 s, and its next read sees the host connected, so the window sees
+        // the connection well inside the limit and the press creates. The
+        // create is held past the 60 s mark, where nothing may discard it,
+        // and its own deadline is well past that. Publishing Connected again
+        // only nudges the page to read, whatever its retry schedule.
+        await page.clock.runFor(30_000);
+        await fixture.publishState();
+        await expect.poll(() => creates.length, { message: "the press created once the window saw the host" }).toBe(1);
+        await expect(form).toHaveAttribute("data-awaiting-woken-connection", "false");
+        await page.clock.runFor(31_000);
+        await expect(form).toBeHidden();
+        await expect(form.getByRole("alert", { includeHidden: true })).toHaveCount(0);
+        createGate.release();
+        await expect(form).toBeVisible();
+        await expect(form.getByRole("alert")).toContainText("woken create boundary");
+        expect(creates).toHaveLength(1);
+      }
+      expect(resumes).toBe(1);
+      bodyFailed = false;
+    } finally {
+      createGate.release();
+      helperRead?.release();
+      lag?.release();
+      await cleanupOwnedSteps(bodyFailed, stops.map((stop, index): [string, () => Promise<void>] =>
+        [`woken connection route ${index}`, stop]));
+    }
+  });
+}
+
 /** Suspension consent needs the same readable frame as other host questions.
  * Capture the real dialog and details in each palette, prove its actions are
  * outside the scroll body, and keep every dismissal free of lifecycle calls. */
