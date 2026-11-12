@@ -4,7 +4,7 @@
  * vendor provides a dialable new sandbox. Backend tests cover that task. */
 import { expect, test } from "./helpers/evidence";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { cleanupSession, createSession, localHostId, openHostsPanel, openRowMenu, patchPreferences, pinAutoSelect, readPreferences, stubFeed } from "./helpers/fleet";
+import { cleanupSession, createSession, localHostId, openHostMenu, openHostsPanel, openRowMenu, patchPreferences, pinAutoSelect, readPreferences, stubFeed } from "./helpers/fleet";
 import { drainedRoute } from "./helpers/drained-route";
 import { cleanupOwnedSteps } from "./helpers/cleanup";
 import { answerYolo, fillCreateForm, waitForTermText } from "./helpers/term";
@@ -644,6 +644,144 @@ test("owned suspended sessions keep Hosts visibility and mandatory whole-sandbox
       ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`owned route ${index}`, stop]),
       ["session", () => cleanupSession(request, session.id)],
       ["preferences", () => patchPreferences(request, { skip_session_confirmations: previous.skip_session_confirmations ?? null })],
+    ]);
+  }
+});
+
+/** SPEC.md: Suspend and Resume are not host registry changes. A sandbox
+ * session's Suspend that is still waiting for its reply must not hold up a
+ * launch on another host, and a launch on another host must not disable that
+ * session's Resume. Before the host-scoped rule both waited on one page-wide
+ * token, so New stayed disabled and the create never left the page; the held
+ * Suspend and the held create are what make that difference observable. */
+test("a held sandbox Suspend and a launch on another host proceed side by side", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, true, false);
+  const suspendGate = routeGate();
+  const createGate = routeGate();
+  const owned: string[] = [];
+  const bodies: any[] = [];
+  let suspends = 0;
+  try {
+    const local = await localHostId(request);
+    expect(local, "the launch must target a host other than the sandbox").not.toBe(fixture.remote.id);
+    const sandboxed = await createSession(request, { title: `overlap-sandbox-${Date.now()}`, host: fixture.remote.id });
+    owned.push(sandboxed.id);
+    const other = await createSession(request, { title: `overlap-local-${Date.now()}`, host: local });
+    owned.push(other.id);
+    // Nothing on the sandbox is working, so Suspend sends without its question.
+    fixture.stops.push(await drainedRoute(page, /\/api\/sessions(\?|$)/, async (route) => {
+      if (route.request().method() !== "GET"
+        || new URL(route.request().url()).searchParams.get("host") !== String(fixture.remote.id)) return route.fallback();
+      const reply = await route.fetch();
+      const json = await reply.json();
+      json.sessions = json.sessions.map((current: any) => ({ ...current, stale: false, status: { state: "exited", exit_code: 0 } }));
+      await route.fulfill({ response: reply, json });
+    }));
+    // Holds admission only; ownedHost's own route then records the suspension.
+    fixture.stops.push(await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/suspend`, async (route) => {
+      suspends++;
+      await suspendGate.wait();
+      await route.fallback();
+    }));
+    fixture.stops.push(await drainedRoute(page, "**/api/sessions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      bodies.push(route.request().postDataJSON());
+      await createGate.wait();
+      await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.build }, body: "overlap create refused" });
+    }));
+    await pinAutoSelect(page, other.id);
+    await page.goto("/");
+    await expect(page.locator(`[data-session-id="${other.id}"]`)).toHaveAttribute("data-session-selected", "true");
+    const sandboxRow = page.locator(`.session-row[data-session-id="${sandboxed.id}"]`);
+    await openRowMenu(sandboxRow);
+    await page.getByRole("menuitem", { name: "Suspend", exact: true }).click();
+    await expect.poll(() => suspends, { message: "the Suspend request is held before its reply" }).toBe(1);
+    expect(fixture.calls).toEqual([]);
+
+    await expect(page.locator(".new-session-button")).toBeEnabled();
+    const form = await fillCreateForm(page, { cwd: "/tmp", invocation: "true", title: "overlap draft" });
+    await form.locator(".create-session-submit").click();
+    await expect.poll(() => bodies.length, { message: "the launch on another host is sent while Suspend waits" }).toBe(1);
+    expect(bodies[0].host).toBe(local);
+
+    suspendGate.release();
+    await expect.poll(() => fixture.calls).toEqual(["suspend"]);
+    await expect(sandboxRow).toHaveClass(/\bstale\b/);
+    expect(bodies, "premise: the other host's launch is still pending").toHaveLength(1);
+    await openRowMenu(sandboxRow);
+    await page.getByRole("menuitem", { name: "Resume", exact: true }).click();
+    await expect.poll(() => fixture.calls, { message: "Resume is not refused for another host's launch" })
+      .toEqual(["suspend", "resume"]);
+
+    createGate.release();
+    await expect(form.getByRole("alert")).toContainText("overlap create refused");
+    expect(suspends).toBe(1);
+  } finally {
+    suspendGate.release();
+    createGate.release();
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`overlap route ${index}`, stop]),
+      ...owned.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
+    ]);
+  }
+});
+
+/** The host-scoped rule's refusal: while this page's launch wakes a host, Hosts
+ * offers no Resume or Suspend for that host, and Settings (a registry change)
+ * still waits for the launch as it always did. Once the launch settles, the
+ * host's lifecycle action is available again. */
+test("Hosts refuses a host's Resume and Settings while a launch is waking that host", async ({ page, request }, testInfo) => {
+  const fixture = await ownedHost(page, request, false);
+  const wake = routeGate();
+  const owned: string[] = [];
+  let resumes = 0;
+  let creates = 0;
+  try {
+    const source = await createSession(request, { title: `waking-source-${Date.now()}`, host: fixture.remote.id });
+    owned.push(source.id);
+    fixture.stops.push(await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async route => {
+      resumes++;
+      await wake.wait();
+      await route.fallback();
+    }));
+    fixture.stops.push(await drainedRoute(page, "**/api/sessions", async route => {
+      if (route.request().method() !== "POST") return route.fallback();
+      creates++;
+      await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.build }, body: "woken-host create refused" });
+    }));
+    await pinAutoSelect(page, source.id);
+    await page.goto("/");
+    await expect(page.locator(`[data-session-id="${source.id}"]`)).toHaveAttribute("data-session-selected", "true");
+    const form = await fillCreateForm(page, { cwd: "/tmp", invocation: "true", title: "waking draft" });
+    await expect(form.getByRole("combobox", { name: "Host", exact: true })).toContainText("Owned sandbox");
+    await form.locator(".create-session-submit").click();
+    await expect.poll(() => resumes, { message: "the launch's wake is held" }).toBe(1);
+    await expect(form).toBeHidden();
+
+    await openHostsPanel(page);
+    const row = page.locator(`[data-host-id="${fixture.remote.id}"]`).filter({ has: page.locator(".host-row-main") }).first();
+    await expect(row).toContainText("Suspended");
+    await expect(row.getByRole("button", { name: "Resume", exact: true })).toBeDisabled();
+    await openHostMenu(row);
+    await expect(row.getByRole("menuitem", { name: "Resume", exact: true })).toBeDisabled();
+    await expect(row.getByRole("menuitem", { name: /^Settings/ })).toHaveAttribute("aria-disabled", "true");
+    await page.keyboard.press("Escape");
+    expect(fixture.calls, "Hosts sent nothing of its own").toEqual([]);
+
+    wake.release();
+    await expect.poll(() => fixture.calls).toEqual(["resume"]);
+    await expect(form.getByRole("alert")).toContainText("woken-host create refused");
+    expect(creates).toBe(1);
+    await form.locator(".launch-composer-cancel").click();
+    await expect(form).toHaveCount(0);
+    await expect(row).toContainText("Connected");
+    await openHostMenu(row);
+    await expect(row.getByRole("menuitem", { name: "Suspend", exact: true })).toBeEnabled();
+  } finally {
+    wake.release();
+    await cleanupOwnedSteps(testInfo.status !== testInfo.expectedStatus, [
+      ...fixture.stops.map((stop, index): [string, () => Promise<void>] => [`waking route ${index}`, stop]),
+      ...owned.reverse().map((id): [string, () => Promise<void>] => [id, () => cleanupSession(request, id)]),
     ]);
   }
 });

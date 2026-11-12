@@ -2417,7 +2417,8 @@ pub(crate) fn SessionView(
                                     }, "Stop"
                                 }
                                 if sandbox.is_some() {
-                                    button { r#type: "button", class: "btn btn-danger", disabled: stopping() || sandbox_frozen || composer_ops.busy(),
+                                    button { r#type: "button", class: "btn btn-danger",
+                                        disabled: stopping() || sandbox_frozen || sandbox.is_some_and(|host| composer_ops.launch_targets(host)),
                                         "data-tooltip": "Stop this session's agent and close its terminal tabs, then suspend the whole environment",
                                         onkeydown: crate::guard_confirmation_enter,
                                         onclick: {
@@ -2425,12 +2426,14 @@ pub(crate) fn SessionView(
                                             let no_tabs = tabs.is_empty();
                                             let ended = shown.status.has_ended();
                                             move |_| {
-                                                let mut host_ops = composer_ops;
-                                                let Some(host_guard) = host_ops.claim_guard() else {
+                                                // Suspend is not a registry change and takes
+                                                // no page token; only this page's launch on
+                                                // the same host refuses it.
+                                                if sandbox.is_some_and(|host| composer_ops.launch_targets_now(host)) {
                                                     return;
-                                                };
+                                                }
                                                 if let Some(claim) = confirming_stop.take(&token) {
-                                                    confirm_stop_suspend(claim.with_host_guard(host_guard), no_tabs, ended, true);
+                                                    confirm_stop_suspend(claim, no_tabs, ended, true);
                                                 }
                                             }
                                         }, "Stop and suspend" }

@@ -6140,6 +6140,13 @@ pub(super) fn CreateSessionForm(
                 }) {
                     return;
                 }
+                // From here this launch is bound to an existing host, through
+                // its wake and preview to the create. Suspend and Resume take
+                // no page token, so this target is what refuses them for this
+                // host (and only this host) while the launch's guard lives.
+                if let (Some(host), Some(guards)) = (selected_now, held.as_ref()) {
+                    guards.launch.target(host);
+                }
                 if selected_now
                     .is_some_and(|id| hosts.iter().any(|host| host.id == id && host.suspended))
                     && matches!(

@@ -1,9 +1,13 @@
 //! The launch/host-mutation token, read generation fences and drawn-answer slots.
 //!
 //! OpLock excludes a launch choosing a host from mutations of that registry.
-//! Session-facing sandbox mutations share it because they change that host.
-//! Ordinary session questions and requests use session_ops instead: neither this
-//! token nor the read gates block navigation. Claims are synchronous handler-time
+//! Suspend and Resume are not registry changes: they change whether a host
+//! runs, not which hosts exist or how they are reached. They take no token, so
+//! a launch on another host or a host change elsewhere proceeds beside them.
+//! They are refused only while this page's own launch targets or is waking
+//! that same host, which the token's launch target records. Ordinary session
+//! questions and requests use session_ops instead: neither this token nor the
+//! read gates block navigation. Claims are synchronous handler-time
 //! test-and-set operations, so stale disabled markup cannot admit another write.
 //! ConfirmSlot binds every answer to the opening its render actually showed.
 
@@ -21,6 +25,13 @@ use dioxus::prelude::*;
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) struct OpLock {
     held: Signal<bool>,
+    /// The existing host the live launch targets, including while it wakes
+    /// that host. `None` while no launch holds the token, while a registry
+    /// change holds it, and while a launch has not resolved an existing host
+    /// (a launch that creates its own environment never does). Only the
+    /// launch's own guard writes it, and dropping that guard clears it, so it
+    /// can never outlive the claim it describes.
+    launch_target: Signal<Option<crate::HostId>>,
 }
 
 /// One claimed page operation, released even if its task is cancelled.
@@ -32,10 +43,25 @@ pub(crate) struct OpLock {
 /// state makes cancellation take the same path as every ordinary return.
 pub(crate) struct OpGuard {
     held: Signal<bool>,
+    launch_target: Signal<Option<crate::HostId>>,
+}
+
+impl OpGuard {
+    /// Record that this claim is a launch on `host`, an existing host.
+    ///
+    /// Call it synchronously in the handler that resolved the host, before
+    /// anything can yield: Suspend and Resume of that host consult it at their
+    /// click and answer instead of claiming the token. Setting it again (an
+    /// internal reentry after a wake) is harmless.
+    pub(crate) fn target(&self, host: crate::HostId) {
+        let mut launch_target = self.launch_target;
+        launch_target.set(Some(host));
+    }
 }
 
 impl Drop for OpGuard {
     fn drop(&mut self) {
+        self.launch_target.set(None);
         self.held.set(false);
     }
 }
@@ -45,6 +71,7 @@ impl Drop for OpGuard {
 pub(crate) fn use_op_lock() -> OpLock {
     OpLock {
         held: use_signal(|| false),
+        launch_target: use_signal(|| None),
     }
 }
 
@@ -61,7 +88,26 @@ impl OpLock {
     /// refused claimant constructs no guard and gains no release authority.
     pub(crate) fn claim_guard(&mut self) -> Option<OpGuard> {
         let claimed = claim_in(&mut self.held.write());
-        claimed_owner(claimed, || OpGuard { held: self.held })
+        claimed_owner(claimed, || OpGuard {
+            held: self.held,
+            launch_target: self.launch_target,
+        })
+    }
+
+    /// Whether this page's launch targets or is waking `host`, for a HANDLER.
+    ///
+    /// The one thing a Suspend or Resume of that host waits for. `peek`, like
+    /// `busy_now`: a queued click must read the live value, not a render's.
+    pub(crate) fn launch_targets_now(&self, host: crate::HostId) -> bool {
+        *self.launch_target.peek() == Some(host)
+    }
+
+    /// Whether this page's launch targets or is waking `host`, for a RENDER.
+    ///
+    /// Tracked, so Suspend and Resume controls re-enable when the launch ends.
+    /// Cosmetic like `busy`: handlers recheck with `launch_targets_now`.
+    pub(crate) fn launch_targets(&self, host: crate::HostId) -> bool {
+        *self.launch_target.read() == Some(host)
     }
 
     /// Whether an operation is live, for a HANDLER.
@@ -1456,5 +1502,54 @@ mod tests {
             Some(false),
             "closing the hidden prompt must release its claim"
         );
+    }
+
+    /// Why this matters: Suspend and Resume no longer claim the page token;
+    /// the launch target is the only thing that refuses them, so it must name
+    /// exactly the launch's host and vanish with the launch, or a host would
+    /// stay unsuspendable after its launch ended (or another host would be
+    /// refused for no reason). Spec: a registry change's claim targets no
+    /// host; a launch's guard targets the host it set and only that host;
+    /// dropping the guard clears the target together with the token.
+    #[farhelm_testtrace::test]
+    fn a_launch_target_names_only_its_host_and_ends_with_the_launch() {
+        use std::cell::Cell;
+        std::thread_local! {
+            static LOCK: Cell<Option<OpLock>> = const { Cell::new(None) };
+        }
+        fn app() -> Element {
+            let lock = use_op_lock();
+            LOCK.with(|slot| slot.set(Some(lock)));
+            rsx! {}
+        }
+        let mut dom = VirtualDom::new(app);
+        dom.rebuild_in_place();
+        dom.in_runtime(|| {
+            let mut lock = LOCK.with(Cell::get).expect("the page owns the token");
+
+            let registry_change = lock.claim_guard().expect("premise: the token is free");
+            assert!(
+                !lock.launch_targets_now(7),
+                "a registry change targets no host"
+            );
+            drop(registry_change);
+
+            let launch = lock
+                .claim_guard()
+                .expect("premise: the token is free again");
+            launch.target(7);
+            assert!(lock.launch_targets_now(7));
+            assert!(
+                !lock.launch_targets_now(8),
+                "another host stays suspendable"
+            );
+            assert!(lock.busy_now(), "launches still exclude registry changes");
+            drop(launch);
+            assert!(
+                !lock.launch_targets_now(7),
+                "the target ends with the launch"
+            );
+            assert!(!lock.busy_now());
+        });
     }
 }
