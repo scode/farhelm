@@ -520,6 +520,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   instead timed out with the banner still checking the host. Cause suspected, not established; see FLAKES.md,
   2026-11-12.
 
+- **Long-host header progress test's listing route fails with "Route is already handled".**
+  `header progress keeps controls inside a 650px pane with a long host` in `e2e/tests/restart-replace-progress.spec.ts`
+  fails about one run in twenty (2 of 20 on WebKit, 0 of 20 on Chromium on main): the spec's `openSource` installs its
+  session-listing and hosts routes with plain `page.route` handlers that `route.fetch` and then fulfill, not the suite's
+  drained routes. Cause suspected, not established; see FLAKES.md, 2026-11-12.
+
 ### Difficult deflake
 
 ## Broken tests
