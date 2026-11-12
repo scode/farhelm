@@ -8071,12 +8071,14 @@ property, because the default download always names the provisioning helm's own 
 
 Verification chain (D3): every release is published on one origin, `https://get.farhelm.io`, in a fixed layout that is a
 permanent contract with every client: `/latest` is one line naming the latest stable tag (never a prerelease; 404 before
-any release is published); `/<tag>/SHA256SUMS` lists, in `sha256sum` format sorted by name, the six payloads and that
-release's `install.sh`; `/<tag>/SHA256SUMS.minisig` is the minisign signature over it, with trusted comment exactly
-`farhelm <tag>`; `/<tag>/install.sh` is the installer signed with the release; and `/<tag>/<payload>` for each payload
-is a temporary redirect to wherever the archive is hosted (today the GitHub release). `<tag>` is `v` plus the version,
-prereleases included. The installer's two-variable interface to the desktop updater is part of this contract (see "The
-desktop app's updater"). Installed software trusts a ring of public keys compiled into both shipped binaries
+any release is published); `/<tag>/SHA256SUMS` lists, in `sha256sum` format sorted by name, the four payload archives
+(`farhelm` for x86_64 Linux, arm64 Linux and Apple-silicon macOS, and the macOS `farhelm-desktop`) and that release's
+`install.sh` (releases before this one also list `tmux-x86_64-unknown-linux-musl` and `tmux-aarch64-unknown-linux-musl`;
+clients look entries up by name); `/<tag>/SHA256SUMS.minisig` is the minisign signature over it, with trusted comment
+exactly `farhelm <tag>`; `/<tag>/install.sh` is the installer signed with the release; and `/<tag>/<payload>` for each
+payload is a temporary redirect to wherever the archive is hosted (today the GitHub release). `<tag>` is `v` plus the
+version, prereleases included. The installer's two-variable interface to the desktop updater is part of this contract
+(see "The desktop app's updater"). Installed software trusts a ring of public keys compiled into both shipped binaries
 (`RELEASE_KEY_RING` in `release_payloads.rs`): a `SHA256SUMS` is accepted when its signature verifies under ANY key in
 the ring and its trusted comment is exactly `farhelm v{version}` for the version being installed, and then each payload
 must match its listed SHA-256. The helm checks its own version's release this way before provisioning a host;
@@ -8156,15 +8158,15 @@ Linux supervisor artifacts: `x86_64-unknown-linux-musl` and `aarch64-unknown-lin
 a native runner per architecture with `musl-tools` for the C half of the link (audited: rusqlite-bundled static musl
 builds work for both). Cross-compiling them with cargo-zigbuild, which the retired hand-written release workflow did, is
 no longer necessary now that GitHub's arm64 Linux runners are generally available; zig remains the toolchain for the
-private tmux builds, which are C and cross-compile cleanly. The Mac artifacts (`aarch64-apple-darwin`: `farhelm` and
-`farhelm-desktop`) are built on a macOS runner with the native toolchain. The Darwin `farhelm` is also the remote Mac
-supervisor payload; `farhelm-desktop` remains local to the desktop installation. Cross-building them from Linux was
-audited and rejected: zig cannot link the Apple frameworks wry needs (WebKit, AppKit) without a licensed macOS SDK, and
-cross ships no darwin images. Dropping the `.app` bundle removed a third reason (`dx bundle` produces bundles only on
-the native platform) but not those two, and it added one: `farhelm-desktop` is built through `dx build`, which patches
-the asset names into the linked binary and so has to run where that binary is linked. The macOS runner stays. Signing
-and notarization are deferred (D11) and the artifacts ship unsigned, so signing is not among today's reasons — it would
-become one if that changes.
+pinned tmux the test suites build, which is C and cross-compiles cleanly, and for devbuild's Linux cross-builds on a
+Mac. The Mac artifacts (`aarch64-apple-darwin`: `farhelm` and `farhelm-desktop`) are built on a macOS runner with the
+native toolchain. The Darwin `farhelm` is also the remote Mac supervisor payload; `farhelm-desktop` remains local to the
+desktop installation. Cross-building them from Linux was audited and rejected: zig cannot link the Apple frameworks wry
+needs (WebKit, AppKit) without a licensed macOS SDK, and cross ships no darwin images. Dropping the `.app` bundle
+removed a third reason (`dx bundle` produces bundles only on the native platform) but not those two, and it added one:
+`farhelm-desktop` is built through `dx build`, which patches the asset names into the linked binary and so has to run
+where that binary is linked. The macOS runner stays. Signing and notarization are deferred (D11) and the artifacts ship
+unsigned, so signing is not among today's reasons — it would become one if that changes.
 
 Motivation: musl-static sidesteps glibc version skew across Ubuntu releases, which matters because provisioning drops
 binaries on machines we do not control; "predicated on whatever cross-compiled binaries are available" in SPEC.md

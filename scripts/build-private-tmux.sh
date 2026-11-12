@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Farhelm's private tmux against pinned static libevent and ncurses.
+# Build the pinned test tmux against pinned static libevent and ncurses.
 # Linux outputs are fully static musl binaries. Apple arm64 keeps only the
 # platform libraries dynamic; libevent and ncurses are the private archives
 # built here because macOS does not support fully static executables.
@@ -15,12 +15,11 @@ source "$pins"
 target=${1:?usage: build-private-tmux.sh TARGET OUTPUT}
 output=${2:?usage: build-private-tmux.sh TARGET OUTPUT}
 zig=${ZIG:-zig}
-# The build directory sits beside the output, which every caller keeps in
-# its checkout (`.ci-tmux/` for the pinned test tmux, `target/` for the
-# release assets). The trap removes it on any ordinary exit; a SIGKILLed
-# build leaves its few hundred megabytes in that checkout, where
-# build-pinned-tmux-ci.sh or `cargo clean` reclaims them, rather than loose
-# in /tmp, where nothing would.
+# The build directory sits beside the output, which the caller keeps in its
+# checkout (`.ci-tmux/` for the pinned test tmux). The trap removes it on any
+# ordinary exit; a SIGKILLed build leaves its few hundred megabytes in that
+# checkout, where build-pinned-tmux-ci.sh reclaims them, rather than loose in
+# /tmp, where nothing would.
 mkdir -p "$(dirname "$output")"
 work=$(mktemp -d "$(dirname "$output")/.tmux-build.XXXXXX")
 trap 'rm -rf "$work"' EXIT
@@ -37,13 +36,13 @@ export ZIG_LOCAL_CACHE_DIR="$work/zig-cache"
 # Fetch one pinned source archive from the first URL that answers, then
 # verify it against the pinned SHA-256 and unpack it.
 #
-# Several URLs, not one, because every build here — CI's pinned tmux, the
-# release gate, the release's own tmux payloads — runs on a cache miss, and
-# a single origin that is down takes all of them down with it: ftp.gnu.org
-# refused connections for hours on 2026-08-28 and every job that needed
-# ncurses failed at this line. The checksum is what makes a mirror safe to
-# trust — a mirror can only hand back the exact bytes the pin names or fail
-# the check — so the alternates only widen availability, never trust.
+# Several URLs, not one, because every build here (CI's and the release
+# gate's pinned tmux) runs on a cache miss, and a single origin that is
+# down takes all of them down with it: ftp.gnu.org refused connections
+# for hours on 2026-08-28 and every job that needed ncurses failed at this
+# line. The checksum is what makes a mirror safe to trust — a mirror can
+# only hand back the exact bytes the pin names or fail the check — so the
+# alternates only widen availability, never trust.
 #
 # A short connect timeout is part of the same fix: an origin that drops
 # SYNs rather than refusing them would otherwise hold each attempt for

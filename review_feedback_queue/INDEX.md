@@ -19,15 +19,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   birth time is unavailable. Current permanent deletion refuses this birthless case; a proven older-release variant may
   be filtered.
 
-- [`devbuild-run-only-skips-old-payload-authentication.md`](devbuild-run-only-skips-old-payload-authentication.md) —
-  Launching an earlier staged development build bypasses the new tmux signature check. Whether the repair must cover
-  operator-staged older builds is unresolved; the claim that verification runs every time is too broad.
-
-- [`concurrent-devbuild-copy-outlives-hash-check.md`](concurrent-devbuild-copy-outlives-hash-check.md) — Overlapping
-  direct builds in one checkout can copy tmux bytes replaced after their digest was checked. This maintainer-tooling
-  authenticity concern is conditional on an ambiguous concurrency contract; practical race control and catastrophic harm
-  are unproved.
-
 - [`older-handoff-reports-success-for-directory-program.md`](older-handoff-reports-success-for-directory-program.md) —
   Installing an older release can report success while leaving an already damaged app unlaunchable because its
   main-program path is a directory.
@@ -421,10 +412,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   commits. Version-matched Playwright source establishes the response and cleanup boundaries; adverse scheduling is
   unmeasured. Additional recipe scope: independent cleanup can accept a missing row before an already accepted POST
   inserts it, leaving fictional recipe and credential rows behind.
-
-- [`devbuild-buffers-unauthenticated-metadata.md`](devbuild-buffers-unauthenticated-metadata.md) — A compromised release
-  origin can provide oversized checksum or signature files that are downloaded and fully read before rejection. Material
-  resource exhaustion is unmeasured; this is maintainer-tooling resource scope, not a demonstrated catastrophic failure.
 
 - [`quick-switcher-pending-read-keeps-old-shortcut-labels.md`](quick-switcher-pending-read-keeps-old-shortcut-labels.md)
   — A successful but still-pending opening read can leave old shortcut labels visible in the switcher. Existing

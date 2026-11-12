@@ -20472,3 +20472,47 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: moot and removed in plan `tmux-drop-from-install`, PR `02-provisioning`: uninstall no longer ends a private
   tmux server, so a retry that skipped the session check has no tmux sessions left to end; a server that outlived an
   already-stopped unit survives uninstall, which the maintainer accepted while planning that removal.
+
+## devbuild-run-only-skips-old-payload-authentication.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
+  `--run-only` relaunches an earlier staged build, which may predate signed-sum verification. Current
+  `scripts/devbuild-mac.sh:14,48,183,263-271` still supports that, and the comment at :48 says checks run "on every
+  run". The finding itself calls the repair contract (whether old stages must be retroactively authenticated)
+  unresolved.
+- Decision: the user picked "Discard: tooling trusts its inputs and its one user" (2026-10-26 ten-question triage page,
+  Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed in plan `tmux-drop-from-install`, PR `03-release-payloads`: `scripts/devbuild-mac.sh` no
+  longer downloads or stages tmux, so there is no signature check for `--run-only` to skip, and the "on every run"
+  wording it questioned is gone with it.
+
+## concurrent-devbuild-copy-outlives-hash-check.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: Two
+  overlapping direct `devbuild-mac.sh` builds in one checkout can replace cached tmux bytes after the first build
+  checked their digest. The finding itself calls supported direct-build concurrency an unresolved contract premise.
+  `scripts/devbuild-github.sh` says concurrent wrapper runs are unsupported, and root AGENTS.md allows one agent per
+  checkout.
+- Decision: the user picked "Discard: tooling trusts its inputs and its one user" (2026-10-26 ten-question triage page,
+  Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed in plan `tmux-drop-from-install`, PR `03-release-payloads`: `scripts/devbuild-mac.sh` no
+  longer downloads, caches, hash-checks or copies tmux, so no cached bytes can change between a check and a copy.
+
+## devbuild-buffers-unauthenticated-metadata.md
+
+- Outcome: `discard`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
+  `scripts/devbuild-mac.sh:595-604` still downloads the checksum and signature files with no size bound, and
+  `verified_release_sums` (`crates/farhelm/src/main.rs:2613-2616`) reads both files fully before verifying the
+  signature. Exploiting this needs a compromised release origin, and the consequence is limited to resource use in
+  maintainer tooling. No SPEC text requires a bound here (SPEC.md's size cap covers helm payload downloads).
+- Decision: the user picked "Discard: tooling trusts its inputs and its one user" (2026-10-26 ten-question triage page,
+  Q7).
+- Completion criteria: Remove the feedback file and its index entry.
+- Execution: moot and removed in plan `tmux-drop-from-install`, PR `03-release-payloads`: `scripts/devbuild-mac.sh` no
+  longer downloads a release's checksum or signature files, and `farhelm internal verify-release-sums`, which read them,
+  is removed.

@@ -1,7 +1,7 @@
 # Release download fixtures
 
-A miniature GitHub release: the six published asset names, a `SHA256SUMS` over them, and a real minisign signature. The
-tests in `provisioning/release_payloads.rs` serve this directory from a loopback `axum` server and drive
+A miniature GitHub release: the four published archive names, a `SHA256SUMS` over them, and a real minisign signature.
+The tests in `provisioning/release_payloads.rs` serve this directory from a loopback `axum` server and drive
 `ReleasePayloadSource` against it, so the whole verification chain — signature, trusted-comment version binding,
 per-file SHA-256, single-member extraction — runs on real bytes rather than on stubs.
 
@@ -13,8 +13,8 @@ from it rather than embedding a copy:
 echo "farhelm fixture: <package> <target>"
 ```
 
-where `<package>` is `farhelm`, `farhelm-desktop`, or `tmux`. Change that rule and the tests fail loudly rather than
-silently comparing nothing.
+where `<package>` is `farhelm` or `farhelm-desktop`. Change that rule and the tests fail loudly rather than silently
+comparing nothing.
 
 ## The version is inside the signature
 
@@ -62,7 +62,8 @@ regenerating the key pair below needs no code change.
 ## Regenerating
 
 Everything here is generated together, from an empty directory, with the key created fresh. Run this from a scratch
-directory, not from a checkout, and delete `test-key.key` when it finishes.
+directory, not from a checkout, and delete `test-key.key` when it finishes. It needs the minisign CLI itself (the
+current set was made with minisign 0.12): `rsign2`, the Rust port, has no flag for the legacy signature step 4 writes.
 
 The `tar` flags are not optional. A plain `tar czf` records the generating account's user and group names in every
 header, and these archives are committed binary data in a repository that must carry no local-environment detail. They
@@ -92,26 +93,18 @@ for spec in \
     -czf "$FIXTURES/$1-$2.tar.gz" "$1-$2/$3"
 done
 
-# 2. The two tmux builds, which ship unarchived (D5).
-for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
-  printf '#!/bin/sh\necho "farhelm fixture: tmux %s"\n' "$target" >"$FIXTURES/tmux-$target"
-  chmod 755 "$FIXTURES/tmux-$target"
-done
-
-# 3. SHA256SUMS over all six, sorted by name.
+# 2. SHA256SUMS over all four, sorted by name.
 (cd "$FIXTURES" && sha256sum \
   farhelm-aarch64-apple-darwin.tar.gz \
   farhelm-aarch64-unknown-linux-musl.tar.gz \
   farhelm-desktop-aarch64-apple-darwin.tar.gz \
-  farhelm-x86_64-unknown-linux-musl.tar.gz \
-  tmux-aarch64-unknown-linux-musl \
-  tmux-x86_64-unknown-linux-musl >SHA256SUMS)
+  farhelm-x86_64-unknown-linux-musl.tar.gz >SHA256SUMS)
 
-# 4. The variants (see below).
-mkdir -p "$FIXTURES/variants/without-tmux" "$FIXTURES/variants/two-member" \
+# 3. The variants (see below).
+mkdir -p "$FIXTURES/variants/without-linux-aarch64" "$FIXTURES/variants/two-member" \
   "$FIXTURES/variants/other-version" "$FIXTURES/variants/legacy-signature"
-grep -v ' tmux-aarch64-unknown-linux-musl$' "$FIXTURES/SHA256SUMS" \
-  >"$FIXTURES/variants/without-tmux/SHA256SUMS"
+grep -v ' farhelm-aarch64-unknown-linux-musl\.tar\.gz$' "$FIXTURES/SHA256SUMS" \
+  >"$FIXTURES/variants/without-linux-aarch64/SHA256SUMS"
 cp "$FIXTURES/SHA256SUMS" "$FIXTURES/variants/other-version/SHA256SUMS"
 mkdir -p two-member/a two-member/b
 printf '#!/bin/sh\necho "farhelm fixture: two-member a"\n' >two-member/a/farhelm
@@ -123,12 +116,12 @@ two_member_sha=$(sha256sum "$FIXTURES/variants/two-member/farhelm-x86_64-unknown
 sed "s|^[0-9a-f]\{64\}\(  farhelm-x86_64-unknown-linux-musl\.tar\.gz\)$|$two_member_sha\1|" \
   "$FIXTURES/SHA256SUMS" >"$FIXTURES/variants/two-member/SHA256SUMS"
 
-# 5. One fresh key, five signatures, then destroy the secret key. Note the
+# 4. One fresh key, five signatures, then destroy the secret key. Note the
 #    deliberately different tag on the other-version variant.
 minisign -G -W -p test-key.pub -s test-key.key
 for sums in \
   "$FIXTURES/SHA256SUMS" \
-  "$FIXTURES/variants/without-tmux/SHA256SUMS" \
+  "$FIXTURES/variants/without-linux-aarch64/SHA256SUMS" \
   "$FIXTURES/variants/two-member/SHA256SUMS"; do
   minisign -S -t "farhelm $TAG" -s test-key.key -m "$sums"
 done
@@ -138,12 +131,12 @@ minisign -S -l -t "farhelm $TAG" -s test-key.key -m "$FIXTURES/SHA256SUMS" \
 cp test-key.pub "$FIXTURES/test-key.pub"
 rm -f test-key.key
 
-# 6. Prove the headers carry no account name before committing.
+# 5. Prove the headers carry no account name before committing.
 tar -tvzf "$FIXTURES/farhelm-x86_64-unknown-linux-musl.tar.gz"   # must show 0/0
 grep -rl "$(id -un)" "$FIXTURES"                                 # must find nothing
 ```
 
-`the_committed_archives_record_no_account_identity` asserts step 6's first check on every committed archive, so a
+`the_committed_archives_record_no_account_identity` asserts step 5's first check on every committed archive, so a
 regeneration that forgets the ownership flags fails the suite rather than shipping a name.
 
 `-W` writes the secret key unencrypted, because the minisign CLI has no non-interactive password path and these steps
@@ -158,8 +151,8 @@ Four refusals cannot be reached by overriding served bytes alone, because an ear
 different (correct) error. Each therefore needs its own separately signed artifact, which the fixture server substitutes
 for the real one:
 
-- `without-tmux/` — the same file with `tmux-aarch64-unknown-linux-musl` removed, for "SHA256SUMS has no entry for
-  {asset}".
+- `without-linux-aarch64/` — the same file with `farhelm-aarch64-unknown-linux-musl.tar.gz` removed, for "SHA256SUMS has
+  no entry for {asset}". The archive itself stays served, so the refusal comes from the manifest alone.
 - `two-member/` — an archive carrying two members named `farhelm`, plus a `SHA256SUMS` listing that archive's hash, for
   "{asset} contains 2 members named farhelm; expected exactly one".
 - `other-version/` — the real `SHA256SUMS`, byte for byte, signed with `-t "farhelm v0.0.2"`. This is the replay attack:

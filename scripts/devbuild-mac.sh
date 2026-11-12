@@ -24,11 +24,10 @@
 # ## What it touches
 #
 # Builds land in this checkout's `target/` (CARGO_TARGET_DIR is forced to it),
-# the runnable app in `target/devbuild/`, and the tmux payloads it downloads in
-# `target/devbuild/tmux/`. Nothing is installed: no app bundle, no
-# ~/Applications, no ~/.local/bin. Outside the checkout, the build tools keep
-# their usual caches (cargo's registry under ~/.cargo, dx's and zig's own),
-# and the running app has its state, in a directory of its own:
+# and the runnable app in `target/devbuild/`. Nothing is installed: no app
+# bundle, no ~/Applications, no ~/.local/bin. Outside the checkout, the build
+# tools keep their usual caches (cargo's registry under ~/.cargo, dx's and
+# zig's own), and the running app has its state, in a directory of its own:
 # `~/.local/state/farhelm-devbuild` (under XDG_STATE_HOME when that is set),
 # beside the installed app's `~/.local/state/farhelm`, which a devbuild never
 # opens unless FARHELM_DESKTOP_STATE_DIR names it. So a devbuild has its own
@@ -37,17 +36,12 @@
 #
 # ## How remote Update works with this build
 #
-# The helm updates a host by pushing a static Linux `farhelm` and a static tmux
-# over SSH. A release build downloads those from its own release and checks
-# their signatures; this build has no release, so the script builds the Linux
-# `farhelm` from this working copy and points the app at it with
-# `FARHELM_HELM_PAYLOAD_DIR`. Files there are trusted as the operator's and not
-# verified (SPEC_impl.md, the provisioning payload paragraphs under D2/D3). The
-# tmux payloads come from the latest stable release, as long as it pins the
-# same tmux version as the working copy (see "tmux payloads" below), fetched
-# once and checked on every run against that release's SHA256SUMS, whose
-# signature the `farhelm` built here verifies with the release keys it
-# carries, as the helm does for its own downloads.
+# The helm updates a host by pushing a static Linux `farhelm` over SSH. A
+# release build downloads it from its own release and checks its signature;
+# this build has no release, so the script builds the Linux `farhelm` from this
+# working copy and points the app at it with `FARHELM_HELM_PAYLOAD_DIR`. Files
+# there are trusted as the operator's and not verified (SPEC_impl.md, the
+# provisioning payload paragraphs under D2/D3).
 #
 # ## Requirements
 #
@@ -55,9 +49,8 @@
 # Dioxus CLI version the repo pins, 0.7.10), the rustup target
 # `wasm32-unknown-unknown` for the web UI, `cargo-zigbuild` and `zig` for the
 # Linux cross-builds with the rustup targets `x86_64-unknown-linux-musl`
-# and/or `aarch64-unknown-linux-musl`, and, to run the result, tmux. The
-# script checks for each before building anything and prints the commands
-# that install whatever is missing.
+# and/or `aarch64-unknown-linux-musl`. The script checks for each before
+# building anything and prints the commands that install whatever is missing.
 
 set -euo pipefail
 
@@ -133,7 +126,7 @@ fi
 #
 # The desktop app keeps everything in one state directory: the helm's
 # database and host list, its own settings and window files, and the local
-# supervisor it starts (socket, tmux server, session database). The
+# supervisor it starts (socket, terminal hosts, session database). The
 # installed app uses the default one, `$XDG_STATE_HOME/farhelm` or
 # `~/.local/state/farhelm` (`farhelm_supervisor::default_state_dir`, whose
 # rule this repeats: an XDG_STATE_HOME that is empty or relative is ignored).
@@ -432,13 +425,6 @@ if [ "${#missing_names[@]}" -gt 0 ]; then
   exit 1
 fi
 
-# macOS has `shasum`, Linux has `sha256sum`; both print `<hex>  <name>`.
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256() { sha256sum "$1" | cut -d' ' -f1; }
-else
-  sha256() { shasum -a 256 "$1" | cut -d' ' -f1; }
-fi
-
 # Forced rather than honored: the request this script serves is that it touch
 # nothing outside the checkout, and `build-desktop-binary.sh` reads dx's output
 # from `$repo/target` regardless of CARGO_TARGET_DIR.
@@ -542,88 +528,6 @@ for arch in "${arches[@]}"; do
   fi
   COPYFILE_DISABLE=1 tar --no-xattrs -czf "$payloads/farhelm-$target.tar.gz" \
     -C "$(dirname "$binary")" farhelm
-done
-
-# --- tmux payloads ------------------------------------------------------------
-#
-# tmux is not built here: the static tmux of the latest stable release is
-# staged instead, which is only right while that release pins the same tmux
-# version as this working copy. The supervisor refuses a tmux older than the
-# floor its build expects, so pushing a mismatched one could leave a host
-# without a working supervisor until it is updated again. The script
-# therefore compares the two pins (TMUX_VERSION in
-# .github/release/source-pins.env) and refuses on a mismatch rather than
-# stage a tmux this build may reject.
-#
-# Downloads are cached under target/devbuild/tmux/<tmux version>/ with the
-# release's signed SHA256SUMS, so after the first run this needs no network
-# until the working copy's pin changes. Every run checks the cache again; one
-# without a `release` file (written once the signed sums are in place) is
-# incomplete or predates the check, and a missing tmux is fetched again.
-
-tmux_version=$(sed -n 's/^TMUX_VERSION=//p' "$repo/.github/release/source-pins.env")
-case "$tmux_version" in
-  '' | *[!0-9A-Za-z.]* | *..*)
-    echo "could not read a tmux version from .github/release/source-pins.env (got '$tmux_version')" >&2
-    exit 1
-    ;;
-esac
-tmux_cache="$devbuild/tmux/$tmux_version"
-[ -f "$tmux_cache/release" ] || rm -rf "$tmux_cache"
-release_tag=$(cat "$tmux_cache/release" 2>/dev/null || true)
-for arch in "${arches[@]}"; do
-  name="tmux-$arch-unknown-linux-musl"
-  if ! [ -f "$tmux_cache/$name" ]; then
-    if [ -z "$release_tag" ]; then
-      release_tag=$(curl -fsSL --proto '=https' https://get.farhelm.io/latest)
-      # The tag goes into URLs below, so anything but a plain version (a `/`
-      # or `..` especially) is refused rather than trusted.
-      case "$release_tag" in
-        v[0-9]*) ;;
-        *) release_tag="invalid: $release_tag" ;;
-      esac
-      case "$release_tag" in
-        *[!0-9A-Za-z.-]* | *..*)
-          echo "https://get.farhelm.io/latest returned an unexpected value: $release_tag" >&2
-          exit 1
-          ;;
-      esac
-      release_tmux=$(curl -fsSL --proto '=https' \
-        "https://raw.githubusercontent.com/scode/farhelm/$release_tag/.github/release/source-pins.env" \
-        | sed -n 's/^TMUX_VERSION=//p')
-      if [ "$release_tmux" != "$tmux_version" ]; then
-        echo "this working copy pins tmux $tmux_version, but release $release_tag ships tmux '${release_tmux:-unknown}';" >&2
-        echo "staging that tmux could leave updated hosts with a tmux their new supervisor refuses, so stopping here" >&2
-        exit 1
-      fi
-      mkdir -p "$tmux_cache"
-      for file in SHA256SUMS SHA256SUMS.minisig; do
-        curl -fsSL --proto '=https' -o "$tmux_cache/$file" "https://get.farhelm.io/$release_tag/$file"
-      done
-      printf '%s\n' "$release_tag" >"$tmux_cache/release"
-    fi
-    echo "== downloading $name (tmux $tmux_version) from release $release_tag"
-    curl -fsSL --proto '=https' -o "$tmux_cache/$name.tmp" "https://get.farhelm.io/$release_tag/$name"
-    mv -f "$tmux_cache/$name.tmp" "$tmux_cache/$name"
-  fi
-done
-if ! verified=$("$devbuild/farhelm" internal verify-release-sums "${release_tag#v}" \
-  "$tmux_cache/SHA256SUMS" "$tmux_cache/SHA256SUMS.minisig"); then
-  echo "the SHA256SUMS of release $release_tag does not carry a valid release signature; refusing its tmux" >&2
-  rm -rf "$tmux_cache"
-  exit 1
-fi
-for arch in "${arches[@]}"; do
-  name="tmux-$arch-unknown-linux-musl"
-  expected=$(awk -v n="$name" '$2 == n { print $1 }' <<<"$verified")
-  actual=$(sha256 "$tmux_cache/$name")
-  if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
-    echo "$name from $release_tag does not match its signed SHA256SUMS entry (expected '$expected', got '$actual')" >&2
-    rm -rf "$tmux_cache"
-    exit 1
-  fi
-  cp "$tmux_cache/$name" "$payloads/$name"
-  chmod 0755 "$payloads/$name"
 done
 
 printf '%s\n%s\n' "$built_from" "$state" >"$stamp"

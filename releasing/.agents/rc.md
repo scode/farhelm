@@ -99,7 +99,9 @@ With the base, version and announcements settled, the process is:
 
   The maintainer asked for this one line on 2026-10-07 so that trying an RC costs them only running it in the right
   directory and supplying the signing key's passphrase. Remind the maintainer that it runs from the signing tooling's
-  directory, and to quit the desktop app before running it and relaunch after.
+  directory, and to quit the desktop app before running it and relaunch after. Also tell them that the signed
+  `SHA256SUMS` lists exactly the five files `releasing/AGENTS.md`, "Rules for every release", names (four archives and
+  `install.sh`, no tmux builds).
 - Once the maintainer reports that it ran, check that `https://get.farhelm.io/vX.Y.Z-rc.N/SHA256SUMS`, its `.minisig`
   and `install.sh` answer, and that `https://get.farhelm.io/latest` still names the last stable release, so ordinary
   installs are unaffected. Then close the version-bump PR without merging it, and close the temporary announcements PR

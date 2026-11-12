@@ -36,10 +36,11 @@
 #   reading the release page by hand.
 # - `unix-archive = ".tar.gz"` — D14. The helm unpacks downloaded archives
 #   itself, and gzip means its extractor needs only `flate2` + `tar`.
-# - `source-tarball = false` — the release's payloads are exactly the six
-#   binaries/archives the plan's asset table names, which the signed
-#   `SHA256SUMS` lists beside the release's `install.sh`. A source tarball
-#   would be one more asset no consumer knows about.
+# - `source-tarball = false` — the release's payloads are exactly the four
+#   archives `RELEASE_ARCHIVES` in `crates/farhelm-helm/src/provisioning/assets.rs`
+#   names, which the signed `SHA256SUMS` lists beside the release's
+#   `install.sh`. A source tarball would be one more asset no consumer knows
+#   about.
 # - `auto-includes = false` + `include = ["LICENSE"]` (dist default:
 #   auto-includes on) — the default sweeps in whatever README/LICENSE sits
 #   beside each package, which here would ship
@@ -302,10 +303,9 @@ contents = "read"
 # `.github/dist-build-setup.yml`): a tag build that fails right after GitHub
 # moves the label should be checked against the new image first.
 #
-# `global` is where dist builds the extra artifacts (the two tmux binaries)
-# and assembles checksums, and dist also runs its plan, host and announce
-# jobs on it. It stays on GitHub: those jobs take seconds to a few minutes
-# and gain nothing from more cores.
+# `global` is where dist assembles checksums, and dist also runs its plan,
+# host and announce jobs on it. It stays on GitHub: those jobs take seconds
+# to a few minutes and gain nothing from more cores.
 [dist.github-custom-runners]
 x86_64-unknown-linux-musl = "ubicloud-standard-8"
 aarch64-unknown-linux-musl = "ubicloud-standard-8-arm"
