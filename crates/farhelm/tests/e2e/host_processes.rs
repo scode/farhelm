@@ -55,9 +55,10 @@ struct HostStack {
     /// The supervisor's state directory: `root` itself, or a directory
     /// inside it when a test needs a path of a chosen length.
     state: PathBuf,
-    /// Further arguments for `supervisor run`, read at each start: a
-    /// `--tmux` naming the program a test wants it to run.
-    extra_args: Vec<std::ffi::OsString>,
+    /// A `FARHELM_TMUX` for the supervisor's own environment, read at each
+    /// start: the program a test wants it handed, as an installed unit
+    /// hands it one. Set on the child only, never on the test process.
+    tmux_env: Option<PathBuf>,
     root: farhelm_teststate::TestDir,
     work: farhelm_teststate::TestDir,
     _slot: tokio::sync::SemaphorePermit<'static>,
@@ -78,7 +79,7 @@ impl HostStack {
         Self {
             supervisor: None,
             state,
-            extra_args: Vec::new(),
+            tmux_env: None,
             root,
             work: farhelm_teststate::tempdir().expect("workdir"),
             _slot: slot,
@@ -104,9 +105,11 @@ impl HostStack {
         let mut command = tokio::process::Command::new(farhelm_bin());
         command
             .args(["supervisor", "run"])
-            .args(&self.extra_args)
             .arg("--state-dir")
             .arg(&self.state);
+        if let Some(tmux) = &self.tmux_env {
+            command.env("FARHELM_TMUX", tmux);
+        }
         let child = command
             .stdout(std::process::Stdio::null())
             .stderr(log)
@@ -481,10 +484,10 @@ fn write_recording_tmux(path: &Path, log: &Path) {
 /// reboot). Every per-session path used to ask tmux for every session (the
 /// listing, a session's details, a tab lookup, the ticker's passes and its
 /// pane-death client, Delete, shutdown), so this drives each of them. The
-/// recording tmux the supervisor is given through `--tmux` is the
-/// observable; it fails every command, so a supervisor that needed it would
-/// also show up as a failure. Spec: with `--tmux` naming a recording
-/// program, a bare supervisor starts, creates a session (a host row) whose
+/// recording tmux the supervisor is given through `FARHELM_TMUX`, as an
+/// installed unit gives it one, is the observable; it fails every command,
+/// so a supervisor that needed it would also show up as a failure. Spec:
+/// with `FARHELM_TMUX` naming a recording program, a bare supervisor starts, creates a session (a host row) whose
 /// agent draws its ready line, opens, attaches and closes a tab, lists,
 /// renames and deletes the session, keeps running across several ticker
 /// intervals, and stops on SIGTERM cleanly, and the program was never run
@@ -511,22 +514,27 @@ async fn a_supervisor_with_only_new_terminals_runs_no_tmux() {
     );
     std::fs::remove_file(&log).expect("reset the log");
     let mut stack = HostStack::new().await;
-    stack.extra_args = vec!["--tmux".into(), recorder.clone().into_os_string()];
+    stack.tmux_env = Some(recorder.clone());
 
     let client = stack.start().await;
-    // Premise: the supervisor was handed the recorder (it can run no other
-    // tmux), seen on its command line.
+    // Premise: the supervisor was handed the recorder, seen in its
+    // environment.
     let pid = stack
         .supervisor
         .as_ref()
         .and_then(|child| child.id())
         .expect("the supervisor's pid");
-    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).expect("read its command line");
+    let environ = std::fs::read(format!("/proc/{pid}/environ")).expect("read its environment");
+    let expected = [
+        b"FARHELM_TMUX=".as_slice(),
+        recorder.as_os_str().as_encoded_bytes(),
+    ]
+    .concat();
     assert!(
-        cmdline
+        environ
             .split(|byte| *byte == 0)
-            .any(|arg| arg == recorder.as_os_str().as_encoded_bytes()),
-        "premise: the supervisor runs with --tmux naming the recorder"
+            .any(|entry| entry == expected),
+        "premise: the supervisor runs with FARHELM_TMUX naming the recorder"
     );
     let session = stack.create(&client).await;
     let socket = stack.host_socket(&session.id).await;

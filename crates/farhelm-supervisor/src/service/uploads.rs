@@ -365,8 +365,8 @@ async fn reply(
 /// remember.
 ///
 /// Deliberately NOT run through [`spawn_admitted`]: the admission
-/// semaphore bounds concurrent SLOW REQUESTS (kill sweeps, tmux round
-/// trips) at eight supervisor-wide, and a transfer lives as long as the
+/// semaphore bounds concurrent SLOW REQUESTS (kill sweeps, terminal
+/// round trips) at eight supervisor-wide, and a transfer lives as long as the
 /// user's file takes to arrive — holding a permit for that would let eight
 /// pasted screenshots starve every management request and every delete on
 /// the host for as long as they took to arrive. The

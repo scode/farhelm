@@ -7,14 +7,12 @@
 //! `crate::launch` owns their on-disk shape, the shim-side write, and the
 //! raw sentinel read through `LaunchArtifacts`; what lives here is their
 //! service side — the async read wrapper, outcome classification, and the
-//! removal and sweep helpers. A never-started error may also retain a bounded terminal excerpt:
-//! for tmux, using the launch's process-local fence and tmux's atomic capture guard; for a host
-//! terminal, from its emulator's screen.
+//! removal and sweep helpers. A never-started error may also retain a
+//! bounded excerpt of the terminal's final screen.
 //! This never runs on the list path. See `service::sweep` for the process-tree
 //! side of a launch's failure classification.
 
 use super::core::{SessionEntry, Supervisor};
-use super::terminals::Terminal;
 use crate::launch::LaunchArtifacts;
 use crate::store::{LastOutcome, SessionStore};
 use anyhow::Context;
@@ -43,92 +41,86 @@ impl LaunchError {
 
 /// Append terminal evidence only after the caller has proved never-started.
 ///
-/// For tmux, the fence belongs to this entry's launch, not its reusable pane.
-/// Reload and ambiguous starts deliberately have none. tmux revalidates
-/// ownership, generation and deadness in the same synchronous command group
-/// as capture; an obsolete observer can therefore never quote a later
-/// launch's output.
-///
-/// A host terminal needs no fence: a host runs one child for its whole life,
-/// so everything on its screen is this launch's output, and the entry's
-/// host is this generation's. Its excerpt is the visible screen its emulator
-/// holds, quoted only once the host's exit record has been processed
+/// A host runs one child for its whole life, so everything on its screen is
+/// this launch's output, and the entry's host is this generation's. The
+/// excerpt is the visible screen its emulator holds, quoted only once the
+/// host's exit record has been processed
 /// (`crate::hosts::HostStatus::evidence` says dead), which the host sends
 /// after the child's drained output, so the quote is the final screen. A
 /// caller that proved the launch never started from the earlier process
 /// probe (Stop) waits for that record first
-/// (`super::terminals::Terminal::holds_final_state`); without it, this
+/// (`crate::hosts::HostTerminal::holds_final_state`); without it, this
 /// quotes nothing rather than a screen that may still be missing the line
 /// that explains the failure. A Restart seeds a new host with the old
 /// terminal's history but a blank screen, so the visible screen never
-/// quotes the previous run. There is no "Pane is dead" banner to leave out:
-/// the client shows the exit state itself, outside the terminal's content.
-///
-/// `capture_available` belongs to one observer pass. Any failed capture spends
-/// the rest of its budget, including a timeout, while ordinary classification
-/// keeps progressing. A missing fence or refused guard costs no capture error.
-/// A host terminal's read is in memory, cannot fail, and is not budgeted.
-/// Stop uses a separate budget and calls this only for a pane already dead.
-pub(crate) async fn append_launch_excerpt(
-    sup: &super::core::Supervisor,
+/// quotes the previous run. The client shows the exit state itself,
+/// outside the terminal's content, so there is no exit banner to leave
+/// out. The read is in memory and cannot fail.
+pub(crate) fn append_launch_excerpt(
     entry: &super::core::SessionEntry,
     mut detail: String,
-    capture_available: &mut bool,
 ) -> String {
-    let terminal = match entry.terminal.as_ref() {
-        Some(Terminal::Tmux(terminal)) => terminal,
-        Some(Terminal::Host(host)) => {
-            let final_screen = matches!(
-                host.evidence(),
-                crate::hosts::HostEvidence::Owned { dead: true, .. }
-            );
-            // The screen is bounded by the terminal's size, so it is read
-            // whole; the excerpt keeps only its last few lines.
-            if final_screen
-                && let Some(excerpt) =
-                    crate::tmux::launch_excerpt_of_text(&host.screen_tail(usize::MAX))
-            {
-                detail.push_str("; last terminal output: ");
-                detail.push_str(&excerpt);
-            }
-            return detail;
-        }
-        None => return detail,
-    };
-    if !*capture_available {
-        return detail;
-    }
-    let fence = entry
-        .run
-        .launch_excerpt
-        .lock()
-        .expect("launch-excerpt mutex poisoned")
-        .clone();
-    // Both halves are tmux's: the fence is a window option and a history
-    // sample stamped on the pane (`LaunchExcerptFence`), and the excerpt is
-    // tmux's guarded capture of that pane.
-    let Some(fence) = fence else {
+    let Some(host) = entry.terminal.as_ref() else {
         return detail;
     };
-    match sup
-        .tmux
-        .capture_launch_excerpt(&terminal.tmux_name, &terminal.pane, &fence)
-        .await
-    {
-        Ok(Some(excerpt)) if !excerpt.is_empty() => {
-            detail.push_str("; last terminal output: ");
-            detail.push_str(&excerpt);
-        }
-        Ok(_) => {}
-        Err(error) => {
-            *capture_available = false;
-            // The diagnostic is optional. In particular, tmux failure must
-            // never discard the launch evidence already proved on disk.
-            debug!(session = %entry.info.id, error = %format!("{error:#}"),
-                "could not capture never-started terminal output; omitting excerpts for the rest of this pass");
-        }
+    let final_screen = matches!(
+        host.evidence(),
+        crate::hosts::HostEvidence::Owned { dead: true, .. }
+    );
+    // The screen is bounded by the terminal's size, so it is read whole;
+    // the excerpt keeps only its last few lines.
+    if final_screen && let Some(excerpt) = launch_excerpt_of_text(&host.screen_tail(usize::MAX)) {
+        detail.push_str("; last terminal output: ");
+        detail.push_str(&excerpt);
     }
     detail
+}
+
+/// How many of a never-started launch's last non-blank screen lines its
+/// error keeps, and at most how many bytes of them: a few final lines, never
+/// a second terminal history. These limits apply after presentation
+/// escaping, including the ` | ` separators.
+const LAUNCH_EXCERPT_LINES: usize = 5;
+const LAUNCH_EXCERPT_BYTES: usize = 500;
+
+/// The never-started excerpt of a screen's text: its last
+/// [`LAUNCH_EXCERPT_LINES`] non-blank lines, trailing whitespace dropped and
+/// presentation-unsafe characters escaped, at most [`LAUNCH_EXCERPT_BYTES`]
+/// (the oldest bytes go, cut on a character boundary), joined with ` | `
+/// because the badge that shows it escapes newlines. `None` for a screen
+/// with nothing on it.
+///
+/// The last lines are picked before anything is escaped or copied, so only
+/// the excerpt's lines are, not the whole screen (which can be up to the
+/// host protocol's `MAX_DIMENSION` cells each way).
+fn launch_excerpt_of_text(text: &str) -> Option<String> {
+    let lines: Vec<&str> = text
+        .split('\n')
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let kept = &lines[lines.len().saturating_sub(LAUNCH_EXCERPT_LINES)..];
+    let mut excerpt = String::new();
+    for (index, line) in kept.iter().enumerate() {
+        if index > 0 {
+            excerpt.push_str(" | ");
+        }
+        for ch in line.chars() {
+            if farhelm_proto::text::is_presentation_unsafe(ch) {
+                excerpt.extend(ch.escape_default());
+            } else {
+                excerpt.push(ch);
+            }
+        }
+    }
+    if excerpt.len() > LAUNCH_EXCERPT_BYTES {
+        let mut cut = excerpt.len() - LAUNCH_EXCERPT_BYTES;
+        while !excerpt.is_char_boundary(cut) {
+            cut += 1;
+        }
+        excerpt.drain(..cut);
+    }
+    (!excerpt.is_empty()).then_some(excerpt)
 }
 
 /// The explanation for a launch that never reached the exec shim at all,
@@ -142,11 +134,11 @@ pub(crate) async fn append_launch_excerpt(
 ///
 /// The recognizable shape has three parts, and every one is load-bearing:
 ///
-/// 1. **A DEAD pane, not an absent one.** `remain-on-exit` keeps a pane
-///    whose command exited, so a failed wrapper leaves the pane there and
-///    dead. A pane that is GONE means the tmux window (or the whole server)
-///    was destroyed — which also strands an unconsumed spec, from a launch
-///    that was merely interrupted rather than failed. Conflating the two
+/// 1. **A DEAD terminal, not an absent one.** A terminal host keeps its
+///    terminal after the command in it exited, so a failed wrapper leaves
+///    the terminal there and dead. A terminal that is GONE means its host
+///    was ended (a reboot, a stop) — which also strands an unconsumed spec,
+///    from a launch that was merely interrupted rather than failed. Conflating the two
 ///    reported perfectly ordinary sessions as `error`; the distinction is
 ///    what this classifier actually rests on. Callers pass `pane_dead`.
 /// 2. **No sentinel.** The shim's own report outranks every inference,
@@ -303,7 +295,7 @@ pub(crate) async fn cleanup_launch_artifacts(
     generation: i64,
 ) -> bool {
     // Only the first launch can settle its original create. A real sentinel
-    // may be its last acceptance evidence after tmux and its scope vanish;
+    // may be its last acceptance evidence after its terminal and scope vanish;
     // Error alone cannot replace that proof because preterminal refusals use
     // the same outcome. Keep the artifacts if preservation cannot commit.
     if generation == 0 {
@@ -394,7 +386,7 @@ pub(crate) async fn clear_launch_artifacts_fail_closed(
 
 impl LaunchArtifacts {
     /// Retain every file-removal failure before a refused create settles its key.
-    /// The caller has confirmed tmux absence and swept this attempt's processes;
+    /// The caller has confirmed the terminal's absence and swept this attempt's processes;
     /// no consumer remains for its spec, sentinel or waypoint. Attempt every file
     /// so one obstruction cannot strand the other leftovers. Missing files are
     /// already clean, and every other failure joins the error recorded for retry.
@@ -425,7 +417,7 @@ impl LaunchArtifacts {
         error
     }
 
-    /// Remove a failed create's files after its process and tmux cleanup attempts.
+    /// Remove a failed create's files after its process and terminal cleanup attempts.
     /// Keep the original spec → status → waypoint order and attempt every file;
     /// cleanup warnings must not replace the create failure being unwound.
     pub(super) async fn remove_failed_create_best_effort(&self) -> bool {
@@ -669,10 +661,10 @@ impl LaunchArtifacts {
 /// A spec's session id (the first component of its `<id>.<generation>`
 /// stem — `launch::parse_launch_file_name`) is checked against `sessions` —
 /// rather than removing every entry unconditionally, which is what this
-/// sweep used to do — because a supervisor restart does NOT kill tmux: a
-/// session created just before the restart can have its login shell
-/// STILL mid-flight toward `exec farhelm internal launch <spec>`,
-/// arbitrarily long after tmux itself created the window (a slow or hung
+/// sweep used to do — because a supervisor restart does NOT end terminal
+/// hosts: a session created just before the restart can have its login
+/// shell STILL mid-flight toward `exec farhelm internal launch <spec>`,
+/// arbitrarily long after its host started it (a slow or hung
 /// rc-file is a real, if rare, way this stretches out). Its session id is
 /// already durably recorded (the just-reloaded `sessions` map reflects
 /// SQLite, loaded before this sweep runs), so "does a session with this
@@ -808,6 +800,44 @@ impl LaunchArtifacts {
 mod tests {
     use super::super::core::tests::StateDir;
     use super::*;
+
+    /// A never-started launch's error keeps the shell's complaint through a
+    /// screen of blank rows, and bounds the escaped result rather than the
+    /// raw text.
+    ///
+    /// Why: the excerpt is peer-controlled text shown in a badge, so an
+    /// unescaped control or bidi character, or an unbounded line, would reach
+    /// the user's screen; and a screen is mostly blank rows below the last
+    /// output, which must not push the complaint out. Spec: the last five
+    /// non-blank lines, joined with ` | `, presentation-unsafe characters
+    /// escaped, at most 500 bytes, cut on a character boundary.
+    #[farhelm_testtrace::test]
+    fn launch_excerpt_reduction_bounds_sanitized_nonblank_lines() {
+        let screen = format!(
+            "old line\nline 1\nline 2\nline 3\nline 4\nlast \u{00e9}\u{202e}\u{001b} complaint{}",
+            " \t\r\n".repeat(20_000)
+        );
+        let excerpt = launch_excerpt_of_text(&screen).expect("the complaint survives padding");
+        assert_eq!(excerpt.split(" | ").count(), LAUNCH_EXCERPT_LINES);
+        assert_eq!(
+            excerpt,
+            "line 1 | line 2 | line 3 | line 4 | last \u{00e9}\\u{202e}\\u{1b} complaint"
+        );
+        assert!(
+            !excerpt
+                .chars()
+                .any(farhelm_proto::text::is_presentation_unsafe)
+        );
+
+        let excerpt = launch_excerpt_of_text(&"\u{00e9}\u{202e}".repeat(1000)).expect("long line");
+        assert!(excerpt.len() <= LAUNCH_EXCERPT_BYTES);
+        assert!(
+            !excerpt
+                .chars()
+                .any(farhelm_proto::text::is_presentation_unsafe)
+        );
+        assert_eq!(launch_excerpt_of_text(" \n\t\n"), None);
+    }
 
     /// A missing or unreadable spec cannot justify the more specific startup
     /// annotation. A directory at the spec path forces a portable read failure
@@ -1028,9 +1058,9 @@ mod tests {
     /// generations.
     ///
     /// Item 22's restart race is why the current spec must survive: a
-    /// supervisor restart does not kill tmux, so the login shell behind that
-    /// session can still be mid-flight toward reading it, arbitrarily long
-    /// after the window was created. An earlier generation's spec is
+    /// supervisor restart does not end terminal hosts, so the login shell
+    /// behind that session can still be mid-flight toward reading it,
+    /// arbitrarily long after the terminal was created. An earlier generation's spec is
     /// different: a restart already wrote its successor, nothing reads the
     /// old one again, and before this sweep learned generations it stayed on
     /// disk until Delete whenever its shell never reached the shim.
@@ -1207,8 +1237,8 @@ mod tests {
                 .await
                 .unwrap(),
             None,
-            "an ABSENT pane means the window or the whole tmux server was destroyed, which \
-             strands a spec from a launch that was interrupted rather than failed"
+            "an ABSENT terminal means its host was ended, which strands a spec from a \
+             launch that was interrupted rather than failed"
         );
         assert!(
             wrapper_failure_detail(state.path(), &id, 0, true, true, Some(1))
@@ -1456,7 +1486,7 @@ mod tests {
         assert!(artifacts.status().is_file() && artifacts.waypoint().is_file());
 
         let error = artifacts
-            .remove_unconsumed_relaunch_fail_closed(anyhow::anyhow!("original tmux failure"))
+            .remove_unconsumed_relaunch_fail_closed(anyhow::anyhow!("original host failure"))
             .await;
 
         assert!(!artifacts.waypoint().exists());
@@ -1467,14 +1497,14 @@ mod tests {
         let chain: Vec<_> = error.chain().map(ToString::to_string).collect();
         assert_eq!(chain.len(), 2);
         assert!(chain[0].starts_with("removing the failed relaunch's spec ("));
-        assert_eq!(chain[1], "original tmux failure");
+        assert_eq!(chain[1], "original host failure");
 
         std::fs::create_dir(artifacts.waypoint()).unwrap();
         assert!(artifacts.spec().is_dir() && artifacts.waypoint().is_dir());
         assert!(artifacts.status().is_file());
 
         let error = artifacts
-            .remove_unconsumed_relaunch_fail_closed(anyhow::anyhow!("original tmux failure"))
+            .remove_unconsumed_relaunch_fail_closed(anyhow::anyhow!("original host failure"))
             .await;
 
         let chain: Vec<_> = error.chain().map(ToString::to_string).collect();
@@ -1483,7 +1513,7 @@ mod tests {
         assert!(chain[0].contains(&artifacts.waypoint().display().to_string()));
         assert!(chain[1].starts_with("removing the failed relaunch's spec ("));
         assert!(chain[1].contains(&artifacts.spec().display().to_string()));
-        assert_eq!(chain[2], "original tmux failure");
+        assert_eq!(chain[2], "original host failure");
         assert_eq!(
             std::fs::read(artifacts.status()).unwrap(),
             b"retained sentinel"

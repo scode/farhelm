@@ -20,8 +20,7 @@
 //!    following a symlink, which is also the handle a leftover socket file
 //!    is later removed through. A `hosts` that is a symlink or not a
 //!    directory, or that cannot be opened, is refused, and nothing it leads
-//!    to is contacted. Hosts are found by place, as tmux's sessions are by
-//!    its socket: a host whose socket file was deleted inside an intact
+//!    to is contacted. Hosts are found by place: a host whose socket file was deleted inside an intact
 //!    directory is not found (in production the remote uninstall's stop of
 //!    the supervisor's unit ends such hosts with the unit's control group).
 //! 2. **Stopping them**, all at once:
@@ -59,7 +58,7 @@
 //!
 //! Deliberately out of scope: the programs inside hosts get their hangup
 //! and nothing more (descendants that ignore it are the business of the
-//! session's scope or the supervisor's unit, as for tmux), nothing outside
+//! session's scope or the supervisor's unit), nothing outside
 //! the one `hosts` directory is looked at, and no state lock is taken: a
 //! supervisor still running on the state directory loses its terminals'
 //! hosts, which is what a caller of this command asked for.

@@ -7,9 +7,9 @@
 //! preflights happen before uploads are cancelled; cancellation still comes
 //! before the multi-second process sweep so nothing goes on writing into a
 //! directory that is about to vanish; tab and past-launch scope units are
-//! enumerated from the manager because a tmux server that died first leaves
-//! no windows to read tab ids from while a scrubbed daemon keeps running
-//! inside its cgroup; the session's terminal hosts are found from its
+//! enumerated from the manager because a tab terminal that ended first
+//! leaves no tab id to read while a scrubbed daemon keeps running inside
+//! its cgroup; the session's terminal hosts are found from its
 //! launch records and their children rooted with the other preflights, and
 //! ended right after the
 //! sweep, outside the attachment lock, because a host outlives its program
@@ -58,15 +58,12 @@
 //! `DeleteSession` itself.
 //!
 use super::connection::notify_detached;
-use super::core::{SessionEntry, Supervisor, session_tmux_name};
+use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::remove_launch_artifacts_for_session;
 use super::session_hosts::SessionHosts;
-use super::sweep::{
-    ScopeKillFailure, ScopeUnits, SweepTarget, capture_process_identity, reap_process_tree,
-};
-use super::terminals::{ActiveAttach, AttachmentKey, SinkReapWait, Terminal, tmux_tab_home};
+use super::sweep::{ScopeKillFailure, ScopeUnits, SweepTarget, reap_process_tree};
+use super::terminals::{ActiveAttach, AttachmentKey, join_forwarder};
 use super::uploads::abort_session_uploads;
-use crate::terminal_process::TerminalProbe;
 
 use std::path::PathBuf;
 use tracing::{debug, error, warn};
@@ -77,8 +74,6 @@ use tracing::{debug, error, warn};
 /// later retry whenever teardown cannot prove the process tree and terminal
 /// are gone.
 pub(crate) enum TeardownError {
-    TerminalProbe(anyhow::Error),
-    TabRediscovery(anyhow::Error),
     TabScopeEnumeration(anyhow::Error),
     Sweep(anyhow::Error),
     /// The session's recorded terminal hosts could not be settled, or one's
@@ -123,7 +118,6 @@ pub(crate) enum CheckoutDisposition {
 pub(crate) struct PreparedTeardown<'a> {
     deleting: super::core::DeleteInProgress<'a>,
     root_identity: Option<(u32, u64)>,
-    other_roots: Vec<(u32, u64)>,
     hosts: SessionHosts,
     host_roots: Vec<(u32, u64)>,
     units: ScopeUnits,
@@ -178,84 +172,6 @@ impl ArchiveSkipped {
 }
 
 impl Supervisor {
-    /// The live panes, other than the recorded agent pane, that Delete roots
-    /// its process walk at: every pane under the session's tmux name, which
-    /// is its tabs in ordinary use.
-    ///
-    /// The environment-marker scan finds a tab's processes only through a
-    /// marked process to expand from, normally the tab's own shell. On macOS
-    /// the kernel withholds the environment of platform binaries
-    /// (`/usr/bin/env`, the login shell, `ssh`, `caffeinate`) even from the
-    /// same user, so the shell reads as unmarked, and a pane process that
-    /// replaced itself with a scrubbed environment has the same effect
-    /// anywhere. On a host without a usable systemd user manager there is no
-    /// tab scope to fall back on, so a PPID walk from the tab pane is the one
-    /// thing that reaches the tab's processes, as Close Tab already does for
-    /// a single tab. What a walk cannot reach (a descendant that both
-    /// reparented away and lost its marker) stays the accepted manager-less
-    /// residual of `kill_process_tree`.
-    ///
-    /// A session with no recorded terminal (a restart gap, or a reload that
-    /// has not seen its pane yet) contributes every pane found under its
-    /// tmux session's name, agent pane included, since none is recorded to
-    /// root at. A session whose agent runs in a terminal host contributes
-    /// every pane of its tmux session (its tmux tabs, if it has any; see
-    /// `tmux_tab_home`), since its agent is not one of them; the agent's
-    /// own root is its host's child, taken beside the agent's probe, and
-    /// the children of the session's other hosts are rooted by
-    /// `SessionHosts::sweep_roots`. A pane
-    /// that disappears or changes hands between the listing and its probe
-    /// is skipped; failing to ask tmux or to read a live pane's process
-    /// fails the delete, row retained, like the agent pane's own probe.
-    async fn other_pane_roots(
-        &self,
-        entry: &SessionEntry,
-        session_id: &str,
-    ) -> Result<Vec<(u32, u64)>, TeardownError> {
-        let (tmux_name, agent_pane) = match entry.terminal.as_ref() {
-            Some(terminal @ (Terminal::Tmux(_) | Terminal::Host(_))) => {
-                let (tmux_name, agent_pane) = tmux_tab_home(session_id, terminal);
-                (tmux_name.into_owned(), agent_pane)
-            }
-            None => match self
-                .store
-                .has_session_row(session_id)
-                .await
-                .map_err(TeardownError::TabRediscovery)?
-            {
-                true => (session_tmux_name(session_id), None),
-                false => return Ok(Vec::new()),
-            },
-        };
-        // A name this process knows holds no tmux session has no panes to
-        // root at, and asking would be a tmux command for a session that has
-        // only new terminals.
-        if !self.tmux.may_hold_session(&tmux_name) {
-            return Ok(Vec::new());
-        }
-        let states = self
-            .tmux
-            .pane_states()
-            .await
-            .map_err(TeardownError::TabRediscovery)?;
-        let mut roots = Vec::new();
-        for (pane, state) in &states {
-            if state.session_name != tmux_name || state.dead || Some(pane.as_str()) == agent_pane {
-                continue;
-            }
-            if let TerminalProbe::Owned(process) = self
-                .tmux
-                .pane_process(&tmux_name, pane)
-                .await
-                .map_err(TeardownError::TerminalProbe)?
-                && let Some(pid) = process.live_pid()
-            {
-                roots.extend(capture_process_identity(pid).map_err(TeardownError::Sweep)?);
-            }
-        }
-        Ok(roots)
-    }
-
     /// [`Self::teardown_session_with_hosts`] settling the session's recorded
     /// terminal hosts itself, as an unconditional Delete does: for tests,
     /// which drive the teardown without the request around it.
@@ -276,7 +192,7 @@ impl Supervisor {
     ///
     /// Called under the session's lifecycle claim (the caller's, held
     /// across this whole call) — which is what keeps a concurrent restart
-    /// from respawning into a tmux session this is mid-way through
+    /// from respawning into a session this is mid-way through
     /// destroying, and what keeps a new transfer from staging into the
     /// directory this is about to take away.
     ///
@@ -358,8 +274,8 @@ impl Supervisor {
     }
 
     /// The first half of [`Self::teardown_session_with_hosts`]: every
-    /// refusal-prone, read-only preflight (pane ownership, the roots of every
-    /// process to sweep, terminal-tab rediscovery, scope enumeration), with
+    /// refusal-prone, read-only preflight (the roots of every process to
+    /// sweep, the session's terminal hosts, scope enumeration), with
     /// nothing changed yet. An `Err` here means nothing was touched and the
     /// session is intact. Called under the same lifecycle claim and directory
     /// admission as the second half, which must follow it under those same
@@ -398,61 +314,10 @@ impl Supervisor {
         // notice — that is the one acceptable consequence of not
         // holding the lock here, not an oversight.
         //
-        // A dead pane does not prove its detached jobs ended. The reap
-        // trusts confirmed containment only; missing tab discovery below
-        // keeps the portable sweep even without a live pane root.
-        //
-        // The pane's identity is captured right after the probe, before tab
-        // discovery, scope enumeration, and archive work can give the
-        // kernel time to recycle this pid. A vanished process leaves no
-        // root; an unreadable one fails the delete rather than sweeping
-        // without it.
+        // A dead terminal does not prove its detached jobs ended. The reap
+        // trusts confirmed containment only; an incomplete tab inventory
+        // below keeps the portable sweep even without a live root.
         let root_identity = match entry.terminal.as_ref() {
-            Some(terminal @ Terminal::Tmux(_)) => match terminal
-                .probe_process(self)
-                .await
-                .map_err(TeardownError::TerminalProbe)?
-            {
-                TerminalProbe::Owned(pane) => {
-                    terminal.live_root(&pane).map_err(TeardownError::Sweep)?
-                }
-                TerminalProbe::Gone => None,
-                // The headline case of the 2026-08-16 incident: a pane id
-                // recycled onto another session used to make this probe a
-                // hard error, and delete became impossible for the rest of
-                // the supervisor's life. A RECOGNIZED owner means exactly
-                // that recycle, so there is no live pane root here and
-                // nothing of the old terminal left to remove; the reap
-                // below still uses the session's cgroup scopes or the
-                // required portable marker fallback (enumeration only NAMES those
-                // units — `reap_process_tree` is what kills), neither of
-                // which needs a pane. Using the stranger's pid instead
-                // would reap THEIR process tree, which is the outcome the
-                // session scoping exists to prevent.
-                //
-                // An UNRECOGNIZED owner fails closed, as every verb did
-                // before this probe classified: the recorded pane may be
-                // this session's own live terminal under a renamed tmux
-                // session, and a delete would then kill a live agent
-                // without consent and still leave the renamed container,
-                // its scrollback, and its tabs behind while reporting
-                // success. The row and the map entry survive the refusal,
-                // so a retry — or an operator undoing the rename — can
-                // finish the job.
-                TerminalProbe::ForeignOwner { owner } => {
-                    if !self.known_session_tmux_name(&owner).await {
-                        return Err(TeardownError::TerminalProbe(anyhow::anyhow!(
-                            terminal.unknown_owner_refusal(&owner)
-                        )));
-                    }
-                    warn!(
-                        session = %session_id, foreign_owner = %owner,
-                        "this session's recorded pane now belongs to another tmux session; \
-                         deleting through scoped or portable cleanup without that pane"
-                    );
-                    None
-                }
-            },
             // A host terminal's root is its child as the runtime pinned it at
             // adoption, so the sweep reaches the agent's whole tree even
             // where a reparented descendant carries no marker. Taken from
@@ -466,7 +331,7 @@ impl Supervisor {
             // refuses on such a host at its guard (`still_alive_for_delete`
             // cannot tell whether its agent runs), so ending one this way
             // is what an unconditional delete asks for.
-            Some(Terminal::Host(host)) => host
+            Some(host) => host
                 .status()
                 .pinned_child_root()
                 .map_err(|why| {
@@ -478,11 +343,8 @@ impl Supervisor {
                 .map(|root| (root.pid, root.start)),
             None => None,
         };
-        // Every other live pane of the session is a root too, captured at
-        // the same boundary for the same recycling reason.
-        let other_roots = self.other_pane_roots(entry, session_id).await?;
-        // And so is the program of every recorded terminal host of the
-        // session that no runtime here holds: an agent host of a session
+        // The program of every recorded terminal host of the session that
+        // no runtime here holds is a root too: an agent host of a session
         // with no terminal right now, or of an earlier generation, found by
         // the session's launch records, never by a scan (`session_hosts`
         // says what each record's socket may hold and what is done with
@@ -509,16 +371,12 @@ impl Supervisor {
         // that takes tabs down with the agent (SPEC.md — stop
         // leaves them running), so this
         // sweep deliberately does NOT subtract tab processes. It
-        // roots its walk at every tab pane as well as the agent's
-        // (`other_pane_roots`): the marker scan reaches a tab's
-        // processes only by expanding from a marked shell, macOS
-        // hides its platform binaries' markers, and on a host
-        // without a user manager no tab scope holds them either.
-        // (Rediscovery below only needs the tab's WINDOW, which
-        // survives whether or not its shell already exited —
-        // `remain-on-exit` keeps a dead pane's window listed — so
-        // "the tmux teardown has not run yet" is what matters
-        // here, not that any pane is still alive.)
+        // roots its walk at every tab host's child as well as the
+        // agent's (`SessionHosts::sweep_roots`): the marker scan
+        // reaches a tab's processes only by expanding from a marked
+        // shell, macOS hides its platform binaries' markers, and on
+        // a host without a user manager no tab scope holds them
+        // either.
         //
         // Every tab's SCOPE, however, does have to be named: a
         // cgroup kill can only reach what its own `systemd-run`
@@ -527,14 +385,14 @@ impl Supervisor {
         // shape the marker sweep provably cannot find.
         //
         // Named from TWO independent sources, and the second is
-        // the load-bearing one. Rediscovering tabs from tmux
-        // covers the ordinary case, but the case that matters here
-        // is a tmux server that died BEFORE the delete: there are
-        // no windows left to read tab ids from, while a scrubbed
-        // tab daemon is still running inside a cgroup that
-        // outlived its pane. So the manager is also asked directly
-        // for every unit matching this session's tab and launch
-        // globs, which need no tmux at all. The launch glob reaches
+        // the load-bearing one. The session's tab runtimes cover
+        // the ordinary case, but the case that matters here is a
+        // tab whose host is already gone (or an old tab whose tmux
+        // server this release ended at startup): there is no tab
+        // left to read an id from, while a scrubbed tab daemon is
+        // still running inside a cgroup that outlived it. So the
+        // manager is also asked directly for every unit matching
+        // this session's tab and launch globs. The launch glob reaches
         // prior generations whose failed kill left a scrubbed daemon
         // after the old portable sweep reported clean. A failure to
         // ENUMERATE fails the delete outright, row retained:
@@ -543,13 +401,7 @@ impl Supervisor {
         // ends on.
         let mut units = ScopeUnits::recorded(entry.scope.clone());
         if entry.terminal.is_some() {
-            // Strict: "we could not ask tmux" is not "there
-            // are no tabs", and a delete that assumed the
-            // latter would skip live tab scopes.
-            let (tabs, complete) = self
-                .session_tabs_including_dead(entry)
-                .await
-                .map_err(TeardownError::TabRediscovery)?;
+            let (tabs, complete) = self.session_tabs_including_dead(entry);
             if !complete {
                 units.require_sweep();
             }
@@ -561,15 +413,15 @@ impl Supervisor {
             // can find scoped leftovers, never detached unscoped tab jobs.
             units.require_sweep();
         }
-        // A tab in a host has no window to read its id from. Include its
-        // false or unavailable scope selection too: an agent's scope must
+        // Include each host tab's false or unavailable scope selection
+        // too: an agent's scope must
         // not conceal an unscoped tab's detached jobs from cleanup.
         hosts.add_tab_scopes(session_id, &mut units);
         // Settle a stale "no manager" verdict BEFORE enumerating. The row's
         // recorded launch unit is the durable evidence that earns one
         // re-probe, and the sweep below would spend it anyway; spending it
-        // after the globs had been skipped would kill only the names tmux
-        // still listed, missing older generations and closed tabs, and then
+        // after the globs had been skipped would kill only the names the
+        // session's runtimes still listed, missing older generations and closed tabs, and then
         // publish "deleted" over them. A second negative stays final, so the
         // sweep's own re-probe costs nothing extra.
         if entry.scope.is_some() && !self.seams.scopes.available().await {
@@ -617,7 +469,6 @@ impl Supervisor {
         Ok(PreparedTeardown {
             deleting,
             root_identity,
-            other_roots,
             hosts,
             host_roots,
             units,
@@ -645,15 +496,14 @@ impl Supervisor {
         let PreparedTeardown {
             deleting,
             root_identity,
-            other_roots,
             hosts,
             host_roots,
             units,
             container_runtime,
         } = prepared;
 
-        // All refusal-prone, read-only preflights have passed: pane
-        // ownership, terminal-tab rediscovery, and scope enumeration. Now
+        // All refusal-prone, read-only preflights have passed: the sweep's
+        // roots, the session's terminal hosts, and scope enumeration. Now
         // cancel in-flight uploads, still before the process sweep and every
         // destructive step below. A refused preflight therefore leaves the
         // transfer and its staged bytes available to the session, while a
@@ -681,10 +531,7 @@ impl Supervisor {
         reap_process_tree(
             &self.seams.scopes,
             units,
-            root_identity
-                .into_iter()
-                .chain(other_roots)
-                .chain(host_roots),
+            root_identity.into_iter().chain(host_roots),
             session_id,
             &SweepTarget::WholeSession,
             ScopeKillFailure::Refuse,
@@ -707,20 +554,15 @@ impl Supervisor {
         // for a retry, like a sweep that could not confirm its kill; its
         // launch record goes only with the row, below, so a retry still
         // finds it.
-        let agent_host = match entry.terminal.as_ref() {
-            Some(Terminal::Host(host)) => Some(host.clone()),
-            Some(Terminal::Tmux(_)) | None => None,
-        };
+        let agent_host = entry.terminal.clone();
         hosts
             .end(self, agent_host)
             .await
             .map_err(TeardownError::HostShutdown)?;
 
-        // Everything from here to the row's removal is fast (one tmux
-        // round trip plus the session sink's bounded orderly shutdown, see
-        // `DELETE_SINK_REAP_WAIT`, a few fail-closed removals, one sqlite
-        // write) and
-        // runs under `attachments`; the slow removal of the deleted
+        // Everything from here to the row's removal is fast (joining the
+        // session's output tasks, a few fail-closed removals, one sqlite
+        // write) and runs under `attachments`; the slow removal of the deleted
         // session's files waits until after the guard is released. The
         // guarded part mirrors the Attach
         // handler's takeover for the same reason: a concurrent Attach
@@ -739,67 +581,31 @@ impl Supervisor {
         // ownership, on the teardown side). Restart is the
         // deliberate contrast — see `detach_for_restart`.
         //
-        // Stop the forwarders now, before they can race their own
+        // Stop the output tasks now, before they can race their own
         // natural "session terminal ended" Detached against whatever
         // truthful notice this function sends once the real outcome
         // below is known — but do not send that notice yet.
         //
         // ALL of them are signalled before ANY join is started, exactly as
         // the attach takeover does it. Starting joins in the same loop would
-        // let a quick forwarder finish while a later one was still streaming
-        // and able to emit its own detach.
+        // let a quick task finish while a later one was still streaming and
+        // able to emit its own detach.
         let doomed: Vec<(AttachmentKey, ActiveAttach)> = attachments
             .extract_if(|key, _| key.session == session_id)
             .collect();
-        for (key, old) in &doomed {
-            self.begin_forwarder_shutdown(key.clone(), old);
+        for (_, old) in &doomed {
+            old.request_forwarder_shutdown();
         }
         let mut notify_detach = Vec::with_capacity(doomed.len());
-        // `..` drops each attachment's pause sender, which the stopped
-        // forwarder can no longer observe anyway. Its backend goes with the
-        // forwarder's join: for tmux that kills the input client's
-        // control-mode process via `kill_on_drop`, like every other teardown
-        // path, and releases the sink share.
-        let mut forwarders = tokio::task::JoinSet::new();
         for (key, old) in doomed {
             let ActiveAttach {
                 channel,
                 notify,
                 forwarder,
-                backend,
                 ..
             } = old;
-            forwarders.spawn(async move {
-                let joined = forwarder.await;
-                drop(backend);
-                (key, joined, channel, notify)
-            });
-        }
-        let mut forwarder_error = None;
-        while let Some(joined) = forwarders.join_next().await {
-            match joined {
-                Ok((key, result, channel, notify)) => {
-                    if let Err(error) = self.record_forwarder_join(key, result) {
-                        forwarder_error.get_or_insert(error.to_string());
-                    }
-                    notify_detach.push((channel, notify));
-                }
-                Err(join) => {
-                    forwarder_error
-                        .get_or_insert_with(|| format!("terminal cleanup wrapper failed: {join}"));
-                }
-            }
-        }
-        // A live runtime-owned reaper still owns an output client, so the
-        // session cannot be destroyed yet. A durable Failed entry differs:
-        // its replacement barrier remains fail-closed, but no task is known
-        // to be holding the client, so Delete may make the safe tmux progress
-        // before returning its retained diagnostic.
-        let output_reap_blocked = self.has_output_reap_for_session(session_id);
-        if output_reap_blocked && forwarder_error.is_none() {
-            forwarder_error = Some(
-                "a terminal-output client is still crossing its safe shutdown boundary".to_string(),
-            );
+            join_forwarder(&key, forwarder).await;
+            notify_detach.push((channel, notify));
         }
 
         // Fail-closed and sequenced deliberately: artifacts before the
@@ -818,7 +624,6 @@ impl Supervisor {
         // once the row removal has committed (see the
         // quarantining step's own comment).
         let mut quarantined: Option<PathBuf> = None;
-        let forwarder_error = forwarder_error;
         // Filled by the archive decisions below: notices for the reply, and
         // the checkout rows Delete gave up archiving, which its final
         // transaction releases instead of retiring.
@@ -833,122 +638,6 @@ impl Supervisor {
         // releasing an unarchived checkout must retain its vendor entry.
         let mut trust_cleanup = std::collections::HashMap::new();
         let teardown: Result<crate::store::DeleteSettlement, String> = async {
-            if output_reap_blocked {
-                // Reaping is the only state that still proves a runtime task
-                // owns an output client. Leave tmux and all durable state in
-                // place until a later Delete observes a settled barrier.
-                return Err(forwarder_error.expect("blocked output reap has a diagnostic"));
-            }
-            // A join failure has already become durable Failed evidence.
-            // Killing tmux is safe progress for this failed attempt, but the
-            // retained diagnostic prevents us from claiming deletion. Resolve
-            // the target below, then return before artifacts or the row are
-            // removed so a retry owns the remaining cleanup.
-            // Reload can deliberately retain a row without a terminal when
-            // tmux has not exposed its pane yet. The durable name still
-            // identifies the whole session, so delete must use it as the
-            // kill target rather than leaving a same-named tmux husk behind.
-            // For that terminal-less case the name is only a CANDIDATE: a
-            // session whose tmux side never existed (a launch that failed
-            // before its window, a supervisor whose private tmux server was
-            // never started) must still delete cleanly, so the kill runs
-            // only when tmux confirms the session is there. A server that
-            // is not running at all is the same answer as "not there".
-            //
-            // A session whose agent runs in a terminal host has a tmux
-            // session only if a tmux tab was opened in it, so its name is a
-            // candidate in the same way, checked before the kill. The
-            // session's hosts were ended right after the sweep; the tmux
-            // teardown here tolerates finding nothing.
-            let tmux_name = match entry.terminal.as_ref() {
-                Some(Terminal::Tmux(terminal)) => Some(terminal.tmux_name.clone()),
-                // Not even asked when this process knows the name holds
-                // nothing: no server runs, or the server it adopted had no
-                // tmux session for this one (`TmuxDriver::may_hold_session`),
-                // which is every session created in a host.
-                Some(Terminal::Host(_)) if !self.tmux.may_hold_session(&session_tmux_name(session_id)) => None,
-                Some(Terminal::Host(_)) => {
-                    let tmux_name = session_tmux_name(session_id);
-                    match self
-                        .tmux
-                        .has_session(&tmux_name)
-                        .await
-                    {
-                        Ok(true) => Some(tmux_name),
-                        Ok(false) => None,
-                        Err(error) => {
-                            return Err(format!(
-                                "checking whether the session's tmux session exists before \
-                                 delete: {error:#}"
-                            ));
-                        }
-                    }
-                }
-                None => match self
-                    .store
-                    .has_session_row(session_id)
-                    .await
-                    .map(|exists| exists.then(|| session_tmux_name(session_id)))
-                {
-                    // Not asked when this process knows the name holds
-                    // nothing (`TmuxDriver::knows_session_absent`). Asked
-                    // while the server cannot be used, which refuses: the
-                    // agent may still run there.
-                    Ok(Some(tmux_name)) if self.tmux.knows_session_absent(&tmux_name) => None,
-                    Ok(Some(tmux_name)) => match self
-                        .tmux
-                        .has_session(&tmux_name)
-                        .await
-                    {
-                        Ok(true) => Some(tmux_name),
-                        Ok(false) => None,
-                        Err(error) => {
-                            return Err(format!(
-                                "checking whether the session's tmux session still exists before \
-                                 delete: {error:#}"
-                            ));
-                        }
-                    },
-                    Ok(None) => {
-                        return Err(format!(
-                            "session {session_id} vanished before its tmux terminal could be removed"
-                        ));
-                    }
-                    Err(error) => {
-                        return Err(format!(
-                            "reading the session's row before deleting its tmux terminal: \
-                             {error:#}"
-                        ));
-                    }
-                },
-            };
-            if let Some(tmux_name) = tmux_name {
-                // Let the session sink's orderly shutdown finish while the
-                // session still exists; see `DELETE_SINK_REAP_WAIT`. This
-                // waits under the `attachments` lock, which every keystroke,
-                // attach, detach and resize on this host goes through. That
-                // is the brief, bounded local work SPEC.md ("Waiting between
-                // operations on one host") lets terminals wait on: normally
-                // one tmux round trip, the same kind of work Delete already
-                // does under this lock, and the full limit only when tmux is
-                // not answering, when terminal I/O is stalled anyway.
-                let limit = self.timeouts.delete_sink_reap;
-                if self.await_sink_reap(&tmux_name, limit).await == SinkReapWait::TimedOut {
-                    warn!(
-                        session = %session_id,
-                        tmux = %tmux_name,
-                        "the session's terminal-output client had not finished its orderly \
-                         shutdown after {limit:?}; killing its tmux session anyway"
-                    );
-                }
-                self.tmux
-                    .kill_session(&tmux_name)
-                    .await
-                    .map_err(|e| format!("killing tmux session: {e:#}"))?;
-            }
-            if let Some(error) = forwarder_error {
-                return Err(error);
-            }
             // EVERY generation's launch files, not just the current
             // one: they are named per launch now
             // (`launch::spec_path_for_launch`), and a session that
@@ -1228,7 +917,6 @@ impl Supervisor {
         // The one removal point every delete reaches, on the task that owns
         // the delete; the handler's waiter can be abandoned before this.
         self.hint_sessions_changed();
-        self.clear_failed_output_reaps_for_session(session_id);
         for (channel, notify) in &notify_detach {
             notify_detached(
                 notify,
@@ -1531,81 +1219,38 @@ impl Supervisor {
         Some(journaled_destination_path(row, &name))
     }
 
-    /// Close every terminal-output client this supervisor holds, each
-    /// through its orderly no-output boundary, because the process is about
-    /// to exit; give up after `budget`.
-    ///
-    /// This exists because a supervisor that simply exits closes all its
-    /// tmux control clients at once, and tmux can abort its whole private
-    /// server when a client that still has queued pane output sees EOF,
-    /// ending every session on the host (BUGS.md: "Abrupt supervisor death
-    /// can crash the private tmux server"). SIGKILL cannot be helped; a
-    /// planned stop can, and the generated units' `KillMode=process` makes
-    /// every planned stop and upgrade exactly that: a SIGTERM to the
-    /// supervisor alone, while tmux and every session keep running. Remote
-    /// uninstall is the exception: it ends the private tmux server on
-    /// purpose, after systemd has forgotten that policy.
+    /// End every attachment this supervisor holds, because the process is
+    /// about to exit; give up after `budget`.
     ///
     /// First a stop boundary is established while holding `attachments`:
-    /// from then on no new session sink is handed out and no attachment
-    /// installs (see [`super::terminals::SinkRegistryState::stopping`]), so an attach racing
-    /// the stop is refused rather than left streaming. Connection tasks keep
-    /// running; they simply cannot create output clients any more. Then
-    /// comes whole-session delete's orderly sequence with the session filter
-    /// removed: every attachment is drained and its cleanup barrier
-    /// published under that same lock hold, every forwarder is signalled
-    /// before any is joined (so none can race the others), each forwarder
-    /// crosses its own acknowledged no-output boundary, and each sink lease
-    /// is dropped only after its forwarder finished, which hands the sink to
-    /// its own orderly shutdown. Finally it waits until no sink is still
-    /// owned and every runtime-owned reaper has settled. No detach notices
-    /// are sent: the peers are about to lose the connection anyway.
+    /// from then on no attachment installs ([`Supervisor::is_stopping`]), so
+    /// an attach racing the stop is refused rather than left streaming.
+    /// Connection tasks keep running; they simply cannot attach any more.
+    /// Then every attachment is drained under that same lock hold, every
+    /// output task is signalled before any is joined (so none can race the
+    /// others), and each is joined. No detach notices are sent: the peers are
+    /// about to lose the connection anyway.
     ///
     /// ONE budget covers all of it, including waiting for `attachments`
-    /// itself, which an in-flight attach holds across tmux commands.
-    /// Returns whether everything settled inside it. On expiry, one independent
-    /// best-effort attempt switches the private server's control clients to
-    /// no-output, with at most two additional seconds. It does not wait for
-    /// their cleanup or turn an expired stop into a successful one. Errors from
-    /// individual clients are recorded in the registries as usual.
+    /// itself, which an in-flight attach holds across its setup. Returns
+    /// whether everything settled inside it.
     pub(crate) async fn shutdown_output_clients(&self, budget: std::time::Duration) -> bool {
-        let settled = tokio::time::timeout(budget, async {
-            let mut forwarders = tokio::task::JoinSet::new();
-            {
+        tokio::time::timeout(budget, async {
+            let doomed: Vec<(AttachmentKey, ActiveAttach)> = {
                 let mut attachments = self.attachments.lock().await;
-                self.sinks.lock().expect("sink registry poisoned").stopping = true;
-                let doomed: Vec<(AttachmentKey, ActiveAttach)> = attachments.drain().collect();
-                for (key, old) in &doomed {
-                    self.begin_forwarder_shutdown(key.clone(), old);
-                }
-                for (key, old) in doomed {
-                    // `..` drops the pause sender, and the backend goes with
-                    // the forwarder's join (for tmux, the input client's
-                    // control process ends with `kill_on_drop`; it carries
-                    // no output), exactly as whole-session delete does.
-                    let ActiveAttach {
-                        forwarder, backend, ..
-                    } = old;
-                    forwarders.spawn(async move {
-                        let joined = forwarder.await;
-                        drop(backend);
-                        (key, joined)
-                    });
-                }
+                self.attachments_closed
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                attachments.drain().collect()
+            };
+            for (_, old) in &doomed {
+                old.request_forwarder_shutdown();
             }
-            while let Some(joined) = forwarders.join_next().await {
-                if let Ok((key, joined)) = joined {
-                    let _ = self.record_forwarder_join(key, joined);
-                }
+            for (key, old) in doomed {
+                join_forwarder(&key, old.forwarder).await;
             }
-            self.wait_for_all_output_cleanup().await;
         })
         .await
-        .is_ok();
-        if !settled && let Err(error) = self.tmux.quiet_control_clients_before_exit().await {
-            warn!(error = %error, "planned-stop output quiet-down failed; exiting anyway");
-        }
-        settled
+        .is_ok()
     }
 }
 
@@ -1653,17 +1298,16 @@ fn cleanup_retired_preparation_sync(state_dir: &std::path::Path, checkout_id: &s
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use tokio::sync::{mpsc, oneshot, watch};
+    use tokio::sync::oneshot;
 
     use super::super::core::tests::{StateDir, dummy_exe, entry_with, host_seams, test_admission};
     use super::super::core::{CreateInputs, SupervisorSeams, SupervisorTimeouts};
-    use super::super::terminals::{SessionSinkHandle, SessionSinkLease, SinkRegistryState};
     use super::*;
     use crate::store::{LastOutcome, StoredSession};
     use farhelm_proto::SessionLaunch;
 
     /// Seed a terminal-less, scoped session so teardown tests can isolate the
-    /// cgroup verdict from tmux discovery and pane ownership.
+    /// cgroup verdict from terminal discovery.
     async fn scoped_session(
         scopes: crate::scope::ScopeManager,
         id: &str,
@@ -1757,16 +1401,10 @@ mod tests {
     /// never belonged to it. Only Delete's portable marker fallback can end
     /// this child. The custom sleeper's environment is readable on modern
     /// macOS, unlike /bin/sleep's; the guard owns cleanup during unwinding.
-    async fn assert_incomplete_discovery_reaps_unscoped_tab(missing_terminal: bool) {
+    async fn assert_incomplete_discovery_reaps_unscoped_tab() {
         let id = uuid::Uuid::new_v4().to_string();
         let (_state, sup, original) = scoped_session(working_scopes(), &id).await;
-        let terminal = (!missing_terminal).then(|| {
-            Terminal::Tmux(super::super::terminals::TmuxTerminal {
-                tmux_name: session_tmux_name(&id),
-                pane: "%0".to_owned(),
-            })
-        });
-        let mut entry = entry_with(terminal, LastOutcome::Running);
+        let mut entry = entry_with(None, LastOutcome::Running);
         entry.info.id = id.clone();
         entry.scope = original.scope.clone();
         let entry = Arc::new(entry);
@@ -1774,10 +1412,7 @@ mod tests {
             .lock()
             .await
             .insert(id.clone(), Arc::clone(&entry));
-        let (tabs, complete) = sup
-            .session_tabs_including_dead(&entry)
-            .await
-            .expect("empty discovery");
+        let (tabs, complete) = sup.session_tabs_including_dead(&entry);
         assert!(
             tabs.is_empty() && !complete,
             "fixture has no historical tab inventory"
@@ -1827,14 +1462,7 @@ mod tests {
     /// when its durable launch scope is known and confirms collected.
     #[farhelm_testtrace::test]
     async fn delete_without_a_terminal_sweeps_former_unscoped_tab_jobs() {
-        assert_incomplete_discovery_reaps_unscoped_tab(true).await;
-    }
-
-    /// A valid empty listing after an old tmux server died describes no
-    /// current panes, not the containment of jobs its tabs left behind.
-    #[farhelm_testtrace::test]
-    async fn delete_with_a_missing_old_tmux_session_sweeps_unscoped_tab_jobs() {
-        assert_incomplete_discovery_reaps_unscoped_tab(false).await;
+        assert_incomplete_discovery_reaps_unscoped_tab().await;
     }
 
     /// Delete removes the deleted session's files (uploaded attachments,
@@ -1993,410 +1621,6 @@ mod tests {
         assert!(
             matches!(result, Err(super::super::sweep::StopFailure::Sweep(_))),
             "an unconfirmed scope must fail the stop"
-        );
-    }
-
-    /// A session with a real tmux session and one attachment whose sink is a
-    /// test-controlled fake, for the Delete-versus-sink-shutdown tests.
-    ///
-    /// The fake sink's task waits for the shutdown request and reports it on
-    /// `shutdown_seen`, which is the moment Delete has released the last sink
-    /// reference and the reaper is running. With `finish_on_release` it then
-    /// waits for `release`, records whether the tmux session still existed,
-    /// and ends; without it, it never ends, like a client tmux never answers.
-    struct SinkDeleteFixture {
-        _state: StateDir,
-        sup: Arc<Supervisor>,
-        entry: Arc<SessionEntry>,
-        id: String,
-        tmux_name: String,
-        shutdown_seen: oneshot::Receiver<()>,
-        release: oneshot::Sender<()>,
-        saw_session: oneshot::Receiver<anyhow::Result<bool>>,
-    }
-
-    async fn sink_delete_fixture(
-        timeouts: SupervisorTimeouts,
-        finish_on_release: bool,
-    ) -> SinkDeleteFixture {
-        let id = uuid::Uuid::new_v4().to_string();
-        let (state, sup, entry) = scoped_session_with_timeouts(
-            SupervisorSeams {
-                scopes: Arc::new(working_scopes()),
-                ..SupervisorSeams::default()
-            },
-            timeouts,
-            &id,
-        )
-        .await;
-        let tmux_name = format!("fh-{id}");
-        let pane = sup
-            .tmux
-            .create_session(
-                &tmux_name,
-                "/",
-                80,
-                24,
-                &[],
-                &["sleep".to_string(), "60".to_string()],
-            )
-            .await
-            .expect("fixture premise: tmux session must be created before Delete");
-        let input = sup
-            .tmux
-            .open_input_client(&tmux_name, &pane)
-            .await
-            .expect("fixture premise: input client must attach");
-
-        let (shutdown, shutdown_rx) = oneshot::channel::<()>();
-        let (shutdown_seen_tx, shutdown_seen) = oneshot::channel::<()>();
-        let (release, released) = oneshot::channel::<()>();
-        let (saw_session_tx, saw_session) = oneshot::channel::<anyhow::Result<bool>>();
-        let (sink_state, _sink_state_rx) = watch::channel(None);
-        let sink_task = tokio::spawn({
-            let sup = Arc::clone(&sup);
-            let tmux_name = tmux_name.clone();
-            async move {
-                let _ = shutdown_rx.await;
-                let _ = shutdown_seen_tx.send(());
-                if !finish_on_release {
-                    std::future::pending::<()>().await;
-                }
-                let _ = released.await;
-                let _ = saw_session_tx.send(sup.tmux.has_session(&tmux_name).await);
-                Ok::<_, anyhow::Error>(())
-            }
-        });
-        let handle = Arc::new(SessionSinkHandle {
-            tmux_name: tmux_name.clone(),
-            task: Some(sink_task),
-            shutdown: Some(shutdown),
-            state: sink_state,
-        });
-        sup.sinks.lock().expect("sink registry").insert(
-            tmux_name.clone(),
-            super::super::terminals::SinkRegistryEntry::Live(Arc::downgrade(&handle)),
-        );
-        let sink = SessionSinkLease::new(handle, Arc::clone(&sup.sinks));
-        let (notify, _notify_rx) = mpsc::channel(2);
-        let (forwarder_shutdown, _shutdown_observer) = watch::channel(false);
-        let (forwarder_cleanup, cleanup_rx) = watch::channel(None);
-        let (pause, _pause_rx) = watch::channel(None);
-        sup.attachments.lock().await.insert(
-            crate::service::terminals::AttachmentKey::new(
-                &id,
-                crate::service::terminals::TerminalId::Agent,
-            ),
-            ActiveAttach {
-                channel: 7,
-                lease: "test".to_string(),
-                notify,
-                forwarder: tokio::spawn(async {}),
-                forwarder_shutdown,
-                forwarder_cleanup: cleanup_rx,
-                pause,
-                backend: super::super::terminals::AttachBackend::Tmux(
-                    super::super::terminals::TmuxAttach {
-                        pane_death: super::super::terminals::PaneDeath::new(&tmux_name, &pane).0,
-                        input,
-                        sink,
-                    },
-                ),
-            },
-        );
-        drop(forwarder_cleanup);
-        SinkDeleteFixture {
-            _state: state,
-            sup,
-            entry,
-            id,
-            tmux_name,
-            shutdown_seen,
-            release,
-            saw_session,
-        }
-    }
-
-    /// Delete lets the session sink's orderly shutdown finish before it kills
-    /// the session's tmux session, and leaves no sink behind.
-    ///
-    /// Why it matters: the shutdown turns the sink's output off through a
-    /// control-mode exchange with tmux, which only works while the session
-    /// exists. Killed first, tmux answered "can't find client" while the
-    /// client stayed alive behind its unread output, and the reaper retried
-    /// forever: a leaked tmux client and a tmux command every five seconds
-    /// until the supervisor restarted. Spec: while the reaper is still
-    /// running, Delete has not killed the session; once it finishes, Delete
-    /// kills it and succeeds, and the session's sink entry is gone. The test
-    /// holds the reaper itself, so the order is observed deterministically
-    /// rather than by reproducing the original race.
-    #[farhelm_testtrace::test]
-    async fn delete_lets_the_sink_shut_down_before_killing_tmux() {
-        let fixture = sink_delete_fixture(SupervisorTimeouts::default(), true).await;
-        let SinkDeleteFixture {
-            _state,
-            sup,
-            entry,
-            id,
-            tmux_name,
-            shutdown_seen,
-            release,
-            saw_session,
-        } = fixture;
-        let delete = tokio::spawn({
-            let sup = Arc::clone(&sup);
-            async move {
-                let admission = test_admission(&sup).await;
-                sup.teardown_session(&entry, &id, admission).await
-            }
-        });
-        tokio::time::timeout(std::time::Duration::from_secs(10), shutdown_seen)
-            .await
-            .expect("Delete must release the session sink")
-            .expect("the sink reports its shutdown request");
-        assert!(
-            matches!(
-                sup.sinks.lock().expect("sink registry").get(&tmux_name),
-                Some(super::super::terminals::SinkRegistryEntry::Reaping(_))
-            ),
-            "premise: the released sink is being reaped"
-        );
-        // sleep-ok: observation window in which a Delete that did not wait for the sink would already have killed tmux
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        assert!(
-            !delete.is_finished(),
-            "Delete must wait for the sink's shutdown"
-        );
-
-        release.send(()).expect("release the sink's shutdown");
-        assert!(
-            saw_session
-                .await
-                .expect("the sink reports")
-                .expect("probe the tmux session from the sink"),
-            "the sink finished while its tmux session still existed"
-        );
-        assert!(
-            delete.await.expect("delete task").is_ok(),
-            "Delete succeeds once the sink is gone"
-        );
-        assert!(
-            sup.sinks
-                .lock()
-                .expect("sink registry")
-                .get(&tmux_name)
-                .is_none(),
-            "no sink entry is left behind"
-        );
-        assert!(
-            !sup.tmux
-                .has_session(&tmux_name)
-                .await
-                .expect("tmux liveness after Delete"),
-            "Delete kills the tmux session"
-        );
-    }
-
-    /// A sink whose orderly shutdown never finishes delays Delete only by
-    /// the bounded wait, after which Delete kills the session and succeeds.
-    ///
-    /// Why it matters: the wait exists for a shutdown that normally takes
-    /// one exchange with tmux, but it runs under the lock every terminal on
-    /// the host shares, so a client tmux never answers must not turn into a
-    /// Delete that fails or hangs (P3 of the plan that added the wait: kill
-    /// as before and log). Spec: with the budget expired, the session is
-    /// killed, the row removed and Delete reports success, while the sink's
-    /// entry is still `Reaping`, which the fallback deliberately leaves to
-    /// its reaper.
-    #[farhelm_testtrace::test]
-    async fn delete_kills_tmux_when_the_sink_shutdown_outlasts_its_wait() {
-        let fixture = sink_delete_fixture(
-            SupervisorTimeouts {
-                delete_sink_reap: std::time::Duration::from_millis(100),
-                ..SupervisorTimeouts::default()
-            },
-            false,
-        )
-        .await;
-        let admission = test_admission(&fixture.sup).await;
-        let deleted = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            fixture
-                .sup
-                .teardown_session(&fixture.entry, &fixture.id, admission),
-        )
-        .await
-        .expect("Delete must not wait past its budget");
-        assert!(deleted.is_ok(), "Delete succeeds after the bounded wait");
-        assert!(
-            !fixture
-                .sup
-                .tmux
-                .has_session(&fixture.tmux_name)
-                .await
-                .expect("tmux liveness after Delete"),
-            "Delete kills the tmux session after the wait"
-        );
-        assert!(
-            fixture
-                .sup
-                .store
-                .session(&fixture.id)
-                .await
-                .expect("read the row")
-                .is_none(),
-            "Delete removes the session's row"
-        );
-        assert!(
-            matches!(
-                fixture
-                    .sup
-                    .sinks
-                    .lock()
-                    .expect("sink registry")
-                    .get(&fixture.tmux_name),
-                Some(super::super::terminals::SinkRegistryEntry::Reaping(_))
-            ),
-            "the unfinished shutdown stays with its reaper"
-        );
-        drop(fixture.release);
-    }
-
-    /// A failed forwarder join must still kill the session's tmux server, but
-    /// the first Delete remains visibly incomplete so a retry can finish the
-    /// durable row cleanup. The fixture uses a real control client and tmux
-    /// session, then cancels only the forwarder task to reproduce its
-    /// JoinError boundary without changing the test process environment.
-    #[farhelm_testtrace::test]
-    async fn failed_forwarder_join_kills_tmux_then_retry_deletes_the_row() {
-        let id = uuid::Uuid::new_v4().to_string();
-        let (_state, sup, entry) = scoped_session(working_scopes(), &id).await;
-        let tmux_name = format!("fh-{id}");
-        let pane = sup
-            .tmux
-            .create_session(
-                &tmux_name,
-                "/",
-                80,
-                24,
-                &[],
-                &["sleep".to_string(), "60".to_string()],
-            )
-            .await
-            .expect("fixture premise: tmux session must be created before Delete");
-        assert!(
-            sup.tmux
-                .has_session(&tmux_name)
-                .await
-                .expect("fixture premise: probe tmux session")
-        );
-        let input = sup
-            .tmux
-            .open_input_client(&tmux_name, &pane)
-            .await
-            .expect("fixture premise: input client must attach");
-        let (_shutdown, _shutdown_rx) = oneshot::channel();
-        let (sink_state, _sink_state_rx) = watch::channel(None);
-        let sink_task = tokio::spawn(async { Ok::<_, anyhow::Error>(()) });
-        let sink = SessionSinkLease::new(
-            Arc::new(SessionSinkHandle {
-                tmux_name: tmux_name.clone(),
-                task: Some(sink_task),
-                shutdown: Some(_shutdown),
-                state: sink_state,
-            }),
-            Arc::new(std::sync::Mutex::new(SinkRegistryState::default())),
-        );
-        let (notify, _notify_rx) = mpsc::channel(2);
-        let (forwarder_shutdown, _shutdown_observer) = watch::channel(false);
-        let (forwarder_cleanup, cleanup_rx) = watch::channel(None);
-        let (pause, _pause_rx) = watch::channel(None);
-        let forwarder = tokio::spawn(async {
-            std::future::pending::<()>().await;
-        });
-        // Inject the JoinError boundary without a panic; the teardown wrapper
-        // observes this cancellation as a failed forwarder join.
-        forwarder.abort();
-        sup.attachments.lock().await.insert(
-            crate::service::terminals::AttachmentKey::new(
-                &id,
-                crate::service::terminals::TerminalId::Agent,
-            ),
-            ActiveAttach {
-                channel: 7,
-                lease: "test".to_string(),
-                notify,
-                forwarder,
-                forwarder_shutdown,
-                forwarder_cleanup: cleanup_rx,
-                pause,
-                backend: super::super::terminals::AttachBackend::Tmux(
-                    super::super::terminals::TmuxAttach {
-                        pane_death: super::super::terminals::PaneDeath::new(&tmux_name, &pane).0,
-                        input,
-                        sink,
-                    },
-                ),
-            },
-        );
-        drop(forwarder_cleanup);
-
-        let first = sup
-            .teardown_session(&entry, &id, test_admission(&sup).await)
-            .await;
-        let first_failed = matches!(
-            first,
-            Err(TeardownError::FailClosed(message)) if message.contains("forwarder")
-        );
-        assert!(
-            first_failed,
-            "first Delete must surface the injected forwarder failure"
-        );
-        assert!(
-            !sup.tmux
-                .has_session(&tmux_name)
-                .await
-                .expect("tmux liveness after partial Delete"),
-            "first Delete must kill tmux even though it retains the row"
-        );
-        assert!(
-            sup.store
-                .session(&id)
-                .await
-                .expect("read retained row")
-                .is_some(),
-            "first Delete must retain the row for retry"
-        );
-
-        let entry = sup
-            .sessions
-            .lock()
-            .await
-            .get(&id)
-            .cloned()
-            .expect("retained row reloads for retry");
-        let retry = sup
-            .teardown_session(&entry, &id, test_admission(&sup).await)
-            .await;
-        assert!(
-            retry.is_ok(),
-            "retry must complete after tmux teardown progress"
-        );
-        assert!(
-            sup.store
-                .session(&id)
-                .await
-                .expect("read deleted row")
-                .is_none(),
-            "successful retry must remove the durable row"
-        );
-        assert!(
-            !sup.output_reaps
-                .lock()
-                .expect("output-reap registry")
-                .keys()
-                .any(|key| key.session == id),
-            "successful Delete must prune failed output-reap evidence"
         );
     }
 
@@ -4875,132 +4099,12 @@ mod tests {
     // Orderly stop: `shutdown_output_clients`
     // -----------------------------------------------------------------
 
-    /// A registered, live session-sink lease backed by a fake task that ends
-    /// as soon as it is asked to, standing in for a real sink client so the
-    /// stop boundary can be exercised without tmux.
-    fn fake_live_sink(sup: &Supervisor, tmux_name: &str) -> SessionSinkLease {
-        let (shutdown, shutdown_rx) = oneshot::channel::<()>();
-        let (state, _state_rx) = watch::channel(None);
-        let task = tokio::spawn(async move {
-            let _ = shutdown_rx.await;
-            Ok::<_, anyhow::Error>(())
-        });
-        let handle = Arc::new(SessionSinkHandle {
-            tmux_name: tmux_name.to_string(),
-            task: Some(task),
-            shutdown: Some(shutdown),
-            state,
-        });
-        sup.sinks.lock().expect("sink registry").insert(
-            tmux_name.to_string(),
-            super::super::terminals::SinkRegistryEntry::Live(Arc::downgrade(&handle)),
-        );
-        SessionSinkLease::new(handle, Arc::clone(&sup.sinks))
-    }
-
-    /// Spec: a stop does not report completion while any session sink is
-    /// still owned, refuses new sinks from the moment it starts, and
-    /// completes once the last owner lets go.
-    ///
-    /// Why: the stop exists so that no output-bearing client is closed
-    /// abruptly at exit. An attach that got its sink just before the stop
-    /// holds a live lease outside the attachment map; reporting completion
-    /// then would let the process exit with that sink still streaming. And
-    /// a sink handed out after the stop began would be a new client nothing
-    /// is going to close in order.
-    #[farhelm_testtrace::test]
-    async fn a_stop_waits_for_live_sinks_and_refuses_new_ones() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let lease = fake_live_sink(&sup, "fh-held");
-
-        assert!(
-            !sup.shutdown_output_clients(std::time::Duration::from_millis(200))
-                .await,
-            "a stop must not complete while a sink lease is still held"
-        );
-        assert!(sup.is_stopping());
-        let refused = sup
-            .ensure_session_sink("fh-new")
-            .await
-            .err()
-            .expect("no new sink may be handed out once stopping");
-        assert!(
-            format!("{refused:#}").contains(super::super::terminals::SUPERVISOR_STOPPING),
-            "unexpected refusal: {refused:#}"
-        );
-
-        drop(lease);
-        assert!(
-            sup.shutdown_output_clients(std::time::Duration::from_secs(5))
-                .await,
-            "the stop must complete once the last lease is released"
-        );
-    }
-
-    /// Spec: when the last owner of a live sink lets go while a stop is
-    /// waiting, the stop keeps waiting until that sink's reaper finishes;
-    /// it does not return in the gap between "no live sink" and "reaper
-    /// done".
-    ///
-    /// Why: the lease destructor turns `Live` into `Reaping` and only then
-    /// schedules the orderly shutdown. A stop that saw the sink as neither
-    /// would exit before that shutdown disabled the client's output. The
-    /// reaper here is held until the test releases it, so a premature
-    /// return is visible deterministically.
-    #[farhelm_testtrace::test]
-    async fn a_stop_waits_for_the_reaper_a_released_sink_leaves_behind() {
-        let state = StateDir::new();
-        let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
-            .await
-            .expect("supervisor");
-        let (release, released) = oneshot::channel::<()>();
-        let (shutdown, _shutdown_rx) = oneshot::channel::<()>();
-        let (sink_state, _sink_state_rx) = watch::channel(None);
-        let handle = Arc::new(SessionSinkHandle {
-            tmux_name: "fh-held-reaper".to_string(),
-            task: Some(tokio::spawn(async move {
-                let _ = released.await;
-                Ok::<_, anyhow::Error>(())
-            })),
-            shutdown: Some(shutdown),
-            state: sink_state,
-        });
-        sup.sinks.lock().expect("sink registry").insert(
-            "fh-held-reaper".to_string(),
-            super::super::terminals::SinkRegistryEntry::Live(Arc::downgrade(&handle)),
-        );
-        let lease = SessionSinkLease::new(handle, Arc::clone(&sup.sinks));
-
-        let stop = tokio::spawn({
-            let sup = Arc::clone(&sup);
-            async move {
-                sup.shutdown_output_clients(std::time::Duration::from_secs(10))
-                    .await
-            }
-        });
-        drop(lease);
-        // sleep-ok: observation window in which a stop that lost track of the reaper would already have returned
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        assert!(
-            !stop.is_finished(),
-            "the stop must still be waiting for the released sink's reaper"
-        );
-        release.send(()).expect("release the reaper");
-        assert!(
-            stop.await.expect("stop task"),
-            "the stop must complete once the reaper finishes"
-        );
-    }
-
     /// Spec: the stop budget includes waiting for the `attachments` lock.
     ///
-    /// Why: an in-flight attach holds that lock across tmux commands that
-    /// have no timeout of their own, so a budget that started only after
-    /// acquiring it would not bound the stop at all; a wedged tmux would
-    /// hang a desktop quit or outlast systemd's stop timeout.
+    /// Why: an in-flight attach holds that lock across its setup, so a budget
+    /// that started only after acquiring it would not bound the stop at all;
+    /// a wedged attach would hang a desktop quit or outlast systemd's stop
+    /// timeout.
     #[farhelm_testtrace::test]
     async fn the_stop_budget_covers_the_attachments_lock() {
         let state = StateDir::new();

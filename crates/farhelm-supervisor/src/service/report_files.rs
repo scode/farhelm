@@ -36,24 +36,24 @@
 //! deleted with the old one. The taken report is then either settled —
 //! accepted, or refused for a reason a retry cannot change (wrong kind, wrong
 //! launch, failed attribution, malformed) — and deleted, or it hit something
-//! transient — every refusal of kind `Internal` (a store or tmux that could
-//! not be read), and a session whose published entry a relaunch has already
-//! moved past — and is put back for a later pass unless a newer report has
-//! refilled the slot, in which case the newer one wins. A tmux server that is
-//! gone altogether is not transient: it reads as the pane being gone, which
-//! is definitive. A transient outcome also ends that session's pass, so Grok's
+//! transient — every refusal of kind `Internal` (a store or terminal that
+//! could not be read), and a session whose published entry a relaunch has
+//! already moved past — and is put back for a later pass unless a newer
+//! report has refilled the slot, in which case the newer one wins. A
+//! terminal host that is gone altogether is not transient: it reads as the
+//! terminal being gone, which is definitive. A transient outcome also ends that session's pass, so Grok's
 //! enrichment is never judged before its selection.
 //!
 //! # Tying a report to its launch
 //!
 //! Every report, whatever its vendor, must carry the hook's recorded process
-//! chain, and the chain must reach the session's CURRENT pane process
-//! (`procs::anchor_chain`): by pid and start token while that process is
-//! alive, by pid alone once it has exited and tmux still lists the pane (on
-//! tmux 3.8, which no longer reports a dead pane's pid, such a report is
-//! refused instead; see `Supervisor::owned_terminal_anchor`). Every
-//! launch runs a new pane process, so a report made under an earlier launch,
-//! or one whose pane is gone entirely (a reboot killed tmux), is discarded.
+//! chain, and the chain must reach the session's CURRENT terminal root
+//! process (`procs::anchor_chain`): by pid and start token while that
+//! process is alive, by pid alone once it has exited and its host still
+//! holds the terminal (see `Supervisor::owned_terminal_anchor`). Every
+//! launch runs a new root process, so a report made under an earlier
+//! launch, or one whose terminal is gone entirely (a reboot ended its
+//! host), is discarded.
 //! The per-kind attribution (Claude's position, Codex's, Grok's and OMP's
 //! corridors) then reads the same anchored chain.
 
@@ -190,7 +190,7 @@ impl Supervisor {
 
     /// Log that a session's waiting report is being kept for a later pass:
     /// at warn the first time for the session, at debug while the same cause
-    /// keeps it waiting, so a long outage of the store or tmux does not log a
+    /// keeps it waiting, so a long outage of the store or a terminal does not log a
     /// line every two seconds.
     fn note_retry(&self, id: &str, reason: &str, what: &str) {
         let first = self
@@ -858,7 +858,7 @@ mod tests {
     /// ends the session's pass, so the slots after it wait too; a newer
     /// report that refilled the slot meanwhile wins over the one put back.
     ///
-    /// Why: a transient failure (a store or tmux that could not be read)
+    /// Why: a transient failure (a store or terminal that could not be read)
     /// must not lose the report, and must not let Grok's enrichment be
     /// judged without its selection. And the latest report is the one that
     /// describes the agent now.

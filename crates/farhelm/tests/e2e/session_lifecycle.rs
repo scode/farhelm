@@ -12,12 +12,6 @@
 
 use crate::harness::*;
 
-// Two takeover-refusal tests below verify the incumbent attachment
-// receives NO detach notice, and use `terminal_backpressure`'s chunked
-// reader for the drain rather than `wait_for`'s quadratic full-rescan
-// (see that module's doc comment on `drain_for`).
-use crate::terminal_backpressure::drain_for;
-
 /// A duplex endpoint whose write direction can fail independently.
 ///
 /// Real sockets can remain readable after their peer stops accepting
@@ -65,24 +59,15 @@ impl AsyncWrite for ToggleWriteFailure {
 
 /// The size session `session`'s agent terminal is at, as "COLSxROWS":
 /// the size its terminal host reports in force (the runtime's record of
-/// the host's resize records), or its tmux window's.
+/// the host's resize records).
 async fn terminal_geometry(h: &Harness, session: &str) -> String {
-    if let Some(host) = h.sup.agent_host_for_test(session).await {
-        let size = host.size();
-        return format!("{}x{}", size.cols, size.rows);
-    }
-    let out = tmux_query(
-        &h.state.path().join("tmux.sock"),
-        &[
-            "display-message",
-            "-p",
-            "-t",
-            &format!("fh-{session}"),
-            "#{window_width}x#{window_height}",
-        ],
-    )
-    .await;
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+    let host = h
+        .sup
+        .agent_host_for_test(session)
+        .await
+        .expect("premise: the session's agent runs in a terminal host");
+    let size = host.size();
+    format!("{}x{}", size.cols, size.rows)
 }
 
 /// Poll until `session`'s terminal reports `expected` ("COLSxROWS"),
@@ -203,7 +188,7 @@ async fn create_attach_and_roundtrip_input() {
 #[farhelm_testtrace::test]
 async fn a_session_dates_its_activity_to_creation_and_output_moves_it() {
     let h = harness_with_seams(
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams {
             activity_quantum: Duration::ZERO,
             ticker_interval: Duration::from_millis(100),
@@ -1179,16 +1164,12 @@ async fn create_with_relative_cwd_is_rejected() {
     );
     assert!(
         h.client.list_sessions().await.unwrap().sessions.is_empty(),
-        "a rejected create must not have created a session (in-memory or tmux)"
+        "a rejected create must not have created a session"
     );
     // The in-memory check above only proves the supervisor's own bookkeeping
-    // saw nothing; a rejected create could in principle still have raced a
-    // tmux `new-session` before validation ran. Probe the private socket
-    // directly. No prior test in this harness created a tmux session, so
-    // the server may not even be running — and a supervisor that has made
-    // no old terminal never starts one, so the socket file may not exist at
-    // all. Either absence proves there is no session, the same shape
-    // `harness::kill_tmux_server_and_wait` relies on.
+    // saw nothing; a rejected create could in principle still have started
+    // a terminal before validation ran. Look at the socket directory
+    // directly.
     let hosts = std::fs::read_dir(farhelm_supervisor::hosts::hosts_dir(h.state.path()))
         .map(|entries| entries.count())
         .unwrap_or(0);
@@ -1196,23 +1177,6 @@ async fn create_with_relative_cwd_is_rejected() {
         hosts, 0,
         "a rejected create must not have started a terminal host"
     );
-    let socket = h.state.path().join("tmux.sock");
-    if !socket.exists() {
-        return;
-    }
-    let probe = tmux_query(&socket, &["list-sessions"]).await;
-    if probe.status.success() {
-        assert!(
-            String::from_utf8_lossy(&probe.stdout).trim().is_empty(),
-            "a rejected create must not have left a tmux session behind"
-        );
-    } else {
-        assert!(
-            String::from_utf8_lossy(&probe.stderr).contains("no server running"),
-            "tmux list-sessions failed for a reason other than an absent server: {}",
-            String::from_utf8_lossy(&probe.stderr)
-        );
-    }
 }
 
 /// A `~`-prefixed cwd expands against the SUPERVISOR's home, the session
@@ -1669,9 +1633,8 @@ async fn wait_for_launch_directory_report(marker: &std::path::Path) -> String {
 /// A session whose agent exits stays viewable and replayable.
 ///
 /// SPEC.md: a stopped or exited session's terminal stays viewable while its
-/// host is up. A terminal host keeps its exited child's final screen; an old
-/// terminal needs `remain-on-exit on` for the same, and without it the tmux
-/// session disappears on exit and the reattach below fails outright.
+/// host is up. A terminal host keeps its exited child's final screen, so the
+/// reattach below must succeed.
 #[farhelm_testtrace::test]
 async fn exited_agent_leaves_a_viewable_terminal() {
     let h = harness().await;
@@ -1685,40 +1648,31 @@ async fn exited_agent_leaves_a_viewable_terminal() {
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     h.client.send_keys(chan, b"quit\r".to_vec()).await;
 
-    quit_until_pane_dead(&h, &session.id, chan, &rx).await;
+    quit_until_agent_exits(&h, &session.id, chan, &rx).await;
     h.client.detach(chan).await;
 
     // The attach succeeding IS the contract: a terminal that went away with
-    // its process (on an old terminal, a window closed for want of
-    // `remain-on-exit on`) leaves nothing to attach to. (The replayed
-    // content is deliberately not asserted — an exited terminal's screen
-    // depends on what the exiting program left behind.)
-    //
-    // Retried while the failure looks transient, because the contract is
-    // "an exited session's terminal is still attachable", not "attachable
-    // on the first try". An attach is several bounded exchanges with the
-    // terminal, and a machine loaded enough to blow one of those budgets
-    // says nothing about whether the terminal survived the exit. Anything that does NOT look like a timeout fails
-    // at once: a closed window is a permanent, differently-shaped error
-    // and must not be retried into a slow pass.
-    let (_chan2, _rx2) = attach_exited_pane(&h, &session.id).await;
+    // its process leaves nothing to attach to. (The replayed content is
+    // deliberately not asserted — an exited terminal's screen depends on
+    // what the exiting program left behind.)
+    let (_chan2, _rx2) = attach_exited_terminal(&h, &session.id).await;
 }
 
-/// Drive the basic fixture to pane death while observing attachment loss.
+/// Drive the basic fixture to its exit while observing attachment loss.
 ///
 /// The caller is testing retained terminal state after exit. Farewell text
 /// alone is not the exit boundary, and a detached peer cannot receive the
-/// idempotent quit stimulus this helper repeats while waiting for tmux.
-async fn quit_until_pane_dead(h: &Harness, session: &str, chan: u32, rx: &TermStream) {
+/// idempotent quit stimulus this helper repeats while waiting for the exit.
+async fn quit_until_agent_exits(h: &Harness, session: &str, chan: u32, rx: &TermStream) {
     // Wait for the agent to have actually exited by asking its terminal
     // (`agent_has_exited`), not by watching for the agent's farewell text. Output-watching would race
-    // the process teardown this test deliberately provokes; `pane_dead`
-    // is the state the assertion below actually depends on.
+    // the process teardown this test deliberately provokes; the host's
+    // exit record is the state the assertion below actually depends on.
     //
-    // There is no `Detached` to WAIT for — `remain-on-exit` keeps the
-    // session alive after the process dies, which is the property under
+    // There is no `Detached` to WAIT for — the terminal host keeps the
+    // terminal after the process dies, which is the property under
     // test — but one ARRIVING means this attachment is gone and no further
-    // `quit` can ever reach the pane, so the wait below would burn its
+    // `quit` can ever reach the agent, so the wait below would burn its
     // whole budget on an outcome already decided. That is monitored
     // through the DETACH SIGNAL rather than by draining the event queue:
     // the signal is out of band precisely so a consumer parked on
@@ -1737,11 +1691,10 @@ async fn quit_until_pane_dead(h: &Harness, session: &str, chan: u32, rx: &TermSt
             "agent never exited after quit"
         );
         // Re-sent every pass, not just once. `quit` is idempotent against
-        // the basic fake agent (it exits on the first one and the pane is
-        // dead for every later one, which tmux simply drops), and each
-        // send is a bounded exchange with tmux that a loaded machine can
-        // lose outright — one lost send would otherwise leave this loop
-        // waiting the full 30s for an exit nobody ever asked for.
+        // the basic fake agent (it exits on the first one, and later ones
+        // reach a terminal with nothing reading), so repeating it is
+        // harmless and keeps this loop from depending on any one send's
+        // timing.
         h.client.send_keys(chan, b"quit\r".to_vec()).await;
         // The pause between polls is also where the detach is watched.
         // Both arms of this select are cancel-safe (a watch `changed()`
@@ -1750,72 +1703,27 @@ async fn quit_until_pane_dead(h: &Harness, session: &str, chan: u32, rx: &TermSt
             reason = detached.detached() => match reason {
                 Some(reason) => panic!(
                     "the attachment was detached ({reason}) before the agent exited; no \
-                     further quit can reach the pane"
+                     further quit can reach the agent"
                 ),
                 None => panic!(
                     "the supervisor client went away before the agent exited; no further \
-                     quit can reach the pane"
+                     quit can reach the agent"
                 ),
             },
-            // sleep-ok: pace the idempotent quit stimulus and pane-death polls while the other select arm watches peer loss.
+            // sleep-ok: pace the idempotent quit stimulus and exit polls while the other select arm watches peer loss.
             () = tokio::time::sleep(Duration::from_millis(100)) => {}
         }
     }
 }
 
-/// Require an exited pane to remain attachable without consuming replay.
-///
-/// Keep the existing retry policy limited to recognized tmux timeouts.
-/// A permanent refusal must fail immediately, because hiding a removed
-/// terminal would defeat the caller's remain-on-exit assertion.
-async fn attach_exited_pane(h: &Harness, session_id: &str) -> (u32, TermStream) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    loop {
-        // This retry observes whether a dead pane remains attachable; consuming
-        // catch-up would turn a successful attach into a replay-read test.
-        match h.client.attach_at_boundary(session_id, 80, 24).await {
-            Ok(attached) => return attached,
-            Err(e) => {
-                assert!(
-                    looks_like_a_tmux_timeout(&e),
-                    "a session whose agent exited must still be attachable, and this failure \
-                     is not a transient one: {e:#}"
-                );
-                assert!(
-                    tokio::time::Instant::now() < deadline,
-                    "a session whose agent exited never became attachable within 60s; last \
-                     error: {e:#}"
-                );
-                // sleep-ok: only recognized tmux timeouts are retried; a permanent attachment refusal still fails immediately.
-                tokio::time::sleep(Duration::from_millis(250)).await;
-            }
-        }
-    }
-}
-
-/// Whether a failed request failed because a tmux exchange ran out of
-/// budget, as opposed to for a reason retrying cannot fix.
-///
-/// Text matching, deliberately, and the alternative deserves recording
-/// because it is the obvious one: the supervisor's timeouts really do
-/// carry a `tokio::time::error::Elapsed` at the root of their `anyhow`
-/// chain, so downcasting to it looks like the precise answer. It is not
-/// REACHABLE here. Every handler failure is flattened to a string on the
-/// wire (`ControlMsg::Error`'s `message`, built with `format!("{e:#}")`)
-/// and rebuilt client-side as a `SupervisorError`, so no source error
-/// survives the round trip at all — a downcast to `Elapsed` would match
-/// nothing and silently turn this into a no-retry loop, which is worse
-/// than the imprecision it was meant to remove.
-///
-/// The match is narrowed as far as the wire allows: the kind must be
-/// `Internal` (a timeout is never a refusal the caller could have
-/// avoided), and only the supervisor's own message is searched rather than
-/// the rendered chain, so context this test's own layers might add can
-/// never make an unrelated failure look retryable.
-fn looks_like_a_tmux_timeout(error: &anyhow::Error) -> bool {
-    error
-        .downcast_ref::<SupervisorError>()
-        .is_some_and(|e| e.kind() == ErrorKind::Internal && e.message().contains("timed out"))
+/// Attach to a session whose agent exited, without consuming replay: the
+/// terminal host keeps the exited terminal, so the attach must succeed at
+/// once, and any refusal fails the test with the supervisor's reason.
+async fn attach_exited_terminal(h: &Harness, session_id: &str) -> (u32, TermStream) {
+    h.client
+        .attach_at_boundary(session_id, 80, 24)
+        .await
+        .unwrap_or_else(|e| panic!("a session whose agent exited must still be attachable: {e:#}"))
 }
 
 /// PLAN_M2.md's list-status contract: once an agent exits ON ITS OWN — no
@@ -2369,7 +2277,7 @@ async fn stdio_proxy_carries_a_real_session() {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams::default(),
     )
     .await
@@ -2447,47 +2355,6 @@ async fn stdio_proxy_carries_a_real_session() {
         .send_keys(chan, b"through-the-proxy\r".to_vec())
         .await;
     wait_for(&mut rx, &mut seen, "through-the-proxy", 15).await;
-}
-
-/// Attaching to a tmux session that does not exist must fail with tmux's
-/// own diagnostic, not report success.
-///
-/// Pins a bug found in review (recorded in lore/): `%begin` only opens a
-/// control-mode reply block, but was treated as "attached" — a failed
-/// attach reported success and discarded tmux's reason. Nothing else
-/// reaches this path: the service layer rejects unknown session ids
-/// before tmux is ever asked, so only a driver-level test can regress it.
-#[farhelm_testtrace::test]
-async fn control_mode_attach_to_missing_session_reports_tmux_reason() {
-    use farhelm_supervisor::tmux::TmuxDriver;
-
-    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
-    let state = farhelm_teststate::tempdir().expect("tempdir");
-    let driver = TmuxDriver::new(state.path());
-    let _tmux = TmuxServerGuard::new(state.path().join("tmux.sock"));
-    // A decoy session, so tmux's refusal names the missing session
-    // ("can't find session: ...") instead of the generic "no sessions" a
-    // sessionless server answers with.
-    driver
-        .create_session(
-            "decoy",
-            state.path().to_str().expect("tempdir path is UTF-8"),
-            80,
-            24,
-            &[],
-            &["sleep".to_string(), "60".to_string()],
-        )
-        .await
-        .expect("decoy session");
-
-    let err = match driver.open_replay_stream("no-such-session", "%0").await {
-        Ok(_) => panic!("attaching to a missing session must fail"),
-        Err(err) => err,
-    };
-    assert!(
-        format!("{err:#}").contains("no-such-session"),
-        "the error must carry tmux's own diagnostic naming the session, got: {err:#}"
-    );
 }
 
 /// An untitled session takes its title from the working directory, and a
@@ -2851,7 +2718,7 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
             Supervisor::new_with_seams(
                 &state,
                 farhelm_bin().into(),
-                suite_timeouts(),
+                SupervisorTimeouts::default(),
                 SupervisorSeams::default(),
             )
             .await
@@ -2955,22 +2822,6 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
     );
 }
 
-// No sibling test provokes a NON-"no server running" `pane_states`
-// failure at this end-to-end layer: every other tmux failure this
-// module's own tolerance list (and the one above it) does not cover
-// would need something this harness has no honest way to arrange — a
-// malformed or corrupted tmux invocation, a permissions failure on the
-// socket, a tmux binary that emits an unrecognized diagnostic — without
-// resorting to fault injection this test suite does not otherwise use
-// (mocking or wrapping the tmux binary itself). Rather than invent a fake
-// seam for it, that classification is pinned at the unit level instead:
-// see `farhelm-supervisor`'s `tmux.rs`,
-// `is_tolerated_list_panes_diagnostic_pins_all_three_tolerated_cases`
-// (plus its path-embedding sibling), which exercise every diagnostic
-// outcome directly against constructed stderr: the three tolerated ones
-// (a running-but-empty server, an absent server, and a server caught
-// mid-teardown) and the unclassified failure that must still propagate.
-
 /// The restart-gap decision is PER SESSION, not one answer applied to the
 /// whole reloaded batch.
 ///
@@ -2995,7 +2846,7 @@ async fn restart_gap_is_decided_per_session() {
             Supervisor::new_with_seams(
                 &state,
                 farhelm_bin().into(),
-                suite_timeouts(),
+                SupervisorTimeouts::default(),
                 SupervisorSeams::default(),
             )
             .await
@@ -4640,10 +4491,9 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
     let restarted = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        // Built by hand for the scope seam below, so `suite_timeouts()`
-        // rather than `harness_with_seams` — the stop this restarted
-        // supervisor runs still does real terminal work through the sweep.
-        suite_timeouts(),
+        // Built by hand for the scope seam below rather than through
+        // `harness_with_seams`.
+        SupervisorTimeouts::default(),
         SupervisorSeams {
             scopes,
             ..SupervisorSeams::default()

@@ -6,11 +6,11 @@
 //! its screen lives in the supervisor's emulator (`crate::hosts::terminal`),
 //! and reaches a viewer as grid messages (`farhelm_proto::grid`). An attach
 //! that asks for a grid gets one [`GridSender`] task, which fills the
-//! attachment's `ActiveAttach::forwarder` slot (shut down and joined like an
-//! old terminal's `Forwarder`), and one [`HostAttach`], the attachment's
-//! `AttachBackend`, which takes its input. Everything around them (takeover,
-//! detach, the pause watch, the stall detach, the detach verdicts) is the
-//! attachment machinery every terminal's attachment shares.
+//! attachment's `ActiveAttach::forwarder` slot, and one [`HostAttach`], the
+//! attachment's `ActiveAttach::input`, which takes its input. Everything
+//! around them (takeover, detach, the pause watch, the stall detach, the
+//! detach verdicts) is the attachment machinery in `super::terminals` and
+//! `super::connection`.
 //!
 //! # The stream
 //!
@@ -180,7 +180,7 @@ use super::connection::{
     ForwarderEnd, park_while_paused, report_forwarder_end, stalled_past_deadline,
 };
 use super::core::Supervisor;
-use super::terminals::{AttachmentKey, OutputReapOutcome};
+use super::terminals::AttachmentKey;
 use crate::grid_input::{InputEncoder, input_frames};
 use crate::grid_output::{
     self, HistoryBatch, HistoryCursor, Layout, SentScreen, clipboard_messages, clipboard_target,
@@ -572,9 +572,8 @@ impl GridStream {
     }
 
     /// Tell the client its attach's catch-up is over, with the same control
-    /// message every attachment sends (`Forwarder::send_replay_complete` for
-    /// an old terminal): not held back by a pause, which is about terminal
-    /// output, but raced against the stall deadline.
+    /// message every attachment sends: not held back by a pause, which is
+    /// about terminal output, but raced against the stall deadline.
     async fn send_replay_complete(&mut self) -> Result<(), ForwarderEnd> {
         let frame = Frame::control(&ControlMsg::ReplayComplete {
             channel: self.channel,
@@ -920,10 +919,10 @@ fn with_exit(state: TerminalState, liveness: &Liveness) -> TerminalState {
 /// shared attachment machinery (`super::connection::report_forwarder_end`),
 /// as every attachment's output task reports its own.
 ///
-/// Like the forwarder, it never takes `Supervisor::attachments` (the
-/// verdicts that need it run on tasks of their own), so teardown can
-/// signal it and await it with that lock held. It holds no external
-/// process, so its cleanup is confirmed as soon as it stops.
+/// It never takes `Supervisor::attachments` (the verdicts that need it run
+/// on tasks of their own), so teardown can signal it and await it with that
+/// lock held. It holds no external process, so joining it is all its
+/// cleanup needs.
 pub(crate) struct GridSender {
     pub(crate) sup: Arc<Supervisor>,
     pub(crate) key: AttachmentKey,
@@ -931,13 +930,10 @@ pub(crate) struct GridSender {
     pub(crate) tx: mpsc::Sender<Frame>,
     pub(crate) stream: GridStream,
     pub(crate) stall_timeout: Duration,
-    /// Published once the task has stopped streaming
-    /// (`ActiveAttach::forwarder_cleanup`).
-    pub(crate) cleanup: watch::Sender<OutputReapOutcome>,
 }
 
 impl GridSender {
-    /// The whole task: stream, confirm the cleanup, report the end.
+    /// The whole task: stream, then report the end.
     pub(crate) async fn run(self, mut shutdown: watch::Receiver<bool>) {
         let GridSender {
             sup,
@@ -946,7 +942,6 @@ impl GridSender {
             tx,
             stream,
             stall_timeout,
-            cleanup,
         } = self;
         let end = {
             let streaming = stream.run();
@@ -957,9 +952,8 @@ impl GridSender {
                 end = &mut streaming => end,
             }
         };
-        cleanup.send_replace(Some(Ok(())));
-        // As in `Forwarder::run`: a teardown that won after the stream
-        // ended on its own owns the detach reason.
+        // A teardown that won after the stream ended on its own owns the
+        // detach reason.
         let end = if *shutdown.borrow_and_update() {
             ForwarderEnd::Requested
         } else {
@@ -971,8 +965,7 @@ impl GridSender {
 
 // ---- Input ---------------------------------------------------------------------
 
-/// A grid attachment's input side, and its `AttachBackend` (module docs,
-/// "Input"): it decodes and encodes each message where the connection reads
+/// A grid attachment's input side (module docs, "Input"): it decodes and encodes each message where the connection reads
 /// it, without waiting, collects a paste until its last part, and owns the
 /// pump that writes the bytes to the host. Dropping it tells the pump to
 /// stop at once; a paste still being collected is dropped with it, never

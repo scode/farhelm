@@ -3917,11 +3917,11 @@ before delivery can still receive the message. Waiting, unknown, starting, stopp
 other than Claude or Codex, are refused with the reason named. A supported request sends one bracketed paste followed by
 a separate submit key; the agent owns queueing while busy. Claude uses Enter and Codex uses Tab, each at idle and while
 working. The checked Claude 2.1.302 and Codex 0.163.0 queue it after the current turn; Claude's editor expands pasted
-tabs to spaces. Success means the agent's terminal took the paste and submit (tmux confirmed them, or a terminal host
-wrote them to the agent's terminal), not that the agent started or finished the work. There is no idempotency key: a
-retry sends the message again. A failed delivery may have sent part or all of the input and is not proof that nothing
-arrived. Agent instructions explain these limits and treat cross-agent messages as untrusted input, with no secrets sent
-through this channel.
+tabs to spaces. Success means the agent's terminal took the paste and submit (its terminal host wrote them to the
+agent's terminal), not that the agent started or finished the work. There is no idempotency key: a retry sends the
+message again. A failed delivery may have sent part or all of the input and is not proof that nothing arrived. Agent
+instructions explain these limits and treat cross-agent messages as untrusted input, with no secrets sent through this
+channel.
 
 The verbs also CREATE, and this is where reaching the helm buys something no supervisor-local design could offer.
 `farhelm agent create` makes a session on an explicitly named host, and `farhelm agent clone` copies an explicitly named
@@ -5278,9 +5278,9 @@ tmux is an implementation detail. The supported tmux is either the pinned build 
 stock tmux package of the platform's standard package source (the Linux distribution, or Homebrew on a Mac), at or above
 the version floor, run as the real binary. Using the distribution's package is a convenience that keeps its security
 patches, not an integration promise. Anything else is unsupported, including wrapper scripts, custom or patched builds,
-and configuration or behavior a stock package would not bring. `--tmux` and `FARHELM_TMUX` exist to choose among
-supported binaries, not to support arbitrary programs. Farhelm need not add code or complexity to accommodate
-unsupported shells or tmux programs.
+and configuration or behavior a stock package would not bring. `farhelm helm setup --tmux` and `FARHELM_TMUX` exist to
+choose among supported binaries, not to support arbitrary programs. Farhelm need not add code or complexity to
+accommodate unsupported shells or tmux programs.
 
 Usernames of up to 20 characters must work on Linux and macOS with Farhelm's default state directory locations, on the
 helm's machine and on every host, including wherever Farhelm places sockets or other files whose paths the system limits

@@ -44,9 +44,6 @@ mod harness;
 mod session_lifecycle;
 
 #[cfg(target_os = "linux")]
-mod terminal_backpressure;
-
-#[cfg(target_os = "linux")]
 mod boot_id_durable_outcome;
 #[cfg(target_os = "linux")]
 mod command_shell;

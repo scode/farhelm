@@ -4,9 +4,9 @@
 //! A terminal in a terminal host gets its input as the grid client's reports
 //! of what the user did ([`GridInput`]: `key`, `text`, `paste`, `mouse`,
 //! `focus`), and the program's modes live in the supervisor's emulator, so
-//! this module turns each message into bytes from those modes. (An old tmux
-//! terminal is different: the browser's xterm.js encodes its input and the
-//! supervisor passes the bytes through.) It is pure: no I/O, no clock, and
+//! this module turns each message into bytes from those modes. (Earlier
+//! releases' tmux terminals took bytes the browser's xterm.js encoded
+//! instead.) It is pure: no I/O, no clock, and
 //! the only state is the paste in progress, so the grid sender that receives
 //! messages and writes `Input` frames to the host owns everything else.
 //!
@@ -56,7 +56,7 @@
 //!   terminals ignore (sending the default encoding, which a 1005 program
 //!   misreads past column 94), are encoded as the program asked, unless SGR
 //!   (1006) is set too: then SGR wins, whichever the program set first, as
-//!   in tmux and old terminals (the emulator keeps the two modes apart and
+//!   in tmux (the emulator keeps the two modes apart and
 //!   reports SGR when both are set). De-duplicating motion is the client's
 //!   job (`GridInput::Mouse`'s docs).
 //! - **Focus**: `CSI I` and `CSI O`, only while the program set mode 1004.

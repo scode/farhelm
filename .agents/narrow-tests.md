@@ -50,7 +50,7 @@ workspace, or filter scope:
 
 ```sh
 python3 scripts/hunt-rust-tests.py --repeat 20 --timeout 60 --execute \
-  -- cargo nextest run -p farhelm-supervisor --lib -E 'test(shutdown_acks)'
+  -- cargo nextest run -p farhelm-supervisor --lib -E 'test(repeated_pause_spam)'
 ```
 
 Each attempt still goes through the recorder, so the pinned tmux binary must already be available. The wrapper does not
@@ -66,7 +66,7 @@ The shapes, narrowest first:
 - One test, exactly:
   `cargo nextest run -p farhelm --test e2e -E 'test(=session_rename::a_rename_is_visible_in_the_next_list_reply_without_a_restart)'`
   (the e2e binary's test names are `module::test_name`; get the name from failure output or `cargo nextest list`).
-- One filter (substring match): `cargo nextest run -p farhelm-supervisor --lib -E 'test(shutdown_acks)'`.
+- One filter (substring match): `cargo nextest run -p farhelm-supervisor --lib -E 'test(repeated_pause_spam)'`.
 - A whole e2e module: `cargo nextest run -p farhelm --test e2e -E 'test(terminal_tabs::)'`.
 - A crate's unit tests only: `cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::)'`.
 - Repetition for a flake: loop the complete recorder invocation, stopping at the first failure and preserving its run

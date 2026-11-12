@@ -2,7 +2,7 @@
 //! session's login shell, and how exec failure is told apart from
 //! ran-and-died.
 //!
-//! The chain is: tmux window command → user's shell as an interactive
+//! The chain is: the terminal host's child command → user's shell as an interactive
 //! login shell (`-l -i -c`) → Farhelm's optional scope-waypoint helper →
 //! the scope wrapper → `farhelm internal launch <spec>` → the shim execs
 //! the executable argv: direct agent words, or Bash with original user command
@@ -84,8 +84,8 @@ pub const OMP_REPORTER_EXE_ENV_VAR: &str = "FARHELM_OMP_REPORTER_EXE";
 
 /// The environment marker every TERMINAL TAB carries on top of
 /// [`SESSION_ID_ENV_VAR`]: the tab's own id (PLAN_M4.md item 2). The
-/// supervisor supplies it in the tab's complete environment, through tmux's
-/// `new-window -e` or the terminal host's child environment. The tab helper
+/// supervisor supplies it in the tab's complete environment, the terminal
+/// host's child environment. The tab helper
 /// preserves that identity when it execs the user's login shell.
 ///
 /// Its job is SELECTION: closing a tab must reap that tab's shell and
@@ -110,8 +110,8 @@ pub const TAB_ID_ENV_VAR: &str = "FARHELM_TAB_ID";
 /// An earlier cut did that by EXCLUSION — sweep the session marker,
 /// subtract anything wearing a tab marker — and it had a hole that only
 /// shows up when farhelm supervises farhelm. A supervisor running inside
-/// somebody's tab inherits that tab's `FARHELM_TAB_ID`, its tmux server
-/// inherits it, and every INNER agent it launches inherits it too. Under
+/// somebody's tab inherits that tab's `FARHELM_TAB_ID`, its terminal hosts
+/// inherit it, and every INNER agent it launches inherits it too. Under
 /// exclusion, every one of those inner agents looks like a tab process and
 /// escapes its own session's stop entirely. Positive marking closes it:
 /// an inner agent carries `FARHELM_AGENT_ID=<its own session>`, which is
@@ -161,8 +161,9 @@ pub struct LaunchSpec {
     /// before this vector can run on the outside host.
     pub argv: Vec<String>,
     /// The directory the agent must enter after login-shell initialization and checkout
-    /// preparation. tmux's start directory is only a hint: it can silently fall back to
-    /// HOME, and shell startup can change it again. The shim enters this directory
+    /// preparation. The terminal's start directory is not enough: shell startup can
+    /// change it again (and tmux, which ran terminals in earlier releases, silently fell
+    /// back to HOME when it could not enter one). The shim enters this directory
     /// before exec and supplies matching PWD. Absent only for older supervisors' specs.
     #[serde(default)]
     pub working_directory: Option<PathBuf>,
@@ -650,7 +651,7 @@ fn lookup_with_growing_buffer(
     }
 }
 
-/// Build the tmux window command argv: the interactive login shell running
+/// Build the agent terminal's command argv: the interactive login shell running
 /// the launch shim. `farhelm_exe` is this supervisor's own binary — the
 /// shim ships inside it, which is why one artifact per host suffices.
 ///
@@ -659,7 +660,7 @@ fn lookup_with_growing_buffer(
 /// [`exec_wrapped_launch`], which writes its waypoint then execs the wrapper
 /// around the ordinary shim invocation. The wrapper stays after shell startup for two
 /// reasons that pull in the same direction: the login shell must still be
-/// the outermost thing tmux starts (SPEC.md's environment contract is what
+/// the outermost thing the terminal host starts (SPEC.md's environment contract is what
 /// `-l -i` delivers, and a scope around the SHELL would put the rc files'
 /// own subprocesses in the cgroup too), while everything the shim
 /// promises — its `exec` of the agent, its sentinel, its session-id marker
@@ -718,9 +719,11 @@ pub fn window_command(
 }
 
 /// Build the terminal tab's directory-enforcing helper command, inside its scope.
-/// tmux can silently fall back to HOME when it cannot enter a directory. The helper
-/// enters the requested folder before execing the user's interactive login shell,
-/// so failure reaches the tab-open pane-liveness check instead of opening elsewhere.
+/// The helper enters the requested folder before execing the user's interactive
+/// login shell, so a folder it cannot enter fails the tab open's liveness check
+/// instead of opening elsewhere. (It was written for tmux, which silently fell back
+/// to HOME; it also keeps the folder the shell starts in independent of the scope
+/// wrapper's own directory.)
 /// Tabs need no spec or sentinel: a shell that dies during open already refuses the
 /// open with its last output, while a later exit silently reaps the tab.
 ///
@@ -738,7 +741,7 @@ pub fn window_command(
 /// processes" (SPEC.md) names the shell itself, so the shell must be in
 /// the cgroup, rc-file subprocesses and all.
 ///
-/// tmux runs this argv directly, so — unlike `window_command`'s `-c`
+/// The terminal host runs this argv directly, so — unlike `window_command`'s `-c`
 /// payload — nothing here is ever re-parsed by a shell and nothing needs
 /// quoting.
 ///
@@ -746,8 +749,8 @@ pub fn window_command(
 /// before exec, so the shell and its startup children carry only the tab identity,
 /// including when a scope wrapper supplied an ambient marker.
 ///
-/// The same helper removes [`PRIVATE_TMUX_ENV_VARS`], which tmux sets in
-/// the pane. For a tab that has to happen before the user's shell starts,
+/// The same helper removes [`PRIVATE_TMUX_ENV_VARS`] (in case something
+/// above the shell set them). For a tab that has to happen before the user's shell starts,
 /// so its startup files run without them too: a tab then behaves like a
 /// fresh SSH login, and an rc snippet that starts or attaches tmux when
 /// `TMUX` is unset fires here exactly as it would there (accepted when
@@ -760,7 +763,7 @@ pub fn tab_window_command(
 ) -> Vec<String> {
     let mut argv = scope_prefix;
     // Like window_command, the supervisor's startup validation guarantees this
-    // executable path is UTF-8. tmux receives argv directly, without shell parsing.
+    // executable path is UTF-8. The host receives argv directly, without shell parsing.
     argv.extend([
         farhelm_exe.to_string_lossy().into_owned(),
         "internal".to_string(),
@@ -1224,7 +1227,7 @@ pub fn exec_launch_spec_with_seam(
     // Among the things deliberately REMOVED is the opposite kind's marker
     // (see [`AGENT_ID_ENV_VAR`]): a supervisor running inside somebody's
     // farhelm tab passes that tab's `FARHELM_TAB_ID` down through its own
-    // tmux server, and an inner agent still wearing it would be filed as a
+    // terminal hosts, and an inner agent still wearing it would be filed as a
     // tab process by its own session's stop sweep and never reaped. This
     // is the exec that ends that inheritance.
     let err = agent_command(&spec).exec();
@@ -1325,9 +1328,9 @@ pub(crate) fn browser_forwarding_command(exe: &std::path::Path) -> Option<String
     Some(format!("{path} agent open-url -- %s"))
 }
 
-/// Tabs inherit the supervisor's environment through tmux, then run shell startup. An
+/// Tabs inherit the supervisor's environment, then run shell startup. An
 /// explicit fixture value wins first, then any inherited value (even empty), then fallback.
-/// A non-UTF-8 inherited value cannot be represented by tmux's string argv; leave it ambient
+/// A non-UTF-8 inherited value cannot be represented in the string environment; leave it ambient
 /// rather than replacing it with a generated command. The local-host path does not call this.
 pub(crate) fn append_tab_browser(
     env: &mut Vec<(String, String)>,
@@ -1375,10 +1378,9 @@ pub fn validate_session_program_path(program: &Path) -> anyhow::Result<()> {
 /// itself), the truecolor capability, and the removal of the opposite
 /// kind's markers (the same scrub [`AGENT_ID_ENV_VAR`]'s docs describe
 /// for the exec below the shim — a git clone inside an agent's tab must
-/// not inherit that tab's `FARHELM_TAB_ID` either), and the removal of the
-/// private tmux server's `TMUX`/`TMUX_PANE` ([`PRIVATE_TMUX_ENV_VARS`]),
-/// here rather than earlier so the login shell's startup files still ran
-/// with them.
+/// not inherit that tab's `FARHELM_TAB_ID` either), and the removal of
+/// `TMUX`/`TMUX_PANE` ([`PRIVATE_TMUX_ENV_VARS`]), here rather than earlier
+/// so the login shell's startup files still ran with whatever they set.
 ///
 /// The bearer spawn credential ([`SESSION_TOKEN_ENV_VAR`]) and the
 /// supervisor socket deliberately stay OUT of git and hook children
@@ -4542,14 +4544,15 @@ printf 'AGENT-RAN\n'
         }
     }
 
-    /// Nothing the shim starts sees the private tmux server's `TMUX` or
-    /// `TMUX_PANE`.
+    /// Nothing the shim starts sees a `TMUX` or `TMUX_PANE` it inherited.
     ///
-    /// Why: with them, a `tmux new-window` typed by an agent (or by a hook)
-    /// lands in Farhelm's hidden tmux server, where Stop, Restart, Delete and
-    /// tab close never clean it up (`PRIVATE_TMUX_ENV_VARS`). Specified: when
-    /// the shim itself inherits both, as it does inside a pane, the clone,
-    /// the preparation hook and the agent all run with both unset.
+    /// Why: a Farhelm terminal is not a tmux pane, and with them a `tmux
+    /// new-window` typed by an agent (or by a hook) would land in whatever
+    /// server they name instead of behaving as in an SSH login
+    /// (`PRIVATE_TMUX_ENV_VARS`); earlier releases ran agents in a hidden
+    /// private server where such windows escaped every cleanup. Specified:
+    /// when the shim itself inherits both, the clone, the preparation hook
+    /// and the agent all run with both unset.
     #[farhelm_testtrace::test]
     fn shim_children_run_without_the_private_tmux_variables() {
         use std::ffi::OsStr;

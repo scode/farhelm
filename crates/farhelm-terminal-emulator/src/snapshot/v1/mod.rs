@@ -113,7 +113,7 @@ use alacritty_terminal::grid::{Cursor, Dimensions, Grid};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::Cell;
 
-pub(super) use paint::{Content, sgr_setting};
+pub(super) use paint::Content;
 use wire::{Extras, Reader, Writer, malformed};
 
 use super::{

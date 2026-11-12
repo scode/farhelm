@@ -45,8 +45,8 @@ use std::time::{Duration, Instant};
 /// the program it starts (the forwarder sets it to `8`).
 ///
 /// A program that finds it adopts that descriptor as its lock and removes
-/// the variable before starting anything, so it never reaches tmux,
-/// sessions or agents. A value that does not name the program's own file is
+/// the variable before starting anything, so it never reaches terminal
+/// hosts, sessions or agents. A value that does not name the program's own file is
 /// ignored: the variable can leak through an environment it was never meant
 /// for, and adopting an unrelated descriptor would leave the program
 /// unprotected.

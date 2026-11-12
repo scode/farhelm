@@ -174,11 +174,11 @@ pub fn unit_name(session_id: &str, generation: i64) -> Option<String> {
 ///
 /// Both ids go through the same UUID-shape refusal `unit_name` documents,
 /// and for the same reason — plus one this name has and that one does not:
-/// a tab id is read back out of a tmux WINDOW MARKER, and any process that
-/// inherited `TMUX` can write window options on the private server. A unit
-/// name derived from an id this supervisor did not mint could aim a kill
-/// at something else entirely, so an unrecognized shape selects the same
-/// fallback a missing user manager does — the marker sweep alone.
+/// earlier releases read a tab id back out of a tmux WINDOW MARKER, which
+/// any process that inherited `TMUX` could write. A unit name derived from
+/// an id this supervisor did not mint could aim a kill at something else
+/// entirely, so an unrecognized shape selects the same fallback a missing
+/// user manager does — the marker sweep alone.
 ///
 /// The `-tab-` infix keeps this namespace disjoint from `unit_name`'s
 /// `<session>-<generation>` shape without needing a second prefix: a
@@ -192,12 +192,13 @@ pub fn tab_unit_name(session_id: &str, tab_id: &str) -> Option<String> {
 /// session id that cannot safely name a unit.
 ///
 /// Exists so a teardown can find a session's tab scopes WITHOUT asking
-/// tmux (`ScopeManager::units_matching`). That independence is the point:
-/// a delete whose tmux server has already died would otherwise have no
-/// tab ids to derive names from, and an environment-scrubbed tab daemon —
+/// the terminals (`ScopeManager::units_matching`). That independence is the
+/// point: a delete whose tab terminals are already gone (a crashed host, a
+/// supervisor restart that lost a tab's record) would otherwise have no tab
+/// ids to derive names from, and an environment-scrubbed tab daemon —
 /// reachable only through its cgroup — would outlive a delete that
 /// reported success. The manager knows its own units regardless of what
-/// tmux is doing.
+/// the terminals are doing.
 ///
 /// Anchored on the same `-tab-` infix [`tab_unit_name`] builds, so it can
 /// never match a LAUNCH unit of the same session (a generation is always
@@ -224,8 +225,8 @@ pub fn is_tab_unit(unit: &str) -> bool {
 ///
 /// Delete asks the manager for these names because the row only
 /// records its current generation. A prior generation can still contain a
-/// daemon after its portable sweep reported clean, and tmux has no record of
-/// that scope once the old pane is gone. The `[0-9]*` suffix is deliberately
+/// daemon after its portable sweep reported clean, and nothing else records
+/// that scope once the old terminal is gone. The `[0-9]*` suffix is deliberately
 /// narrower than `*`: launch generations are digits, so this cannot match a
 /// tab scope's `-tab-` infix.
 pub fn launch_unit_glob(session_id: &str) -> Option<String> {
@@ -238,12 +239,13 @@ pub fn launch_unit_glob(session_id: &str) -> Option<String> {
 /// braced forms would reintroduce two spellings of one id, and the only
 /// producer this needs to accept is `uuid::Uuid::new_v4().to_string()`.
 ///
-/// Public because it doubles as the ACCEPTANCE test for a tab id read back
-/// out of a tmux window marker (`service.rs`'s tab rediscovery): the
-/// marker is writable by anything that inherited `TMUX`, so a value that
-/// is not the shape this supervisor mints is treated as not a tab at all,
-/// rather than carried on into an attachment key, an error message, or a
-/// derived unit name.
+/// Public because it doubles as the ACCEPTANCE test for a tab id read from
+/// something other processes can write: a process's `FARHELM_TAB_ID`
+/// (`service::sweep`), or an old tmux window's marker as startup ends the
+/// old terminals (`service::core::old_terminals`). A value that is not the
+/// shape this supervisor mints is treated as not a tab at all, rather than
+/// carried on into an attachment key, an error message, or a derived unit
+/// name.
 pub fn is_uuid_shaped(id: &str) -> bool {
     const GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
     let mut parts = id.split('-');
@@ -1016,14 +1018,14 @@ impl ScopeManager {
     }
 
     /// Every unit this manager knows whose name matches `pattern` — the
-    /// tmux-independent half of a session teardown (see [`tab_unit_glob`]
+    /// terminal-independent half of a session teardown (see [`tab_unit_glob`]
     /// and [`launch_unit_glob`]).
     ///
     /// `Ok(vec![])` means the manager answered and has none, which is the
     /// ordinary case and a real answer. An `Err` means the manager could
     /// not be asked, which a teardown must NOT flatten into "there are
-    /// none": the whole reason this exists is the case where tmux has
-    /// already died and the cgroup is the only remaining handle on a
+    /// none": the whole reason this exists is the case where the terminal
+    /// is already gone and the cgroup is the only remaining handle on a
     /// scrubbed daemon.
     ///
     /// `--all` is deliberate: a scope whose processes have all exited is
@@ -1748,10 +1750,9 @@ mod tests {
     /// one that is not the shape this supervisor mints.
     ///
     /// The tab id is the half that matters most, and for a reason the
-    /// session id does not share: it is read back out of a tmux window
-    /// option, and anything that inherited `TMUX` inside a pane can write
-    /// one. A name derived from an attacker-chosen (or merely corrupted)
-    /// marker would aim a `systemctl kill` at whatever unit that marker
+    /// session id does not share: earlier releases read it back out of a
+    /// tmux window option that anything inside a pane could write. A name
+    /// derived from an attacker-chosen (or merely corrupted) marker would aim a `systemctl kill` at whatever unit that marker
     /// spelled. Refusing is what makes that unconstructible, exactly as
     /// for [`unit_name`].
     #[farhelm_testtrace::test]

@@ -1267,23 +1267,6 @@ enum SupervisorCmd {
         /// State directory (default: ~/.local/state/farhelm).
         #[arg(long)]
         state_dir: Option<PathBuf>,
-        /// Drive this tmux binary instead of the one on PATH.
-        ///
-        /// Overrides FARHELM_TMUX; with neither, plain `tmux` off PATH is
-        /// used. The binary is version-checked like any other and refused
-        /// by name if it is older than Farhelm's floor. This is a "you own
-        /// the substrate" knob, not a supported configuration: Farhelm
-        /// drives tmux harder than interactive use does, versions below
-        /// the floor have crashed under it, and versions above the tested
-        /// one are unaudited.
-        ///
-        /// Only tmux's stable releases and single-letter patch releases
-        /// are recognized (3.7, 3.7c, 3.10). Its development and
-        /// release-candidate spellings — next-3.8, 3.8-rc, 3.8-rc2 — are
-        /// refused whatever they are pointed at, because Farhelm has no
-        /// defined ordering for those stages against a stable release.
-        #[arg(long = "tmux", value_name = "PATH")]
-        tmux: Option<PathBuf>,
         /// Exit when the spawning parent closes the pipe it gave as stdin.
         ///
         /// Hidden because ordinary foreground and systemd supervisors own
@@ -1783,7 +1766,6 @@ fn main() -> anyhow::Result<()> {
             command:
                 SupervisorCmd::Run {
                     state_dir,
-                    tmux,
                     exit_on_stdin_close,
                     boot_id_file,
                 },
@@ -1794,12 +1776,8 @@ fn main() -> anyhow::Result<()> {
                 None => farhelm_supervisor::default_state_dir()?,
             };
             // Resolved here and nowhere else: this is the supervisor's one
-            // startup, so a single resolution is what makes "every launch
-            // path honors the override" true rather than aspirational.
-            let tmux = farhelm_supervisor::tmux::resolve_tmux_program_from_env(tmux.as_deref());
-            // The same rule, for the same reason, one line down: this is
-            // the ONLY read of `FARHELM_AGENT_HOOKS` in the codebase (plan
-            // D5). Everything downstream consults the parsed seam value, so
+            // startup, and this is the ONLY read of `FARHELM_AGENT_HOOKS` in
+            // the codebase (plan D5). Everything downstream consults the parsed seam value, so
             // no launch path can observe a variable that changed under a
             // running supervisor, and no test ever has to mutate its own
             // process's environment to exercise the opt-out. An unset
@@ -1859,7 +1837,6 @@ fn main() -> anyhow::Result<()> {
                 }
             };
             let startup = farhelm_supervisor::service::SupervisorStartup {
-                tmux_program: tmux,
                 agent_hooks,
                 agent_instructions,
                 boot_id_file,
@@ -2158,9 +2135,9 @@ fn hook_budget_from(value: Option<&str>) -> std::time::Duration {
 /// thread, not Tokio's blocking pool: if the supervisor itself fails first,
 /// runtime shutdown cannot wait forever for an uncancellable stdin read.
 ///
-/// `startup` arrives ALREADY resolved — the tmux program (`--tmux` over
-/// `FARHELM_TMUX` over `PATH`), the `FARHELM_AGENT_HOOKS` opt-out, and the
-/// `FARHELM_AGENT_INSTRUCTIONS` switch — and is passed straight through.
+/// `startup` arrives ALREADY resolved — the `FARHELM_AGENT_HOOKS` opt-out
+/// and the `FARHELM_AGENT_INSTRUCTIONS` switch — and is passed straight
+/// through.
 /// Resolving any of them here instead would put the decision on both sides
 /// of the tether branch, which is one place too many for values that must
 /// be identical on every launch path.

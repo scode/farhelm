@@ -17,7 +17,7 @@ selection allowlist as the recorder:
 
 ```console
 python3 scripts/hunt-rust-tests.py --repeat 20 --timeout 60 \
-  -- cargo nextest run -p farhelm-supervisor --lib -E 'test(shutdown_acks)'
+  -- cargo nextest run -p farhelm-supervisor --lib -E 'test(repeated_pause_spam)'
 ```
 
 `--repeat` accepts 1 through 1000 and `--timeout` is a finite positive number. The plan reports the maximum sum of child
@@ -160,11 +160,11 @@ required version and runner config.
 
 This mode accepts package, target, feature and filter selection; it refuses options that replace the runner policy. It
 invokes the resolved cargo-nextest binary directly with four global slots, zero retries, failure on a flaky outcome, and
-failure on an empty selection. `.config/nextest.toml` adds the e2e group's four-slot cap, the supervisor tmux modules'
-two-slot cap, per-test timeout and five-second signal grace. The recorder allows ten seconds for runner cleanup by
-default and refuses a shorter allowance. Ambient `NEXTEST_*` settings are removed from the child environment, and
-nextest's user config is disabled. The names removed are retained, never their values. Generic recording remains
-available for explicit experiments with other policies, but such a command does not acquire these controlled-run claims.
+failure on an empty selection. `.config/nextest.toml` adds the e2e group's four-slot cap, per-test timeout and
+five-second signal grace. The recorder allows ten seconds for runner cleanup by default and refuses a shorter allowance.
+Ambient `NEXTEST_*` settings are removed from the child environment, and nextest's user config is disabled. The names
+removed are retained, never their values. Generic recording remains available for explicit experiments with other
+policies, but such a command does not acquire these controlled-run claims.
 
 Each run retains `nextest.toml`, `nextest-store.toml`, the actual executable path/hash/version probe, the requested
 argv, and the actual argv. The tool config directs output to that run's `nextest/default/junit.xml`; it cannot overwrite

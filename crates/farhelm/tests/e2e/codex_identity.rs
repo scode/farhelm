@@ -1649,7 +1649,7 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams::default(),
     )
     .await

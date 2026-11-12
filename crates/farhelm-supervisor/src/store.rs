@@ -1,9 +1,10 @@
 //! SQLite session persistence: the durable half of the split introduced
-//! by M2 (PLAN_M2.md, "Supervisor SQLite"). tmux stays the truth for
-//! whether a session's terminal is alive; this module is the truth for
-//! the coarser fact that a session exists at all and what its metadata
-//! is, which must survive the supervisor process even though tmux (or
-//! the whole host) might not have restarted alongside it.
+//! by M2 (PLAN_M2.md, "Supervisor SQLite"). The terminal host stays the
+//! truth for whether a session's terminal is alive; this module is the
+//! truth for the coarser fact that a session exists at all and what its
+//! metadata is, which must survive the supervisor process even though the
+//! terminal hosts (or the whole host) might not have restarted alongside
+//! it.
 //!
 //! WAL with NORMAL sync preserves consistency and process-crash durability,
 //! but an OS crash or power loss may lose the last commits. Journal conversion
@@ -19,13 +20,13 @@
 //!
 //! One more durable fact sits beside the metadata, and it is easy to
 //! read as a contradiction of the paragraph above — the distinction
-//! matters. Liveness is still never persisted: tmux remains the
-//! only truth for "is this agent running right now". What [`LastOutcome`]
+//! matters. Liveness is still never persisted: the terminal host remains
+//! the only truth for "is this agent running right now". What [`LastOutcome`]
 //! records is the supervisor's own last WITNESSED transition (PLAN_M3.md
 //! item 2), which is a different kind of fact: it is what lets a reboot —
-//! the one event that destroys tmux entirely, taking every probe-able
+//! the one event that ends every terminal host, taking every probe-able
 //! answer with it — be classified as **interrupted** instead of guessed
-//! at. A stored outcome answers the question a vanished tmux leaves
+//! at. A stored outcome answers the question a vanished host leaves
 //! unanswerable, and otherwise defers to the live probe — with ONE
 //! exception, `LastOutcome::Error`, which outranks probing entirely
 //! because "the agent never execed" is not something a pane can show: a
@@ -119,8 +120,8 @@ const META_ROW_ID: i64 = 0;
 /// `Launching` → `Running` → a terminal state (`Exited`, `Interrupted`,
 /// `Error`) — and the crash-ordering rule that shapes every writer is that
 /// the stored value may LAG reality toward the earlier state but must
-/// never LEAD it. That is why `Launching` is committed before the tmux
-/// side effect it describes rather than after: a crash straddling a launch
+/// never LEAD it. That is why `Launching` is committed before the
+/// terminal side effect it describes rather than after: a crash straddling a launch
 /// then leaves a record that under-claims (a session that may in fact be
 /// running is recorded as merely starting, and reload reconciles it
 /// against reality) instead of one that over-claims, or — worse — one that
@@ -163,8 +164,9 @@ pub enum LastOutcome {
     /// an unannotated `Exited` means the agent RAN. A launch that may never have started
     /// is reported as `Unknown` until one of those PRs can say which.
     Launching,
-    /// The launch was confirmed: the session's agent terminal (a tmux pane,
-    /// or a terminal host) existed at the moment this was written.
+    /// The launch was confirmed: the session's agent terminal (a terminal
+    /// host; a tmux pane in earlier releases) existed at the moment this
+    /// was written.
     Running,
     /// The user asked for this session to be stopped and the kill sweep
     /// has not yet reported back (PLAN_M3.md item 4).
@@ -186,9 +188,9 @@ pub enum LastOutcome {
     /// defined to produce the annotated exit.
     StopRequested,
     /// The agent ended, or the user stopped its startup, and the supervisor
-    /// saw it. `exit_code` is tmux's
-    /// own `#{pane_dead_status}` when it had one to give — `None` covers a
-    /// signal death and the case where no pane survived to be asked.
+    /// saw it. `exit_code` is the code the terminal host recorded for its
+    /// child when it had one to give — `None` covers a signal death and the
+    /// case where no terminal survived to be asked.
     /// `annotation` is SPEC.md's user-legible qualifier, set only by a
     /// user-initiated stop. The ordinary and stopped-before-start proto
     /// annotations both survive supervisor restarts and reboots as the
@@ -299,8 +301,8 @@ impl LastOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Transition {
     /// The session's agent terminal exists and is alive. Carries the
-    /// terminal's address ([`StoredSession::terminal_address`]: a tmux pane
-    /// id, or a terminal host's socket name) because a launch is only
+    /// terminal's address ([`StoredSession::terminal_address`]: a terminal
+    /// host's socket name) because a launch is only
     /// confirmed once that address exists, and the two facts must land
     /// together (a `Running` row with no address is exactly what reload
     /// treats as an unconfirmed launch).
@@ -336,8 +338,8 @@ pub enum Transition {
         exit_code: Option<i32>,
         stopped_before_start: bool,
     },
-    /// A launching row whose terminal was rediscovered (a tmux pane by its
-    /// session name, a host by its tag), found dead: the terminal's address
+    /// A launching row whose terminal was rediscovered (a host by its
+    /// tag), found dead: the terminal's address
     /// and the exit it evidences, recorded together so no crash window can
     /// leave the address written but the outcome not (the gap that would
     /// resurrect the row as `Running` on the next reload).
@@ -364,11 +366,11 @@ pub enum Transition {
     /// the SAME commit as the outcome it accompanies, even though `Error`'s
     /// status computation (`service::session_status`) does not itself
     /// consult it. Every call site fills this differently: `reload_sessions`
-    /// passes whatever its own terminal lookup found (by session name for
-    /// a tmux row with no stored pane yet, by pane id otherwise — either
-    /// shape, not only the empty-address `Launching` case); `ListSessions`
+    /// passes whatever its own terminal lookup found (by tag for a row with
+    /// no stored address yet, by socket name otherwise — either shape, not
+    /// only the empty-address `Launching` case); `ListSessions`
     /// passes `None` outright (it only ever visits sessions it already
-    /// tracks a `Terminal` for, so there is nothing new to rediscover);
+    /// tracks a terminal for, so there is nothing new to rediscover);
     /// `StopSession` passes the address its own already-loaded
     /// `SessionEntry` carries. Recording it anyway keeps the stored row
     /// internally consistent with the terminal that actually exists, for
@@ -411,9 +413,11 @@ impl Transition {
     ///   (never into `Error` itself, which stays genuinely immutable); see
     ///   its own bullet below for why that is not a contradiction of this
     ///   one.
-    /// - **`Exited` enriches monotonically.** tmux publishes `pane_dead`
-    ///   before `pane_dead_status` becomes readable, so the FIRST observer
-    ///   of an exit routinely has no code while a later one does; SPEC.md
+    /// - **`Exited` enriches monotonically.** A terminal can read as dead
+    ///   before its exit code is known (a host's exit record arrives after
+    ///   the child is gone; tmux, in earlier releases, published
+    ///   `pane_dead` before `pane_dead_status`), so the FIRST observer of an
+    ///   exit routinely has no code while a later one does; SPEC.md
     ///   requires showing the code when it is known, so a known code
     ///   replaces a missing one and never the reverse. The stop annotation
     ///   is the same shape of enrichment on the other field.
@@ -615,7 +619,7 @@ type OutcomeColumns = (String, Option<i32>, Option<String>, Option<String>);
 /// dropped reply, a crash, and a supervisor restart alike: it is committed
 /// BEFORE any side effect of the launch it describes, and it carries the
 /// identities that launch will use — so a retry that finds one still
-/// `Pending` knows exactly which session and which tmux session to look
+/// `Pending` knows exactly which session and which terminal to look
 /// for rather than having to guess whether the previous attempt got
 /// anywhere.
 ///
@@ -648,12 +652,10 @@ pub struct Reservation {
     /// attempt can never land on a reservation that has since been
     /// re-pointed.
     ///
-    /// There is no second, terminal-specific identity beside it: a tmux
-    /// launch's session name is derived from this id
-    /// (`service::core::session_tmux_name`), which is what `service`'s
-    /// pending reconciliation probes tmux for at decision time, and a
+    /// There is no second, terminal-specific identity beside it: a
     /// terminal host is found by the tag that names this id. Schema 34
-    /// dropped the stored tmux name that used to sit here.
+    /// dropped the stored tmux name that used to sit here (it was always
+    /// derived from this id).
     pub session_id: String,
     /// Stored scope of the original claim. New creates and refusals use
     /// `SessionLifetime`; legacy pending recovery may still carry `Permanent`.
@@ -883,9 +885,10 @@ pub struct PriorRun {
     pub launch_boot_ended: bool,
     /// The kind of terminal the previous run's `terminal_address` names
     /// ([`StoredSession::terminal_kind`]). Restored with the address: a
-    /// Restart that moves an old tmux session into a terminal host writes
-    /// the host kind as it opens the generation, and a definitive failure of
-    /// that move must leave the row naming its tmux pane as a tmux row again.
+    /// Restart of an old-kind row (its tmux terminal ended at startup)
+    /// writes the host kind as it opens the generation, and a definitive
+    /// failure of that restart must leave the row as it was, its old pane
+    /// id read as one.
     pub terminal_kind: TerminalKind,
 }
 
@@ -1171,14 +1174,16 @@ fn resume_template_from_column(text: Option<String>) -> anyhow::Result<Option<Ve
 /// instant does. Production always passes `None`.
 pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 
-/// Where a session's agent terminal lives: in the supervisor's private tmux
-/// server, or in a terminal host of its own (SPEC_impl.md, "Terminal host").
+/// Where a session's agent terminal lives: in a terminal host of its own
+/// (SPEC_impl.md, "Terminal host"), or, for a row an earlier release wrote,
+/// in that release's private tmux server.
 ///
 /// Stored per row as `sessions.terminal_kind` (schema 32), because a
 /// terminal never changes kind while it lives and a restarted supervisor
-/// must look for it in the right place: a tmux pane by id or session name,
-/// a host by its socket and tag. The kind also says how to read
-/// [`StoredSession::terminal_address`].
+/// must look for it in the right place: a host by its socket and tag. The
+/// kind also says how to read [`StoredSession::terminal_address`]. Every
+/// start ends the old tmux terminals (`service::core::old_terminals`), and
+/// its reload converts the rows this column says ran in them.
 ///
 /// The schema bump that added the column makes a supervisor from before it
 /// refuse the database (it refuses any newer schema) rather than take a
@@ -1194,8 +1199,8 @@ pub type BootTxFault = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 /// supervisor that may have created host rows has opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalKind {
-    /// A pane in the supervisor's private tmux server. Every row written
-    /// before schema 32 is one.
+    /// A pane in the private tmux server an earlier release ran. Every row
+    /// written before schema 32 is one; this release writes none.
     Tmux,
     /// A terminal host process that owns the pty and the agent in it.
     Host,
@@ -1249,11 +1254,11 @@ impl TerminalKind {
 /// what is stored on disk.
 ///
 /// Deliberately missing: `SessionInfo::status`. Liveness is never
-/// persisted — tmux is its only truth (module docs above), and a status
+/// persisted — the terminal host is its only truth (module docs above), and a status
 /// written at some past moment would be stale the instant the process it
 /// described changed state, with nothing to invalidate it on the way
 /// back out of SQLite. `service::Supervisor::reload_sessions` always
-/// recomputes a freshly loaded row's terminal from a live tmux probe, and
+/// recomputes a freshly loaded row's terminal from the live hosts, and
 /// `ListSessions` recomputes `status` itself on every reply
 /// (`service::session_status`) — a persisted status column would be
 /// redundant at best and actively misleading at worst. [`LastOutcome`] is
@@ -1284,7 +1289,7 @@ pub struct StoredSession {
     ///
     /// A crash-interrupted create's RETRY (`SessionStore::
     /// restart_pending_launch`, taken only when the earlier attempt left no
-    /// evidence of ever reaching tmux — see that method's own docs)
+    /// evidence of ever reaching a terminal — see that method's own docs)
     /// PRESERVES the dead attempt's value rather than minting a fresh one.
     /// An earlier version of this doc argued mint-fresh was fine because
     /// "the reply that would have carried it never went out" — true, but
@@ -1351,24 +1356,22 @@ pub struct StoredSession {
     /// and agent type stay fixed across that.
     pub launch: farhelm_proto::SessionLaunch,
     /// Where the agent's terminal is, read by
-    /// [`StoredSession::terminal_kind`]: a tmux pane id (`%7`) for a
-    /// [`TerminalKind::Tmux`] row, the terminal host's socket name for a
-    /// [`TerminalKind::Host`] row. EMPTY for a row whose launch is not yet
+    /// [`StoredSession::terminal_kind`]: the terminal host's socket name for
+    /// a [`TerminalKind::Host`] row, an old tmux pane id (`%7`), never looked
+    /// up, for a [`TerminalKind::Tmux`] row. EMPTY for a row whose launch is not yet
     /// confirmed: neither address exists until the launch has created it,
     /// which by PLAN_M3.md item 2's ordering happens strictly after this
     /// row is committed. Empty is therefore "not yet confirmed", never "no
     /// terminal": `service::Supervisor::reload_sessions` rediscovers the
-    /// terminal (a pane by its tmux session's name, a host by its tag) when
+    /// terminal (a host by its tag) when
     /// the launch did in fact happen before a crash.
     ///
     /// One field for both kinds rather than one per kind, because every
     /// rule about it (written with the confirmation, emptied by a relaunch,
     /// restored by an abort together with the kind) is the same for both.
     /// Schema 34 renamed the column from `pane`, which held a host's socket
-    /// name under a tmux name, and dropped the stored tmux session name: the
-    /// session's tmux session name is derived from its id where tmux code
-    /// needs it (`service::core::session_tmux_name`), for a tmux row's agent
-    /// and for the old tmux tabs of a session moved into a host.
+    /// name under a tmux name, and dropped the stored tmux session name,
+    /// which was always `fh-` and the id.
     pub terminal_address: String,
     /// Whether the agent terminal this row describes is a tmux pane or a
     /// terminal host. Rows from before schema 32 are [`TerminalKind::Tmux`].
@@ -1378,7 +1381,7 @@ pub struct StoredSession {
     /// is reconciled against the right kind: when the row is inserted for a
     /// create, and when a relaunch opens its generation
     /// ([`SessionStore::begin_relaunch_named`]), which is where a Restart
-    /// moves an old tmux session into a terminal host. The relaunch saves
+    /// of an old-kind row starts it in a terminal host. The relaunch saves
     /// the prior kind with the rest of [`PriorRun`], and
     /// [`SessionStore::abort_relaunch`] restores it together with the
     /// address, so a restored address is read the way it was written.
@@ -1437,7 +1440,7 @@ pub struct StoredSession {
     pub launch_scoped: bool,
     /// Whether this launch's argv received Farhelm's conversation hook.
     ///
-    /// Recorded before tmux starts, fenced by generation, and reset when a
+    /// Recorded before the host starts, fenced by generation, and reset when a
     /// relaunch opens its new generation. Reload restores this fact so the
     /// silent-hook warning can start at the next qualifying Enter. Rows from
     /// before schema 29 default false; their argv cannot be reconstructed.
@@ -1478,7 +1481,7 @@ pub struct StoredSession {
     ///
     /// The value is the asset's file name (today
     /// `farhelm-conversation-v2.ts` for OMP), written pre-spawn — after
-    /// the launch spec publishes, before tmux can start anything — by
+    /// the launch spec publishes, before the host can start anything — by
     /// the one place that decides injection, fenced on the launch
     /// generation. Publishing before the first process can exist is
     /// what closes the startup-report race. OMP admission requires it
@@ -1827,8 +1830,8 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         // during the upgrade would be the record leading reality, and
         // would additionally paint such a session `interrupted` at the
         // next reboot. `launching` under-claims instead, and the very
-        // first reload after this migration reconciles each row against a
-        // live tmux probe anyway.
+        // first reload after this migration reconciles each row against its
+        // live terminal anyway.
         //
         // `DEFAULT 'launching'` on the added column is what backfills
         // those rows; it is repeated in the fresh-database DDL above so a
@@ -2637,7 +2640,7 @@ fn migrate_to_launch_kinds(conn: &Connection) -> anyhow::Result<()> {
 ///
 /// Both tables' `tmux_name` columns are redundant: since sessions were first
 /// persisted, every value written was `fh-` and the session's id
-/// (`service::core::session_tmux_name`). The step checks that before it
+/// (the name tmux code derived from the id). The step checks that before it
 /// drops anything, and refuses the upgrade naming the first row that breaks
 /// it rather than derive a name that is not the one stored: a tmux row whose
 /// stored name differed would then point at a tmux session it never had and
@@ -3267,11 +3270,11 @@ impl SessionStore {
 
     /// Persist a freshly created session's metadata.
     ///
-    /// As of PLAN_M3.md item 2 this runs BEFORE the tmux session exists,
+    /// As of PLAN_M3.md item 2 this runs BEFORE the terminal exists,
     /// with `outcome: LastOutcome::Launching` and an empty
     /// `terminal_address` — the
     /// inversion of M2's ordering, and the whole point of the launching
-    /// state: a crash between this commit and the tmux launch must leave
+    /// state: a crash between this commit and the terminal's start must leave
     /// evidence that a launch was attempted, not silence. A failure here
     /// therefore fails the create before anything external has happened
     /// at all (see `service::Supervisor::create_session`).
@@ -4002,8 +4005,8 @@ impl SessionStore {
     /// as they are (this session may be the last ownership record of an
     /// allocated checkout), and (c) settles the pending intent as `Failed`
     /// with the same refusal, so a retry replays the error instead of
-    /// relaunching. Used for failures AFTER an allocation (spec write, tmux
-    /// spawn, confirmation) and for the ambiguous-Planned refusal on
+    /// relaunching. Used for failures AFTER an allocation (spec write, host
+    /// start, confirmation) and for the ambiguous-Planned refusal on
     /// recovery — never for a launch that may still be running (those stay
     /// `Launching` and pending, exactly as before).
     ///
@@ -4150,7 +4153,7 @@ impl SessionStore {
     ///
     /// On [`RetryClaim::Acquired`] the previous launching row — which by
     /// the conditions above described nothing — is replaced by `row`, under
-    /// the same id and tmux name the reservation already carries. `row`'s
+    /// the same id the reservation already carries. `row`'s
     /// OWN `created_at` is discarded in favor of the row it replaces: see
     /// [`StoredSession::created_at`]'s docs for why the crashed attempt's
     /// timestamp already durable a moment ago must survive the takeover
@@ -4224,7 +4227,7 @@ impl SessionStore {
                     // `service`'s `reserved_launch_evidence`: since R1.2 that one
                     // counts only a recorded terminal address or a conversation report and
                     // leaves the rest to its physical probes (scope, sentinel,
-                    // tmux), while this one additionally refuses a row whose
+                    // hosts), while this one additionally refuses a row whose
                     // outcome is anything but `launching`, `interrupted`, or
                     // `error` (so `running`, `stop_requested`, or `exited` with no
                     // address and no report). `interrupted` is exempt because the
@@ -4239,7 +4242,7 @@ impl SessionStore {
                     // R1.2's retained-create-refusal rows are the one exception:
                     // an `error` outcome with an EMPTY address (and no conversation
                     // report) is a refusal the refusal transaction wrote over a
-                    // launch that provably never reached tmux — it is NOT launch
+                    // launch that provably never reached a terminal — it is NOT launch
                     // evidence, and a retry whose durability was unresolved may
                     // still take the launch over. Anything the shim actually ran
                     // leaves an address, a sentinel, a scope, or a conversation report
@@ -4269,7 +4272,7 @@ impl SessionStore {
                     // left nothing in the kind of terminal it was started in. A
                     // retry in the other kind would rewrite the row to that kind,
                     // and an agent the crashed attempt did start (a host the
-                    // caller's tmux probes cannot see, say) would then belong to a
+                    // caller's probes of the other kind cannot see, say) would then belong to a
                     // session row that no longer describes it, which no orphan or
                     // superseded-host cleanup reclaims. So a kind mismatch replays
                     // instead, the same conservative direction as every other
@@ -4474,8 +4477,8 @@ impl SessionStore {
     /// - the terminal address is emptied, because the relaunch has not
     ///   confirmed one yet. `terminal_kind` is KEPT: this spelling relaunches in the kind
     ///   the row already records. [`Self::begin_relaunch_named`] can write
-    ///   another, for a Restart that moves an old tmux session into a
-    ///   terminal host; the prior kind is returned in [`PriorRun`] either
+    ///   another, for a Restart that starts an old-kind row in a terminal
+    ///   host; the prior kind is returned in [`PriorRun`] either
     ///   way, and an abort restores it with the address, so the address it
     ///   puts back is read as it was written ([`StoredSession::terminal_kind`]).
     /// - boot-finality proof clears because a new shim can write. A definitive
@@ -4519,12 +4522,11 @@ impl SessionStore {
     ///
     /// `kind`, when given, is the kind of terminal the new launch starts in,
     /// written in the same transaction as the generation (`None` keeps the
-    /// row's). A Restart that moves an old tmux session into a terminal host
-    /// passes [`TerminalKind::Host`] here rather than at its confirmation, for
+    /// row's). A Restart of an old-kind row passes [`TerminalKind::Host`] here rather than at its confirmation, for
     /// the reason a create writes its kind with its launching row: from the
     /// moment the generation is open a host may start for it, and a
     /// supervisor that dies before the confirmation must look for that
-    /// launch where it ran, by its host's tag, not for a tmux pane. The
+    /// launch where it ran, by its host's tag, not for an old pane. The
     /// previous kind rides in [`PriorRun`] for an abort to restore.
     pub async fn begin_relaunch_named(
         &self,
@@ -4652,8 +4654,8 @@ impl SessionStore {
     /// effect for the ordering rule — so the only way to have both is to
     /// restore on the failures that are provably harmless to restore on.
     /// The caller decides which those are: a launch artifact that could not
-    /// be cleared, a spec that never landed, a tmux refusal with the
-    /// session CONFIRMED absent. An ambiguous failure — anything that may
+    /// be cleared, a spec that never landed, a host start refused with the
+    /// terminal CONFIRMED absent. An ambiguous failure — anything that may
     /// have left an agent running — must NOT restore, because the row would
     /// then describe a run that is not the one actually alive; those stay
     /// `Launching` for reload to reconcile.
@@ -4792,10 +4794,9 @@ impl SessionStore {
     /// honored (an integrated agent kind without a usable resume template, a
     /// corrupt outcome), which is the right answer for anything that would
     /// relaunch or describe the session and the wrong one for a teardown.
-    /// Delete must be able to find and kill the tmux side of exactly such a
-    /// row (its tmux session's name follows from the id alone,
-    /// `service::core::session_tmux_name`) — a row it cannot decode is one
-    /// the user can only get rid of by deleting it.
+    /// Delete must be able to find and end the terminal hosts of exactly
+    /// such a row (by the tags that name its id) — a row it cannot decode
+    /// is one the user can only get rid of by deleting it.
     pub async fn has_session_row(&self, id: &str) -> anyhow::Result<bool> {
         let id = id.to_string();
         self.conn
@@ -4910,7 +4911,7 @@ impl SessionStore {
 
     /// Every reservation still `Pending` — the reconciliation worklist
     /// `service::Supervisor::reload_sessions` resolves against the session
-    /// map it has just rebuilt from tmux.
+    /// map it has just rebuilt from the hosts.
     ///
     /// Only pending rows, because a settled outcome is final: nothing a
     /// reload observes could move a `Created` or `Failed` row, and loading
@@ -5082,14 +5083,12 @@ impl SessionStore {
 
     /// Test fixture: record that session `id`'s agent terminal is of
     /// `kind`, at `address` as that kind reads it
-    /// ([`StoredSession::terminal_address`]: a tmux pane id, or a host's
-    /// socket name).
+    /// ([`StoredSession::terminal_address`]: a host's socket name, or an
+    /// old tmux pane id).
     ///
     /// Production writes the kind with the launching row of the create
-    /// that starts the terminal; the tests of the host arms that install a
-    /// host-backed session over a created tmux one
-    /// (`Supervisor::install_host_agent_for_test`) need its row to say so
-    /// too. Compiled only for tests and the `test-seams` feature so it cannot
+    /// that starts the terminal; tests that need a row of the old kind, or
+    /// one whose address names a host they started themselves, set it here. Compiled only for tests and the `test-seams` feature so it cannot
     /// become a production way to change a row's kind.
     #[cfg(any(test, feature = "test-seams"))]
     pub async fn set_terminal_for_test(
@@ -5135,8 +5134,8 @@ impl SessionStore {
     /// transition whose generation is no longer the row's current one is
     /// silently dropped (the committed outcome is still returned), because
     /// it describes a run this session has already moved past: the classic
-    /// case is a `ListSessions` pass that cloned an entry, went to tmux,
-    /// and came back with the OLD pane's death after a restart replaced it
+    /// case is a `ListSessions` pass that cloned an entry, read its terminal,
+    /// and came back with the OLD terminal's death after a restart replaced it
     /// (see [`StoredSession::generation`]).
     ///
     /// `Ok(None)` means the row no longer exists (a concurrent delete);
@@ -5608,13 +5607,13 @@ impl SessionStore {
     /// slow spawn records against the run it actually launched rather
     /// than one a relaunch has since replaced.
     ///
-    /// Called pre-spawn — after the launch spec publishes, before tmux
+    /// Called pre-spawn — after the launch spec publishes, before the host
     /// can start anything — by the one place that decides injection,
     /// for every OMP launch that gets that far. Publishing before the
     /// first process can exist is what closes the startup-report race:
-    /// a report requires a live agent, which requires the tmux start
+    /// a report requires a live agent, which requires the host start
     /// this write precedes. Only a spec-publish failure records
-    /// nothing, and that failure provably started nothing. A tmux
+    /// nothing, and that failure provably started nothing. A host start
     /// failure records the decided values: the argv was fixed, so an
     /// ambiguous survivor runs exactly what the row describes. Only
     /// OMP writes here today.
@@ -5765,40 +5764,6 @@ impl SessionStore {
                             .context("resolving a session notification")?;
                     }
                     tx.commit()?;
-                    Ok(changed > 0)
-                },
-            )
-            .await
-    }
-
-    /// Resolve every unresolved notification of `kind` for session `id`,
-    /// whichever launch recorded it. Returns whether any row changed, for
-    /// cell reload and hinting.
-    ///
-    /// Only for a kind that describes the session rather than one launch
-    /// (`NotificationKind::OldTerminal`): it is recorded once per session
-    /// and must resolve after a Restart has opened a new launch. Every
-    /// launch-scoped kind resolves through
-    /// [`Self::resolve_session_notifications_if_current`], whose generation
-    /// fence this deliberately lacks.
-    pub async fn resolve_session_notifications_of_kind(
-        &self,
-        id: &str,
-        kind: &str,
-    ) -> anyhow::Result<bool> {
-        let id = id.to_owned();
-        let kind = kind.to_owned();
-        self.conn
-            .call(
-                "session notification resolve task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<bool> {
-                    let changed = conn
-                        .execute(
-                            "UPDATE session_notifications SET resolved_at = ?3 \
-                             WHERE session_id = ?1 AND kind = ?2 AND resolved_at IS NULL",
-                            rusqlite::params![id, kind, now_unix()],
-                        )
-                        .context("resolving a session's notifications of one kind")?;
                     Ok(changed > 0)
                 },
             )
@@ -6400,7 +6365,7 @@ impl SessionStore {
 
     /// Load every persisted session, for `Supervisor::reload_sessions`
     /// (called both from construction and again from `serve`) to turn into
-    /// `SessionEntry`s — live if tmux still knows the session, terminal-
+    /// `SessionEntry`s — live if its host still runs, terminal-
     /// less (the restart gap) otherwise. Order is unspecified; the
     /// in-memory map this feeds is keyed by id anyway.
     pub async fn load_all(&self) -> anyhow::Result<Vec<StoredSession>> {
@@ -8989,16 +8954,16 @@ mod tests {
         assert_eq!(restored.terminal_kind, TerminalKind::Host);
     }
 
-    /// A relaunch that moves a tmux row into a terminal host writes the host
-    /// kind with its generation, and an abort puts the tmux kind back with
-    /// the tmux pane.
+    /// A relaunch that starts an old-kind (tmux) row in a terminal host
+    /// writes the host kind with its generation, and an abort puts the tmux
+    /// kind back with the old pane id.
     ///
-    /// Why: a Restart of an old tmux session under the terminal-host switch
-    /// starts its new launch in a host, and from the generation claim on a
-    /// supervisor that dies must look for that launch by its host's tag, so
-    /// the kind cannot wait for the confirmation; but a move that fails
-    /// definitively restores the tmux pane, which a host row would read as a
-    /// socket name. Specified: a running tmux row with pane `%7`, relaunched
+    /// Why: a Restart of an old-kind row (its tmux terminal ended at
+    /// startup) starts its new launch in a host, and from the generation
+    /// claim on a supervisor that dies must look for that launch by its
+    /// host's tag, so the kind cannot wait for the confirmation; but a
+    /// restart that fails definitively restores the old pane id, which a
+    /// host row would read as a socket name. Specified: a running tmux row with pane `%7`, relaunched
     /// with `Some(Host)`, reads as a host row with an empty pane at the next
     /// generation, and its claim's prior run says tmux; aborting restores
     /// `%7` under the tmux kind. A relaunch with `None` keeps the kind.
@@ -13674,7 +13639,8 @@ mod tests {
                 .await
                 .expect("takeover"),
             RetryClaim::Launched,
-            "an interrupted row WITH a pane was seen in tmux and must not be relaunched over"
+            "an interrupted row WITH a terminal address was seen in a terminal and must not be \
+             relaunched over"
         );
     }
 
@@ -13816,7 +13782,7 @@ mod tests {
     /// preserved by ONE rule rather than by coincidence, and separating
     /// them into two tests would invite separating the rule. On this path
     /// the two columns genuinely hold the same value — a row eligible for
-    /// takeover provably never reached tmux, so nothing has sampled it and
+    /// takeover provably never reached a terminal, so nothing has sampled it and
     /// the activity column still holds its creation seed — but the fixture
     /// gives them different numbers anyway, so that a takeover which
     /// re-derived one from the other, or crossed the two columns, fails
@@ -15817,8 +15783,8 @@ mod tests {
     /// holding a pre-restart view of a session must not be able to record
     /// the OLD run's exit against the new one. That is not hypothetical —
     /// it is precisely what a `ListSessions` pass does when it clones an
-    /// entry, goes to tmux, and comes back after a restart replaced the
-    /// pane it was asking about.
+    /// entry, reads its terminal, and comes back after a restart replaced
+    /// the terminal it was asking about.
     #[farhelm_testtrace::test]
     async fn a_stale_generations_observation_is_dropped() {
         let (_dir, store) = fresh_store().await;

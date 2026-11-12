@@ -5,8 +5,8 @@
 //! A session's window must start the supervisor's own version (the launch
 //! shim reads a launch description only that version writes), so it does
 //! not go through the forwarder and nothing there claims the version. The
-//! gap that leaves is the login shell's startup: between tmux starting the
-//! window and the launch shim taking its own lock (`version_lock`, at the
+//! gap that leaves is the login shell's startup: between the terminal host
+//! starting the shell and the launch shim taking its own lock (`version_lock`, at the
 //! top of `main`), the user's startup files run for as long as they like,
 //! and an install could delete the version the shim is about to run.
 //!
@@ -78,7 +78,7 @@ pub fn held_window_command(
     window: Vec<String>,
 ) -> Vec<String> {
     // Both paths are valid UTF-8 for the reason `launch::window_command`
-    // gives (supervisor startup refuses anything else), and tmux runs this
+    // gives (supervisor startup refuses anything else), and the host runs this
     // argv directly, so nothing here is quoted.
     let mut argv = vec![
         farhelm_exe.to_string_lossy().into_owned(),

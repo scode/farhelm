@@ -303,14 +303,13 @@ async fn a_reload_classified_error_session_keeps_its_terminal_for_attach_and_del
     // Reload — not list — is what this test targets: a fresh supervisor's
     // `reload_sessions` reconciliation is where item 5's bug lived,
     // separately from `ListSessions`'s own (already-correct) sentinel
-    // branch. This supervisor goes on to attach below, so it gets the
-    // suite's loaded-CI timeout floors.
+    // branch.
     let h = h
         .restart_supervisor(|state| async move {
             Supervisor::new_with_seams(
                 &state,
                 farhelm_bin().into(),
-                suite_timeouts(),
+                SupervisorTimeouts::default(),
                 SupervisorSeams::default(),
             )
             .await

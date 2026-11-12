@@ -36,7 +36,7 @@ pub(crate) fn unit_name(id: &str) -> anyhow::Result<String> {
 }
 
 /// Podman control inherits the user's storage configuration without the
-/// supervisor's session credentials or private tmux connection coordinates.
+/// supervisor's session credentials or any inherited tmux connection coordinates.
 pub(crate) fn control_command(program: &Path) -> Command {
     let mut command = Command::new(program);
     for (name, _) in std::env::vars_os() {

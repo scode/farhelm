@@ -1,12 +1,11 @@
 //! Session notifications: telling the user, on the session itself, that
 //! Farhelm has lost track of that session's agent conversation, or that
-//! something in the session still runs in an old terminal.
+//! its old terminal was ended.
 //!
 //! SPEC.md (Status) has the product contract and SPEC_impl.md the storage
 //! and transport. In short: a problem the supervisor notices is recorded in
 //! its store (`session_notifications`, at most 10 per session, at most one per
-//! kind per launch, and the old-terminal kind at most one unresolved per
-//! session; see below), copied into the session's in-memory cell
+//! kind per launch), copied into the session's in-memory cell
 //! ([`super::core::SessionCells::notifications`]) so every reply carries it,
 //! and announced to connected helms with the ordinary `SessionsChanged` hint.
 //! The helm keeps read and cleared state; nothing here knows about either.
@@ -34,26 +33,14 @@
 //! - [`NotificationKind::ClaudePinCorrected`]: Claude admission, when a recorded
 //!   ancestor corrects a child-first conversation choice.
 //! - [`NotificationKind::MusePinCorrected`]: the same correction for Muse.
-//! - [`NotificationKind::OldTerminal`]: the ticker's sample pass, which is
-//!   the one place that already asks tmux, every couple of seconds, what
-//!   runs in the private tmux server
-//!   ([`Supervisor::reconcile_old_terminal_notifications`]).
+//! - [`NotificationKind::OldTerminal`]: nothing any more. Earlier releases'
+//!   ticker recorded it while something of a session still ran in an old
+//!   tmux terminal; this release ends those terminals at startup and
+//!   resolves every one left unresolved (`super::core::old_terminals`).
 //! - [`NotificationKind::OldTerminalEnded`]: the startup step that ends the
 //!   old terminals (`super::core::old_terminals`), once for each session
 //!   whose agent it found in one, when the reload converts that agent to
 //!   interrupted.
-//!
-//! # The old-terminal notification is per session, not per launch
-//!
-//! Every other kind describes one launch of the agent, so the store keys it
-//! by `(session, generation, kind)` and a Restart starts afresh. The
-//! old-terminal warning is about the session: a Restart that moves the
-//! agent into a terminal host while old shell tabs stay open must not add a
-//! second warning, and the first must stay unresolved until those tabs are
-//! gone too. So it is recorded, at the current launch, only while the
-//! session has no unresolved one in any launch, and resolved across
-//! launches. It is transitional: it goes when old terminals do (TODO.md,
-//! "After tmux and xterm.js are dropped entirely").
 //!
 //! # The wording rule
 //!
@@ -63,12 +50,9 @@
 //! ability to resume; a corrected selection explains which conversation
 //! an earlier Restart would have resumed instead.
 
-use super::core::{SessionEntry, Supervisor, session_tmux_name};
-use super::terminals::{Terminal, tabs_from_pane_states, tmux_tab_home};
+use super::core::Supervisor;
 use crate::store::StoredSessionNotification;
-use crate::tmux::PaneState;
 use farhelm_proto::{AgentKind, ReadinessWording};
-use std::collections::HashMap;
 use tracing::warn;
 
 /// What kind of problem a notification reports.
@@ -100,11 +84,11 @@ pub(crate) enum NotificationKind {
     /// A recorded Muse ancestor corrected a conversation selected by its child.
     /// The prior Restart target remains relevant after successful capture.
     MusePinCorrected,
-    /// Something in the session still runs in an old terminal (its agent in
-    /// a tmux pane, or an open tmux tab), which an upcoming release will
-    /// forcibly terminate. One per session, not per launch (module docs).
-    /// Kept decodable for stored rows; this release resolves every one at
-    /// startup, since it ends the old terminals.
+    /// Something in the session still ran in an old terminal (its agent in
+    /// a tmux pane, or an open tmux tab), which an upcoming release would
+    /// forcibly terminate: earlier releases recorded it, one per session.
+    /// Kept decodable for stored rows; nothing records it now, and every
+    /// start resolves every one, since this release ends the old terminals.
     OldTerminal,
     /// The session's agent ran in an old terminal, which this release ended
     /// at startup. A kind of its own rather than [`Self::OldTerminal`]
@@ -133,8 +117,8 @@ impl NotificationKind {
     fn resolves_on_resume(self) -> bool {
         match self {
             Self::HookSilent | Self::ResumeWithdrawn => true,
-            // The old-terminal warning has nothing to do with the
-            // conversation; its own check resolves it.
+            // The old-terminal warning and notice have nothing to do with
+            // the conversation.
             Self::HookNotAdded
             | Self::ReporterMismatch
             | Self::CodexPinCorrected
@@ -180,22 +164,6 @@ impl NotificationKind {
         }
     }
 }
-
-/// The text of a [`NotificationKind::OldTerminal`] notification, in the
-/// maintainer's own words (2026-11-07), verbatim: do not reword it without
-/// them. One message covers an old agent and old tabs alike, which is why
-/// its first sentence also asks for the session to be restarted when only
-/// its tabs are old; the maintainer accepted that. It never says tabs
-/// "move": the maintainer ruled that meaningless to users. The docs link at
-/// the end is clickable in the session list (`farhelm-ui`'s `list::bell`
-/// links only `https://farhelm.io/docs/` addresses), and no date is named
-/// because none is set.
-pub(crate) const OLD_TERMINAL_TEXT: &str = "This session must be restarted, replaced, stopped or \
-    deleted as soon as possible. Any of its shell tabs that are still old terminals (the note at \
-    the top of the session names them) must also be closed and reopened, because restarting a \
-    session restarts only its agent, not its tabs. Otherwise an upcoming Farhelm release will \
-    forcibly terminate this session's old terminals as part of transitioning away from using tmux \
-    to manage sessions. See https://farhelm.io/docs/using/new-terminals/";
 
 /// The text of a [`NotificationKind::OldTerminalEnded`] notice: what
 /// happened, what the user loses, what they can do, and the docs page the
@@ -482,69 +450,6 @@ impl Supervisor {
         }
     }
 
-    /// Record or resolve each session's old-terminal notification from one
-    /// tmux pane-state snapshot ([`NotificationKind::OldTerminal`]).
-    ///
-    /// Called by the ticker's sample pass with the snapshot it already took,
-    /// so the check costs no tmux call of its own; the pass runs it before
-    /// it narrows to sessions whose agent is alive, since a stopped agent's
-    /// session can still hold old tabs. `states` must be a definite answer:
-    /// the pass does not call this when the probe failed, because "tmux
-    /// could not be asked" is not "nothing old runs". An empty map from a
-    /// pass that had no session to ask about is definite, and resolves.
-    ///
-    /// The session's notification cell is the precheck, so the store is
-    /// touched only on a transition: a session with something old running
-    /// and no unresolved warning of this kind in any launch gets one at its
-    /// current launch, and one with nothing old running and an unresolved
-    /// warning has it resolved, whichever launch recorded it. A recording the
-    /// store turns away (the session moved to another launch meanwhile) is
-    /// simply tried again on the next pass. The cells are loaded before the
-    /// ticker starts and a relaunch shares its session's cell, so an empty
-    /// cell here means no warning, not one not yet read.
-    pub(crate) async fn reconcile_old_terminal_notifications(
-        &self,
-        entries: &[std::sync::Arc<SessionEntry>],
-        states: &HashMap<String, PaneState>,
-    ) {
-        if !self.may_record() {
-            return;
-        }
-        let kind = NotificationKind::OldTerminal;
-        let by_session = panes_by_session(states);
-        for entry in entries {
-            let running = runs_in_old_terminal(entry, states, &by_session);
-            let unresolved = entry
-                .session
-                .notifications
-                .lock()
-                .expect("notification cell poisoned")
-                .iter()
-                .any(|stored| stored.kind == kind.as_str() && !stored.notification.resolved);
-            match (running, unresolved) {
-                (true, false) => {
-                    self.notify_session(&entry.info.id, entry.generation, kind, OLD_TERMINAL_TEXT)
-                        .await;
-                }
-                (false, true) => match self
-                    .store
-                    .resolve_session_notifications_of_kind(&entry.info.id, kind.as_str())
-                    .await
-                {
-                    Ok(true) => {
-                        if self.reload_notification_cell(&entry.info.id).await {
-                            self.hint_sessions_changed();
-                        }
-                    }
-                    Ok(false) => {}
-                    Err(error) => warn!(session = %entry.info.id, error = %format!("{error:#}"),
-                        "could not resolve a session's old-terminal notification"),
-                },
-                (true, true) | (false, false) => {}
-            }
-        }
-    }
-
     /// Replace the published entry's notification cell with what the store
     /// holds for session `id`, returning whether the cell changed.
     ///
@@ -575,63 +480,6 @@ impl Supervisor {
         *cell = stored;
         true
     }
-}
-
-/// A pane-state snapshot grouped by the tmux session each pane belongs to,
-/// so finding one session's tabs does not rescan every pane on the server
-/// (the same partition `ticker::reap_dead_tabs` makes).
-fn panes_by_session(states: &HashMap<String, PaneState>) -> HashMap<&str, Vec<&PaneState>> {
-    let mut by_session: HashMap<&str, Vec<&PaneState>> = HashMap::new();
-    for state in states.values() {
-        by_session
-            .entry(state.session_name.as_str())
-            .or_default()
-            .push(state);
-    }
-    by_session
-}
-
-/// Whether something in `entry`'s session still runs in an old terminal,
-/// by one pane-state snapshot: its agent's tmux pane is alive, or one of
-/// its tmux tabs is.
-///
-/// The agent counts with the predicate the sample pass uses to decide
-/// whether to sample it: its pane is in the snapshot, under the session's
-/// own tmux name, and not dead. A pane reported under another name (one
-/// tmux recycled after its server restarted) is not this session's. A dead
-/// pane, which Stop and an exited agent leave so their last screen stays
-/// readable, is not running: there is nothing in it for a release to
-/// terminate. Tabs are found as everywhere else, by their window markers in
-/// the session's tmux session (`terminals::tmux_tab_home`, or the session's
-/// own tmux name when it has no agent terminal at all, as the listing
-/// does), and count while their shell is alive; a dead one is about to be
-/// reaped.
-fn runs_in_old_terminal(
-    entry: &SessionEntry,
-    states: &HashMap<String, PaneState>,
-    by_session: &HashMap<&str, Vec<&PaneState>>,
-) -> bool {
-    let agent_alive = match &entry.terminal {
-        Some(Terminal::Tmux(tmux)) => states
-            .get(&tmux.pane)
-            .is_some_and(|state| state.session_name == tmux.tmux_name && !state.dead),
-        Some(Terminal::Host(_)) | None => false,
-    };
-    if agent_alive {
-        return true;
-    }
-    let (tmux_name, agent_pane) = match &entry.terminal {
-        Some(terminal) => tmux_tab_home(&entry.info.id, terminal),
-        None => (
-            std::borrow::Cow::Owned(session_tmux_name(&entry.info.id)),
-            None,
-        ),
-    };
-    by_session.get(tmux_name.as_ref()).is_some_and(|panes| {
-        tabs_from_pane_states(panes.iter().copied(), &tmux_name, agent_pane)
-            .iter()
-            .any(|tab| !tab.dead)
-    })
 }
 
 /// Project the stored history onto the protocol without leaking private kinds.

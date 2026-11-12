@@ -1000,10 +1000,8 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
         let sup = Supervisor::new_with_seams(
             state.path(),
             farhelm_bin().into(),
-            // Built by hand (not `harness()`) for the boot-id seam below;
-            // `suite_timeouts()` still gives this real attach the suite's
-            // loaded-CI timeout floors.
-            suite_timeouts(),
+            // Built by hand (not `harness()`) for the boot-id seam below.
+            SupervisorTimeouts::default(),
             seams("boot-a"),
         )
         .await
@@ -1140,9 +1138,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        // Same reasoning as the first supervisor above: this one attaches
-        // for real too (the resume/reattach below).
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         seams("boot-b"),
     )
     .await
@@ -1343,7 +1339,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
         let sup = Supervisor::new_with_seams(
             state.path(),
             farhelm_bin().into(),
-            suite_timeouts(),
+            SupervisorTimeouts::default(),
             seams("boot-a"),
         )
         .await
@@ -1413,7 +1409,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
     let sup = Supervisor::new_with_seams(
         state.path(),
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         seams("boot-b"),
     )
     .await

@@ -13,7 +13,6 @@ use crate::create_idempotency::handoff_to_new_supervisor;
 use crate::hook_identity::{
     attach_ready, hook_harness, hook_log, hook_session, report as report_conversation,
 };
-use crate::terminal_backpressure::drain_for;
 use farhelm_proto::RestartOffer;
 
 // ---------------------------------------------------------------------

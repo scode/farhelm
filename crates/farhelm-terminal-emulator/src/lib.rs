@@ -119,9 +119,8 @@ pub use emulator::{Emulator, Size};
 pub use modes::{Modes, MouseEncoding, MouseReporting};
 pub use screen::trim_screen_tail;
 pub use snapshot::{
-    Cancel, FORMAT_VERSION, LineStyles, LinesSeed, MAX_RESTORE_CELLS, MAX_SIDE, MIN_SNAPSHOT_LIMIT,
-    NotClean, Restored, Snapshot, SnapshotError, SnapshotStopped, WidthTable,
-    history_seed_from_lines, history_seed_from_lines_until, seed_history_capacity,
+    Cancel, FORMAT_VERSION, MAX_RESTORE_CELLS, MAX_SIDE, MIN_SNAPSHOT_LIMIT, NotClean, Restored,
+    Snapshot, SnapshotError, SnapshotStopped, WidthTable,
 };
 pub use split::snapshot_split_candidate;
 

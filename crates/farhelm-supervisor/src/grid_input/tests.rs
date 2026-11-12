@@ -717,7 +717,7 @@ fn utf8_reports_encode_large_values_as_characters() {
 }
 
 /// A program that asks for SGR (1006) and also for UTF-8 coordinates (1005)
-/// gets SGR reports, whichever it set first, as from tmux and old terminals;
+/// gets SGR reports, whichever it set first, as from tmux;
 /// resetting 1006 leaves UTF-8. The modes are read from a real emulator fed the
 /// program's output, since the order is what the emulator used to get wrong (it
 /// kept only the mode set last).

@@ -33,8 +33,9 @@ const MAX_RECORD_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_NAMESPACE_ENTRIES: usize = 100_000;
 
 /// Startup's already-observed launch evidence, kept separate from disk work.
-/// A failed tmux observation protects all claims; a per-launch uncertainty
-/// protects that exact generation rather than borrowing another run's pane.
+/// `uncertain` protects all claims (a caller with no liveness evidence at
+/// all); a per-launch uncertainty protects that exact generation rather than
+/// borrowing another run's terminal.
 #[derive(Default)]
 pub(crate) struct LiveClaims {
     pub(crate) uncertain: bool,

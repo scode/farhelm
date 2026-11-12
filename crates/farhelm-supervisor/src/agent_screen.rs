@@ -34,7 +34,7 @@
 //!
 //! - `{"op": "screen"}`: `screen` (the visible screen as text), `title`,
 //!   and `exited` (whether the program has exited; its last screen stays
-//!   readable, as a dead tmux pane's did with `remain-on-exit`).
+//!   readable until the host ends).
 //! - `{"op": "type", "text": "..."}`: the text as is, in one write.
 //! - `{"op": "keys", "keys": ["Enter", "C-u"]}`: named keys ([`key_input`]),
 //!   encoded from the program's modes as a grid viewer's keys are. Every
@@ -289,9 +289,8 @@ async fn write_input(terminal: &HostTerminal, bytes: &[u8]) -> anyhow::Result<()
 }
 
 /// The bytes a grid viewer's keydown for the named key sends to a program
-/// whose cursor-key mode is `application_cursor`: the names tmux's
-/// `send-keys` uses for the keys the scripts press, so that a script reads
-/// the same either way.
+/// whose cursor-key mode is `application_cursor`. The names are the ones
+/// tmux's `send-keys` uses, which the scripts were first written against.
 ///
 /// The named keys are `Enter`, `Escape`, `Tab`, `BTab` (Shift+Tab),
 /// `BSpace`, `Space`, `Up`, `Down`, `Left`, `Right`, `Home`, `End`,

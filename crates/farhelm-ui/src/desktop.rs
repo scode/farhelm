@@ -473,9 +473,9 @@ impl DesktopBootstrap {
         // Discovery MUST run before the tmux preflight, not after: an
         // answering supervisor is an ownership boundary (this type's own
         // doc comment) that has to be reused exactly as it stands, tmux
-        // included — it may be driving a perfectly good tmux selected by
-        // its own `--tmux`, its own `FARHELM_TMUX`, or a login-shell `PATH`
-        // this Finder-launched process never sees. Running the preflight
+        // included — it was started with whatever `FARHELM_TMUX` or
+        // login-shell `PATH` it had, which this Finder-launched process
+        // never sees. Running the preflight
         // first would refuse startup over a dependency this process is not
         // about to need, for a supervisor it does not own and must not
         // reconfigure. Only the branches where THIS process is about to

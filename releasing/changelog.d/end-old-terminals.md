@@ -17,3 +17,7 @@ is no longer retried: the retry is refused, and the session has to be created ag
 
 If Farhelm cannot end the old tmux (it logs why), it starts anyway and treats those sessions as ended, so a Restart could
 start a second agent beside one that is still running. Remote hosts end their old terminals when they are updated.
+
+`farhelm supervisor run` no longer accepts `--tmux`, since the supervisor no longer runs tmux at all. A service unit or
+script you wrote yourself that passes it has to drop it, or the supervisor will not start; the units that
+`farhelm helm setup`, the desktop app and adding a remote host write never pass it.

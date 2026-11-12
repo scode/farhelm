@@ -55,10 +55,11 @@ impl Stack {
         &self,
         seams: SupervisorSeams,
     ) -> (Arc<Supervisor>, Arc<SupervisorClient>) {
-        self.supervisor_with(seams, suite_timeouts()).await
+        self.supervisor_with(seams, SupervisorTimeouts::default())
+            .await
     }
 
-    /// [`Self::supervisor`] with `timeouts` instead of the suite's, for a
+    /// [`Self::supervisor`] with `timeouts` instead of the production defaults, for a
     /// test that shortens a budget on purpose.
     pub(crate) async fn supervisor_with(
         &self,

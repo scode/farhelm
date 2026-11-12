@@ -15,8 +15,8 @@ use crate::harness::*;
 //
 // "Simulated reboot" throughout means two things together, because a real
 // reboot does both: the boot id the supervisor reads changes (injected
-// through `SupervisorSeams`), and the private tmux server is gone. Tests
-// that changed only the boot id would leave live panes behind for the
+// through `SupervisorSeams`), and every terminal host is gone. Tests that
+// changed only the boot id would leave live terminals behind for the
 // reload to find, which is not a reboot at all.
 // ---------------------------------------------------------------------
 
@@ -105,39 +105,6 @@ pub(crate) async fn harness_believing_boot(boot: &str) -> Harness {
     }
 }
 
-/// Wait until tmux itself reports `tmux_name`'s pane dead.
-///
-/// Deliberately asks tmux directly instead of polling `list_sessions`: the
-/// same-boot test needs the agent to have exited WITHOUT the supervisor
-/// ever observing it (that is what "with the supervisor down" means for an
-/// in-process supervisor), and a list is exactly such an observation.
-pub(crate) async fn wait_for_dead_pane(sock: &std::path::Path, tmux_name: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-    let mut last_observation = None;
-    loop {
-        let out = tmux_query_before_deadline(
-            sock,
-            &["display-message", "-p", "-t", tmux_name, "#{pane_dead}"],
-            deadline,
-        )
-        .await
-        .unwrap_or_else(|| panic!(
-            "pane of {tmux_name} never died; last completed pane-death response prefix (None means no response): {last_observation:?}"
-        ));
-        if String::from_utf8_lossy(&out.stdout).trim() == "1" {
-            return;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "pane of {tmux_name} never died"
-        );
-        last_observation =
-            Some(String::from_utf8_lossy(&out.stdout[..out.stdout.len().min(2048)]).into_owned());
-        // sleep-ok: poll tmux pane death without making the supervisor observe that death first.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
 /// One session out of a listing, by id.
 pub(crate) async fn listed(client: &SupervisorClient, id: &str) -> SessionInfo {
     client
@@ -156,8 +123,7 @@ pub(crate) async fn listed(client: &SupervisorClient, id: &str) -> SessionInfo {
 ///
 /// Three sessions, three different fates while no supervisor is watching:
 /// one agent exits on its own (its terminal survives holding the code: a
-/// terminal host keeps its exited child's status, as a dead tmux pane
-/// does), one has its terminal ended outright (nothing survives to ask),
+/// terminal host keeps its exited child's status), one has its terminal ended outright (nothing survives to ask),
 /// and one is simply left alone. The reloading supervisor must report
 /// exactly those three answers — including the true exit code from the
 /// surviving terminal, which is the "retained knowledge is not a guess" half
@@ -197,29 +163,23 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
         .await;
     let client2 = Arc::clone(&h.client);
 
-    // Asserted against what the terminal ACTUALLY retains, not against a
-    // version gate: a terminal host always keeps the code, `3`, and so does
-    // a tmux that records exit statuses reliably, while one that loses them
-    // under load keeps none — either way the supervisor must report exactly
-    // what the terminal still holds and never more
-    // (`tmux_records_exit_codes_reliably` documents the 3.4 behavior this
-    // tolerates). A supervisor that fabricated a code, or dropped one the
-    // terminal still had, fails this on every host.
+    // Asserted against what the terminal ACTUALLY retains: a terminal host
+    // keeps its exited child's code, `3`, and the supervisor must report
+    // exactly that. A supervisor that fabricated a code, or dropped the one
+    // the terminal still had, fails this.
     let retained = agent_exit_code(&h, &exiting.id).await;
-    if is_host_row(h.state.path(), &exiting.id).await || tmux_records_exit_codes_reliably() {
-        assert_eq!(
-            retained,
-            Some(3),
-            "a tmux this test trusts for codes must have kept this one"
-        );
-    }
+    assert_eq!(
+        retained,
+        Some(3),
+        "the terminal host must have kept its child's exit code"
+    );
     let exited = listed(&client2, &exiting.id).await;
     assert_eq!(
         exited.status,
         SessionStatus::Exited {
             exit_code: retained
         },
-        "the supervisor must report exactly the code the surviving dead pane retains — \
+        "the supervisor must report exactly the code the surviving terminal retains — \
          retained knowledge, never a guess and never a loss"
     );
     assert_eq!(
@@ -242,7 +202,7 @@ async fn same_boot_classification_is_per_session_and_never_interrupted() {
 ///
 /// The stop annotation riding through this is the durable half of
 /// PLAN_M3.md item 4: it was written when the user stopped the session,
-/// and the tmux pane that stop happened in no longer exists by the time it
+/// and the terminal host that stop happened in no longer exists by the time it
 /// is read back here — so this proves the annotation comes from the
 /// supervisor's own durable record and nowhere else.
 #[farhelm_testtrace::test]
@@ -250,7 +210,7 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     let h = harness_believing_boot("boot-a").await;
     let (live, _live_work) = basic_session(&h).await;
     let (stopped, _stopped_work) = basic_session(&h).await;
-    // Reconcile an ended session before reboot destroys its pane. The
+    // Reconcile an ended session before reboot ends its terminal host. The
     // surviving code must be durable knowledge, rather than a reconstruction
     // from a terminal that no longer exists. Liveness polling alone does not
     // establish that recording boundary in this timer-free fixture.
@@ -307,25 +267,10 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     );
     wait_for_live_agent(&h.sup, h.state.path(), &live.id, 30).await;
 
-    // Older tmux versions can first report an exited pane without its code,
-    // then enrich that durable outcome on a later list. Accept only that
-    // monotonic refinement before using the final observation as the snapshot
-    // the reboot must preserve; a broader allowance would hide corruption by
-    // the same-boot supervisor restart above.
     let ended_before_reboot = listed(&h.client, &ended.id).await.status;
-    assert!(
-        ended_before_reboot == ended_settled.status
-            || matches!(
-                (&ended_settled.status, &ended_before_reboot),
-                (
-                    SessionStatus::Exited { exit_code: None },
-                    SessionStatus::Exited { exit_code: Some(3) }
-                )
-            ),
-        "an ended session may gain its known exit code before reboot, but must not otherwise \
-         change across a same-boot supervisor restart (settled: {:?}, final: \
-         {ended_before_reboot:?})",
-        ended_settled.status
+    assert_eq!(
+        ended_before_reboot, ended_settled.status,
+        "an ended session's status must not change across a same-boot supervisor restart"
     );
 
     // The reboot: every terminal dies with the host, and the next
@@ -345,7 +290,7 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
         "a session that was running when the host rebooted lost its terminal to that \
          reboot; that is knowable, unlike how (or whether) its agent ended"
     );
-    // Its row still says its last terminal was tmux, but it holds no
+    // Its row still names its last terminal host, but it holds no
     // terminal now, so it reports no kind: there is nothing left that a
     // client's migration band could ask the user to move.
     assert_eq!(interrupted.agent_terminal, None);
@@ -364,7 +309,7 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     let ended_after = listed(&client2, &ended.id).await;
     assert_eq!(
         ended_after.status, ended_before_reboot,
-        "an exit keeps the final status observed before the reboot, even though the pane that \
+        "an exit keeps the final status observed before the reboot, even though the terminal that \
          held it is gone"
     );
     assert_eq!(
@@ -453,7 +398,7 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
     // Hand-built rather than through `basic_session`, because this
     // test owns two supervisors over one state dir; the barrier is the
     // same one for the same reason — the live-status check below must be
-    // about an agent that execed, not a login shell holding a pane.
+    // about an agent that execed, not a login shell holding a terminal.
     wait_for_agent_ready_on(&sup1, state.path(), &session.id).await;
 
     retire_supervisor(state.path(), sup1, client1).await;
@@ -486,7 +431,7 @@ async fn a_database_without_a_stored_boot_id_does_not_claim_a_reboot() {
 /// every cleanup path a graceful failure would run — a real crash gets no
 /// cleanup either) must leave evidence that a launch was attempted. Under
 /// M2's ordering there would be nothing at all: the row was written only
-/// after tmux had the session, so this crash would have left silence.
+/// after the terminal existed, so this crash would have left silence.
 ///
 /// What the next startup does with that evidence is the second half, and
 /// it is deliberately NOT "exited": SPEC.md's exited means the agent RAN,
@@ -534,12 +479,6 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
     assert_eq!(
         hosts, 0,
         "the crash landed before the terminal's start, so no host may exist"
-    );
-    let sessions = tmux_query(&state.path().join("tmux.sock"), &["list-sessions"]).await;
-    assert!(
-        !String::from_utf8_lossy(&sessions.stdout).contains("fh-"),
-        "the crash landed before the terminal's start, so no tmux session may exist: {}",
-        String::from_utf8_lossy(&sessions.stdout)
     );
 
     let sup2 = supervisor_on(state.path()).await.expect("the next startup");
@@ -631,8 +570,8 @@ async fn a_stop_annotation_is_written_where_it_happens_and_read_back_elsewhere()
 ///
 /// This is the concrete loss seven review lenses converged on. The window
 /// is not exotic — `kill_process_tree` spends seconds on SIGTERM, a grace
-/// period, re-enumeration and SIGKILL, tmux marks the pane dead the
-/// instant the process actually dies, and the UI lists every couple of
+/// period, re-enumeration and SIGKILL, the host records the child's exit
+/// the instant the process actually dies, and the UI lists every couple of
 /// seconds — so a list observing that death mid-sweep is the ORDINARY
 /// case, not a corner one. The poll loop below runs as fast as it can for
 /// exactly that reason: it is trying to be the observer that gets there

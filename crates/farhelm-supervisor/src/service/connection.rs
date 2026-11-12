@@ -1,19 +1,20 @@
-//! The per-connection read loop, output forwarder, and stall detection.
+//! The per-connection read loop, and what every attachment's output task
+//! shares: its end verdicts, pause handling and stall detection.
 //!
 //! `handle_connection` is the whole lifetime of one client connection: it
 //! owns terminal, upload, download and raw TCP channel routes, spawns
 //! (and, on the way out, drains) the slow request handlers admitted
 //! through `spawn_admitted`, and reads control/data frames until the
-//! peer goes away. `Forwarder` is the other half — one per attachment,
-//! pumping tmux output back to the client and detecting a stalled reader.
+//! peer goes away. The output side of an attachment is its grid sender
+//! (`super::grid_stream`), which reports how it ended through
+//! [`report_forwarder_end`].
 
 use super::capture::note_first_input;
 use super::channels::ConnectionChannels;
 use super::core::{Supervisor, error_kind};
 use super::handlers::{handle_control, handle_restricted_control};
-use super::terminals::{ActiveAttach, AttachmentKey, OutputReapOutcome, TerminalId};
+use super::terminals::{ActiveAttach, AttachmentKey, TerminalId, join_forwarder};
 use super::uploads::{UPLOAD_PRIORITY_QUEUE, UploadCommand, UploadRoute, UploadSignal};
-use crate::tmux::{OutputEvent, OutputStream, PaneModes};
 use anyhow::Context;
 use farhelm_proto::io::{
     FrameReader, FrameWriter, ProgressWrite, handshake_with_host_identity, parse_control,
@@ -25,16 +26,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot, watch};
-use tracing::{debug, info, warn};
-
-/// Data-frame chunk size for replay.
-///
-/// This must stay at or below `farhelm_proto::MAX_TERMINAL_DATA_LEN`: helms
-/// from the limit's release onward reject a larger incoming frame and detach
-/// the terminal as stalled. The shared limit leaves headroom above this 32 KiB
-/// chunk, while keeping the first screenful small enough to render before the
-/// rest streams.
-const REPLAY_CHUNK: usize = 32 * 1024;
+use tracing::{debug, warn};
 
 /// Depth of the per-connection writer queue — the single queue every
 /// reply, notification, and terminal data frame on one connection passes
@@ -108,7 +100,7 @@ pub(crate) const CONNECTION_WRITER_QUEUE: usize = 64;
 /// gets that reply to a still-reading peer. A straggling task aborted by
 /// `HANDLER_SHUTDOWN_TIMEOUT` instead, by contrast, never enqueues
 /// anything at all — there is nothing left for this drain to wait out on
-/// its behalf, and its own multi-second tmux work is exactly why it gets
+/// its behalf, and its own multi-second stop or sweep work is exactly why it gets
 /// a separate, longer budget rather than being folded into this one.
 const WRITER_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -117,7 +109,7 @@ const WRITER_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 /// tracked in a `JoinSet`, before aborting whatever remains and logging
 /// it. Generous — `kill_process_tree`'s own sequence (grace period,
 /// quiesce passes, kill confirmation) can legitimately take several
-/// seconds — but not unbounded: a wedged tmux must not leak a task (and
+/// seconds — but not unbounded: a wedged host or sweep must not leak a task (and
 /// this connection's own shutdown) forever. See `WRITER_DRAIN_TIMEOUT`'s
 /// docs for how the two windows interact.
 const HANDLER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -494,11 +486,11 @@ where
                         // between them is a TOCTOU where a takeover
                         // completes in the gap and the kicked client's
                         // already-validated keystrokes land in the
-                        // winner's pane — and keystrokes into an agent
+                        // winner's terminal — and keystrokes into an agent
                         // terminal are command execution. Safe against
                         // deadlock because forwarders never take this
                         // lock, and the Attach handler already holds it
-                        // across its own tmux calls.
+                        // across its own terminal calls.
                         //
                         // Both halves of the check matter: channel ids are
                         // unique only within a connection (every client
@@ -509,18 +501,16 @@ where
                         let mut attachments = sup.attachments.lock().await;
                         // Borrow the matched `ActiveAttach` directly and
                         // send on it in place, rather than cloning a
-                        // handle out of the map: its backend's input
-                        // client (tmux's `InputClient`) owns a child
-                        // process and its pipes, so unlike the old
-                        // `InputWriter` there is nothing cheap to clone.
-                        // The borrow (via `a`) ends when this match
+                        // handle out of the map: its grid input side
+                        // holds the paste in progress, which a clone would
+                        // split. The borrow (via `a`) ends when this match
                         // expression finishes evaluating, which is what
                         // lets the failure arm below still mutate
                         // `attachments` (`.remove`) under the SAME lock
                         // hold — no gap where a takeover could interleave.
                         let send_result = match attachments.get_mut(&route.key) {
                             Some(a) if a.channel == frame.channel && a.notify.same_channel(&tx) => {
-                                Some(a.backend.send_input(&frame.body).await)
+                                Some(a.input.send_input(&frame.body))
                             }
                             _ => None,
                         };
@@ -534,9 +524,9 @@ where
                         // have been confirmed: the any-bytes latch is already
                         // true once those replies land, so it cannot say
                         // whether THIS frame's Enter arrived. Which bytes
-                        // the frame delivered is the backend's to say: a
+                        // the frame delivered is the input side's to say: a
                         // grid attachment's frame is a message, not bytes
-                        // (`AttachBackend::send_input`).
+                        // (`grid_stream::HostAttach::send_input`).
                         if route.key.terminal == TerminalId::Agent
                             && matches!(send_result, Some(Ok(true)))
                         {
@@ -552,26 +542,16 @@ where
                             Some(Err(e)) => {
                                 warn!(session = %entry.info.id, error = %e, "input dropped");
                                 if let Some(old) = attachments.remove(&route.key) {
-                                    sup.begin_forwarder_shutdown(route.key.clone(), &old);
+                                    old.request_forwarder_shutdown();
                                     let ActiveAttach {
                                         channel,
                                         notify,
                                         forwarder,
-                                        backend,
+                                        input,
                                         ..
                                     } = old;
-                                    if let Err(cleanup) = sup.record_forwarder_join(
-                                        route.key.clone(),
-                                        forwarder.await,
-                                    ) {
-                                        warn!(
-                                            session = %entry.info.id,
-                                            terminal = ?route.key.terminal,
-                                            error = %cleanup,
-                                            "terminal output cleanup remains unconfirmed after input failure"
-                                        );
-                                    }
-                                    drop(backend);
+                                    join_forwarder(&route.key, forwarder).await;
+                                    drop(input);
                                     notify_detached(
                                         &notify,
                                         channel,
@@ -795,50 +775,20 @@ where
     }
     channels.drop_transfers();
     drop(bulk_tx);
-    // Tear down any attachments this connection owned so the next
-    // attach doesn't fight a dead forwarder. Signal AND await, exactly
-    // like the takeover path: a shutdown request only wakes the forwarder,
-    // and joining it proves the output client was either reaped or handed to
-    // the per-terminal barrier published above. If this connection held the
-    // session's final attachment, dropping its sink lease likewise publishes
-    // a same-session barrier before process cleanup continues. Removing the
-    // entry without those handoffs would let a new connection's attach —
-    // which finds no incumbent to kick — open clients while the old ones are
-    // still unsafe, the documented frozen-replay hazard. Awaiting under the
-    // lock is safe (forwarders never take it); a reaper that outlives the lock
-    // still blocks replacement through the registry.
+    // Tear down any attachments this connection owned, so that no output
+    // task keeps streaming to a connection that is gone and the next attach
+    // finds nothing of this one. Signal every output task first, then join
+    // them, like the takeover path. Awaiting under the lock is safe (output
+    // tasks never take it).
     let mut attachments = sup.attachments.lock().await;
     let mine: Vec<(AttachmentKey, ActiveAttach)> = attachments
         .extract_if(|_, attachment| attachment.notify.same_channel(&tx))
         .collect();
-    for (key, attachment) in &mine {
-        sup.begin_forwarder_shutdown(key.clone(), attachment);
+    for (_, attachment) in &mine {
+        attachment.request_forwarder_shutdown();
     }
-    let mut forwarders = tokio::task::JoinSet::new();
     for (key, attachment) in mine {
-        let ActiveAttach {
-            forwarder, backend, ..
-        } = attachment;
-        forwarders.spawn(async move {
-            let joined = forwarder.await;
-            drop(backend);
-            (key, joined)
-        });
-    }
-    while let Some(joined) = forwarders.join_next().await {
-        match joined {
-            Ok((key, result)) => {
-                if let Err(cleanup) = sup.record_forwarder_join(key.clone(), result) {
-                    warn!(
-                        session = %key.session,
-                        terminal = ?key.terminal,
-                        error = %cleanup,
-                        "connection closed before terminal output cleanup was confirmed"
-                    );
-                }
-            }
-            Err(join) => warn!(error = %join, "terminal cleanup wrapper failed"),
-        }
+        join_forwarder(&key, attachment.forwarder).await;
     }
     drop(attachments);
     drop(tx);
@@ -848,7 +798,7 @@ where
     // waiting on the queue those replies land in — a task that finishes
     // after the writer has already given up would have enqueued a reply
     // nobody drains. `HANDLER_SHUTDOWN_TIMEOUT` is generous (kill sweeps
-    // legitimately take seconds), but a tmux wedged forever must not leak
+    // legitimately take seconds), but a handler wedged forever must not leak
     // this connection's shutdown forever either: past that bound, every
     // remaining task is aborted and logged rather than awaited
     // unconditionally.
@@ -1283,23 +1233,23 @@ fn reap_finished_tasks(tasks: &mut tokio::task::JoinSet<()>) {
     }
 }
 
-/// Why a forwarder stopped, and therefore what the client must be told
-/// ([`report_forwarder_end`]). Shared by both kinds of output task: the tmux
-/// [`Forwarder`] and a host terminal's grid sender
-/// (`super::grid_stream::GridSender`).
+/// Why an attachment's output task (`super::grid_stream::GridSender`)
+/// stopped, and therefore what the client must be told
+/// ([`report_forwarder_end`]).
 pub(crate) enum ForwarderEnd {
     /// The attachment owner requested an orderly detach.
     Requested,
     /// The client's connection is gone (its writer queue closed). Nothing
     /// left to notify.
     ClientGone,
-    /// The pane's control client ended: session killed, tmux server gone.
+    /// The terminal ended: its host is gone.
     TerminalEnded,
-    /// The control stream itself failed mid-read.
+    /// The stream itself failed: the terminal's runtime ended or became
+    /// unreadable, or a message could not be encoded.
     StreamFailed(String),
-    /// The attachment stayed paused past [`STALL_DETACH_TIMEOUT`]. Unlike
-    /// every other outcome this one also TEARS THE ATTACHMENT DOWN — see
-    /// `Forwarder::run`.
+    /// The attachment stayed paused past
+    /// [`super::core::STALL_DETACH_TIMEOUT`]; the verdict tears the
+    /// attachment down ([`detach_stalled`]).
     Stalled,
     /// The attachment's input broke where the connection's input path
     /// could not see it: a grid attachment's input written to a host
@@ -1309,580 +1259,16 @@ pub(crate) enum ForwarderEnd {
     InputFailed(String),
 }
 
-/// One attachment's output pump: everything between a pane's control-mode
-/// client and one client channel's data frames.
-///
-/// A struct rather than a closure because this task now owns four
-/// intertwined responsibilities that each need most of the same state —
-/// writing the initial replay, honoring client pause/resume, recovering
-/// from a tmux-side pause, and detaching a stalled client — and threading
-/// eight captured variables through free functions read far worse than
-/// methods on the thing they all belong to.
-///
-/// It never takes `Supervisor::attachments`. That is the invariant which
-/// lets the takeover, detach, and delete paths request shutdown and await a
-/// forwarder while holding that mutex; the one place this task needs the
-/// map (the stall teardown) hands the work to a separate task for exactly
-/// that reason.
-pub(crate) struct Forwarder {
-    pub(crate) sup: Arc<Supervisor>,
-    pub(crate) session_id: String,
-    /// Which of the session's terminals this pump belongs to — carried
-    /// only so a stall detach can name its own attachment exactly (see
-    /// [`detach_stalled`]). A stall is a property of ONE terminal's
-    /// client (PLAN_M4.md item 3: `pause-after`/`%pause` are per control
-    /// client), so the teardown it triggers must not reach the session's
-    /// other terminals, and reconstructing the key from the session id
-    /// alone could no longer say which one stalled.
-    pub(crate) terminal: TerminalId,
-    pub(crate) channel: u32,
-    pub(crate) tx: mpsc::Sender<Frame>,
-    pub(crate) stream: AttachOutput,
-    pub(crate) pause_rx: watch::Receiver<Option<tokio::time::Instant>>,
-    /// A ticker observation stays latched while this task is replaying or
-    /// honoring client flow control, including an exit during initial replay.
-    pub(crate) death_rx: watch::Receiver<bool>,
-    pub(crate) stall_timeout: Duration,
-    /// Publishes process cleanup independently of the request awaiting this task.
-    pub(crate) cleanup: watch::Sender<OutputReapOutcome>,
-}
-
-/// One attachment's output source, by the kind of terminal it streams.
-///
-/// The forwarder's half of the attachment seam (`terminals::AttachBackend`
-/// is the attachment map's half): everything the forwarder does with its
-/// stream (the live read, the death-recovery pause, the safe shutdown, and
-/// both replays: capturing them and rendering them into client bytes) goes
-/// through the exhaustive dispatches below, so a second kind of terminal
-/// fails to compile at each of those steps rather than being pumped, or
-/// replayed, as if it were a tmux control client. What the forwarder does
-/// AROUND them (client pause and resume, the stall bound, the replay
-/// marker, detach verdicts) is the same for every kind and stays in
-/// [`Forwarder`].
-///
-/// Host terminals stream grids rather than bytes, from a task of their own
-/// beside this one (`super::grid_stream::GridSender`), which shares the
-/// forwarder's pause, stall and verdict machinery but none of its stream
-/// handling: there is no replay to render and no death recovery, since the
-/// emulator holds the whole screen. So this enum has one variant; it stays
-/// an enum so that a byte stream of another kind would get the same
-/// exhaustive dispatches.
-pub(crate) enum AttachOutput {
-    /// A tmux control-mode client streaming one pane, with its attach
-    /// replay (see [`TmuxOutput`]).
-    Tmux(TmuxOutput),
-}
-
-/// A tmux attachment's output: the pane's control-mode stream and the
-/// attach replay captured when that stream was installed.
-///
-/// The replay rides here, rather than beside the forwarder, so that the
-/// screen it carries keeps its kind until it is rendered for the client
-/// (see [`AttachOutput::take_attach_replay`]).
-pub(crate) struct TmuxOutput {
-    stream: OutputStream,
-    /// `None` once [`Forwarder::run`] has taken it, which it does before
-    /// it reads anything from `stream`.
-    attach_replay: Option<TmuxReplay>,
-}
-
-impl TmuxOutput {
-    /// Pair an installed stream with the replay its candidate captured
-    /// (`ReplayStreamCandidate::install` returns all three).
-    pub(crate) fn new(modes: PaneModes, content: Vec<u8>, stream: OutputStream) -> Self {
-        Self {
-            stream,
-            attach_replay: Some(TmuxReplay { modes, content }),
-        }
-    }
-}
-
-/// Which replay the forwarder is writing, and so what the client's
-/// terminal already shows when it arrives.
-///
-/// PLAN_M2_5.md is explicit: never replay into a populated terminal. Each
-/// kind's renderer decides what that requires of it; the forwarder only
-/// says which case it is in.
-#[derive(Clone, Copy)]
-enum ReplayOccasion {
-    /// The attach's own replay, into a terminal the client just created
-    /// (empty by construction).
-    Attach,
-    /// A catch-up mid-stream (after a flow-control cut or a pane death),
-    /// into a terminal already showing everything received before the
-    /// stream was cut.
-    Recovery,
-}
-
-/// One captured tmux screen: the pane's modes and its content bytes, as
-/// the snapshot machinery returns them.
-struct TmuxReplay {
-    modes: PaneModes,
-    content: Vec<u8>,
-}
-
-impl TmuxReplay {
-    /// Encode this screen for the client: optional reset, the
-    /// pre-content mode sequences, the captured content, then the
-    /// post-content sequences.
-    ///
-    /// Order is load-bearing (see `PaneModes`): the alternate-screen
-    /// switch must precede the content because it CLEARS the buffer it
-    /// switches to, and cursor placement must follow it because writing
-    /// content moves the cursor.
-    ///
-    /// The occasion is the only difference between the attach replay and
-    /// a catch-up, and the whole correctness argument for the second. A
-    /// [`ReplayOccasion::Recovery`] lands in a terminal already showing
-    /// the pre-cut output, and `\x1bc` (RIS) is what makes that case
-    /// equivalent to an attach: it clears screen AND scrollback, so the
-    /// catch-up's end state is a fresh reattach's end state rather than
-    /// the old content with a second copy of history appended under it.
-    fn render(self, occasion: ReplayOccasion) -> RenderedReplay {
-        let mut segments = Vec::with_capacity(4);
-        match occasion {
-            ReplayOccasion::Attach => {}
-            ReplayOccasion::Recovery => segments.push(b"\x1bc".to_vec()),
-        }
-        segments.push(self.modes.pre_content_sequences().into_bytes());
-        segments.push(self.content);
-        segments.push(self.modes.post_content_sequences().into_bytes());
-        RenderedReplay { segments }
-    }
-}
-
-/// A replay encoded for the client, in the order it must be written.
-///
-/// Kept as separate segments, each written as its own run of data frames
-/// by [`Forwarder::send_replay`], so that frame boundaries fall where they
-/// always have: a reset or a mode sequence never shares a frame with
-/// content.
-struct RenderedReplay {
-    segments: Vec<Vec<u8>>,
-}
-
-impl AttachOutput {
-    /// The attach replay, rendered for a terminal the client just created.
-    ///
-    /// Taken exactly once, by [`Forwarder::run`] before its first write; a
-    /// second call renders nothing, since the screen it captured has
-    /// already been handed out.
-    fn take_attach_replay(&mut self) -> RenderedReplay {
-        match self {
-            AttachOutput::Tmux(output) => match output.attach_replay.take() {
-                Some(replay) => replay.render(ReplayOccasion::Attach),
-                None => RenderedReplay {
-                    segments: Vec::new(),
-                },
-            },
-        }
-    }
-
-    /// Ask the terminal for an ordered recovery boundary after its process
-    /// died, without borrowing the stream's in-flight read: the forwarder
-    /// keeps polling the same `next_output` future while this runs. For
-    /// tmux this is the external `%pause` that [`OutputStream::request_pause`]
-    /// documents.
-    fn request_pause(
-        &self,
-    ) -> impl std::future::Future<Output = anyhow::Result<()>> + Send + 'static {
-        match self {
-            AttachOutput::Tmux(output) => output.stream.request_pause(),
-        }
-    }
-
-    /// The next live output event, `Ok(None)` once the terminal's output
-    /// has ended. Not cancellation-safe to abandon and then reuse the
-    /// stream; see [`OutputStream::next_output`].
-    async fn next_output(&mut self) -> anyhow::Result<Option<OutputEvent>> {
-        match self {
-            AttachOutput::Tmux(output) => output.stream.next_output().await,
-        }
-    }
-
-    /// Resume after the terminal cut this stream (an [`OutputEvent::Paused`])
-    /// and return the replay that catches the client up, rendered for a
-    /// terminal that already shows the output from before the cut.
-    async fn resume_paused_with_replay(&mut self) -> anyhow::Result<RenderedReplay> {
-        match self {
-            AttachOutput::Tmux(output) => {
-                let (modes, content) = output.stream.resume_paused_with_replay().await?;
-                Ok(TmuxReplay { modes, content }.render(ReplayOccasion::Recovery))
-            }
-        }
-    }
-
-    /// Close this stream at its safe boundary. `Err` carries the cleanup
-    /// that could not be confirmed yet: a future that keeps retrying until
-    /// it is, which the forwarder runs on a task of its own so that its
-    /// per-terminal barrier stays published until then (for tmux, see
-    /// [`OutputStream::shutdown`] and [`crate::tmux::OutputReaper`]).
-    async fn shutdown(
-        self,
-    ) -> Result<(), impl std::future::Future<Output = Result<(), Arc<str>>> + Send + 'static> {
-        match self {
-            AttachOutput::Tmux(output) => output
-                .stream
-                .shutdown()
-                .await
-                .map_err(|reaper| reaper.run()),
-        }
-    }
-}
-
-impl Forwarder {
-    /// Write the attach replay, mark its end, then pump live output until
-    /// something ends it.
-    ///
-    /// The whole task body, so the teardown obligations live in exactly
-    /// one place: the control client is always shut down, and a stall
-    /// additionally removes the attachment (via `detach_stalled`, which
-    /// must run on its own task — see there).
-    ///
-    /// The three phases are in this order because the marker's whole
-    /// meaning is its POSITION between them (PLAN_M5.md item 2): it is
-    /// emitted once the initial replay has been enqueued in full and
-    /// before `pump` can enqueue a single live byte. Nothing else in this
-    /// task may be inserted between the second and third steps.
-    pub(crate) async fn run(mut self, mut shutdown: watch::Receiver<bool>) {
-        // The attach replay is rendered for a brand-new client terminal
-        // (`ReplayOccasion::Attach`); only the catch-up path renders a
-        // recovery — see `catch_up_after_tmux_pause`.
-        let attach_replay = self.stream.take_attach_replay();
-        let end = {
-            let forwarding = async {
-                match self.send_replay(attach_replay).await {
-                    Ok(()) => match self.send_replay_complete().await {
-                        Ok(()) => self.pump().await,
-                        Err(end) => end,
-                    },
-                    Err(end) => end,
-                }
-            };
-            tokio::pin!(forwarding);
-            tokio::select! {
-                biased;
-                _ = shutdown.changed() => ForwarderEnd::Requested,
-                end = &mut forwarding => end,
-            }
-        };
-        // Ordered: establish the safe shutdown handoff before announcing any
-        // detach. A client that reattaches immediately must find either a
-        // reaped output client or the published barrier of the runtime-owned
-        // reaper that retained it. The cooperative shutdown arm above makes
-        // this path run even when teardown interrupts a blocked replay or
-        // output read.
-        let cleanup_gate = self.sup.seams.faults.forwarder_cleanup_gate().cloned();
-        let cleanup = self.cleanup.clone();
-        match self.stream.shutdown().await {
-            Ok(()) if cleanup_gate.is_none() => {
-                cleanup.send_replace(Some(Ok(())));
-            }
-            result => {
-                tokio::spawn(async move {
-                    let outcome = match result {
-                        Ok(()) => Ok(()),
-                        Err(reap) => reap.await,
-                    };
-                    if let Some(gate) = cleanup_gate {
-                        gate().await;
-                    }
-                    cleanup.send_replace(Some(outcome));
-                });
-            }
-        }
-        // Explicit teardown can win after forwarding ended naturally but
-        // before process cleanup finished. In that case its caller owns the
-        // detach reason; publishing the earlier natural reason afterward
-        // would be a stale second verdict on the same channel.
-        let end = if *shutdown.borrow_and_update() {
-            ForwarderEnd::Requested
-        } else {
-            end
-        };
-        report_forwarder_end(
-            &self.sup,
-            AttachmentKey::new(&self.session_id, self.terminal),
-            self.channel,
-            self.tx,
-            end,
-            self.stall_timeout,
-        );
-    }
-
-    /// Write one rendered replay to the client, segment by segment, under
-    /// the same client pause and stall deadline as live output.
-    ///
-    /// What the bytes are (the reset policy, mode sequences and their
-    /// order) is the terminal kind's decision and was made when the replay
-    /// was rendered (for tmux, [`TmuxReplay::render`]); this only delivers
-    /// them, for the attach replay and every catch-up alike.
-    async fn send_replay(&mut self, replay: RenderedReplay) -> Result<(), ForwarderEnd> {
-        for segment in replay.segments {
-            self.send_bytes(segment).await?;
-        }
-        Ok(())
-    }
-
-    /// Tell the client its attach's catch-up is over: every byte this
-    /// forwarder will replay from history has been enqueued, and the live
-    /// stream follows (`ControlMsg::ReplayComplete`, PLAN_M5.md item 2).
-    ///
-    /// Called from exactly one place — between the initial replay and the
-    /// live pump in [`Self::run`] — and deliberately NOT from
-    /// [`Self::catch_up_after_tmux_pause`]: M2.5's flow-control recovery
-    /// replays history into an attachment that is already live, and the
-    /// marker bounds the ATTACH's catch-up, not every catch-up the
-    /// attachment will ever perform. A marker there would tell a consumer
-    /// a second catch-up phase had just ended when none had begun, and
-    /// the pause recovery's presentation is explicitly out of M5's scope.
-    ///
-    /// Ordering needs no machinery of its own, which is the design: the
-    /// marker is enqueued onto the SAME per-connection writer queue as
-    /// this channel's data frames (see [`CONNECTION_WRITER_QUEUE`]), and
-    /// this task is the only producer of that channel's replay, marker and
-    /// live data — so "after every replay byte, before any live byte"
-    /// follows from the two calls around this one rather than from a
-    /// promise anybody has to keep. (It is not the only producer on the
-    /// channel at all: a teardown elsewhere can enqueue a channel-
-    /// correlated `Detached`, which by construction is the last frame the
-    /// channel carries and so orders against nothing that still matters.)
-    ///
-    /// Unlike [`Self::send_bytes`] this does not park on a client pause.
-    /// The pause contract is about not pushing terminal OUTPUT at a
-    /// client that asked for silence; the marker carries none, is already
-    /// queued behind every replay frame it describes, and holding it back
-    /// would leave a paused client's catch-up unbounded from its own
-    /// point of view. It is still raced against the same absolute stall
-    /// deadline, because a client that has stopped draining can otherwise
-    /// pin this task on a full queue forever.
-    async fn send_replay_complete(&mut self) -> Result<(), ForwarderEnd> {
-        let frame = Frame::control(&ControlMsg::ReplayComplete {
-            channel: self.channel,
-        });
-        tokio::select! {
-            result = self.tx.send(frame) => result.map_err(|_| ForwarderEnd::ClientGone),
-            () = stalled_past_deadline(self.pause_rx.clone(), self.stall_timeout) => {
-                Err(ForwarderEnd::Stalled)
-            }
-        }
-    }
-
-    /// Park while the client has output paused, returning `Err(Stalled)`
-    /// once this ONE pause has outlived [`STALL_DETACH_TIMEOUT`].
-    ///
-    /// The deadline is absolute: it is computed from the instant the pause
-    /// STARTED (stored in the watch by `set_attachment_paused`), never
-    /// from whenever this function happened to be called. That is what
-    /// makes the timeout a hard maximum across every phase a forwarder can
-    /// be in — initial replay, live pump, catch-up replay — and across
-    /// every individual chunk within them. A per-call timer would be
-    /// restarted by any progress at all, so a client draining just fast
-    /// enough to keep the forwarder moving between chunks could stay
-    /// paused forever.
-    async fn park_while_paused(&mut self) -> Result<(), ForwarderEnd> {
-        park_while_paused(&mut self.pause_rx, self.stall_timeout).await
-    }
-
-    /// Enqueue `bytes` as one or more data frames, honoring the client's
-    /// pause before every one and blocking on the bounded writer queue
-    /// when it is full — which is the backpressure this milestone exists
-    /// to introduce.
-    ///
-    /// Gating EVERY chunk, not merely the top of the pump loop, is what
-    /// makes the watermark actually work: a replay, or a single large
-    /// output notification, can be megabytes, and a version that consulted
-    /// the pause only between EVENTS would push that entire burst at a
-    /// client which had already said stop.
-    ///
-    /// Chunked at [`REPLAY_CHUNK`] for a harsher reason than the replay's
-    /// own progressiveness: one bounded output notification may still be
-    /// larger than a protocol frame, and the encoder rejects that rather
-    /// than sending something the far side cannot decode. This is the
-    /// last chunking boundary; input and replay already do the same.
-    async fn send_bytes(&mut self, bytes: Vec<u8>) -> Result<(), ForwarderEnd> {
-        for chunk in bytes.chunks(REPLAY_CHUNK) {
-            self.park_while_paused().await?;
-            let frame = Frame::data(self.channel, chunk.to_vec());
-            // Raced against the SAME absolute deadline so a client that
-            // pauses mid-send cannot pin this task (and the frames behind
-            // it) on a queue nobody is draining. Cancelling a
-            // `Sender::send` is safe — the frame is either enqueued or it
-            // is not — and on the stall path the whole attachment is torn
-            // down anyway.
-            tokio::select! {
-                result = self.tx.send(frame) => {
-                    if result.is_err() {
-                        return Err(ForwarderEnd::ClientGone);
-                    }
-                    // Output-path checkpoint; see the first one in
-                    // `OutputStream::next_output`.
-                    debug!(channel = self.channel, len = chunk.len(), "terminal output queued for the client");
-                }
-                () = stalled_past_deadline(self.pause_rx.clone(), self.stall_timeout) => {
-                    return Err(ForwarderEnd::Stalled);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Pump pane output to the client until the stream, the client, or
-    /// the client's patience ends.
-    async fn pump(&mut self) -> ForwarderEnd {
-        // There is no reliable byte-loss oracle: tmux 3.7c can silently drop
-        // queued control output at pane EOF. Recover once on every observed
-        // death, even if the live bytes happened to arrive in full.
-        let mut death_requested = false;
-        let pause_request = self.stream.request_pause();
-        tokio::pin!(pause_request);
-        loop {
-            // Park while the client has asked for silence. Not reading
-            // the control client at all IS the flow control: past
-            // `pause-after`, tmux answers by either throttling the pane
-            // (the agent's write blocks) or cutting this client's stream
-            // with `%pause` — see TMUX_PAUSE_AFTER_SECS for why both
-            // happen and why nothing here may assume which. Either way
-            // the tmux server's memory stays flat, which is the property
-            // this parking exists to get.
-            if let Err(end) = self.park_while_paused().await {
-                return end;
-            }
-
-            let event = {
-                let next_output = self.stream.next_output();
-                tokio::pin!(next_output);
-                loop {
-                    tokio::select! {
-                        biased;
-                        () = wait_for_pane_death(&mut self.death_rx), if !death_requested => {
-                            death_requested = true;
-                            // Retain the SAME read future across the external
-                            // pause. It may already own a partial control line
-                            // or be writing a foreign-pane filter. Only teardown
-                            // may abandon it, never a recoverable notification.
-                            let request = async {
-                                wait_until_resumed(self.pause_rx.clone()).await;
-                                pause_request.as_mut().await
-                            };
-                            tokio::select! {
-                                result = request => {
-                                    if let Err(error) = result {
-                                        return ForwarderEnd::StreamFailed(format!("{error:#}"));
-                                    }
-                                }
-                                () = stalled_past_deadline(self.pause_rx.clone(), self.stall_timeout) => {
-                                    return ForwarderEnd::Stalled;
-                                }
-                            }
-                        }
-                        event = &mut next_output => break event,
-                        () = stalled_past_deadline(self.pause_rx.clone(), self.stall_timeout) => {
-                            // This is teardown: abandoning the read is safe
-                            // because the stream will never be reused.
-                            return ForwarderEnd::Stalled;
-                        }
-                    }
-                }
-            };
-            match event {
-                Ok(Some(OutputEvent::Bytes(bytes))) => {
-                    if self
-                        .sup
-                        .seams
-                        .faults
-                        .suppress_live_output()
-                        .is_some_and(|suppress| suppress.load(Ordering::SeqCst))
-                    {
-                        continue;
-                    }
-                    if let Err(end) = self.send_bytes(bytes).await {
-                        return end;
-                    }
-                }
-                Ok(Some(OutputEvent::Paused)) => {
-                    if let Err(end) = self.catch_up_after_tmux_pause(death_requested).await {
-                        return end;
-                    }
-                }
-                Ok(None) => return ForwarderEnd::TerminalEnded,
-                Err(e) => return ForwarderEnd::StreamFailed(format!("{e:#}")),
-            }
-        }
-    }
-
-    /// Recover from tmux having cut this client's pane stream: continue
-    /// the pane and replay it as a full reattach.
-    ///
-    /// A `%pause` means bytes were dropped from the LIVE path — they are
-    /// not buffered anywhere and will never arrive. What tmux still has is
-    /// its history, which is exactly what the attach path already knows
-    /// how to replay, so the catch-up reuses that machinery verbatim
-    /// (`OutputStream::resume_paused_with_replay`) instead of growing a
-    /// second replay implementation. Alternate-screen and normal-screen
-    /// panes are both covered for free: the shared snapshot code already
-    /// picks the right capture for the pane's current mode.
-    ///
-    /// Also used after pane death: tmux 3.7c discards pending control output
-    /// at EOF while retaining the rendered cells. An external per-client
-    /// pause gives that recovery the same ordered `%pause` boundary. Death
-    /// during an earlier capture remains latched and gets another capture,
-    /// since the earlier one may predate the final output.
-    /// The diagnostic records whether this pump requested a death pause;
-    /// natural flow control can already have queued a pause at that boundary.
-    ///
-    /// The rendered recovery resets the client's terminal first, because
-    /// the replay assumes an empty one — see [`TmuxReplay::render`].
-    /// Within `HISTORY_LIMIT` this is lossless; past it, it degrades to the
-    /// history floor, which is the same floor the browser's own scrollback
-    /// is capped at, so the end state stays observably equivalent to
-    /// lossless slow delivery (PLAN_M2_5.md).
-    ///
-    /// A failure here is fatal to the attachment rather than ignorable: a
-    /// pane left paused delivers nothing ever again, so pretending
-    /// otherwise would leave a live-looking terminal that has silently
-    /// stopped.
-    ///
-    /// This replay is deliberately MARKERLESS: no `ReplayComplete` is
-    /// emitted here, and none may be added (PLAN_M5.md item 2 draws the
-    /// boundary, and a test pins it). The marker means "this attach's
-    /// initial catch-up ended"; this catch-up happens mid-stream on an
-    /// attachment that already finished one, so history reappearing on
-    /// the channel after the marker is a documented possibility rather
-    /// than a contradiction — see [`Self::send_replay_complete`].
-    async fn catch_up_after_tmux_pause(
-        &mut self,
-        death_requested: bool,
-    ) -> Result<(), ForwarderEnd> {
-        if let Some(observe) = self.sup.seams.faults.tmux_recovery_observer() {
-            observe(self.channel, death_requested);
-        }
-        info!(
-            channel = self.channel,
-            session = %self.session_id,
-            terminal = ?self.terminal,
-            reason = if death_requested { "pane_death_requested" } else { "tmux_flow_control" },
-            "tmux paused the pane for this client; catching up by reset and replay"
-        );
-        let replay = match self.stream.resume_paused_with_replay().await {
-            Ok(replay) => replay,
-            Err(e) => return Err(ForwarderEnd::StreamFailed(format!("{e:#}"))),
-        };
-        self.send_replay(replay).await
-    }
-}
-
 /// Tell the client how its attachment ended, as `end` says, from the output
 /// task that reported it. Must be called from that task: the detach arbiters
 /// below identify "this attachment" by the reporting task's id.
 ///
-/// The arbiters identify "this attachment" by the forwarder task that
-/// reports the verdict. Channel ids are reused, so a client that detaches
-/// and reattaches on the same channel of the same connection produces a
+/// The arbiters identify "this attachment" by the output task that reports
+/// the verdict. Channel ids are reused, so a client that detaches and
+/// reattaches on the same channel of the same connection produces a
 /// replacement that matches on channel and connection alone; only the
-/// forwarder's task id tells it apart. Every output task (`Forwarder::run`,
-/// the grid sender's `run`) executes as the task `ActiveAttach::forwarder`
-/// joins.
+/// task's id tells it apart. The grid sender's `run` executes as the task
+/// `ActiveAttach::forwarder` joins.
 pub(crate) fn report_forwarder_end(
     sup: &Arc<Supervisor>,
     key: AttachmentKey,
@@ -1895,9 +1281,7 @@ pub(crate) fn report_forwarder_end(
     match end {
         ForwarderEnd::Requested | ForwarderEnd::ClientGone => {}
         ForwarderEnd::TerminalEnded => {
-            // Output-path checkpoint; see the first one in
-            // `OutputStream::next_output`.
-            debug!(channel, session = %key.session, "pane output stream ended; detaching");
+            debug!(channel, session = %key.session, "terminal ended; detaching");
             detach_naturally(
                 sup,
                 key,
@@ -1945,8 +1329,8 @@ pub(crate) fn report_forwarder_end(
 
 /// Park while the client has output paused, returning `Err(Stalled)` once
 /// this ONE pause has outlived `stall_timeout`, measured from the instant it
-/// started (see [`Forwarder::park_while_paused`] for why the deadline is
-/// absolute). Shared by every output task.
+/// started: re-entering the park after a wakeup cannot restart the clock
+/// (see [`stalled_past_deadline`]).
 pub(crate) async fn park_while_paused(
     pause_rx: &mut watch::Receiver<Option<tokio::time::Instant>>,
     stall_timeout: Duration,
@@ -1972,34 +1356,8 @@ pub(crate) async fn park_while_paused(
     }
 }
 
-/// Await a latched death, including one published before this read started.
-/// Sender closure belongs to teardown; it must not manufacture pane death.
-async fn wait_for_pane_death(death: &mut watch::Receiver<bool>) {
-    loop {
-        if *death.borrow_and_update() {
-            return;
-        }
-        if death.changed().await.is_err() {
-            return std::future::pending().await;
-        }
-    }
-}
-
-/// Defer a recovery request while client flow control forbids progress.
-/// The caller races this wait against the original absolute stall deadline.
-async fn wait_until_resumed(mut pause: watch::Receiver<Option<tokio::time::Instant>>) {
-    loop {
-        if pause.borrow_and_update().is_none() {
-            return;
-        }
-        if pause.changed().await.is_err() {
-            return std::future::pending().await;
-        }
-    }
-}
-
 /// Resolve only once the attachment has been paused CONTINUOUSLY past
-/// `timeout` — the stall detector every blocking await in a forwarder is
+/// `timeout` — the stall detector every blocking await in an output task is
 /// raced against.
 ///
 /// Safe to create fresh at each `select!` site precisely because the
@@ -2007,8 +1365,8 @@ async fn wait_until_resumed(mut pause: watch::Receiver<Option<tokio::time::Insta
 /// from now: re-creating it cannot restart the clock, so the hard maximum
 /// survives however many chunks, phases, or wakeups a single pause spans.
 /// (An earlier version timed from `Instant::now()` and had exactly that
-/// bug — a client draining slowly enough to keep the forwarder awaiting,
-/// but fast enough to keep it moving, was never detached.)
+/// bug — a client draining slowly enough to keep the task awaiting, but
+/// fast enough to keep it moving, was never detached.)
 ///
 /// Resolving only on a CONTINUOUS pause is what keeps this a hard maximum
 /// pause duration rather than a cumulative budget: a client that pauses
@@ -2042,25 +1400,23 @@ pub(crate) async fn stalled_past_deadline(
 
 /// Tear down an attachment whose client stalled, on a task of its own.
 ///
-/// Spawned rather than run inline because forwarders must never take
+/// Spawned rather than run inline because output tasks must never take
 /// `Supervisor::attachments`: the takeover, detach, and delete paths all
-/// request shutdown and await a forwarder while holding that mutex, so a
-/// forwarder blocking on it would deadlock the supervisor outright. A
-/// separate task can wait for the lock safely: it is not the task being
-/// awaited, so a teardown holding the mutex can always make progress and
-/// release it. (This does NOT assume the spawning forwarder has already
-/// returned — it may still be unwinding when this runs. Nothing here depends
-/// on that: the forwarder has already shut its control client down before
-/// spawning this, and the signal-then-await below reaps the handle whenever it
-/// finishes.)
+/// request shutdown and await an output task while holding that mutex, so a
+/// task blocking on it would deadlock the supervisor outright. A separate
+/// task can wait for the lock safely: it is not the task being awaited, so a
+/// teardown holding the mutex can always make progress and release it.
+/// (This does NOT assume the reporting task has already returned — it may
+/// still be unwinding when this runs; the signal-then-await below joins it
+/// whenever it finishes.)
 ///
-/// The identity check adds the reporting forwarder's task id (`origin`) to
+/// The identity check adds the reporting output task's id (`origin`) to
 /// the channel-plus-connection check other ownership checks in this module
 /// use: by the time this runs, a takeover may already have installed a
 /// different attachment for this terminal, or the same client may have
 /// detached and reattached on the very same channel, and tearing either one
 /// down would kill a live terminal. Channel and connection cannot tell that
-/// reattach from the stalled original; the forwarder task can.
+/// reattach from the stalled original; the task id can.
 ///
 /// Scoped to ONE terminal, deliberately (PLAN_M4.md item 3 settles this):
 /// a client whose agent view is healthy but whose background tab wedged
@@ -2094,25 +1450,10 @@ fn detach_stalled(
         let removed = attachments.remove(&key);
         if let Some(old) = removed {
             // Signal-and-await like every other teardown, even though the
-            // forwarder is the very task that asked for this: it has
-            // already handed its control client to safe shutdown and is about
-            // to return, so this only joins that completion. Dropping the
-            // removed attachment's backend after that join kills its input
-            // client, then orderly reaps the sink when this was the
-            // session's last attachment.
-            sup.begin_forwarder_shutdown(key.clone(), &old);
-            let ActiveAttach {
-                forwarder, backend, ..
-            } = old;
-            if let Err(cleanup) = sup.record_forwarder_join(key.clone(), forwarder.await) {
-                warn!(
-                    session = %key.session,
-                    terminal = ?key.terminal,
-                    error = %cleanup,
-                    "stalled terminal output cleanup remains unconfirmed"
-                );
-            }
-            drop(backend);
+            // output task is the very task that asked for this: it is about
+            // to return, so this only joins that completion.
+            old.request_forwarder_shutdown();
+            join_forwarder(&key, old.forwarder).await;
         }
         drop(attachments);
         let _ = tx
@@ -2125,14 +1466,14 @@ fn detach_stalled(
     });
 }
 
-/// Claim and report a forwarder's natural terminal verdict on a separate task.
+/// Claim and report an output task's natural terminal verdict on a separate task.
 ///
-/// A forwarder cannot take `attachments`: teardown may hold that lock while it
+/// An output task cannot take `attachments`: teardown may hold that lock while it
 /// awaits this very task. The separate arbiter identity-checks and removes the
 /// still-current attachment instead. An explicit restart, takeover, close, or
 /// connection teardown that removed it first therefore owns the only notice;
 /// the stale natural verdict is discarded. "Still current" includes the
-/// reporting forwarder's task id (`origin`), because a detach and reattach on
+/// reporting output task's id (`origin`), because a detach and reattach on
 /// the same channel of the same connection installs a replacement that
 /// matches on channel and connection alone.
 ///
@@ -2141,8 +1482,8 @@ fn detach_stalled(
 /// the session's viewers, or returned, before it claims anything: the
 /// Delete ends the session's terminals before it detaches their viewers, so
 /// a terminal host's stream can end first, and its viewer must hear the
-/// Delete's own notice (deleted, or why it failed), as an old terminal's
-/// viewer does (`Supervisor::deletes_in_progress`).
+/// Delete's own notice (deleted, or why it failed)
+/// (`Supervisor::deletes_in_progress`).
 fn detach_naturally(
     sup: &Arc<Supervisor>,
     key: AttachmentKey,
@@ -2153,9 +1494,6 @@ fn detach_naturally(
 ) {
     let sup = Arc::clone(sup);
     tokio::spawn(async move {
-        if let Some(gate) = sup.seams.faults.natural_detach_gate() {
-            gate().await;
-        }
         // A Delete that ended this terminal sends the notice itself once it
         // knows its outcome; by the time it is over the attachment is either
         // gone from the map (detached as deleted, or with why the Delete
@@ -2172,19 +1510,8 @@ fn detach_naturally(
         let old = attachments
             .remove(&key)
             .expect("the identity-checked attachment remains under the lock");
-        sup.begin_forwarder_shutdown(key.clone(), &old);
-        let ActiveAttach {
-            forwarder, backend, ..
-        } = old;
-        if let Err(cleanup) = sup.record_forwarder_join(key.clone(), forwarder.await) {
-            warn!(
-                session = %key.session,
-                terminal = ?key.terminal,
-                error = %cleanup,
-                "naturally ended terminal output cleanup remains unconfirmed"
-            );
-        }
-        drop(backend);
+        old.request_forwarder_shutdown();
+        join_forwarder(&key, old.forwarder).await;
         drop(attachments);
         notify_detached(&tx, channel, reason, DetachCode::Other);
     });
@@ -2211,7 +1538,7 @@ fn detach_naturally(
 ///
 /// A pause records WHEN it started and a resume clears it, and a pause
 /// arriving while already paused changes nothing at all. That last part is
-/// load-bearing rather than tidy: the forwarder's hard maximum is measured
+/// load-bearing rather than tidy: the output task's hard maximum is measured
 /// from this stored instant (see [`stalled_past_deadline`]), so letting a
 /// repeated `PauseOutput` overwrite it would let a client hold an
 /// attachment open forever simply by re-sending pause. `send_if_modified`
@@ -2264,247 +1591,6 @@ mod tests {
     use super::*;
     use farhelm_proto::SessionLaunch;
     use farhelm_proto::{RestartOffer, SessionInfo, SessionStatus};
-
-    /// Keep the honest supervisor's output chunk within the smallest terminal
-    /// data frame a supported helm accepts. The failure text points at the
-    /// shared limit's documentation so a future chunk-size change does not
-    /// silently detach every terminal on older helms.
-    #[allow(
-        clippy::assertions_on_constants,
-        reason = "this test keeps the cross-crate chunk-size contract visible"
-    )]
-    #[farhelm_testtrace::test]
-    fn replay_chunk_stays_within_the_helm_terminal_data_limit() {
-        assert!(
-            REPLAY_CHUNK <= farhelm_proto::MAX_TERMINAL_DATA_LEN,
-            "REPLAY_CHUNK ({REPLAY_CHUNK}) exceeds MAX_TERMINAL_DATA_LEN ({}); read the shared limit's doc comment before raising either constant",
-            farhelm_proto::MAX_TERMINAL_DATA_LEN
-        );
-    }
-
-    /// A pane's final write must reach the already-live attachment even when
-    /// the control stream loses it at EOF. The fault drops all live bytes after
-    /// a verified live marker; the producer still writes and exits immediately.
-    /// Recovery must replace earlier content with one complete history, even
-    /// when death was published while the client had output paused. Existing
-    /// flow-control tests own the scheduling proof of silence during a pause.
-    /// This models missing delivery deterministically, not tmux's scheduling
-    /// race; the e2e repetition exercises that race without the seam.
-    #[farhelm_testtrace::test]
-    async fn pane_death_recovers_missing_final_output_after_client_resume() {
-        use super::super::core::{SupervisorSeams, SupervisorTimeouts};
-        use super::super::terminals::{AttachBackend, PaneDeath, TmuxAttach};
-        use std::sync::atomic::AtomicBool;
-
-        let state = StateDir::new();
-        let suppress = Arc::new(AtomicBool::new(false));
-        let mut seams = SupervisorSeams::default();
-        seams.faults.suppress_live_output = Some(Arc::clone(&suppress));
-        let sup = Supervisor::new_with_seams(
-            state.path(),
-            dummy_exe(),
-            SupervisorTimeouts::default(),
-            seams,
-        )
-        .await
-        .expect("supervisor");
-        let session = "fh-final-output";
-        let pane = sup.tmux.create_session(session, "/", 80, 24, &[], &[
-            "sh".to_owned(), "-c".to_owned(),
-            "stty -echo; printf 'READY\n'; read first; printf 'LIVE-BEFORE\n'; read second; printf 'FINAL-OUTPUT\n'".to_owned(),
-        ]).await.expect("create input-gated producer");
-        let mut input = sup
-            .tmux
-            .open_input_client(session, &pane)
-            .await
-            .expect("input client");
-        let (modes, prefill, stream) = sup
-            .tmux
-            .open_replay_stream(session, &pane)
-            .await
-            .expect("replay stream");
-        let (death, death_rx) = PaneDeath::new(session, &pane);
-        let (pause, pause_rx) = watch::channel(None);
-        let (shutdown, shutdown_rx) = watch::channel(false);
-        let (cleanup, cleanup_rx) = watch::channel(None);
-        let (tx, mut rx) = mpsc::channel(64);
-        let forwarder = tokio::spawn(
-            Forwarder {
-                sup: Arc::clone(&sup),
-                session_id: "final-output".to_owned(),
-                terminal: TerminalId::Agent,
-                channel: 7,
-                tx: tx.clone(),
-                stream: AttachOutput::Tmux(TmuxOutput::new(modes, prefill, stream)),
-                pause_rx,
-                death_rx,
-                stall_timeout: Duration::from_secs(60),
-                cleanup,
-            }
-            .run(shutdown_rx),
-        );
-        let key = AttachmentKey::new("final-output", TerminalId::Agent);
-        let attached_input = sup
-            .tmux
-            .open_input_client(session, &pane)
-            .await
-            .expect("attachment input");
-        let sink = sup
-            .ensure_session_sink(session)
-            .await
-            .expect("session sink");
-        sup.attachments.lock().await.insert(
-            key.clone(),
-            ActiveAttach {
-                channel: 7,
-                lease: String::new(),
-                notify: tx,
-                forwarder,
-                forwarder_shutdown: shutdown.clone(),
-                forwarder_cleanup: cleanup_rx,
-                pause: pause.clone(),
-                backend: AttachBackend::Tmux(TmuxAttach {
-                    pane_death: death,
-                    input: attached_input,
-                    sink,
-                }),
-            },
-        );
-        let mut transcript = Vec::new();
-        let mut replayed = false;
-        tokio::time::timeout(Duration::from_secs(30), async {
-            while !replayed || !transcript.windows(5).any(|w| w == b"READY") {
-                let frame = rx.recv().await.expect("forwarder remains attached");
-                if frame.channel == 7 {
-                    transcript.extend(frame.body);
-                } else if matches!(
-                    serde_json::from_slice::<ControlMsg>(&frame.body),
-                    Ok(ControlMsg::ReplayComplete { channel: 7 })
-                ) {
-                    replayed = true;
-                }
-                assert!(transcript.len() < 128 * 1024, "bounded fixture output");
-            }
-        })
-        .await
-        .expect("producer readiness and initial replay");
-        assert!(!sup.tmux.pane_states().await.expect("live premise")[&pane].dead);
-        transcript.clear();
-        input.send(b"first\n").await.expect("release first gate");
-        receive_through(&mut rx, &mut transcript, b"LIVE-BEFORE").await;
-        assert!(
-            !transcript.windows(2).any(|w| w == b"\x1bc"),
-            "readiness must arrive live"
-        );
-        assert!(
-            !sup.tmux
-                .pane_states()
-                .await
-                .expect("live premise before exit")[&pane]
-                .dead
-        );
-        suppress.store(true, Ordering::SeqCst);
-        apply_pause_transition(&pause, true);
-        input
-            .send(b"second\n")
-            .await
-            .expect("release immediate write-and-exit");
-        let probe_started = tokio::time::Instant::now();
-        let dead_states = tokio::time::timeout(Duration::from_secs(30), async {
-            loop {
-                let states = sup.tmux.pane_states().await.expect("death probe");
-                if states.get(&pane).is_some_and(|state| state.dead) {
-                    break states;
-                }
-                // sleep-ok: bounded polling for the producer's actual tmux dead state, not elapsed-time readiness.
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await
-        .expect("producer must exit while attachment is paused");
-        {
-            let held_map = sup.attachments.lock().await;
-            // This synchronous call must return while the map remains held;
-            // a busy attach or teardown cannot hold the ticker hostage.
-            super::super::ticker::publish_pane_deaths(&sup, &dead_states, probe_started);
-            drop(held_map);
-        }
-        super::super::ticker::publish_pane_deaths(&sup, &dead_states, probe_started);
-        // Check the queue's present contents before resuming. This does not
-        // assert that the forwarder has been scheduled since publication;
-        // the recovery below proves the death survives the paused boundary.
-        while let Ok(frame) = rx.try_recv() {
-            if frame.channel == 7 {
-                transcript.extend(frame.body);
-            }
-        }
-        assert!(!transcript.windows(12).any(|w| w == b"FINAL-OUTPUT"));
-        assert!(!transcript.windows(2).any(|w| w == b"\x1bc"));
-        apply_pause_transition(&pause, false);
-        receive_through(&mut rx, &mut transcript, b"FINAL-OUTPUT").await;
-        let reset = transcript
-            .windows(2)
-            .position(|w| w == b"\x1bc")
-            .expect("missing live bytes require a reset");
-        let replay = &transcript[reset + 2..];
-        assert_eq!(
-            replay.windows(11).filter(|w| *w == b"LIVE-BEFORE").count(),
-            1,
-            "reset replay must replace the previously delivered content once"
-        );
-        assert_eq!(
-            replay.windows(12).filter(|w| *w == b"FINAL-OUTPUT").count(),
-            1
-        );
-        shutdown.send_replace(true);
-        let attachment = sup
-            .attachments
-            .lock()
-            .await
-            .remove(&key)
-            .expect("attachment retained after death");
-        tokio::time::timeout(Duration::from_secs(30), attachment.forwarder)
-            .await
-            .expect("orderly shutdown")
-            .expect("forwarder task");
-        while let Ok(frame) = rx.try_recv() {
-            assert_eq!(
-                frame.channel, 7,
-                "death recovery must stay markerless: {frame:?}"
-            );
-            transcript.extend(frame.body);
-        }
-        assert_eq!(
-            transcript.windows(2).filter(|w| *w == b"\x1bc").count(),
-            1,
-            "one death must cause only one reset"
-        );
-    }
-
-    /// Consume this fixture's live channel up to a named output boundary, with
-    /// bounded time and memory so a broken recovery cannot hang or flood a test.
-    async fn receive_through(
-        rx: &mut mpsc::Receiver<Frame>,
-        transcript: &mut Vec<u8>,
-        marker: &[u8],
-    ) {
-        tokio::time::timeout(Duration::from_secs(30), async {
-            while !transcript.windows(marker.len()).any(|w| w == marker) {
-                let frame = rx.recv().await.expect("forwarder remains attached");
-                assert_eq!(frame.channel, 7, "unexpected control frame: {frame:?}");
-                transcript.extend(frame.body);
-                assert!(transcript.len() < 128 * 1024, "bounded fixture output");
-            }
-        })
-        .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "missing {:?}; received {:?}",
-                String::from_utf8_lossy(marker),
-                String::from_utf8_lossy(transcript)
-            )
-        });
-    }
 
     /// The defusal this whole change exists for: an oversized reply must
     /// never reach the writer task, because the writer's fatal-on-any-
@@ -3093,7 +2179,7 @@ mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not run the launch shim");
         let first_identity = hello_host_identity_over_a_fresh_connection(&sup).await;
         uuid::Uuid::parse_str(&first_identity).expect("the identity must be a real UUID");
 
@@ -3156,7 +2242,7 @@ mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not run the launch shim");
         assert!(
             sup.owns_state_dir(),
             "test fixture: the first construction against a fresh state dir must own it"
@@ -3187,7 +2273,7 @@ mod tests {
         // is released synchronously by `sup`'s drop above, but that is a
         // kernel-level fact this test thread only learns about through an
         // ordinary syscall — under a heavily loaded test run (many other
-        // tests' real tmux servers competing for the scheduler) the retry
+        // tests' real terminal hosts competing for the scheduler) the retry
         // below is what absorbs the gap, rather than this test flaking on
         // a claim that is releasing but has not quite finished the
         // instant this line runs.
@@ -3235,7 +2321,7 @@ mod tests {
         let state = StateDir::new();
         let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
             .await
-            .expect("supervisor construction touches only tmux, not the launch shim");
+            .expect("supervisor construction does not run the launch shim");
         let (tx, mut rx) = mpsc::channel(CONNECTION_WRITER_QUEUE);
         let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
@@ -3285,7 +2371,7 @@ mod tests {
     /// permit there, which froze typing on the whole host while eight
     /// management operations held the slots. This pins the replacement at
     /// the helper itself, with a 2-permit semaphore and tasks held by a
-    /// `Notify`, so no real tmux or timing decides the outcome. A
+    /// `Notify`, so no real terminal or timing decides the outcome. A
     /// regression back to waiting makes the third call below not complete
     /// at all, which the bounded await turns into a failure.
     #[farhelm_testtrace::test]
@@ -3478,20 +2564,14 @@ mod tests {
     /// of the exact deadline (the loop's advance granularity, not wall-clock
     /// slack: virtual time cannot drift, so the bound is one tick wide).
     ///
-    /// This is the precise version of the property the e2e suite's
-    /// `terminal_backpressure::a_paused_replay_detaches_relative_to_the_
-    /// first_pause_despite_pause_spam` test can only bound loosely: that
-    /// test measures real wall-clock elapsed time against a fire-and-
-    /// forget `PauseOutput` send, so delivery and teardown latency eat
-    /// into whatever slack its ceiling allows, and an implementation whose
-    /// anchor drifts by less than that slack would still pass it. Here,
-    /// under a paused clock, "measured from the first pause" and "measured
-    /// from anything else" resolve at two DIFFERENT virtual instants, so
-    /// any wrong anchor misses the assertion below deterministically.
+    /// Under a paused clock, "measured from the first pause" and "measured
+    /// from anything else" resolve at two DIFFERENT virtual instants, so any
+    /// wrong anchor misses the assertion below deterministically, which a
+    /// wall-clock end-to-end test (the tmux era's byte-stream one) could
+    /// only bound loosely.
     ///
-    /// No real process or I/O is awaited anywhere in this test — see
-    /// `terminals.rs`'s `a_healthy_sink_run_resets_the_respawn_backoff` for
-    /// why that matters under `start_paused`: an awaited real-world event
+    /// No real process or I/O is awaited anywhere in this test, which
+    /// matters under `start_paused`: an awaited real-world event
     /// parks the runtime with nothing else ready, and tokio's time driver
     /// is then free to auto-advance the frozen clock straight through the
     /// very window being measured. Everything exercised here — a `watch`

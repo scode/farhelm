@@ -19,7 +19,6 @@
 
 use super::core::{SessionEntry, Supervisor};
 use super::launch_artifacts::stopped_before_start;
-use super::status::dead_pane_exit_code;
 use crate::procs::{self, ProcessState};
 use crate::store::Transition;
 use std::collections::{HashMap, HashSet};
@@ -298,12 +297,12 @@ impl SweepTarget {
 /// same-uid parent, so a reparented descendant exec'd into `/bin/sh` (or
 /// any other platform binary) reads as marker-less there no matter what
 /// its environment really holds. The PPID closure still finds such a
-/// process while it remains in the pane's tree, which is why Delete roots
-/// its walk at every pane the session has rather than the agent's alone;
+/// process while it remains in the terminal's tree, which is why Delete roots
+/// its walk at every terminal the session has rather than the agent's alone;
 /// once reparented it is
 /// unreachable by this scan on that OS. The recorded follow-up is a
-/// session-id membership channel (tmux panes are session leaders, and a
-/// SID survives fork, exec, and reparenting), deliberately deferred —
+/// session-id membership channel (a terminal host's child is a session
+/// leader, and a SID survives fork, exec, and reparenting), deliberately deferred —
 /// see `procs::read_environ`'s docs for the observation itself.
 ///
 /// What is scanned is the EXEC-TIME environment and only that, identically
@@ -564,7 +563,7 @@ fn expand_ppid_closure(
 /// `root_pid` carries no prior identity to validate on its first use —
 /// this is the moment its (pid, starttime) pair gets established, by
 /// trusting whatever the snapshot reports for it right now (it was just
-/// queried fresh from tmux). Every LATER round passes `root_pid: None`
+/// read fresh from the terminal). Every LATER round passes `root_pid: None`
 /// and relies on `seeds` instead, because by then the root's identity, if
 /// it was found, is already sitting in `seeds` (folded in by
 /// `kill_process_tree` reusing its own previous result) — from that point
@@ -1289,22 +1288,16 @@ impl ScopeUnits {
         }
     }
 
-    /// Preserve a tab's own containment selection independently of the
-    /// session-based fallback used only for legacy re-probe/error policy.
-    pub(crate) fn tab(
-        unit: Option<String>,
-        selection: crate::terminal_process::TabScope,
-        session_scoped: bool,
-    ) -> Self {
-        use crate::terminal_process::TabScope;
-        let mut units = match selection {
-            TabScope::Scoped => Self::recorded(unit),
-            TabScope::Unscoped => Self::derived(unit.into_iter().collect()),
-            TabScope::Unknown if session_scoped => Self::recorded(unit),
-            TabScope::Unknown => Self::possible(unit),
-        };
-        units.needs_sweep |= selection != TabScope::Scoped;
-        units
+    /// A tab's own scope unit, by whether its tag records it was opened
+    /// `scoped`: a scoped tab has its unit handled like a recorded one, while
+    /// an unscoped tab's name is only a guess, and the portable sweep stays
+    /// required for it.
+    pub(crate) fn tab(unit: Option<String>, scoped: bool) -> Self {
+        if scoped {
+            Self::recorded(unit)
+        } else {
+            Self::derived(unit.into_iter().collect())
+        }
     }
 
     /// Unreadable selection is not evidence of containment. Keep optional
@@ -1316,13 +1309,8 @@ impl ScopeUnits {
     /// Delete historically treats tab names as derived cleanup handles.
     /// Retain that manager policy while keeping the tab's actual selection
     /// for the independent decision about omitting the portable sweep.
-    pub(crate) fn extend_tab(
-        &mut self,
-        unit: Option<String>,
-        selection: crate::terminal_process::TabScope,
-    ) {
-        self.needs_sweep |=
-            unit.is_none() || selection != crate::terminal_process::TabScope::Scoped;
+    pub(crate) fn extend_tab(&mut self, unit: Option<String>, scoped: bool) {
+        self.needs_sweep |= unit.is_none() || !scoped;
         self.derived.extend(unit);
     }
 
@@ -1563,32 +1551,16 @@ where
     }
 }
 
-/// Capture a pane process's identity at the liveness decision that authorizes
-/// a teardown. The start time travels with the pid so later work can refuse a
-/// recycled number instead of binding the sweep to an unrelated process.
-///
-/// `Ok(None)` means the process is gone. A process that exists but cannot be
-/// read is an `Err`, never `None`: the caller was about to reap it, and SPEC.md
-/// "Lifecycle operations" counts a process Farhelm tried to reap but could not
-/// examine as unconfirmed, never as gone, so the operation must fail rather
-/// than sweep without its root and report success.
+/// A process's `(pid, start time)` identity as a sweep root, for tests that
+/// root a sweep at a process they started, the way a lifecycle verb roots it
+/// at a terminal host's pinned child (`HostTerminal::sweep_root`). `Ok(None)` for
+/// a process that is gone.
+#[cfg(test)]
 pub(crate) fn capture_process_identity(pid: u32) -> anyhow::Result<Option<(u32, u64)>> {
-    identity_from_read(pid, procs::read_process(pid))
-}
-
-/// [`capture_process_identity`]'s decision over one process-table read, split
-/// out so the unreadable case can be tested without an unreadable process.
-fn identity_from_read(
-    pid: u32,
-    read: Result<Option<(u32, u64, procs::ProcessState)>, String>,
-) -> anyhow::Result<Option<(u32, u64)>> {
-    match read {
+    match procs::read_process(pid) {
         Ok(Some((_, starttime, _))) => Ok(Some((pid, starttime))),
         Ok(None) => Ok(None),
-        Err(error) => Err(anyhow::anyhow!(
-            "could not read the terminal's process {pid} before reaping it ({error}); \
-             refusing to report its process tree cleaned up"
-        )),
+        Err(error) => Err(anyhow::anyhow!("could not read process {pid}: {error}")),
     }
 }
 
@@ -2021,12 +1993,11 @@ impl StopFailure {
 ///   success — the kill has already happened, so any crash from here on
 ///   must find a record that says so.
 ///
-/// The exit code is re-queried rather than assumed. A killed process
-/// usually leaves tmux nothing to reduce to a plain code, but where it
-/// does, that code is worth keeping — and `pane_states`, not
-/// `pane_process`, is what carries `#{pane_dead_status}` at all. A failed
-/// query costs the code, not the annotation, and a later tick's observation
-/// can still enrich the record (the store's transitions are monotonic).
+/// The exit code is read from the host's exit record rather than assumed.
+/// A killed process usually leaves no plain code, but where it does, that
+/// code is worth keeping. A record that has not arrived yet costs the code,
+/// not the annotation, and a later tick's observation can still enrich the
+/// record (the store's transitions are monotonic).
 ///
 /// `roots` are the `(pid, start time)` pairs the caller captured at its own
 /// liveness check: the agent's, and for a Restart also the programs that
@@ -2061,7 +2032,10 @@ pub(crate) async fn stop_live_agent(
     )
     .await
     .map_err(StopFailure::Sweep)?;
-    let exit_code = dead_pane_exit_code(sup, entry.terminal.as_ref(), session_id).await;
+    // The host's exit record may not have arrived right after the sweep,
+    // which reads as no code; the store's monotonic enrichment lets a later
+    // tick fill it in.
+    let exit_code = entry.terminal.as_ref().and_then(|host| host.exit_code());
     // The cleanup above ended this launch's writers. Sample its spec before any
     // cleanup can remove the startup evidence; an observer may already have
     // committed the same choice, which the store preserves monotonically.
@@ -2770,7 +2744,7 @@ mod tests {
         let mut units = ScopeUnits::recorded(crate::scope::unit_name(&session, 0));
         units.extend_tab(
             crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()),
-            crate::terminal_process::TabScope::Scoped,
+            true,
         );
         reap_process_tree_with_sweep(
             &scopes,
@@ -2814,20 +2788,14 @@ mod tests {
         assert!(!observed.iter().any(|op| matches!(op, ScopeOp::Kill { .. })));
     }
 
-    /// Scope-name success must never erase an unscoped or unknown target.
+    /// Scope-name success must never erase an unscoped target.
     /// Independently confirmed scopes cannot prove that every target was
     /// contained; keep them live until signalling to isolate that condition.
     /// The explicit callback error proves fallback without real signalling.
     #[farhelm_testtrace::test]
-    async fn unscoped_and_unknown_targets_keep_the_sweep_when_the_manager_is_usable() {
-        use crate::terminal_process::TabScope;
+    async fn unscoped_targets_keep_the_sweep_when_the_manager_is_usable() {
         let session = uuid::Uuid::new_v4().to_string();
-        for (agent_scoped, tab) in [
-            (false, None),
-            (false, Some(TabScope::Scoped)),
-            (true, Some(TabScope::Unscoped)),
-            (true, Some(TabScope::Unknown)),
-        ] {
+        for (agent_scoped, tab) in [(false, None), (false, Some(true)), (true, Some(false))] {
             let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal(
                 "SIGTERM",
                 Arc::new(|_| {}),
@@ -2835,10 +2803,10 @@ mod tests {
             let mut units = ScopeUnits::recorded(
                 agent_scoped.then(|| crate::scope::unit_name(&session, 0).unwrap()),
             );
-            if let Some(selection) = tab {
+            if let Some(scoped) = tab {
                 units.extend_tab(
                     crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()),
-                    selection,
+                    scoped,
                 );
             }
             units.normalize();
@@ -2854,28 +2822,23 @@ mod tests {
             .expect_err("an uncontained target requires the sweep");
             assert_eq!(error.to_string(), "portable fallback reached");
         }
-        for selection in [TabScope::Unscoped, TabScope::Unknown] {
-            let scopes = crate::scope::ScopeManager::fake_vanishing_after_signal(
-                "SIGTERM",
-                Arc::new(|_| {}),
-            );
-            let units = ScopeUnits::tab(
-                crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()),
-                selection,
-                true,
-            );
-            let error = reap_process_tree_with_sweep(
-                &scopes,
-                units,
-                None,
-                &session,
-                ScopeKillFailure::Refuse,
-                |_| async { anyhow::bail!("portable fallback reached") },
-            )
-            .await
-            .expect_err("a guessed tab scope cannot suppress the sweep");
-            assert_eq!(error.to_string(), "portable fallback reached");
-        }
+        let scopes =
+            crate::scope::ScopeManager::fake_vanishing_after_signal("SIGTERM", Arc::new(|_| {}));
+        let units = ScopeUnits::tab(
+            crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()),
+            false,
+        );
+        let error = reap_process_tree_with_sweep(
+            &scopes,
+            units,
+            None,
+            &session,
+            ScopeKillFailure::Refuse,
+            |_| async { anyhow::bail!("portable fallback reached") },
+        )
+        .await
+        .expect_err("a guessed tab scope cannot suppress the sweep");
+        assert_eq!(error.to_string(), "portable fallback reached");
     }
 
     /// An earlier-generation root may survive the current scope. Checking
@@ -3645,20 +3608,17 @@ mod tests {
         );
     }
 
-    /// A pane process that exists but cannot be read fails the teardown
-    /// instead of being treated as gone, at both the capture and the
-    /// re-validation step.
+    /// A root process that exists but cannot be read fails the teardown
+    /// instead of being treated as gone at the re-validation step.
     ///
     /// Why it matters: dropping an unreadable root let Stop, Delete and Close
     /// Tab skip walking the terminal's process tree and still report "nothing
     /// left running"; SPEC.md "Lifecycle operations" counts a process Farhelm
     /// tried to reap but could not examine as unconfirmed, never as gone.
-    /// Specified: a read error yields `Err` from both decisions, while a
-    /// missing row stays `Ok(None)`.
+    /// Specified: a read error yields `Err`, while a missing row stays
+    /// `Ok(None)`.
     #[farhelm_testtrace::test]
-    fn an_unreadable_pane_process_is_unconfirmed_not_gone() {
-        assert!(identity_from_read(42, Err("permission denied".to_string())).is_err());
-        assert!(matches!(identity_from_read(42, Ok(None)), Ok(None)));
+    fn an_unreadable_root_process_is_unconfirmed_not_gone() {
         assert!(root_from_read(42, 7, Err("malformed stat".to_string()), "unreadable").is_err());
         assert!(matches!(
             root_from_read(42, 7, Ok(None), "vanished"),

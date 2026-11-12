@@ -10,12 +10,11 @@
 //!
 //! State model: SQLite (`crate::store`) is the truth that a session exists
 //! and what its metadata is, written at creation and reloaded at startup
-//! so sessions survive a supervisor restart. tmux stays the truth for
-//! whether a session's terminal is currently alive; a session whose own
-//! tmux session no longer exists — whether because the whole private tmux
-//! server did not survive a restart, or because just that one session was
-//! killed independently — is still listed (metadata came back from the
-//! DB) but loses its terminal handle — see `core::SessionEntry`'s `terminal`
+//! so sessions survive a supervisor restart. The session's terminal host
+//! stays the truth for whether its terminal is currently alive; a session
+//! whose host no longer exists — because the machine rebooted, or because
+//! just that one host was killed — is still listed (metadata came back from
+//! the DB) but loses its terminal handle — see `core::SessionEntry`'s `terminal`
 //! field and `terminals::resolve_terminal`, where that `None` becomes the `NotFound`
 //! an `Attach` is refused with. Nothing else has to re-derive it: a
 //! terminal-less session can never hold an attachment, so `Resize` and
@@ -61,8 +60,8 @@
 //! reads and writes, and this file is a re-export shell so nothing outside
 //! `service` has to know the split happened. A submodule may EXTEND
 //! `Supervisor` with an impl block of its own where the operation is
-//! genuinely a method on it (`teardown`'s `teardown_session`, `capture`'s
-//! pass scheduling, and `terminals`' sink/output-reap lifecycle do today);
+//! genuinely a method on it (`teardown`'s `teardown_session` and `capture`'s
+//! pass scheduling do today);
 //! `core` owns the type and the
 //! common lifecycle, not a monopoly on its methods.
 //!
@@ -73,8 +72,8 @@
 //! order, cap, and the whole-list reply itself), `teardown` (the whole of
 //! what `DeleteSession` does, minus the reply), `capture` (the
 //! first-input anchor, claim ladder, scheduling, and durable correlation
-//! pass), and `terminals` (terminal identity plus the sink and output-reap
-//! lifecycle). Each owns a sequence or a precedence whose parts have to agree
+//! pass), and `terminals` (terminal identity and the attachment
+//! bookkeeping). Each owns a sequence or a precedence whose parts have to agree
 //! with each other; see their own module docs for what each one is holding
 //! together.
 //!
@@ -130,12 +129,11 @@ pub use connection::handle_connection;
 /// The environment a terminal host's child gets, for `crate::agent_screen`.
 pub(crate) use core::host_child_env;
 pub use core::{
-    BootIdSource, CreateCrashSeam, CreateIntentWaiting, CreateStage, FaultHooks,
-    ForwarderCleanupGate, HostRestartFault, HostRestartStage, NaturalDetachGate,
-    ReclaimDiscoveryGate, ReclaimListingFault, STALL_DETACH_TIMEOUT, SampleFault, SampleRead,
+    BootIdSource, CreateCrashSeam, CreateIntentWaiting, CreateStage, FaultHooks, HostRestartFault,
+    HostRestartStage, ReclaimDiscoveryGate, ReclaimListingFault, STALL_DETACH_TIMEOUT,
     SessionSnapshot, StateDirOwnership, Supervisor, SupervisorSeams, SupervisorTimeouts,
-    TabOpenFault, TabOpenStage, TabSettleGate, TmuxSeedFault, UPLOAD_DISK_STAGE_TIMEOUT,
-    UPLOAD_PROGRESS_TIMEOUT, WRITER_STALL_TIMEOUT, hook_log_path,
+    TabOpenFault, TabOpenStage, TabSettleGate, UPLOAD_DISK_STAGE_TIMEOUT, UPLOAD_PROGRESS_TIMEOUT,
+    WRITER_STALL_TIMEOUT, hook_log_path,
 };
 pub use core::{
     HOST_CHECKPOINT_BUDGET, ORPHAN_RECLAIM_BUDGET, SHUTDOWN_OUTPUT_BUDGET, STATE_DIR_CLAIM_WAIT,

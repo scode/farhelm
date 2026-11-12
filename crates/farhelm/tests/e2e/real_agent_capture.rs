@@ -227,7 +227,7 @@ async fn serving_supervisor(
     let sup = Supervisor::new_with_seams(
         state,
         farhelm_bin().into(),
-        suite_timeouts(),
+        SupervisorTimeouts::default(),
         SupervisorSeams::default(),
     )
     .await
