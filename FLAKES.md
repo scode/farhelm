@@ -4799,3 +4799,31 @@ kept privately.
 Class: readiness
 
 Cause: hypothesis
+
+## 2026-11-12 — suspended-session banner test's listing route outlives its cleanup (e2e/tests/tensorlake-lifecycle.spec.ts)
+
+`a suspended session banner resumes its host` failed on WebKit in a landing round's narrow browser run of the
+sandbox-suspend-overlap stack on a Tensorlake sandbox (run `9589cbd3-17bf-44bf-afc1-f4714fa27a5a`) with Playwright's
+"Route is already handled". Repeated alone on WebKit with `--grep` and `--repeat-each=60`, it failed 4 of 60 on round
+232's tested tip, which has none of that plan (run `b0544367-4b54-4044-9006-b59410204249`), and 1 of 60 on that plan's
+first fixed tip (run `bdfb7d00-7f84-4adf-8b00-23f6aa2ca134`), every time with the same error, so the flake predates the
+plan. The test installs its `/api/sessions` route with plain `page.route` rather than the suite's drained routes, and
+its cleanup deletes the session while the page is still reading it; the suspected cause is that route's handler
+fulfilling a request after the page was torn down or the request was otherwise settled. A different symptom was seen
+once, in 20 earlier repeats on the plan's tip (run `9ddf3910-4fc9-46c3-ad35-a696c47c1856`): the banner still read
+"Checking localhost…" when the wait for "is suspended" ran out, and it was not seen in 80 runs of the older build (that
+run and `b523d0d4-6107-4f0b-aa6b-077720d84d01`). Not investigated further; open.
+
+```text
+Error: route.fulfill: Route is already handled!
+  > 909 |       if (!response.ok()) return route.fulfill({ response });
+```
+
+Evidence: Tensorlake sandboxes (Ubuntu 24.04, Node 24.16, three stacks each, the recorder's generic mode with
+`npx playwright test --project=webkit-tensorlake-lifecycle --retries=0`), packs of round 232's tested tip `4a12d961` and
+of the plan's first fixed tip `8678c79f`. Pinned tmux 3.7c in each pack; per-case load unavailable. The failed run
+directories are kept privately.
+
+Class: fixture-premise
+
+Cause: hypothesis

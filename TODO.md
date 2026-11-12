@@ -609,6 +609,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   finishes, a single read of the session list still shows the stopped session running or with its tab. Cause suspected,
   not established; see FLAKES.md, 2026-11-11.
 
+- **Suspended-session banner test's listing route can fire after its cleanup.**
+  `a suspended session banner resumes its host` in `e2e/tests/tensorlake-lifecycle.spec.ts` fails on WebKit about one
+  run in twenty with "Route is already handled" (4 of 60 on a build without the plan being landed, 1 of 60 with it): its
+  `/api/sessions` route is a plain `page.route`, not a drained one, while its cleanup deletes the session. Once, it
+  instead timed out with the banner still checking the host. Cause suspected, not established; see FLAKES.md,
+  2026-11-12.
+
 ### Difficult deflake
 
 ## Broken tests
