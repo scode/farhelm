@@ -132,6 +132,17 @@ fn HostResumeProgress(preparation: HostResumePreparation) -> Element {
     }
 }
 
+/// How long a fresh-checkout launch that woke its host waits for this window to
+/// see the woken host connected (SPEC.md "Creation"). The wake itself already
+/// confirmed the connection through its own read; this bounds only the page's
+/// host list catching up, which could otherwise hold the launch, its hidden
+/// launcher and every other launch and host change in the window indefinitely.
+const WOKEN_CONNECTION_WAIT_MS: u64 = 60_000;
+
+/// The launcher's error when [`WOKEN_CONNECTION_WAIT_MS`] runs out. Wording
+/// agreed with the maintainer; it appears after the "Not launched. " prefix.
+const WOKEN_CONNECTION_TIMEOUT: &str = "The host resumed, but this window did not see it connect within 60 seconds. The session was not launched; try again.";
+
 /// Shared by visible invalidation and both submission checks so an explicit
 /// destination correction can retire only this refusal, not an unrelated error.
 const REMEMBERED_DESTINATION_CHANGED: &str = "The remembered folder belongs to a different installation; choose the host or folder again before launching";
@@ -1134,6 +1145,25 @@ impl GuardedSubmitStamp {
             && authority.incarnation != self.authority.incarnation
     }
 
+    /// Whether a press parked after a successful wake is still waiting for this
+    /// window's own host list to show the woken host connected: the form still
+    /// sees the connection the wake replaced, or the selected host still shows
+    /// a connection pending. This is the only wait [`WOKEN_CONNECTION_WAIT_MS`]
+    /// bounds. Once the window sees the connection, the press waits for its
+    /// checkout preview instead, which keeps its own request budget.
+    ///
+    /// The caller passes both readings evaluated, so an effect using this
+    /// subscribes to both.
+    fn awaiting_woken_connection(
+        &self,
+        authority: Option<&PreviewAuthority>,
+        resume_display: Option<&ResumeDisplayHandoff>,
+    ) -> bool {
+        self.resuming_from.is_some()
+            && (authority.is_some_and(|authority| self.waiting_for_connection(authority))
+                || resume_display.is_some())
+    }
+
     /// The precondition to send when the live launch is still the one this
     /// answer or press accepted, or `None` when its identity changed. A match
     /// during the old connection's display handoff still requires waiting:
@@ -1175,6 +1205,22 @@ impl GuardedSubmitStamp {
             && self.conversation == conversation)
             .then_some(self.replace_guard)
     }
+}
+
+/// Whether the parked slot holds a woken press that still owns its launch
+/// token and still waits for the woken connection: what the 60-second limit
+/// may discard, and what the form's diagnostic attribute reports. One helper
+/// for both, so a test reading the attribute observes the timer's own rule.
+/// `parked` is the slot's stamp and whether it retains its token; a visible
+/// guarded answer retains none and is never this wait.
+fn parked_press_awaiting_woken_connection(
+    parked: Option<(&GuardedSubmitStamp, bool)>,
+    authority: Option<&PreviewAuthority>,
+    resume_display: Option<&ResumeDisplayHandoff>,
+) -> bool {
+    parked.is_some_and(|(stamp, retains_token)| {
+        retains_token && stamp.awaiting_woken_connection(authority, resume_display)
+    })
 }
 
 /// Take only an answer for the still-visible refused launch, before any edit.
@@ -3479,6 +3525,11 @@ pub(super) fn CreateSessionForm(
     // neither exclusion opens during preview or internal submit reentry.
     let mut guarded_submit_pending =
         use_signal(|| None::<(GuardedSubmitStamp, Option<SubmitGuards>)>);
+    // Bumped each time a successful wake parks its press in the slot above;
+    // each value gets one bounded wait for the woken connection. The stamp has
+    // no identity of its own, so without this a quick retry in the same
+    // opening could be timed out by an earlier attempt's wait.
+    let mut woken_connection_wait = use_signal(|| 0_u64);
     // The intent key of the last attempt whose outcome stayed unknown (a
     // failure that kept the key for a safe retry). See
     // `LauncherYoloQuestion::uncertain`. It is never cleared: every attempt
@@ -6238,6 +6289,11 @@ pub(super) fn CreateSessionForm(
                                         pending.after_resume(connection, automatic_name),
                                         Some(guards),
                                     )));
+                                    // Starts this press's bounded wait for the
+                                    // window to see the connection (the effect
+                                    // after `discard_guarded_preparation`).
+                                    let next = woken_connection_wait.peek().wrapping_add(1);
+                                    woken_connection_wait.set(next);
                                     return;
                                 } else {
                                     "The target host changed while resuming; check the target and launch again".into()
@@ -7434,6 +7490,36 @@ pub(super) fn CreateSessionForm(
             error.set(Some(reason));
         }
     });
+    // One bounded wait per press a successful wake parked (SPEC.md "Creation").
+    // When it runs out, the press is discarded only if it is still that press
+    // and the window still has not seen the woken host connect. A press that
+    // saw the connection and now waits for its checkout preview is never cut
+    // off, and a connection that shows up after the discard finds nothing to
+    // submit. The discard returns the launcher with its draft and releases the
+    // token, which admits New, quick launches and host changes again.
+    use_effect(move || {
+        let wait = woken_connection_wait();
+        if wait == 0 {
+            return;
+        }
+        spawn(async move {
+            crate::reader::sleep_ms(WOKEN_CONNECTION_WAIT_MS).await;
+            if *woken_connection_wait.peek() != wait {
+                return;
+            }
+            let expired = parked_press_awaiting_woken_connection(
+                guarded_submit_pending
+                    .peek()
+                    .as_ref()
+                    .map(|(pending, guard)| (pending, guard.is_some())),
+                live_preview_authority.peek().as_ref(),
+                live_resume_display.peek().as_ref(),
+            );
+            if expired {
+                discard_guarded_preparation.call(Some(WOKEN_CONNECTION_TIMEOUT.into()));
+            }
+        });
+    });
     // An unchanged accepted answer is spent before ordinary submit. Only a
     // resumed opening retains a claim here; its next step transfers that same
     // owner, while a visible guarded answer claims normally at dispatch.
@@ -7459,15 +7545,13 @@ pub(super) fn CreateSessionForm(
             discard_guarded_preparation.call(None);
             return;
         };
-        if live_preview_authority()
-            .as_ref()
-            .is_some_and(|authority| pending.waiting_for_connection(authority))
-        {
-            return;
-        }
-        // A fresh token may already be visible in Connecting. Even a Ready
-        // preview must wait until this form observes the host as connected.
-        if pending.resuming_from.is_some() && live_resume_display().is_some() {
+        // Still the old connection, or a fresh token already visible in
+        // Connecting: even a Ready preview must wait until this form observes
+        // the host as connected. The bounded wait above ends this.
+        if pending.awaiting_woken_connection(
+            live_preview_authority().as_ref(),
+            live_resume_display().as_ref(),
+        ) {
             return;
         }
         let busy = ops.busy();
@@ -7518,6 +7602,16 @@ pub(super) fn CreateSessionForm(
     let attempted_restart = restart_mode && launch_attempted().was_attempted();
     let loading_setup =
         pending_initial_action().is_some() || !pending_initial_templates.read().is_empty();
+    // Diagnostic only: tells a browser test when a parked press has started
+    // its bounded wait for the woken connection, before it moves the clock.
+    let awaiting_woken_connection = parked_press_awaiting_woken_connection(
+        guarded_submit_pending
+            .read()
+            .as_ref()
+            .map(|(pending, guard)| (pending, guard.is_some())),
+        live_preview_authority.read().as_ref(),
+        live_resume_display.read().as_ref(),
+    );
     let submit_label = if restart_mode {
         if restart_stop_first {
             "Stop and restart"
@@ -7631,6 +7725,7 @@ pub(super) fn CreateSessionForm(
             "data-browse-reply-completions": "{browse_reply_completions}",
             "data-folder-check-completions": "{folder_check_completions}",
             "data-folder-check-pending": "{folder_check_pending}",
+            "data-awaiting-woken-connection": "{awaiting_woken_connection}",
             "data-history-activation-attempts": "{history_activation_attempts}",
             "data-remembered-destination-valid": "{remembered_destination_valid}",
             role: "dialog",
@@ -12304,6 +12399,88 @@ mod tests {
                 .is_none(),
             "a guarded answer still binds the configuration it accepted"
         );
+    }
+
+    /// The 60-second limit after a wake may end only the wait for this window
+    /// to see the woken host connect, never the checkout preview that follows
+    /// it (SPEC.md "Creation"). A visible guarded answer, which never woke a
+    /// host, is never in that wait. The wait holds while the form still sees
+    /// the replaced connection or the host still shows a connection pending,
+    /// and ends once the fresh connection is seen and settled.
+    #[test]
+    fn only_a_woken_press_short_of_its_connection_awaits_it() {
+        let authority = PreviewAuthority {
+            generation: 5,
+            config_revision: 1,
+            host: "7".into(),
+            incarnation: 2,
+            installation_identity: "installation-a".into(),
+            repo: GithubRepo::parse("acme/bar").unwrap(),
+            title: Some(String::new()),
+            agent: "codex".into(),
+        };
+        let pending_display = ResumeDisplayHandoff {
+            target: CreateTarget::new(7, "fingerprint".into()),
+            connection: 4,
+        };
+        let answer = GuardedSubmitStamp::new(
+            3,
+            authority.clone(),
+            None,
+            String::new(),
+            crate::DeleteGuard::NothingAlive,
+            None,
+        );
+        assert!(
+            !answer.awaiting_woken_connection(Some(&authority), Some(&pending_display)),
+            "a press that woke nothing has no connection to wait for"
+        );
+        let woken = answer.after_resume(4, None);
+        assert!(
+            woken.awaiting_woken_connection(Some(&authority), None),
+            "the form still sees the connection the wake replaced"
+        );
+        let mut fresh = authority.clone();
+        fresh.incarnation = 4;
+        assert!(
+            woken.awaiting_woken_connection(Some(&fresh), Some(&pending_display)),
+            "the fresh token is visible but the host still shows Connecting"
+        );
+        assert!(
+            !woken.awaiting_woken_connection(Some(&fresh), None),
+            "connected: the press now waits only for its checkout preview"
+        );
+        assert!(
+            !woken.awaiting_woken_connection(None, None),
+            "no authority and nothing pending on screen is not this wait"
+        );
+        // The slot-level rule the timer and the form's attribute both use.
+        assert!(parked_press_awaiting_woken_connection(
+            Some((&woken, true)),
+            Some(&authority),
+            None
+        ));
+        assert!(
+            !parked_press_awaiting_woken_connection(Some((&woken, true)), Some(&fresh), None),
+            "a parked press that saw its connection is never discarded by the limit"
+        );
+        assert!(
+            !parked_press_awaiting_woken_connection(Some((&woken, false)), Some(&authority), None),
+            "a press without its token is not the wake's parked press"
+        );
+        assert!(
+            !parked_press_awaiting_woken_connection(None, Some(&authority), Some(&pending_display)),
+            "an empty slot, such as a press that already continued, has nothing to discard"
+        );
+    }
+
+    /// The error names the limit in words; it must say the same number of
+    /// seconds the timer waits, or the launcher would misreport the wait.
+    #[test]
+    fn the_woken_connection_error_names_the_limit_it_enforces() {
+        let seconds = WOKEN_CONNECTION_WAIT_MS / 1000;
+        assert_eq!(WOKEN_CONNECTION_WAIT_MS % 1000, 0);
+        assert!(WOKEN_CONNECTION_TIMEOUT.contains(&format!("within {seconds} seconds")));
     }
 
     /// Resume must survive a lagging host read without using its stale preview.

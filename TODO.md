@@ -44,17 +44,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Stop two launch paths from leaving the page stuck after waking a host.** Found by the landing review of
-  nonblocking-session-actions (2026-11-10) and landed unfixed as narrow cases. First: a quick launch whose template
-  checks out a GitHub repository on a suspended sandbox host, if its retry after the wake is refused without an error
-  message, leaves an invisible launcher over the page that blocks every click and key until Escape is pressed. The
-  reveal check runs while the launch token is still held and never runs again once it is released
-  (`crates/farhelm-ui/src/list/create_form.rs`, the quick-launch reveal effect and the continued-submit branch). Second:
-  a launch that woke a host waits with no time limit for the page to see that host connected; if it never does, New,
-  quick launches and host changes stay refused and the hidden launcher has no Cancel. Before that plan the launcher was
-  visible and could be cancelled there. Give that wait a limit that returns the launcher with an error. Plan:
-  `plans/queue/wake-launch-stuck.md`.
-
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
   that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open
