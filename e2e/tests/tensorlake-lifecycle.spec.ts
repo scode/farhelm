@@ -1698,6 +1698,126 @@ for (const mode of ["form", "recent-enter", "typed-taken", "quick", "number", "l
   });
 }
 
+/** The submit that continues a quick launch after its wake can be refused with
+ * no error message, leaving the launcher's own prerequisite text to explain
+ * it. Here the woken host stops being available for launch while the fresh
+ * checkout preview loads. That launcher used to stay hidden while Return made
+ * it the page's modal dialog, so an invisible launcher swallowed every click
+ * and key until Escape. It must come back visibly, with its draft and the
+ * reason, and without having sent a create. */
+test("a quick launch refused without an error after its wake returns visibly", async ({ page, request }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "platform", { get: () => "Linux x86_64" });
+  });
+  const fixture = await fleet(page, request);
+  const previewGate = routeGate();
+  const previous = await readPreferences(request);
+  const templateName = `silent-refusal-after-wake-${Date.now()}`;
+  const stops: Array<() => Promise<void>> = [];
+  const creates: unknown[] = [];
+  let resumes = 0;
+  let freshPreviews = 0;
+  let configRevision = 0;
+  let bodyFailed = true;
+  stops.push(await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async (route) => {
+    resumes++;
+    await fixture.publishState({ phase: "tensorlake-changing", direction: "resuming", requested_at: Date.now() });
+    await fixture.publishState();
+    await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {} });
+  }));
+  stops.push(await drainedRoute(page, "**/api/github-repositories", async (route) => {
+    const input = route.request().postDataJSON();
+    await route.fulfill({
+      status: 200,
+      headers: { "x-farhelm-build": fixture.buildStamp },
+      json: {
+        host: String(input.host),
+        incarnation: input.expected_incarnation,
+        installation_identity: fixture.remote.identity,
+        repos: [],
+        truncated: true,
+        scan_error: "fixture scan unavailable",
+      },
+    });
+  }));
+  stops.push(await drainedRoute(page, "**/api/github-checkout-preview", async (route) => {
+    const input = route.request().postDataJSON();
+    if (input.expected_incarnation === fixture.remote.incarnation) {
+      freshPreviews++;
+      await previewGate.wait();
+    }
+    await route.fulfill({
+      status: 200,
+      headers: { "x-farhelm-build": fixture.buildStamp },
+      json: {
+        canonical_root: "/tmp",
+        basename: "bar-review",
+        cwd: "/tmp/bar-review",
+        config_revision: configRevision,
+        host: String(input.host),
+        incarnation: input.expected_incarnation,
+        installation_identity: fixture.remote.identity,
+      },
+    });
+  }));
+  stops.push(await drainedRoute(page, "**/api/sessions", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    creates.push(route.request().postDataJSON());
+    await route.fulfill({ status: 409, headers: { "x-farhelm-build": fixture.buildStamp,
+      "x-farhelm-create-outcome": "definitely-unaccepted" }, json: { error: "no create was expected" } });
+  }));
+  try {
+    const history = await request.get(`/api/launch-history?host=${fixture.remote.id}`);
+    expect(history.ok()).toBe(true);
+    configRevision = (await history.json()).checkout_config_revision;
+    const saved = await request.put(`/api/templates/${encodeURIComponent(templateName)}`, { data: {
+      kind: "agent", agent: "codex", permissions: "guarded", host: fixture.remote.identity,
+      destination: { github: "acme/bar" }, name: "review", name_kind: "base",
+    } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await patchPreferences(request, { quick_launch_template: templateName });
+    await page.goto("/");
+    await expect(page.locator(".quick-launch-trigger")).toBeEnabled();
+    await page.keyboard.press("Control+Shift+p");
+    const form = page.locator(".create-session-form");
+    await expect.poll(() => freshPreviews, {
+      message: "the wake succeeded and the form asked for a preview on the fresh connection",
+    }).toBe(1);
+    expect(resumes).toBe(1);
+    // Premise: the launch is still hidden preparation, waiting on that preview.
+    await expect(form).toBeHidden();
+    await expect(form.locator(".launch-composer-checkout-preview")).toHaveAttribute("data-preview-state", "pending");
+    await fixture.publishState({ phase: "unreachable-reprobing", cause: "transport-failure", last_error: "fixture host is offline" });
+    // The hidden form's host choice names the phase once the page has read it.
+    await expect(form.getByRole("combobox", { name: "Host", exact: true, includeHidden: true }))
+      .toContainText("Unreachable, retrying");
+    previewGate.release();
+    await expect(form).toBeVisible();
+    await expect(form).toHaveAttribute("aria-modal", "true");
+    await expect(form).toContainText("The selected host is unavailable; choose a connected host before launching");
+    // The refused attempt is explained by the launcher's prerequisite, not by
+    // an error message, which would have revealed the launcher on its own.
+    await expect(form.getByRole("alert")).toHaveText(/^\W*Not launched\. Choose a connected host before launching$/);
+    // The draft and its fresh preview come back with it.
+    await expect(form.locator(".launch-composer-checkout-preview")).toContainText("/tmp/bar-review");
+    await expect(page.locator(".launch-progress-pill .host-resume-progress")).toHaveCount(0);
+    expect(creates, "a refused continuation sends no create").toHaveLength(0);
+    bodyFailed = false;
+  } finally {
+    previewGate.release();
+    await cleanupOwnedSteps(bodyFailed, [
+      ...stops.map((stop, index): [string, () => Promise<void>] => [`silent refusal route ${index}`, stop]),
+      ["quick-launch choice", () => patchPreferences(request, {
+        quick_launch_template: previous.quick_launch_template ?? null,
+      })],
+      ["quick-launch template", async () => {
+        const removed = await request.delete(`/api/templates/${encodeURIComponent(templateName)}`);
+        expect(removed.ok() || removed.status() === 404).toBe(true);
+      }],
+    ]);
+  }
+});
+
 /** Suspension consent needs the same readable frame as other host questions.
  * Capture the real dialog and details in each palette, prove its actions are
  * outside the scroll body, and keep every dismissal free of lifecycle calls. */

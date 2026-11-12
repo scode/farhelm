@@ -7322,6 +7322,21 @@ pub(super) fn CreateSessionForm(
             })();
             if let Some(mut guards) = held {
                 if continued {
+                    // A continuation after a wake can be refused with no error
+                    // at all (the host stopped being available for launch, say);
+                    // the launcher's own prerequisite text is then the
+                    // explanation. A hidden quick launch must reveal
+                    // that here, before Return admits it as modal: the reveal
+                    // effect reads the token with `peek`, so it saw this
+                    // submission as busy, and the token's release is not a
+                    // change it observes. Without this, an invisible modal
+                    // launcher sat over the page. The opening check mirrors the
+                    // validation closure's first one: the only caller passes
+                    // the live opening today, and a submission must never
+                    // reveal an opening that is not its own.
+                    if rendered_opening == *opening_generation.peek() {
+                        quick_launch_hidden.set(false);
+                    }
                     let reason = error.peek().clone();
                     settle_prepared_source(
                         &mut guards.source,
