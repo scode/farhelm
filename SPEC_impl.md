@@ -2953,47 +2953,67 @@ journal cap and `MAX_SNAPSHOT`.
 
 ## Terminal substrate: private tmux server
 
-This section covers the old terminals for as long as both kinds exist. Every terminal a supervisor creates runs in a
-terminal host instead ("Terminal host"), and a session moves its agent there one Restart at a time, its old tabs staying
-in tmux until they are closed. Installation keeps requiring, installing and version-checking tmux exactly as below for
-the whole transition (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`). Remote
-Mac provisioning is the exception: it supports only terminal hosts and has no tmux inspection, payload, installation,
+This section covers the old terminals: the private tmux server releases before terminal hosts ran every terminal in,
+which later releases kept running beside terminal hosts. This release ends them at startup (below); every terminal runs
+in a terminal host ("Terminal host"). Installation keeps requiring, installing and version-checking tmux exactly as
+below for now (the installer, the desktop app's preflight, Linux provisioning and `farhelm helm setup`). Remote Mac
+provisioning is the exception: it supports only terminal hosts and has no tmux inspection, payload, installation,
 version check or uninstall action. This does not change the desktop app's local tmux preflight. The running supervisor
-does not: it uses tmux only for old terminals, and only while a private server holding them runs. This path changes only
-for bug fixes.
+runs no tmux at all. Most of what follows describes how the supervisor drove old terminals while they existed; the
+driver is still in the source and goes with them.
 
-A supervisor's old terminals live in a dedicated tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`)
-with a locked-down generated config: status bar off, `history-limit` sized to SPEC.md's replay floor,
-`remain-on-exit on`, `exit-empty on`. The server runs only while it holds old terminals. At startup the supervisor
-connects to the socket once, a plain connect that runs no tmux and needs none installed: nothing answering means no old
-terminals this run, and from then on the supervisor runs no tmux command at all (listings, session details, tab lookups,
-the ticker's passes and its `wait-for` client, Delete, shutdown), since it creates no old terminals and so never starts
-a server. A server that answers is adopted: the two floor checks below, then its session names become the set of tmux
-sessions this process asks about, and `exit-empty on`, `focus-events on` and the `pane-died` hook are set explicitly,
-since an adopted server never reads the config. A session whose agent runs in a terminal host asks tmux about old tabs
-only while that set holds its tmux session (a host session never gains a tmux tab), so a session created in a host never
-asks; a session with a tmux agent, or with no terminal, asks while any server runs. The set shrinks as whole-server
-listings stop showing a session and as the supervisor kills one; tmux ends the server with its last session (an adopted
-server with none ends at once), and a command that reports no server stops all tmux traffic for the rest of the process,
-since no old terminal is created again. A server that answers but cannot be used (the tmux binary missing or below the
-floor, or the server below it) is left running untouched and treated as unusable: the supervisor starts all the same,
-never asks that server anything, and reports its sessions not alive. Their agents may still run there, so while it lasts
-(a state of the running supervisor, not stored) the supervisor refuses to Delete or Restart a session whose agent may
-live on that server (Delete would leave the agent running with nothing to end it and the server alive for it; Restart
-would start a second agent beside it), naming the server and the way out: install a supported tmux and restart the
-supervisor, or stop those agents. What is not held back: reload and the ticker record those sessions as exited, as for a
-server that is gone, since nothing can be read from it; once tmux is fixed and the supervisor restarted, the server is
-adopted again and Delete ends such a session's agent with its tmux session. Old tabs of a session whose agent runs in a
-terminal host are not looked for in an unusable server, so that session's Delete does not end them. `exit-empty` and
-`wait-for` were verified against tmux 3.7c: setting `exit-empty on` ends an empty server at once, and a pending
-`wait-for` client does not keep an emptying server alive (tmux releases it, successfully, as the server exits). Every
-tmux command the supervisor runs passes `-u`, so tmux treats it as a UTF-8 client whatever its locale: without it, a
-supervisor whose first set of `LC_ALL`, `LC_CTYPE` and `LANG` names no UTF-8 locale (the Mac's, since an app opened from
-Finder or the Dock gets no `LANG`, or a Linux host whose user manager has none) gets format output with control
-characters and non-ASCII characters replaced by `_`, which broke every tab-separated read and every pane title holding a
-non-ASCII character (found on the Mac in v0.34.0-rc.2). Every server, fresh (from the config) or adopted (explicitly),
-also has a global `pane-died` hook that signals a `wait-for` channel; while a server runs, the supervisor's ticker keeps
-one `tmux wait-for` client blocked on it and runs its dead-tab reap as soon as it fires, so a tab whose shell exits is
+Ending the old terminals (`service::core::old_terminals`) is the one tmux-related step the running supervisor keeps, and
+works whether or not any tmux program exists. A supervisor that holds its state directory's claim runs it after the
+store opens and before sessions are reloaded. It connects to `<state dir>/tmux.sock` with a plain socket connect. A
+missing socket file, or (on Linux) a refused connection, means no server: the leftover `tmux.sock`, `tmux.conf` and
+`.tmux.conf.tmp-*` files are removed. Any other failure is logged and the files are left, so a later start can still
+reach the server: a wedged server with a full backlog answers `EAGAIN` on Linux, and macOS refuses a connection to a
+live listener as it refuses one to a dead socket; that residual is accepted. Something answering is identified by the
+connection's peer credentials (the pid pinned to its start identity, `hosts::process::peer_process`, and refused unless
+the process is this user's). Its subtree is read from the process table, each pane (a direct child of the server)
+attributed to its session's agent or one of its tabs by the `FARHELM_*` markers in its environment; then it is ended
+with SIGTERM (and SIGCONT), and after a two-second grace SIGKILL, each signal sent only while the process is still the
+pinned one and its command line still names the socket after `-S` (tmux renames the process, not its arguments, so the
+host's last-argument test does not fit; `hosts::process::terminate_process_within` takes the test as a parameter), and
+its socket and config are removed once it is gone. The reload then takes every old-kind row as having no terminal, in
+any state, without looking its recorded pane id up: one whose agent was launching, running or being stopped is converted
+to interrupted (`Transition::TerminalEnded`, beside the reboot conversion) unless its launch sentinel makes it an error,
+its launch artifacts are removed as a settled launch's are, and it gets one `OldTerminalEnded` notification; one whose
+agent had already ended keeps its outcome. Its `terminal_address` stays as stored, because the reservation settlement
+reads a recorded one as evidence that the launch happened. Before that conversion commits, what the old terminals left
+is swept, so that a crash part way leaves the rows for the next start to convert and sweep again: each converted row's
+agent as a Stop of an agent that already exited is (`SweepTarget::AgentOnly` through the row's recorded launch scope,
+the legacy session-only marker shape included), with the server's subtree under that agent's pane as extra roots, and
+each old tab whose id can be found as a tab close is (`SweepTarget::Tab`): from a tab-marked pane in the subtree, or
+from a tab scope unit the user manager lists for a session whose agent was converted or whose old tab the subtree held,
+unless a terminal host's tab launch record names that tab. A whole session is never swept, since its host terminals
+carry the same session marker; what cannot be attributed to an old tab is left for the session's Delete, which sweeps
+the whole session. Once the server is gone, an old tab is found only through the scope units of a session whose agent
+this start converted, so a scoped tab of any other session (its agent already ended, or in a terminal host), an unscoped
+tab, and one whose shell's environment macOS hides wait for that Delete. The subtree counts only once the process
+answering is verified as the server and signalled; otherwise none of it is swept. A sweep that runs out of time leaves
+the rest for the session's Restart or Delete: the conversion commits regardless. A crash between the conversion's commit
+and the artifact removal and notice after it leaves the row interrupted without its notice, its launch files for its
+Delete; startup-only and short, so accepted, like the reboot conversion's same window. Every start also marks every
+unresolved `old_terminal` notification resolved. A failure anywhere is logged and never fatal (the maintainer chose to
+start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still
+running), and the step's own work, the server's end and the sweeps (not the reload's host discovery between them), has
+one 15-second budget (`OLD_TERMINALS_DEADLINE`), half the 30 seconds the helm allows a supervisor it restarted during
+Update to come back (`farhelm-helm`'s provisioning `ATTACH_TIMEOUT`). `FARHELM_TMUX` is no longer passed to a terminal
+host's child (`host_launch`'s `NOT_INHERITED`); installed units keep setting it until their next setup or Update.
+
+What follows describes the old terminals as the supervisor ran them. A supervisor's old terminals lived in a dedicated
+tmux server on a private socket (`~/.local/state/farhelm/tmux.sock`) with a locked-down generated config: status bar
+off, `history-limit` sized to SPEC.md's replay floor, `remain-on-exit on`, `exit-empty on`. `exit-empty` and `wait-for`
+were verified against tmux 3.7c: setting `exit-empty on` ends an empty server at once, and a pending `wait-for` client
+does not keep an emptying server alive (tmux releases it, successfully, as the server exits). Every tmux command the
+supervisor runs passes `-u`, so tmux treats it as a UTF-8 client whatever its locale: without it, a supervisor whose
+first set of `LC_ALL`, `LC_CTYPE` and `LANG` names no UTF-8 locale (the Mac's, since an app opened from Finder or the
+Dock gets no `LANG`, or a Linux host whose user manager has none) gets format output with control characters and
+non-ASCII characters replaced by `_`, which broke every tab-separated read and every pane title holding a non-ASCII
+character (found on the Mac in v0.34.0-rc.2). Every server, fresh (from the config) or adopted (explicitly), also has a
+global `pane-died` hook that signals a `wait-for` channel; while a server runs, the supervisor's ticker keeps one
+`tmux wait-for` client blocked on it and runs its dead-tab reap as soon as it fires, so a tab whose shell exits is
 closed right away instead of on the next tick, which remains the fallback. One tmux session per Farhelm session; window
 0 is the agent terminal in practice, additional windows are the terminal tabs. Neither is identified by position: the
 supervisor stamps each window it creates with a tmux user option — the agent's window with the session id, a tab's
@@ -3049,24 +3069,19 @@ How the binary is chosen: the supervisor selects its tmux program once at startu
 `farhelm supervisor run`, else `FARHELM_TMUX` from its environment, else the bare name `tmux` — and every invocation
 goes through that one value. A bare name is resolved against `PATH` by the operating system at each spawn, as it always
 was; only the spelling is fixed, and the refusal message reports the `PATH` entry it would resolve to. Whatever was
-chosen is version-checked and refused by name (binary path, version found, floor) when too old. The check is applied
-TWICE, because a tmux server outlives the supervisor by design: once to the client executable before any server is
-started, and once more to the server the supervisor adopts on a socket that already has one — the server is the
-component that holds sessions and the component that has crashed, so a 3.7c client driving a pre-floor server left over
-from before an upgrade is exactly the case the floor exists for. A below-floor adopted server is not used and not
-killed: the supervisor logs the socket, both versions and the floor, starts, and reports that server's sessions as not
-alive (refusing their Delete and Restart, above) until the operator drains or kills it deliberately. Earlier builds
-refused to start instead; now that a supervisor serves new terminals without tmux, refusing would take those down over
-sessions it cannot serve anyway. A supervisor that finds no server runs neither check. The override is "you own the
-substrate": a way to run something newer or differently built, not a supported configuration. Linux releases bundle a
-private musl tmux build per architecture, which provisioning installs only when the host has nothing acceptable
-(Linuxbrew's tmux is the documented alternative); either way the unit provisioning writes names the accepted binary
-through `FARHELM_TMUX`, so a private build left behind by an earlier installation cannot shadow a host tmux that was
-accepted later. The Mac app bundles none: the desktop app takes an ambient `FARHELM_TMUX` as given, otherwise probes
-`/opt/homebrew/bin`, `/usr/local/bin` (Homebrew on the two architectures) and `/opt/local/bin` (MacPorts) in that order
-— because GUI apps do not inherit the shell `PATH` — and hands a hit to its managed supervisor through `FARHELM_TMUX`;
-with no hit it sets nothing and the supervisor's ordinary `PATH` lookup applies. Homebrew's tmux is the recommended way
-to meet the floor on a Mac, not the only one the code accepts.
+chosen was version-checked and refused by name (binary path, version found, floor) when too old, once to the client
+executable before any server was started, and once more to a server the supervisor adopted on a socket that already had
+one. A supervisor now adopts no server and runs no tmux, so neither check runs; the floor stays the installation's
+requirement, checked by the installer, the desktop app's preflight below, Linux provisioning and `farhelm helm setup`.
+The override is "you own the substrate": a way to run something newer or differently built, not a supported
+configuration. Linux releases bundle a private musl tmux build per architecture, which provisioning installs only when
+the host has nothing acceptable (Linuxbrew's tmux is the documented alternative); either way the unit provisioning
+writes names the accepted binary through `FARHELM_TMUX`, so a private build left behind by an earlier installation
+cannot shadow a host tmux that was accepted later. The Mac app bundles none: the desktop app takes an ambient
+`FARHELM_TMUX` as given, otherwise probes `/opt/homebrew/bin`, `/usr/local/bin` (Homebrew on the two architectures) and
+`/opt/local/bin` (MacPorts) in that order — because GUI apps do not inherit the shell `PATH` — and hands a hit to its
+managed supervisor through `FARHELM_TMUX`; with no hit it sets nothing and the supervisor's ordinary `PATH` lookup
+applies. Homebrew's tmux is the recommended way to meet the floor on a Mac, not the only one the code accepts.
 
 The desktop app additionally owns a PREFLIGHT of its own: before it spawns its managed supervisor — never before, and
 never for a supervisor it merely discovers already answering — it probes the SAME candidate it is about to hand that
@@ -3079,12 +3094,7 @@ unparseable `-V` output) falls through to the desktop's ordinary bootstrap-error
 specifically because an answering supervisor is an ownership boundary: it may be driving a perfectly good tmux selected
 by its own `--tmux`, its own `FARHELM_TMUX`, or a login-shell `PATH` this Finder-launched process never sees, and
 refusing startup over a dependency this process does not need would reject a supported setup. The preflight is how the
-installation's tmux requirement holds on the Mac, although the supervisor it starts runs no tmux unless old terminals
-exist. The supervisor still performs its OWN two floor checks on a tmux handed to it this way, where it uses tmux at all
-(the client-executable probe and the adopted-server check described above) — the desktop's preflight is a
-user-experience improvement specific to the one path where this app starts the supervisor itself, not a replacement for
-the supervisor's own checks, which remain the authority for the case this preflight cannot see: a private server already
-running on the socket from before an upgrade.
+installation's tmux requirement holds on the Mac, although the supervisor it starts runs no tmux.
 
 Every pre-window desktop refusal keeps that exact stderr message and exit status, and on macOS also sends it to Console
 and a critical native alert so a Finder or Spotlight launch has a visible diagnostic.
@@ -6155,40 +6165,42 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   Claude, Codex or Muse process pin corrected after a recorded ancestor replaces a child-first conversation (verified
   against the exact record for Codex). These are separate `ClaudePinCorrected`, `CodexPinCorrected` and
   `MusePinCorrected` kinds. Each correction records the consequence for Restart before adoption and remains unresolved,
-  giving one notification per launch. The old-terminal kind (`old_terminal`, `NotificationKind::OldTerminal`) is the one
-  about the session rather than a launch. The ticker's sample pass checks it, because old tabs have no in-memory record
-  and that pass already holds the tick's tmux pane-state snapshot: it records the kind at the current generation only
-  while the in-memory snapshot holds no unresolved row of it in any generation, and resolves every unresolved row of it
-  with one update fenced by neither generation nor conversation (`SessionStore::resolve_session_notifications_of_kind`).
-  It does not run on a pass whose pane-state probe failed; the capture pass never touches it. The first two say Restart
-  cannot resume, so they are refused whenever the launch's row holds a captured conversation, checked in the same
-  statement as the insert, which is also what closes the race between a report's commit and the tripwire. The listing
-  carries the last 10 on `SessionInfo::notifications` as sequence number, time, text and an additive `resolved` bool
-  (false omitted and the decode default): the kind and generation stay private to the store and supervisor's in-memory
-  notification snapshot, because an enum on `SessionInfo` that a newer supervisor extended would make the whole record
-  fail to decode in an older helm, which drops a session it cannot decode. The field is additive with a decode default,
-  so an older helm shows no bell and an older supervisor sends none, and needed no protocol bump. Replies are built from
-  immutable entries, so the list lives in a session-scoped cell beside the activity time, seeded from the store when an
-  entry is built from a row and replaced after each recording or resolution, which then sends the `SessionsChanged`
-  hint. Each capture pass resolves the silent-hook and resume-withdrawn kinds only when the generic restart offer is
-  Resume, rather than merely when a captured conversation exists. This includes reports admitted before startup
-  publishes the entry. An unresolved non-resolving kind or an earlier launch's warning remains history; clearing in the
-  helm does not remove it from the store. The in-memory snapshot retains kind and generation beside the wire fields, so
-  a pass with no unresolved, resolving kind for the current launch skips the store call entirely. An eligible pass uses
-  two indexed updates in one transaction. The resolve SQL compares the exact captured conversation and generation on the
-  session row, so an earlier Resume observation cannot erase a later withdrawal. Notification reloads order snapshots by
-  newest sequence and then resolved count: with the newest sequence fixed, only resolution changes, and it only grows;
-  reopening raises the sequence. Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history;
-  older supervisors refuse the upgraded database on downgrade, as accepted for this change. The helm keeps read and
-  cleared state as two per-session sequence marks ("read through N", "cleared through N") in a
-  `session_notification_marks` table beside `session_seen`, keyed and cleaned up the same way, set by the two endpoints
-  `PUT /api/sessions/{id}/notifications/read` and `PUT /api/sessions/{id}/notifications/cleared`, each taking
-  `{"through": N}`. A mark never moves backwards and is clamped to the newest sequence number the helm's cached row
-  holds, so a mark can never cover an entry that arrives later; the fleet-events revision is bumped only when a mark
-  moved. Building rows for the UI, the helm keeps at most the 10 newest entries whatever a supervisor sent, drops
-  cleared ones, and reports the read mark so the UI can tell unread from read. Clearing deletes nothing in the
-  supervisor; the cap ages records out there. The UI renders each text as peer text, marks resolved entries grey with a
-  "Resolved" word, and excludes them from unread counts and "new" styling without moving the helm's read mark.
+  giving one notification per launch. The old-terminal kind (`old_terminal`, `NotificationKind::OldTerminal`) was the
+  one about the session rather than a launch, recorded by earlier releases while something in the session ran in an old
+  terminal; every supervisor start now resolves every unresolved row of it in one update fenced by neither session,
+  generation nor conversation (`SessionStore::resolve_notifications_of_kind`). Its successor, `old_terminal_ended`
+  (`NotificationKind::OldTerminalEnded`), is recorded at startup, at the converted launch's generation, for each session
+  whose agent the startup's ending of the old terminals converted to interrupted ("Terminal substrate: private tmux
+  server"); nothing resolves it, so a later start, which resolves `old_terminal` rows, leaves it as it is. The capture
+  pass touches neither. The first two say Restart cannot resume, so they are refused whenever the launch's row holds a
+  captured conversation, checked in the same statement as the insert, which is also what closes the race between a
+  report's commit and the tripwire. The listing carries the last 10 on `SessionInfo::notifications` as sequence number,
+  time, text and an additive `resolved` bool (false omitted and the decode default): the kind and generation stay
+  private to the store and supervisor's in-memory notification snapshot, because an enum on `SessionInfo` that a newer
+  supervisor extended would make the whole record fail to decode in an older helm, which drops a session it cannot
+  decode. The field is additive with a decode default, so an older helm shows no bell and an older supervisor sends
+  none, and needed no protocol bump. Replies are built from immutable entries, so the list lives in a session-scoped
+  cell beside the activity time, seeded from the store when an entry is built from a row and replaced after each
+  recording or resolution, which then sends the `SessionsChanged` hint. Each capture pass resolves the silent-hook and
+  resume-withdrawn kinds only when the generic restart offer is Resume, rather than merely when a captured conversation
+  exists. This includes reports admitted before startup publishes the entry. An unresolved non-resolving kind or an
+  earlier launch's warning remains history; clearing in the helm does not remove it from the store. The in-memory
+  snapshot retains kind and generation beside the wire fields, so a pass with no unresolved, resolving kind for the
+  current launch skips the store call entirely. An eligible pass uses two indexed updates in one transaction. The
+  resolve SQL compares the exact captured conversation and generation on the session row, so an earlier Resume
+  observation cannot erase a later withdrawal. Notification reloads order snapshots by newest sequence and then resolved
+  count: with the newest sequence fixed, only resolution changes, and it only grows; reopening raises the sequence.
+  Schema 28 adds `resolved_at` on the forward ladder, preserving old unresolved history; older supervisors refuse the
+  upgraded database on downgrade, as accepted for this change. The helm keeps read and cleared state as two per-session
+  sequence marks ("read through N", "cleared through N") in a `session_notification_marks` table beside `session_seen`,
+  keyed and cleaned up the same way, set by the two endpoints `PUT /api/sessions/{id}/notifications/read` and
+  `PUT /api/sessions/{id}/notifications/cleared`, each taking `{"through": N}`. A mark never moves backwards and is
+  clamped to the newest sequence number the helm's cached row holds, so a mark can never cover an entry that arrives
+  later; the fleet-events revision is bumped only when a mark moved. Building rows for the UI, the helm keeps at most
+  the 10 newest entries whatever a supervisor sent, drops cleared ones, and reports the read mark so the UI can tell
+  unread from read. Clearing deletes nothing in the supervisor; the cap ages records out there. The UI renders each text
+  as peer text, marks resolved entries grey with a "Resolved" word, and excludes them from unread counts and "new"
+  styling without moving the helm's read mark.
 - Per-session "seen" state (the idle dot's grey/blue split and the read/unread toggle; SPEC.md, Status) lives in its own
   `session_seen` table keyed by `(host_id, session_id)`, not as a `session_cache` column: that cache is replaced
   WHOLESALE by each host's refresh, so a column there would need every refresh to carry forward a viewer fact the
@@ -8181,10 +8193,11 @@ Restart to update spawns a detached helper in its own process group: a short `/b
 about a minute, for the app's process to exit, then runs `/usr/bin/open` on the bundle, and gives up without opening
 anything if the app has not exited by then. The app then quits the way closing its window does, which leaves its
 supervisor running. The new main program finds the previous version's supervisor by its record, running another program
-file than its own, and replaces it in order (see "Side-by-side versions inside Farhelm.app"); sessions keep running.
-Terminals in terminal hosts keep running too: the old supervisor's orderly stop checkpoints them, and the new one adopts
-them from their hosts ("Terminal host", "Across supervisor restarts"). The real update handover is exercised by the
-release brick test. Opening the releases page uses the same external-link path as the Documentation item.
+file than its own, and replaces it in order (see "Side-by-side versions inside Farhelm.app"). Terminals in terminal
+hosts keep running: the old supervisor's orderly stop checkpoints them, and the new one adopts them from their hosts
+("Terminal host", "Across supervisor restarts"). An update from a release that still ran old terminals ends the sessions
+still in them instead ("Terminal substrate: private tmux server"). The real update handover is exercised by the release
+brick test. Opening the releases page uses the same external-link path as the Documentation item.
 
 What it trusts over TLS alone is the answer to "which release is the latest". A wrong answer cannot make it run anything
 unsigned, but it can withhold updates (by naming an old release), or, by naming one that fails verification, put up the

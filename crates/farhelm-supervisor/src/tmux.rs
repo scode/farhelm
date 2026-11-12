@@ -2659,6 +2659,8 @@ impl TmuxDriver {
     /// Kill every control-mode client currently attached to the private
     /// server, returning how many were signaled.
     ///
+    /// (No longer called: startup ends the server, `service::core::old_terminals`.)
+    ///
     /// Called exactly once, from supervisor startup, right after
     /// [`Self::adopt_running_server`] — the one moment when "attached control
     /// client" and "stale" coincide by construction: this process owns
@@ -3033,8 +3035,16 @@ impl TmuxDriver {
         Ok(out.stdout)
     }
 
+    /// Supervisor startup's knowledge that no private server runs: it ended
+    /// the one an earlier release left (`service::core::old_terminals`), so
+    /// this driver must run no tmux command at all.
+    pub(crate) fn no_server_after_startup(&self) {
+        self.presence.set_absent();
+    }
+
     /// Probe the private socket once, at supervisor startup, and adopt the
     /// server that answers there, if one does and this tmux can drive it.
+    /// (No longer called by startup, see [`Self::no_server_after_startup`].)
     ///
     /// This replaces "start or adopt a server" on every startup. A
     /// supervisor needs tmux only for old terminals, and those exist only

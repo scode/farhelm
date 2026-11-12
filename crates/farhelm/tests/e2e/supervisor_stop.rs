@@ -331,74 +331,53 @@ async fn an_inherited_ignored_hangup_leaves_the_supervisor_running() {
 }
 
 /// Spec: a tethered supervisor (`--exit-on-stdin-close`) whose tether closes
-/// while it is still starting up exits promptly, even when a tmux command it
-/// is waiting on never returns.
+/// while it is still starting up exits promptly, here while it waits for
+/// the state directory's lock, which another process holds without serving.
 ///
-/// Why: building a supervisor runs tmux commands with no timeout of their
-/// own (adopting a private server left running with old terminals, which
-/// lists its sessions). If the stop were only
-/// watched once serving began, a tethering parent that went away during a
-/// hung startup would leave its supervisor running with no parent.
-/// Nothing streams before startup finishes, so there is nothing to close in
-/// order; the process should simply go.
+/// Why: startup can wait (for a predecessor that is still shutting down, up
+/// to `STATE_DIR_CLAIM_WAIT`). If the stop were only watched once serving
+/// began, a tethering parent that went away during that wait would leave
+/// its supervisor running with no parent. Nothing streams before startup
+/// finishes, so there is nothing to close in order; the process should
+/// simply go. (This test once held startup in a tmux command; startup runs
+/// none now.) The premise is the waiting supervisor's own probe of the
+/// state directory's socket, which this test's listener accepts and drops
+/// before the hello, the way a holder on its way out does.
 #[farhelm_testtrace::test]
 async fn a_closed_tether_stops_a_supervisor_stuck_in_startup() {
-    use std::os::unix::fs::PermissionsExt as _;
     let state = farhelm_teststate::tempdir().expect("supervisor state dir");
-    let real = farhelm_supervisor::tmux::resolve_tmux_program(None, None);
-    let pidfile = state.path().join("stuck-list-sessions.pid");
-    let quote = |path: &std::path::Path| shell_words::quote(&path.to_string_lossy()).into_owned();
-    // `list-sessions`, the adoption's listing, parks in a sleep whose pid
-    // the test records (so it can be reaped afterwards); everything else,
-    // including the version probes, is real tmux.
-    let script = format!(
-        "#!/bin/sh\n\
-         case \" $* \" in\n\
-         *\" list-sessions \"*) echo $$ > {pidfile}; exec sleep 120;;\n\
-         esac\n\
-         exec {real} \"$@\"\n",
-        pidfile = quote(&pidfile),
-        real = quote(&real),
-    );
-    let wrapper = state.path().join("tmux-stuck-list-sessions");
-    std::fs::write(&wrapper, script).expect("write the tmux wrapper");
-    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755))
-        .expect("make the tmux wrapper executable");
+    std::fs::set_permissions(
+        state.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .expect("make the state directory private");
+    // The lock a predecessor holds, taken in this process: a starting
+    // supervisor finds it held and waits.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(state.path().join("supervisor.lock"))
+        .expect("open the lock file");
+    lock.lock().expect("hold the state directory's lock");
+    let listener = tokio::net::UnixListener::bind(state.path().join("supervisor.sock"))
+        .expect("bind the socket a waiting supervisor probes");
 
-    let mut command = tokio::process::Command::new(farhelm_bin());
-    command
+    let mut child = tokio::process::Command::new(farhelm_bin())
         .args(["supervisor", "run", "--state-dir"])
         .arg(state.path())
-        .arg("--tmux")
-        .arg(&wrapper)
         .arg("--exit-on-stdin-close")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let _tmux = tmux_guard_for_supervisor_child(state.path().join("tmux.sock"), command.as_std());
-    // Premise: a private server holding an old terminal, which is what makes
-    // startup ask tmux at all (a supervisor with none runs no tmux command).
-    let started = tokio::process::Command::new(&real)
-        .arg("-S")
-        .arg(state.path().join("tmux.sock"))
-        .args([
-            "-f",
-            "/dev/null",
-            "new-session",
-            "-d",
-            "-s",
-            "old",
-            "sleep",
-            "600",
-        ])
-        .status()
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn supervisor");
+    let (probe, _) = tokio::time::timeout(Duration::from_secs(20), listener.accept())
         .await
-        .expect("start the private server's old terminal");
-    assert!(started.success(), "premise: the private server started");
-    let mut child = command.spawn().expect("spawn supervisor");
-    let stuck = wait_for_pid_file(&pidfile, 20).await;
-    let _reap_stuck = PidKillGuard::arm(stuck);
+        .expect("premise: the starting supervisor waits for the lock and probes the socket")
+        .expect("accept the probe");
+    drop(probe);
 
     drop(child.stdin.take().expect("piped tether"));
     let status = tokio::time::timeout(Duration::from_secs(10), child.wait())
@@ -406,4 +385,5 @@ async fn a_closed_tether_stops_a_supervisor_stuck_in_startup() {
         .expect("a closed tether must stop a supervisor stuck in startup")
         .expect("wait for the supervisor");
     assert!(status.success(), "the stop must exit cleanly: {status:?}");
+    drop(lock);
 }

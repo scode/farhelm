@@ -198,9 +198,11 @@ pub enum LastOutcome {
         annotation: Option<String>,
     },
     /// The host rebooted while this session was still live — `Launching`,
-    /// `Running`, or `StopRequested`: tmux is gone, so nothing can ever be
-    /// probed about this agent again (PLAN_M3.md item 2). Written only by
-    /// the boot-id conversion in [`SessionStore::record_boot`], and
+    /// `Running`, or `StopRequested` — or, for an agent in an old terminal,
+    /// an update ended that terminal at startup: nothing can ever be probed
+    /// about this agent again (PLAN_M3.md item 2). Written only by the
+    /// boot-id conversion in [`SessionStore::record_boot`] and by
+    /// [`Transition::TerminalEnded`], and
     /// otherwise cleared only by a restart or a delete — the one other
     /// route out is a launch sentinel discovered AFTER the conversion
     /// already ran, which reclassifies straight to `Error` rather than
@@ -381,6 +383,13 @@ pub enum Transition {
         /// so only direct evidence may override its pending intent.
         inferred: bool,
     },
+    /// The agent's terminal was an old one (in the private tmux server an
+    /// earlier release ran), which this release ended at startup
+    /// (`service::core::old_terminals`). A launch that was still live is
+    /// then interrupted, as a reboot interrupts it: nothing observed how it
+    /// ended. The terminal address stays as stored, since the reservation
+    /// settlement reads a recorded one as evidence that the launch happened.
+    TerminalEnded,
 }
 
 impl Transition {
@@ -516,6 +525,13 @@ impl Transition {
 
             // Nothing else may reopen or reclassify these.
             (_, O::Interrupted | O::Error { .. }) => None,
+
+            // An ended old terminal interrupts a live launch, and leaves an
+            // ended one as it was.
+            (T::TerminalEnded, O::Launching | O::Running | O::StopRequested) => {
+                Some(O::Interrupted)
+            }
+            (T::TerminalEnded, O::Exited { .. }) => None,
 
             // A confirmed launch never resurrects a closed session, and
             // re-confirming an already-running one writes nothing.
@@ -5784,6 +5800,30 @@ impl SessionStore {
                         )
                         .context("resolving a session's notifications of one kind")?;
                     Ok(changed > 0)
+                },
+            )
+            .await
+    }
+
+    /// Resolve every unresolved notification of `kind`, in every session.
+    ///
+    /// For the old-terminal warning (`NotificationKind::OldTerminal`), which
+    /// every startup resolves once it has ended the old terminals, since
+    /// nothing can run in one after that. One statement, so that a store
+    /// with many sessions pays for it once per start.
+    pub async fn resolve_notifications_of_kind(&self, kind: &str) -> anyhow::Result<()> {
+        let kind = kind.to_owned();
+        self.conn
+            .call(
+                "notification resolve task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "UPDATE session_notifications SET resolved_at = ?2 \
+                         WHERE kind = ?1 AND resolved_at IS NULL",
+                        rusqlite::params![kind, now_unix()],
+                    )
+                    .context("resolving every notification of one kind")?;
+                    Ok(())
                 },
             )
             .await

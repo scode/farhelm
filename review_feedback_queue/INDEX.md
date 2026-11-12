@@ -404,17 +404,9 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   Whether that means deliberate whole-finding discard is ambiguous; no concrete incompatible migration pair or
   corruption route was established.
 
-- [`startup-surviving-tab-adoption-source-gap.md`](startup-surviving-tab-adoption-source-gap.md) — Startup could adopt a
-  surviving shell tab as the agent if the required agent-gone/tab-alive state existed. Ordinary Delete and tab creation
-  did not establish that history; the conditional concern is not a reproduced loss of Resume.
-
 - [`legacy-page-server-rebinding-source-gap.md`](legacy-page-server-rebinding-source-gap.md) — The legacy local static
   server omits Host/Origin validation. Supported browser admission and an actual confidential served page remain
   missing, so rebinding impact is unestablished. The instructed decision-page workflows were separately retired.
-
-- [`startup-alternative-live-clone-pane-source-gap.md`](startup-alternative-live-clone-pane-source-gap.md) — Startup
-  inspects one eligible pane's liveness. No ordinary supported producer was found for a pane-less row with a selected
-  dead pane and another eligible live clone; the possible destructive route remains an incomplete source lead.
 
 - [`retained-refusal-can-clear-restart-delete-protection.md`](retained-refusal-can-clear-restart-delete-protection.md) —
   Retained-refusal settlement lacks a generation check and could replace terminal-less Launching with Error, weakening

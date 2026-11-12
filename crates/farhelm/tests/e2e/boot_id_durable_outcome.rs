@@ -392,7 +392,7 @@ async fn a_reboot_interrupts_live_sessions_and_preserves_ended_ones() {
     // plain-shell session cannot resume anything, so what it is promised is
     // Replace starting it over — never a resume it would not get.
     assert!(
-        refusal.contains("host rebooted") && refusal.contains("replace starts it over"),
+        refusal.contains("host reboot") && refusal.contains("replace starts it over"),
         "the refusal must name the reboot and the way forward: {refusal}"
     );
     assert!(
@@ -583,8 +583,9 @@ async fn a_crash_after_the_launching_record_leaves_evidence_and_stays_pending() 
 ///
 /// The reconciliation of a stop INTERRUPTED mid-sweep is a different edge
 /// and is pinned where it can be provoked deterministically, against the
-/// reload itself (`service.rs`'s
-/// `reload_reconciles_a_stop_intent_against_the_pane_it_left_behind`).
+/// reload itself, for both of its edges
+/// (`service::core::tests::host_terminals::a_stop_request_over_a_live_host_child_is_cleared_by_reload`
+/// and `service::core::tests::pending_stop_reload_keeps_startup_annotation_with_and_without_terminal`).
 #[farhelm_testtrace::test]
 async fn a_stop_annotation_is_written_where_it_happens_and_read_back_elsewhere() {
     let h = harness().await;

@@ -108,6 +108,8 @@ mod host_tabs;
 #[cfg(target_os = "linux")]
 mod host_terminals;
 #[cfg(target_os = "linux")]
+mod old_terminals;
+#[cfg(target_os = "linux")]
 mod session_rename;
 #[cfg(target_os = "linux")]
 mod supervisor_stop;

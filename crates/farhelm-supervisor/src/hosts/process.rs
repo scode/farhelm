@@ -170,6 +170,19 @@ fn names_socket(argv: &[Vec<u8>], socket: &Path) -> bool {
     )
 }
 
+/// Whether `argv` is the command line of a tmux server on `socket`
+/// (already made absolute): it names that socket with `-S`, byte for byte.
+///
+/// The private tmux server earlier releases ran (`service::core::old_terminals`)
+/// keeps the command line of the client that started it: tmux renames only
+/// the process (`tmux: server`), never its arguments, and the supervisor
+/// always passed the socket as a separate argument after `-S`. A host's
+/// test, the socket as the last argument, does not fit it.
+pub(crate) fn names_tmux_server_socket(argv: &[Vec<u8>], socket: &Path) -> bool {
+    argv.windows(2)
+        .any(|pair| pair[0] == b"-S" && pair[1].as_slice() == socket.as_os_str().as_bytes())
+}
+
 /// Whether `argv` could be the command line of the host on a socket named
 /// `name`, however its directory is spelled: it ends with `--socket <an
 /// absolute path whose file name is name>`. The looser test
@@ -386,7 +399,8 @@ pub enum Termination {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TerminateError {
     /// The process runs, but its command line does not say it is the host
-    /// on that socket. It was not signalled (again).
+    /// (or, for [`terminate_process_within`], the process) serving that
+    /// socket. It was not signalled (again).
     #[error("process {pid} is not the terminal host on {socket}")]
     NotThisHost { pid: u32, socket: String },
     /// The process or its command line could not be read while the process
@@ -448,11 +462,29 @@ async fn terminate_within(
     term_grace: Duration,
     kill_grace: Duration,
 ) -> Result<Termination, TerminateError> {
+    terminate_process_within(host, socket, names_socket, term_grace, kill_grace).await
+}
+
+/// End the process `host` serving `socket` the way [`terminate_verified`]
+/// ends a host, for any process whose command line `names` can tell serves
+/// that socket, with the graces given.
+///
+/// The same pinned identity, re-read before every signal, and the same
+/// SIGTERM, SIGCONT and SIGKILL sequence; only the command-line test is the
+/// caller's, since a host and the old private tmux server
+/// ([`names_tmux_server_socket`]) spell their socket differently.
+pub(crate) async fn terminate_process_within(
+    host: &HostProcess,
+    socket: &Path,
+    names: fn(&[Vec<u8>], &Path) -> bool,
+    term_grace: Duration,
+    kill_grace: Duration,
+) -> Result<Termination, TerminateError> {
     let socket = std::path::absolute(socket).map_err(|error| TerminateError::Unreadable {
         pid: host.pid,
         reason: format!("resolving {}: {error}", socket.display()),
     })?;
-    if !verify_off_worker(host, &socket).await? || !signal(host, libc::SIGTERM)? {
+    if !verify_off_worker(host, &socket, names).await? || !signal(host, libc::SIGTERM)? {
         return Ok(Termination::AlreadyGone);
     }
     let pid = host.pid as libc::pid_t;
@@ -463,7 +495,7 @@ async fn terminate_within(
     if wait_gone(host, term_grace).await? {
         return Ok(Termination::Terminated);
     }
-    if !verify_off_worker(host, &socket).await? || !signal(host, libc::SIGKILL)? {
+    if !verify_off_worker(host, &socket, names).await? || !signal(host, libc::SIGKILL)? {
         // It went between the grace and the check.
         return Ok(Termination::Terminated);
     }
@@ -486,10 +518,16 @@ async fn terminate_within(
 /// "the host"), keeps its one blocking thread until it returns, and makes
 /// every later walk or check fail at once while it is still stuck, so that
 /// retries do not strand a thread each.
-async fn verify_off_worker(host: &HostProcess, socket: &Path) -> Result<bool, TerminateError> {
+async fn verify_off_worker(
+    host: &HostProcess,
+    socket: &Path,
+    names: fn(&[Vec<u8>], &Path) -> bool,
+) -> Result<bool, TerminateError> {
     let (pinned, path) = (*host, socket.to_path_buf());
     match WalkGate::process()
-        .run(PROCESS_SEARCH_DEADLINE, move || Ok(verify(&pinned, &path)))
+        .run(PROCESS_SEARCH_DEADLINE, move || {
+            Ok(verify(&pinned, &path, names))
+        })
         .await
     {
         Ok(verified) => verified,
@@ -500,12 +538,16 @@ async fn verify_off_worker(host: &HostProcess, socket: &Path) -> Result<bool, Te
     }
 }
 
-/// Whether `host` is still that process and still the host on `socket`.
-/// `Ok(false)` when it is gone, at any of the reads (a process that exits
-/// while its command line is read reads as unreadable or mismatched, and
-/// is gone, not either of those); an error when it runs but is not, or
-/// cannot be shown to be, the host.
-fn verify(host: &HostProcess, socket: &Path) -> Result<bool, TerminateError> {
+/// Whether `host` is still that process and still serves `socket`, as
+/// `names` reads its command line. `Ok(false)` when it is gone, at any of
+/// the reads (a process that exits while its command line is read reads as
+/// unreadable or mismatched, and is gone, not either of those); an error
+/// when it runs but does not, or cannot be shown to, serve it.
+fn verify(
+    host: &HostProcess,
+    socket: &Path,
+    names: fn(&[Vec<u8>], &Path) -> bool,
+) -> Result<bool, TerminateError> {
     let running = || {
         host.is_running()
             .map_err(|reason| TerminateError::Unreadable {
@@ -526,7 +568,7 @@ fn verify(host: &HostProcess, socket: &Path) -> Result<bool, TerminateError> {
             pid: host.pid,
             reason: "its command line could not be read".into(),
         }),
-        Some(argv) if !names_socket(&argv, socket) => Err(TerminateError::NotThisHost {
+        Some(argv) if !names(&argv, socket) => Err(TerminateError::NotThisHost {
             pid: host.pid,
             socket: socket.display().to_string(),
         }),
@@ -898,6 +940,43 @@ mod tests {
             "{outcome:?}"
         );
         assert!(stand_in.alive(), "the stand-in was signalled");
+    }
+
+    /// The old private tmux server is recognized by its socket after `-S`,
+    /// byte for byte, and by nothing else.
+    ///
+    /// Why: this test decides whether startup signals the process answering
+    /// on the old socket (`service::core::old_terminals`); a looser test
+    /// would signal a process that merely mentions the path. Spec: the
+    /// command line a supervisor started its server with matches; another
+    /// socket after `-S`, the socket not right after `-S` (after `-f`, or
+    /// before `-S`), and `-S` as the last argument do not.
+    #[test]
+    fn a_tmux_server_names_its_socket_after_dash_s() {
+        let socket = Path::new("/state/tmux.sock");
+        let argv = |args: &[&str]| -> Vec<Vec<u8>> {
+            args.iter().map(|arg| arg.as_bytes().to_vec()).collect()
+        };
+        assert!(names_tmux_server_socket(
+            &argv(&[
+                "tmux",
+                "-u",
+                "-S",
+                "/state/tmux.sock",
+                "-f",
+                "/state/tmux.conf",
+                "new-session"
+            ]),
+            socket
+        ));
+        for other in [
+            &["tmux", "-S", "/other/tmux.sock"][..],
+            &["tmux", "-f", "/state/tmux.sock"],
+            &["tmux", "/state/tmux.sock", "-S"],
+            &["tmux", "-S"],
+        ] {
+            assert!(!names_tmux_server_socket(&argv(other), socket), "{other:?}");
+        }
     }
 
     // ---- One walk at a time ------------------------------------------------------

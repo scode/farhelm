@@ -600,29 +600,6 @@
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: `pending`.
 
-## startup-surviving-tab-adoption-source-gap.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: A
-  conditional lead: startup could adopt a surviving shell tab as the agent if an agent-gone/tab-alive state existed. The
-  finding states no supported producer of that state was established (ordinary Delete and Open Tab do not create it).
-- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
-  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## startup-alternative-live-clone-pane-source-gap.md
-
-- Outcome: `discard`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
-  Hypothetical: startup might remove a checkout still being prepared if a pane-less row resolves to a dead pane while
-  another eligible pane runs its clone. The file says this is "an incomplete source investigation" with no supported
-  producer of that row/pane arrangement.
-- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1); the filter
-  is carried by `removal-destination-collapses-distinguishing-spaces.md`.
-- Completion criteria: Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## retained-refusal-can-clear-restart-delete-protection.md
 
 - Outcome: `discard`.

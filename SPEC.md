@@ -760,11 +760,12 @@ app's own background install, or the installer run by hand in a terminal, which 
 the version readout in the sidebar's top bar shows that an update is ready: a red up-arrow before the version, and the
 whole readout red instead of grey. Its hover says which version is installed and that a restart finishes the update.
 Clicking it opens a small menu with **Restart to update**, which quits Farhelm and opens it again on the new version
-(sessions keep running, as they do across any quit), and **What's new**, which opens the release notes on the docs
-website (`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting the
-version checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten both
-and turn the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (the
-web UI or a build from main), the readout stays plain text without the refresh glyph.
+(sessions keep running, as they do across any quit; the one exception was the update that ended old terminals, see
+Terminal experience), and **What's new**, which opens the release notes on the docs website
+(`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting the version
+checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten both and turn
+the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (the web UI
+or a build from main), the readout stays plain text without the refresh glyph.
 
 The update can be checked for on demand by selecting the version, by choosing the local machine's host row's Update (see
 [Session list](#session-list)), or by choosing **Check for updates** in the `?` menu (see [Feedback](#feedback)). Each
@@ -1934,38 +1935,28 @@ submission and focus-return behavior.
   is accepted. The supervisor applies the same rule from its own reading at the moment of the restart, so an agent that
   started working after the user clicked is refused rather than stopped unconfirmed, and the next attempt asks unless
   session confirmations are skipped (below). Replace keeps its confirmation whatever the agent is doing unless session
-  confirmations are skipped (below). Restart keeps whatever scrollback the session's agent terminal retained. On a host
-  that does not create new terminals (see [Terminal experience](#terminal-experience)), an old terminal that still
-  exists is reused. On a host that does, Restart moves the agent to a new terminal that starts with the old terminal's
-  scrollback above a blank screen in default modes. A new terminal is always replaced by a new one for each run,
-  whichever kind the host creates, with its scrollback carried over the same way. What is carried over is the
-  scrollback's text with its colors, styles and links, up to the new terminal's limits, the oldest lines left out first
-  (the terminal then says that some earlier output could not be recovered); a link that spans several rows of an old
-  terminal's scrollback stays clickable only on its first row. Moving an old terminal stops the agent first and then
-  reads the old terminal's scrollback. If that read, or copying what it read, fails, the Restart is refused and nothing
-  else changes: the agent stays stopped in its old terminal, with its scrollback, and Restart can be tried again; for
-  when it keeps failing, the refusal says that Clone or Replace also start the agent in a new terminal, without its
-  scrollback, and that Delete removes the session. If the new terminal does not start and Farhelm confirms that the
-  failed start has ended, the session goes back to its old terminal, its agent stopped, and Restart can be tried again.
-  When Farhelm cannot confirm that, the session is left with no terminal and its next Restart starts an empty one; an
-  old terminal being moved then keeps its scrollback on the host, unshown, until the session is deleted. The new
-  terminal starts empty instead, with a log entry, in two cases: an old terminal too large for a new terminal to hold
-  any of its scrollback (the new one then starts at the default size, and the old one stays on the host, unshown, until
-  the session is deleted), and a new terminal whose scrollback cannot be read or copied. When the terminal no longer
-  exists (the process that kept it ended, such as a new terminal's terminal host, or after a reboot), Restart starts
-  with an empty one. Restart does NOT preserve the previous run's last visible screen: the terminal is blank until the
-  new agent draws, and a full-screen program's final frame (which was never in scrollback to begin with) is gone. Losing
-  it is accepted. Farhelm must never capture a terminal's screen and paint it back into a relaunched terminal ahead of
-  the new process — a frame with no process behind it looks live, accepts typing, and is overwritten when the real
-  program draws, which is worse than blank. Restart touches the agent terminal only: the session's open terminal tabs
-  keep running in their own terminals, old ones included, until they are closed. Restart may carry changed launch
-  settings (Restart with, below); the launch kind, agent type, host, and working directory remain fixed. If a harness
-  rejects a changed model or other setting while resuming, that is an ordinary launch failure; restart again with
-  settings the harness accepts. After a Restart request has waited about two seconds, an adjacent status shows a
-  spinner, the host and elapsed seconds, updated about once a second until the reply arrives. If the GUI's 60-second
-  request deadline expires, it says the restart's outcome is unknown and may still finish, and tells the user to check
-  the session before restarting again. Restart has no retry identity and makes no promise that a second press is
-  harmless.
+  confirmations are skipped (below). Restart keeps whatever scrollback the session's agent terminal retained: the
+  terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in
+  default modes. What is carried over is the scrollback's text with its colors, styles and links, up to the new
+  terminal's limits, the oldest lines left out first (the terminal then says that some earlier output could not be
+  recovered). If the new terminal does not start and Farhelm confirms that the failed start has ended, the session keeps
+  its previous terminal, its agent stopped, and Restart can be tried again; when Farhelm cannot confirm that, the
+  session is left with no terminal and its next Restart starts an empty one. The new terminal starts empty instead, with
+  a log entry, when the old one's scrollback cannot be read or copied. When the terminal no longer exists (the process
+  that kept it ended, after a reboot, or an old terminal this release ended, see
+  [Terminal experience](#terminal-experience)), Restart starts with an empty one. Restart does NOT preserve the previous
+  run's last visible screen: the terminal is blank until the new agent draws, and a full-screen program's final frame
+  (which was never in scrollback to begin with) is gone. Losing it is accepted. Farhelm must never capture a terminal's
+  screen and paint it back into a relaunched terminal ahead of the new process — a frame with no process behind it looks
+  live, accepts typing, and is overwritten when the real program draws, which is worse than blank. Restart touches the
+  agent terminal only: the session's open terminal tabs keep running in their own terminals until they are closed.
+  Restart may carry changed launch settings (Restart with, below); the launch kind, agent type, host, and working
+  directory remain fixed. If a harness rejects a changed model or other setting while resuming, that is an ordinary
+  launch failure; restart again with settings the harness accepts. After a Restart request has waited about two seconds,
+  an adjacent status shows a spinner, the host and elapsed seconds, updated about once a second until the reply arrives.
+  If the GUI's 60-second request deadline expires, it says the restart's outcome is unknown and may still finish, and
+  tells the user to check the session before restarting again. Restart has no retry identity and makes no promise that a
+  second press is harmless.
 - **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
   conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,
   resume command and YOLO assertion for a command launch. Launch kind, agent type, host, folder or destination, session
@@ -2672,14 +2663,15 @@ makes its own sounds.
 
 Each session shows one of: **Running** (agent actively working), **Waiting** (a detected pending question or approval
 directed at the user), **Idle** (agent alive and at rest, no pending ask), **Exited** (process ended), **Interrupted**
-(the host rebooted while the session was last known live — an explicit lost-track state; see Durability), **Error** (the
-agent process could not be started at all). Exited sessions show their exit code when known; an exit that happened while
-the supervisor was down shows the code only when the surviving terminal genuinely retains it, and an explicit unknown
-otherwise — never a guess (see Durability). A user-initiated stop yields exited with an annotation — "stopped" is not a
-distinct status. If the stop was recorded before launch classification and the agent never consumed its launch spec, the
-annotation reads "stopped before the agent finished starting"; otherwise it reads "stopped by user". While a stop is
-pending, a dead terminal alone never becomes a launch error: direct evidence from the launch shim can still report a
-real failure until an annotated exit commits. Host unreachability is per-host connection state, not a session status.
+(the host rebooted, or an update ended the old terminal the agent ran in, while the session was last known live — an
+explicit lost-track state; see Durability and Terminal experience), **Error** (the agent process could not be started at
+all). Exited sessions show their exit code when known; an exit that happened while the supervisor was down shows the
+code only when the surviving terminal genuinely retains it, and an explicit unknown otherwise — never a guess (see
+Durability). A user-initiated stop yields exited with an annotation — "stopped" is not a distinct status. If the stop
+was recorded before launch classification and the agent never consumed its launch spec, the annotation reads "stopped
+before the agent finished starting"; otherwise it reads "stopped by user". While a stop is pending, a dead terminal
+alone never becomes a launch error: direct evidence from the launch shim can still report a real failure until an
+annotated exit commits. Host unreachability is per-host connection state, not a session status.
 
 After a supervisor restart, a live pane keeps its last cached status while the supervisor gathers new screen evidence.
 The first new screen alone does not turn an idle or waiting session into running. A witnessed exit, launch error,
@@ -2781,15 +2773,15 @@ so desktop-only alerts need that window open, though it can be in the background
 
 When Farhelm loses track of a session's agent conversation in a way that will matter later, most often because Restart
 will then be unable to resume it, it says so on that session as a notification rather than only in a log. In this
-version every notification but one (the old-terminal warning, below) is a session-tracking problem: a launch whose
-conversation hook should have reported which conversation the agent is in and has not, a minute after the first Enter
-the user sent it (an Enter inside a paste, or Shift+Enter, inserts a newline and does not count, and an Enter while the
-latest screen reading shows a recognized dialog does not count either; an outdated dialog reading can defer the clock to
-the next Enter; with no reading yet, the ordinary Enter rule applies), for an agent that reports by its first prompt (Pi
-and OMP report only after their first reply, which can take as long as the first turn, so their silence proves nothing
-and is not reported); a launch Farhelm could not add its conversation hook to, unless the user turned hooks off for that
-agent themselves; a Codex or Grok conversation record that Restart finds missing, which withdraws the resume offer; and
-an OMP launch whose conversation reporter does not match the running Farhelm, the one refused conversation report that
+version every notification but the old-terminal ones (below) is a session-tracking problem: a launch whose conversation
+hook should have reported which conversation the agent is in and has not, a minute after the first Enter the user sent
+it (an Enter inside a paste, or Shift+Enter, inserts a newline and does not count, and an Enter while the latest screen
+reading shows a recognized dialog does not count either; an outdated dialog reading can defer the clock to the next
+Enter; with no reading yet, the ordinary Enter rule applies), for an agent that reports by its first prompt (Pi and OMP
+report only after their first reply, which can take as long as the first turn, so their silence proves nothing and is
+not reported); a launch Farhelm could not add its conversation hook to, unless the user turned hooks off for that agent
+themselves; a Codex or Grok conversation record that Restart finds missing, which withdraws the resume offer; and an OMP
+launch whose conversation reporter does not match the running Farhelm, the one refused conversation report that
 notifies; and a Claude, Codex or Muse launch whose first conversation report came from a nested process of that agent,
 corrected when a recorded ancestor reports. That correction says which conversation a Restart before now would have
 resumed and that Farhelm now follows the conversation of the agent process that started it, without claiming no further
@@ -2809,18 +2801,16 @@ from earlier launches stay as they are. If a resolved problem returns in the sam
 reopens at the top as new and unread, even if the user had cleared it; repeated checks while it remains unresolved do
 not repeat it.
 
-The one other notification is the old-terminal warning. While the session's host creates new terminals, a session in
-which something still runs in an old terminal (its agent running in one, or an open old tab; the same condition as the
-migration band under Terminal experience) gets it without anyone opening the session, so an upgrade gives every such
-session a loud bell. Its text is fixed: the session must be restarted, replaced, stopped or deleted as soon as possible,
-any of its shell tabs that are still old terminals must also be closed and reopened (restarting a session restarts only
-its agent, not its tabs), otherwise an upcoming release will forcibly terminate the session's old terminals as part of
-moving away from tmux; it ends with a link to the docs page on new terminals. Unlike the session-tracking kinds it is
-per session, not per launch: a session has at most one unresolved old-terminal warning, so a Restart that moves the
-agent while old tabs stay open adds no second one, and it is marked resolved, whichever launch recorded it, once nothing
-in the session runs in an old terminal (the agent stopped, ended, restarted or replaced, and every old tab closed or
-exited). A stopped agent's old terminal alone does not count. A check that could not ask the host's tmux neither records
-nor resolves it. Should something old run again later, the session is warned again.
+The other notifications are about old terminals (see Terminal experience). Earlier releases gave a session in which
+something still ran in an old terminal the old-terminal warning: it asked for the session to be restarted, replaced,
+stopped or deleted as soon as possible, because an upcoming release would forcibly terminate its old terminals. That
+release is this one, so no warning is recorded any more, and every supervisor start marks any unresolved one resolved.
+Each session whose agent was still launching, running or being stopped in an old terminal when this release ended it
+gets one notice instead, at that start, saying that its old terminal was ended by this release, so its agent is no
+longer running and its last screen is gone, and that Restart starts the agent again in a new terminal (resuming its
+conversation), or Replace when Restart is unavailable; it ends with a link to the docs page on new terminals. Nothing
+resolves the notice: it stays unresolved, and unread until the user reads it, across later supervisor starts, until it
+is cleared. A session whose agent had already ended, or that lost only old tabs, gets none.
 
 A session with notifications shows a bell on its sidebar row (see Session list); a row without notifications shows none.
 The bell is grey when everything in it has been read and unmistakable when something is unread, and its accessible name
@@ -3010,32 +3000,23 @@ whatever the agent renders is what you see. There is no composer, no message abs
   focus; Escape or Tab closes the menu and returns focus to its caret. Cancelling Restart with returns to that
   persistent caret. An unavailable plain Restart does not hide an independently available Restart with; the menu remains
   available to inspect reasons.
-- While terminals move out of tmux, each of a session's terminals (the agent's and each tab's) is old, in the host's
-  private tmux server, or new, in a terminal host of its own, and never changes kind while it lives. A host creates new
-  terminals once its supervisor is a version that has them; from then on, everything started there gets one (a new
-  session, Restart, Clone, Replace, a new tab), and existing terminals stay as they are until the user moves them. The
-  host's private tmux server runs only while it holds old terminals: a host whose terminals are all new runs no tmux
-  server and uses no tmux, the server ends with the host's last old terminal (left to end as the user's sessions and
-  reboots retire them), and old terminals whose server is not running, or that the host's tmux cannot serve (missing, or
-  below the supported version), are reported as not running. Installing Farhelm still requires a supported tmux, except
-  on a remote Mac set up over SSH, which never uses tmux (see Topology). While the session's host creates new terminals,
-  a session in which something still runs in an old terminal (its agent running in one, or an open old tab) shows a loud
-  band at the top of the session view, below the top row, linking to the docs page that explains the move. Every message
-  asks the user to act as soon as possible, because an upcoming release will forcibly terminate whatever still runs in
-  an old terminal as part of moving away from tmux, without naming a date. When the agent is running in an old terminal,
-  it asks the user to restart (keeping the conversation), replace, stop or delete the session, or, when Restart is
-  unavailable for the session, to replace, stop or delete it, with a note that the session cannot be restarted because
-  Farhelm does not yet know the agent's conversation or because the session has no way to resume one. Otherwise, when
-  some tabs are old, it names those tabs as the tab strip labels them and asks the user to close them and open new ones,
-  since restarting a session restarts only its agent, not its tabs. Its × hides that message until the session is next
-  opened, never on a timer (a different message the session comes to need meanwhile still shows), and the dismissal is
-  that view's alone: nothing is stored or shared. No band shows for a session shown from a disconnected host's last
-  known state, or for one with no old tab whose agent is not running in an old terminal: an agent that stopped or ended
-  in an old terminal leaves it only so its last screen stays readable, and the session's next run gets a new terminal.
-  The old-terminal notification (see Status) uses the same condition, so a session nobody opens hears about it too. The
-  bottom bar names the session's terminal kinds (old, new, or both, with each terminal listed in its tooltip and
-  accessible text) while its host creates new terminals or any of its terminals is new; a host that only creates old
-  terminals shows neither the band nor the kinds, so its sessions look as they always have.
+- Every terminal is new: it runs in a terminal host of its own (above). Releases from before terminal hosts ran each
+  terminal (the agent's and each tab's) in the host's private tmux server instead, and later ones kept those old
+  terminals running beside new ones, with a loud band on such a session and the old-terminal warning (see Status) asking
+  the user to move them. This release ends them: the first time a host's supervisor of this release starts, it ends that
+  tmux server, and with it everything that still ran in an old terminal, without needing a tmux program. A session whose
+  agent was still launching, running or being stopped in one becomes interrupted, as after a reboot, and gets the notice
+  Status describes; one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in
+  the server, is gone; old tabs are closed. Programs the old agents and tabs left running are stopped, for an agent by
+  the session's own record (its launch scope and process markers, as a Stop of an agent that already exited finds them)
+  and for a tab wherever its id can be found; what cannot be attributed to an old tab is left for the session's Delete,
+  which stops everything of the session. A session whose agent or tabs already run in terminal hosts keeps them. A
+  failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those
+  sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still
+  running. After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.
+  Installing Farhelm still requires a supported tmux, except on a remote Mac set up over SSH, which never uses tmux (see
+  Topology). The bottom bar names the session's terminal kinds (with each terminal listed in its tooltip and accessible
+  text).
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a
@@ -3487,8 +3468,9 @@ exception below:
   and sessions keep running, local and remote. Sandbox sessions have an explicit exception: after the remote connection
   ends, Tensorlake's 30-minute idle timeout freezes their processes until the sandbox is resumed.
 - The supervisor itself restarting — crash, upgrade, manual restart — must not interrupt its sessions. Terminals and
-  agent processes outlive the supervisor process; only a host reboot takes sessions down. This is what makes updates,
-  the desktop app's automatic ones included, routine instead of scary.
+  agent processes outlive the supervisor process; only a host reboot takes sessions down (and, once, the update that
+  ended old terminals; see Terminal experience). This is what makes updates, the desktop app's automatic ones included,
+  routine instead of scary.
 
 Local sessions have full behavioral parity with remote ones; what differs is availability, not behavior. The Mac desktop
 app's local supervisor is started by the app and keeps running after the app quits (or is started manually — see
@@ -3547,12 +3529,12 @@ with no reboot involved shows as exited — with the true exit code when the sur
 code otherwise (reporting a code the terminal genuinely retains is not guessing; inventing one where nothing retains it
 would be). Interrupted sessions' terminal contents are gone — there is no conversation history store (see Terminal
 experience) — but the conversation itself is recoverable. Opening an interrupted session shows a centered neutral card
-in the empty terminal area explaining that the host restart paused the session and that it needs an intentional restart.
-The card offers Restart when the session can resume its conversation (see Lifecycle operations), and Replace, which
-starts a fresh session under the same settings and keeps its inline destructive confirmation; a session that cannot
-resume offers only Replace and says why. Nothing respawns unattended — an agent (especially one launched with permissive
-flags) only restarts or replaces when the user chooses and confirms. The system must not presume the original OS process
-survived the reboot.
+in the empty terminal area explaining that a host reboot or a Farhelm update ended the agent and that it needs an
+intentional restart. The card offers Restart when the session can resume its conversation (see Lifecycle operations),
+and Replace, which starts a fresh session under the same settings and keeps its inline destructive confirmation; a
+session that cannot resume offers only Replace and says why. Nothing respawns unattended — an agent (especially one
+launched with permissive flags) only restarts or replaces when the user chooses and confirms. The system must not
+presume the original OS process survived the reboot.
 
 The resume promise is per-session: for agents with conversation-identity integration, the supervisor captures which
 agent conversation belongs to each session, and restart resumes exactly that conversation (e.g.

@@ -3602,7 +3602,7 @@ fn restart_offer_continuation(
     let note = feedback_note(offer, ended);
     match status {
         SessionStatus::Interrupted => {
-            format!("interrupted by a host reboot — {offered}.{note}")
+            format!("interrupted by a host reboot or a Farhelm update — {offered}.{note}")
         }
         SessionStatus::Error { .. } => format!("the agent never started — {offered}.{note}"),
         _ => format!("{offered}.{note}"),
@@ -3873,15 +3873,16 @@ fn interrupted_surface_text(
     if replace_with {
         return if offer.can_restart() {
             format!(
-                "A host restart paused this session; it needs an intentional restart. Farhelm \
-                 will wait for you to choose Restart or Replace with — {clause}."
+                "A host reboot or a Farhelm update ended this session's agent; it needs an \
+                 intentional restart. Farhelm will wait for you to choose Restart or Replace with \
+                 — {clause}."
             )
         } else if offer == RestartOffer::NotCaptured {
             // The same ended explanation as the Restart tooltip's, with the
             // card's own way to start over.
             format!(
-                "A host restart paused this session. Farhelm will wait for you to choose Replace \
-                 with — {}.{note}",
+                "A host reboot or a Farhelm update ended this session's agent. Farhelm will wait \
+                 for you to choose Replace with — {}.{note}",
                 not_captured_clause(
                     kind,
                     true,
@@ -3889,19 +3890,19 @@ fn interrupted_surface_text(
                 )
             )
         } else {
-            "A host restart paused this session. Farhelm will wait for you to choose Replace \
-             with — this session was created before launch kinds, so it cannot resume, and \
+            "A host reboot or a Farhelm update ended this session's agent. Farhelm will wait for \
+             you to choose Replace with — this session was created before launch kinds, so it cannot resume, and \
              Replace with opens the launcher with its command to start it over."
                 .to_string()
         };
     }
     if offer.can_restart() {
         format!(
-            "A host restart paused this session; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {clause}."
+            "A host reboot or a Farhelm update ended this session's agent; it needs an intentional restart. Farhelm will wait for you to choose Restart or Replace — {clause}."
         )
     } else {
         format!(
-            "A host restart paused this session. Farhelm will wait for you to choose Replace — {clause}.{note}"
+            "A host reboot or a Farhelm update ended this session's agent. Farhelm will wait for you to choose Replace — {clause}.{note}"
         )
     }
 }
@@ -4792,7 +4793,9 @@ mod tests {
                     feedback_note(offer, true)
                 );
                 assert!(
-                    card.starts_with("A host restart paused this session"),
+                    card.starts_with(
+                        "A host reboot or a Farhelm update ended this session's agent"
+                    ),
                     "{card}"
                 );
                 assert!(
@@ -4838,7 +4841,7 @@ mod tests {
                 );
             }
             assert!(
-                card.starts_with("A host restart paused this session"),
+                card.starts_with("A host reboot or a Farhelm update ended this session's agent"),
                 "{card}"
             );
             assert!(card.contains("Replace with"), "{card}");

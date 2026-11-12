@@ -385,7 +385,8 @@ fn confirm_consequence_for_agent(status: &SessionStatus) -> &'static str {
         }
         SessionStatus::Exited { .. } => "delete anyway:",
         SessionStatus::Interrupted => {
-            "interrupted by a host reboot, which ended the agent; deleting discards the session:"
+            "interrupted by a host reboot or a Farhelm update, which ended the agent; deleting \
+             discards the session:"
         }
         // `Error` never OPENS this prompt (see `on_delete`'s own gate),
         // but a prompt already open for a LIVE session CAN land here —
@@ -593,8 +594,8 @@ fn replace_consequence_for_agent(status: &SessionStatus) -> &'static str {
         }
         SessionStatus::Exited { .. } => "replacing discards the conversation",
         SessionStatus::Interrupted => {
-            "interrupted by a host reboot, which ended the agent, but replacing still discards \
-             the conversation"
+            "interrupted by a host reboot or a Farhelm update, which ended the agent, but \
+             replacing still discards the conversation"
         }
         SessionStatus::Error { .. } => {
             "the agent never started, but replacing still discards any conversation the session \
@@ -631,7 +632,7 @@ pub(crate) fn restart_consequence(status: &SessionStatus) -> &'static str {
             "The agent has exited — restarting first stops anything it left running:"
         }
         SessionStatus::Interrupted => {
-            "Interrupted by a host reboot — nothing left to stop; restart it:"
+            "Interrupted by a host reboot or a Farhelm update — nothing left to stop; restart it:"
         }
         SessionStatus::Error { .. } => "The agent never started — nothing to stop; restart it:",
     }

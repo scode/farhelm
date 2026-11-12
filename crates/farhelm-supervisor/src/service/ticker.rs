@@ -6797,50 +6797,6 @@ mod tests {
         drop(live_host);
     }
 
-    /// A durable session row claiming an existing tmux session (the one
-    /// named `fh-<id>`), for the tests that must go through a REAL reload
-    /// rather than planting an entry in the map.
-    ///
-    /// The terminal address is left empty on purpose: reload's by-name rediscovery is
-    /// what then attaches the live pane, which is the same path a
-    /// supervisor takes over a session it did not launch itself.
-    async fn insert_row(sup: &Arc<Supervisor>, id: &str) {
-        sup.store
-            .insert_session(
-                StoredSession {
-                    conversation_source: None,
-                    capture_ownership_version: 0,
-                    omp_reporter_asset: None,
-                    omp_launch_program: None,
-                    launch_hooked: false,
-                    launch_boot_ended: false,
-                    id: id.to_string(),
-                    parent: None,
-                    title: id.to_string(),
-                    created_at: now_unix(),
-                    last_activity_at: now_unix(),
-                    last_work_started_at: 0,
-                    creation_seq: 0,
-                    cwd: "/tmp".to_string(),
-                    launch: farhelm_proto::SessionLaunch::Legacy {
-                        invocation: "agent".to_string(),
-                        agent_kind: AgentKind::Generic,
-                        resume_template: None,
-                    },
-                    terminal_address: String::new(),
-                    terminal_kind: crate::store::TerminalKind::Tmux,
-                    outcome: LastOutcome::Launching,
-                    canonical_cwd: None,
-                    captured_conversation: None,
-                    generation: 0,
-                    launch_scoped: false,
-                },
-                None,
-            )
-            .await
-            .expect("insert the row that claims that tmux session");
-    }
-
     /// SPEC.md's status rule, at the one place it can actually be
     /// violated: a saturated SAMPLER must not delay a request.
     ///
@@ -6928,18 +6884,29 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn serve_starts_the_ticker_without_any_request_arriving() {
         let state = StateDir::new();
-        let sup = supervisor_with(&state, SupervisorSeams::default()).await;
-        // Through the STORE, not the in-memory map: `serve` reloads the
-        // map wholesale before it starts serving, so a hand-inserted entry
-        // would be replaced by the row set. The reload's own pane
-        // rediscovery is what gives the entry a live terminal.
-        let pane_owner = spawn_pane(&sup, "fh-served", "sleep 300").await;
-        assert!(!pane_owner.is_empty(), "the fixture pane must exist");
-        insert_row(&sup, "served").await;
+        // A launch shim that keeps the host's child running, so the session
+        // has a live terminal for the ticker to sample.
+        let launcher = state.path().join("launcher");
+        std::fs::write(&launcher, "#!/bin/sh\nexec sleep 300\n").expect("write the launcher");
+        std::fs::set_permissions(
+            &launcher,
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .expect("make the launcher executable");
+        let sup = super::super::core::tests::host_supervisor(state.path(), launcher)
+            .await
+            .expect("supervisor");
+        // `serve` reloads the map wholesale before it starts serving; the
+        // reload keeps the host runtime the create published.
+        let served_id = sup
+            .create_session_without_overrides("/tmp", "sleep 300", None, 80, 24, None)
+            .await
+            .expect("create")
+            .id;
 
         let serving = Arc::clone(&sup);
         // `serve` never returns, so the task is abandoned deliberately;
-        // `StateDir`'s own drop is what reaps the tmux server afterwards.
+        // `StateDir`'s own drop is what ends the host afterwards.
         let served = tokio::spawn(async move { serving.serve().await });
 
         wait_until("serve's own ticker sampled the session", || {
@@ -6949,7 +6916,7 @@ mod tests {
                     .try_lock()
                     .ok()
                     .and_then(|sessions| {
-                        sessions.get("served").map(|entry| {
+                        sessions.get(&served_id).map(|entry| {
                             entry.run.activity.lock().expect("activity mutex").samples > 0
                         })
                     })

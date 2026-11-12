@@ -97,9 +97,7 @@ pub(crate) async fn snapshot_of(h: &Harness, session_id: &str) -> SessionSnapsho
 mod raw_peer;
 pub(crate) use raw_peer::RawPeer;
 mod tmux_guard;
-pub(crate) use tmux_guard::{
-    TmuxServerGuard, for_supervisor_child as tmux_guard_for_supervisor_child,
-};
+pub(crate) use tmux_guard::TmuxServerGuard;
 
 /// The receive surface needed by the shared terminal waiters.
 ///

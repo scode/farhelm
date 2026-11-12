@@ -1784,10 +1784,9 @@ async fn a_stop_request_survives_a_restart_whose_replay_has_not_reached_the_exit
     sup.store.insert_session(row, None).await.expect("the row");
 
     let seams = SupervisorSeams::default();
-    let (mut sessions, _) =
-        Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
-            .await
-            .expect("reload");
+    let (mut sessions, _) = Supervisor::reload_sessions(state.path(), &sup.store, &seams, true)
+        .await
+        .expect("reload");
     let entry = sessions.remove("s1").expect("the session");
     let Some(Terminal::Host(host)) = entry.terminal.clone() else {
         panic!("the session's terminal is its host: {:?}", entry.terminal);
@@ -1814,6 +1813,48 @@ async fn a_stop_request_survives_a_restart_whose_replay_has_not_reached_the_exit
         }
     );
     drop(host);
+    end_discoverable(test_host);
+}
+
+/// A durable Stop request whose host's child is still alive at a reload is
+/// cleared, and the session is running again.
+///
+/// Why: PLAN_M3.md item 4's crash boundary, live edge. The stop intent is
+/// written before any signal is sent, so a crash can leave it over an agent
+/// the kill never reached; annotating that agent's later exit "stopped by
+/// user" would be a claim about an ending that did not happen. (The dead
+/// edge, an annotated exit, is
+/// `pending_stop_reload_keeps_startup_annotation_with_and_without_terminal`.)
+/// Spec: a host row `s1` at `StopRequested` at its host's socket, whose
+/// stand-in host's child runs: after a reload the row is `Running` and the
+/// session's terminal is that host.
+#[farhelm_testtrace::test]
+async fn a_stop_request_over_a_live_host_child_is_cleared_by_reload() {
+    let state = StateDir::new();
+    let sup = Supervisor::new_with_exe(state.path(), dummy_exe())
+        .await
+        .expect("supervisor");
+    let (test_host, name) = discoverable_host(&state, "s1", TestHostSpec::default());
+    let mut row = host_row("s1", test_host.socket());
+    row.terminal_address = name;
+    row.outcome = LastOutcome::StopRequested;
+    sup.store.insert_session(row, None).await.expect("the row");
+
+    let seams = SupervisorSeams::default();
+    let (mut sessions, _) = Supervisor::reload_sessions(state.path(), &sup.store, &seams, true)
+        .await
+        .expect("reload");
+    let entry = sessions.remove("s1").expect("the session");
+    assert!(
+        matches!(entry.terminal, Some(Terminal::Host(_))),
+        "the session's terminal is its host: {:?}",
+        entry.terminal
+    );
+    assert_eq!(
+        sup.store.session("s1").await.unwrap().unwrap().outcome,
+        LastOutcome::Running
+    );
+    drop(entry);
     end_discoverable(test_host);
 }
 
@@ -1857,10 +1898,9 @@ async fn an_unreadable_launch_record_leaves_its_session_unavailable() {
     std::fs::write(artifacts.status(), "exec failed: no such file").unwrap();
 
     let seams = SupervisorSeams::default();
-    let (mut sessions, _) =
-        Supervisor::reload_sessions(state.path(), &sup.store, &sup.tmux, &seams, true)
-            .await
-            .expect("reload");
+    let (mut sessions, _) = Supervisor::reload_sessions(state.path(), &sup.store, &seams, true)
+        .await
+        .expect("reload");
     let entry = sessions.remove("s1").expect("the session");
     let Some(Terminal::Host(host)) = entry.terminal.clone() else {
         panic!("the session holds a host terminal: {:?}", entry.terminal);

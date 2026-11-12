@@ -9,7 +9,8 @@
 //! tmux, for every session. This model is what lets those places stop asking
 //! without a durable record of their own: the server's existence is the
 //! signal. A supervisor probes the socket once at startup
-//! ([`super::TmuxDriver::adopt_running_server`]). No server means no old
+//! ([`super::TmuxDriver::adopt_running_server`]; startup now ends the server
+//! instead and sets no server, `super::TmuxDriver::no_server_after_startup`). No server means no old
 //! terminals this run, and the driver then answers every query as tmux
 //! answers for an absent server without spawning anything. A running server
 //! is adopted, and its session names become the set of tmux sessions this

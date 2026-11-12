@@ -114,10 +114,11 @@ that its required systemd or SSH substrate ran.
   suite. Do not also run the old full libtest battery. Every terminal a test's supervisor creates is a terminal host:
   the e2e suite's in-process harness and its real supervisor process fixture start hosts from the built `farhelm`, and
   the supervisor's own unit tests that need a real terminal run in terminal hosts their test binary starts from itself
-  (`hosts::test_program`, glibc Linux only). The tests of tmux itself (the supervisor's driver of the old terminals it
-  still serves, which build their own tmux servers) are what the pinned tmux is for. On Linux it needs Python 3 at
-  `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's `managed_supervisor::` stop test runs a
-  Python stand-in whose main thread exits before its other thread.
+  (`hosts::test_program`, glibc Linux only). The tests of tmux itself (the supervisor's driver of the old terminals,
+  which build their own tmux servers, and the tests of ending old terminals at startup, which build an earlier release's
+  server by hand) are what the pinned tmux is for. On Linux it needs Python 3 at `/usr/bin/python3`: besides the e2e
+  stand-ins named below, the supervisor's `managed_supervisor::` stop test runs a Python stand-in whose main thread
+  exits before its other thread.
 - `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' --tmux required -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
   — preserves doctest coverage separately because nextest does not execute it.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p terminal-host`
@@ -496,6 +497,23 @@ that its required systemd or SSH substrate ran.
   only (the e2e suite), a minute or two; part of the workspace nextest run. Run it when the startup, the schema, the
   orderly stop, reload, the host socket's path, the helm's grid relay, or when and whether the supervisor uses tmux
   changes.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'ending old terminals' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::old_terminals::/) | test(/^hosts::process::/) | test(the_child_gets_the_supervisors_environment_in_farhelms_terminal) | test(/^old_terminals::/) | test(a_retry_of_a_create_interrupted_in_tmux_is_refused)'`
+  — the startup step that ends the old terminals, the private tmux server earlier releases ran sessions in
+  (`crates/farhelm-supervisor/src/service/core/old_terminals.rs`). The unit tests pin how a pane of that server is
+  attributed to a session's agent or one of its tabs by its markers, the verified signal's command-line test as a
+  parameter (`hosts::process`), and `FARHELM_TMUX` kept from a terminal host's child. The e2e tests
+  (`crates/farhelm/tests/e2e/old_terminals.rs`) build the earlier release's layout by hand with the `tmux` on `PATH` (a
+  server on the state directory's `tmux.sock`, `fh-<id>` sessions, marked windows whose panes carry the markers, and
+  old-kind rows) and start a supervisor of this release on it: a dead old agent's job with no markers, alive only in its
+  launch scope, ended with the server and its files, the row interrupted with its pane id kept and one unresolved notice
+  that survives another start, the old warning resolved, and Restart starting the session in a host (with a user
+  manager, else `SKIPPED`); a server killed beforehand, its refusing socket, config and staged config write removed, an
+  old agent's marked SIGHUP-immune daemon ended by the row's identity, and an old row that had exited left as it was
+  with no notice; and an old tab of a session whose agent and other tab run in hosts ended (its SIGHUP-immune job too)
+  while those hosts run on and the session gets no notice. The retry test shows that a create an older release left
+  interrupted in tmux is still refused once the startup interrupts its row. Needs the pinned tmux first on `PATH`. Linux
+  only (the e2e suite), a minute or so; part of the workspace nextest run. Run it when the startup's ending of the old
+  terminals, the reload's handling of old-kind rows or the verified signal changes.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid streams' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_output::/) | test(/^service::grid_stream::/)'`
   — how a host terminal reaches a grid viewer: the encoding (`crates/farhelm-supervisor/src/grid_output.rs`: cells to
   runs with styles, redefined palette colors, wide and combining characters and links, a row with more links than a
