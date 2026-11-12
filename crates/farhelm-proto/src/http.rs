@@ -73,6 +73,16 @@ pub const YOLO_CONFIRMATION_REQUIRED: &str = "confirmation-required";
 pub const UNINSTALL_REMEDY_HEADER: &str = "x-farhelm-uninstall-remedy";
 /// The one value of [`UNINSTALL_REMEDY_HEADER`].
 pub const UNINSTALL_REMEDY_REMOVE: &str = "remove-host";
+/// Marks a Suspend or Resume refused only because another operation on that
+/// host (setup, an update, removal, an edit, another Suspend or Resume) still
+/// holds it: the one lifecycle refusal that waiting can clear, which is what a
+/// launch waking its host retries on. A 409 without it is a refusal that
+/// waiting will not change. Only the helm sets this header, from its own typed
+/// refusal, so neither a provider's text nor a supervisor's reply can make a
+/// client wait. The only value it carries is [`HOST_BUSY_OPERATION`].
+pub const HOST_BUSY_HEADER: &str = "x-farhelm-host-busy";
+/// The one value of [`HOST_BUSY_HEADER`].
+pub const HOST_BUSY_OPERATION: &str = "operation-in-progress";
 /// The host-list `cause` for a local row whose supervisor is not running.
 ///
 /// The one unreachable cause a user can fix with a command on the machine they

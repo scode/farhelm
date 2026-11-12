@@ -59,12 +59,7 @@ pub(super) async fn change_tensorlake(
     host: HostId,
     resume: bool,
 ) -> anyhow::Result<()> {
-    let _lock = manager.try_host_provision_lock(host).ok_or_else(|| {
-        refusal(
-            ErrorKind::Conflict,
-            "This host is busy; try again after its current operation finishes",
-        )
-    })?;
+    let _lock = crate::environment::lifecycle::provision_lock_or_busy(manager, host)?;
     let row = manager
         .store()
         .list_hosts()

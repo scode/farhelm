@@ -26,15 +26,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
-- **Revisit keeping a sandbox session's Suspend and Resume exclusive with launches.** Decided on the maintainer's behalf
-  on 2026-11-10 when landing nonblocking-session-actions stopped: that plan lets you act on other sessions while a
-  launch or a session action is pending, and as delivered it also let Suspend and Resume from a sandbox session's row or
-  top bar run while a launch or a change to the host list was pending, while the Hosts panel's own Suspend and Resume
-  still waited. The plan was sent back to keep the session-facing Suspend and Resume waiting as before, since its goal
-  file listed relaxing that exclusion as needing reassessment. The alternative was to keep the overlap, after showing
-  that a suspend or resume running beside a launch on the same host cannot leave either in a wrong state. Plan:
-  `plans/queue/sandbox-suspend-overlap.md`.
-
 - **Revisit raising sandbox-suspend-overlap's size gate to about 1,000 lines.** Decided on the maintainer's behalf on
   2026-11-12 when that plan blocked: its first PR (#3339, the host-scoped Suspend and Resume rule) came to about 600
   changed lines against a gate of about 400 for the whole plan, because the estimate was low rather than the scope

@@ -5659,57 +5659,245 @@ pub(crate) async fn resume_host(base: &str, host: HostId) -> Result<(), String> 
 /// Use the ordinary refusal wording for lifecycle operations, including busy
 /// hosts and missing account credentials.
 async fn host_lifecycle(base: &str, host: HostId, verb: &str) -> Result<(), String> {
+    post_lifecycle(base, host, verb)
+        .await
+        .map_err(|refusal| refusal.text)
+}
+
+/// A refused Suspend or Resume: the text to show, and whether the helm marked
+/// it as the host being busy with another operation, the one refusal that
+/// waiting can clear (`farhelm_proto::http::HOST_BUSY_HEADER`).
+struct LifecycleRefusal {
+    text: String,
+    busy: bool,
+}
+
+/// One Suspend or Resume request, keeping the helm's busy marker. A transport
+/// failure or timeout is never busy: only the helm's own header says so.
+async fn post_lifecycle(base: &str, host: HostId, verb: &str) -> Result<(), LifecycleRefusal> {
     let url = format!("{base}/api/hosts/{host}/{verb}");
     // Resume can spend 120 seconds restoring a memory snapshot, plus the
     // connection teardown. Keep the UI's deadline outside the helm's budget.
-    let response = send_within(client().post(&url), std::time::Duration::from_secs(150)).await?;
+    let response = send_within(client().post(&url), std::time::Duration::from_secs(150))
+        .await
+        .map_err(|text| LifecycleRefusal { text, busy: false })?;
     if !response.status().is_success() {
-        return Err(refusal_text("POST", &url, response).await);
+        let busy = response
+            .headers()
+            .get(farhelm_proto::http::HOST_BUSY_HEADER)
+            .is_some_and(|value| value == farhelm_proto::http::HOST_BUSY_OPERATION);
+        return Err(LifecycleRefusal {
+            text: refusal_text("POST", &url, response).await,
+            busy,
+        });
     }
     Ok(())
 }
 
-/// Wait for the connection established after an explicit Resume. Return the
-/// fresh registry snapshot so a launch binds its new connection token, never
-/// the token invalidated by suspension. Reads and polling are bounded. A
-/// TensorlakeChanging phase is still preparation, as is Connecting after
-/// vendor confirmation; neither permits session creation. Callers own any
-/// preparation indicator across this whole future, separate from create progress.
+/// How long a launch's wake may wait for the host to stop being busy and then
+/// to connect. The accepted Resume request is neither cut off by it nor
+/// counted against it: the helm may spend 120 seconds restoring memory.
+const WAKE_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Wake a host for a launch: Resume it, then wait for the connection that
+/// follows. Return the fresh registry snapshot so a launch binds its new
+/// connection token, never the token invalidated by suspension. Callers own
+/// any preparation indicator across this whole future, separate from create
+/// progress.
+///
+/// Suspend and Resume from other surfaces may run beside the wake
+/// (SPEC_impl.md, "Tensorlake hosts"), so it tolerates them: a Resume refused
+/// only because another operation holds the host is sent again until that
+/// operation ends (or the host connects through someone else's Resume), and a
+/// host suspended again while the wake waits fails it at once instead of after
+/// the whole wait. Every other refusal fails at once. The waiting, busy
+/// refusals included, shares one [`WAKE_WAIT`] budget that only the accepted
+/// Resume request does not spend.
 pub(crate) async fn resume_host_connected(base: &str, host: HostId) -> Result<Vec<Host>, String> {
-    resume_host(base, host).await?;
-    let mut ready = Box::pin(async {
-        loop {
-            let hosts = fetch_hosts(base).await?;
-            let current = hosts
-                .iter()
-                .find(|row| row.id == host)
-                .ok_or("The host was removed while resuming")?;
-            if crate::hosts::is_connected(&current.state) {
-                return Ok(hosts);
+    // Read before the Resume: the suspension the wake starts from.
+    let before = fetch_hosts(base).await?;
+    let mut watch = WakeWatch::new(host_phase(&before, host)?);
+    let mut budget = WakeBudget::new();
+    let mut resumed = false;
+    loop {
+        if !resumed {
+            let request = web_time::Instant::now();
+            match post_lifecycle(base, host, "resume").await {
+                // Only the accepted Resume is refunded: a busy refusal's time
+                // is waiting like any other, or a slow helm would stretch it.
+                Ok(()) => {
+                    resumed = true;
+                    budget.exclude(request.elapsed());
+                }
+                Err(refusal) if refusal.busy => {}
+                Err(refusal) => return Err(refusal.text),
             }
-            match &current.state {
-                crate::HostPhase::Suspended {
-                    resume_failed: Some(_),
-                    ..
-                } => return Err("Tensorlake could not resume this host; check its details".into()),
-                // The hold can remain visible between its release and the
-                // actor's next publication. Wait for Connected, not the
-                // disappearance of a suspended or transitional phase.
-                crate::HostPhase::TensorlakeChanging { .. } => {}
-                _ => {}
+        }
+        let Some(hosts) = budget.within(fetch_hosts(base)).await else {
+            break;
+        };
+        let hosts = hosts?;
+        match watch.step(host_phase(&hosts, host)?) {
+            WakeStep::Connected => return Ok(hosts),
+            WakeStep::Wait => {}
+            WakeStep::SuspendedAgain => {
+                return Err(
+                    "The host was suspended again while it was waking; resume it and launch again"
+                        .into(),
+                );
             }
-            crate::reader::sleep_ms(1000).await;
+            WakeStep::ResumeFailed => {
+                return Err("Tensorlake could not resume this host; check its details".into());
+            }
         }
-    });
-    let mut deadline = Box::pin(crate::reader::sleep_ms(60_000));
-    std::future::poll_fn(move |cx| {
-        if let std::task::Poll::Ready(answer) = ready.as_mut().poll(cx) {
-            return std::task::Poll::Ready(answer);
+        if budget.within(crate::reader::sleep_ms(1000)).await.is_none() {
+            break;
         }
-        deadline.as_mut().poll(cx).map(|()| Err(
-            "The host resumed but did not connect within 60 seconds; try again when it connects".into()
-        ))
-    }).await
+    }
+    let seconds = WAKE_WAIT.as_secs();
+    Err(if resumed {
+        format!(
+            "The host resumed but did not connect within {seconds} seconds; try again when it connects"
+        )
+    } else {
+        format!(
+            "The host stayed busy with another operation for {seconds} seconds; try again when it finishes"
+        )
+    })
+}
+
+/// The phase `host` has in a registry snapshot read during its wake.
+fn host_phase(hosts: &[Host], host: HostId) -> Result<crate::HostPhase, String> {
+    hosts
+        .iter()
+        .find(|row| row.id == host)
+        .map(|row| row.state.clone())
+        .ok_or_else(|| "The host was removed while resuming".into())
+}
+
+/// The wait budget of one wake: [`WAKE_WAIT`] of time spent outside its
+/// accepted Resume request.
+struct WakeBudget {
+    deadline: web_time::Instant,
+}
+
+impl WakeBudget {
+    fn new() -> Self {
+        Self {
+            deadline: web_time::Instant::now() + WAKE_WAIT,
+        }
+    }
+
+    /// Give back the time the accepted Resume request took, which the
+    /// budget does not count.
+    fn exclude(&mut self, spent: std::time::Duration) {
+        self.deadline += spent;
+    }
+
+    /// Run `work` until the budget runs out; `None` when it ran out first.
+    async fn within<T>(&self, work: impl Future<Output = T>) -> Option<T> {
+        let remaining = self
+            .deadline
+            .saturating_duration_since(web_time::Instant::now());
+        let mut work = std::pin::pin!(work);
+        let mut deadline = std::pin::pin!(crate::reader::sleep_ms(remaining.as_millis() as u64));
+        std::future::poll_fn(move |cx| {
+            if let std::task::Poll::Ready(answer) = work.as_mut().poll(cx) {
+                return std::task::Poll::Ready(Some(answer));
+            }
+            deadline.as_mut().poll(cx).map(|()| None)
+        })
+        .await
+    }
+}
+
+/// What a wake does after reading its host's phase.
+#[derive(Debug, PartialEq, Eq)]
+enum WakeStep {
+    /// Connected: the launch may bind the snapshot's connection.
+    Connected,
+    /// Still preparing: resuming, connecting, held, busy, or the suspension
+    /// the wake started from still showing.
+    Wait,
+    /// Suspended by something other than the suspension the wake started from.
+    SuspendedAgain,
+    /// The provider reported that the Resume failed.
+    ResumeFailed,
+}
+
+/// Tells a host suspended again during its wake apart from the suspension the
+/// wake started from, which keeps showing for as long as the wake's own
+/// Resume has not run: while it is refused as busy behind an operation that
+/// publishes no hold of its own (an update run, an edit), the listing still
+/// shows the host exactly as the wake first read it. The same marks also come
+/// back after a hold when the busy operation was another Suspend of a host
+/// Farhelm had already suspended: the helm republishes the stored marks, and
+/// nothing suspended the host again. (After an accepted Resume the helm shows
+/// its hold until the connection publishes Connecting; the rule does not
+/// depend on that.)
+///
+/// A suspension is therefore new when its `observed_at` or
+/// `suspended_by_farhelm_at` is later than the starting one's (a Suspend or an
+/// idle suspension always stamps a new time), when the wake did not start
+/// suspended, or when it follows a phase the connection itself published
+/// (Connecting and the rest). A hold is not such a phase. A failed-resume
+/// mark the starting suspension already carried is part of that same reading,
+/// not a failure of this wake; only one that appears later fails it.
+struct WakeWatch {
+    /// The starting suspension's marks, and whether it already carried a
+    /// failed resume, while the starting reading can still show; `None` when
+    /// the wake did not start suspended or the connection has published since,
+    /// after which any suspension is new.
+    starting: Option<(i64, Option<i64>, bool)>,
+}
+
+impl WakeWatch {
+    fn new(start: crate::HostPhase) -> Self {
+        let mut watch = Self { starting: None };
+        if let crate::HostPhase::Suspended {
+            observed_at,
+            suspended_by_farhelm_at,
+            resume_failed,
+        } = start
+        {
+            watch.starting = Some((
+                observed_at,
+                suspended_by_farhelm_at,
+                resume_failed.is_some(),
+            ));
+        }
+        watch
+    }
+
+    fn step(&mut self, phase: crate::HostPhase) -> WakeStep {
+        let (observed_at, suspended_by_farhelm_at, resume_failed) = match phase {
+            phase if crate::hosts::is_connected(&phase) => return WakeStep::Connected,
+            crate::HostPhase::Suspended {
+                observed_at,
+                suspended_by_farhelm_at,
+                resume_failed,
+            } => (observed_at, suspended_by_farhelm_at, resume_failed),
+            // Someone's Suspend or Resume in progress, this wake's own
+            // included; whatever follows it decides.
+            crate::HostPhase::TensorlakeChanging { .. } => return WakeStep::Wait,
+            _ => {
+                self.starting = None;
+                return WakeStep::Wait;
+            }
+        };
+        let Some((starting_observed, starting_by_farhelm, starting_failed)) = self.starting else {
+            return WakeStep::SuspendedAgain;
+        };
+        if observed_at > starting_observed || suspended_by_farhelm_at > starting_by_farhelm {
+            return WakeStep::SuspendedAgain;
+        }
+        // The starting reading's own failure is an earlier Resume's, and a
+        // wake waiting out "busy" must not end on it.
+        if resume_failed.is_some() && !starting_failed {
+            return WakeStep::ResumeFailed;
+        }
+        WakeStep::Wait
+    }
 }
 
 /// Send the feedback dialog's submission to the maintainer, through the helm
@@ -8673,5 +8861,139 @@ mod seen_write_tests {
             queue.record("sess-1", Some(2), Box::new(|_| {})),
             "the next write must be able to start a replacement writer"
         );
+    }
+}
+
+/// A launch's wake must tell a host suspended again while it waits from the
+/// suspension it started from, which keeps showing while its own Resume is
+/// refused as busy. Getting it wrong either way is visible: a false
+/// "suspended again" (or a stale "could not resume") fails a launch that
+/// would have woken its host, and a missed one leaves the launch waiting a
+/// minute for a host that will not connect (SPEC_impl.md, "Tensorlake hosts").
+#[cfg(test)]
+mod wake_watch_tests {
+    use super::{WakeStep, WakeWatch};
+    use crate::{HostPhase, RefreshHealth};
+    use farhelm_proto::tensorlake::LifecycleDirection;
+
+    fn suspended(observed_at: i64, by_farhelm: Option<i64>) -> HostPhase {
+        HostPhase::Suspended {
+            observed_at,
+            suspended_by_farhelm_at: by_farhelm,
+            resume_failed: None,
+        }
+    }
+
+    fn held(direction: LifecycleDirection) -> HostPhase {
+        HostPhase::TensorlakeChanging {
+            starting: false,
+            direction,
+            requested_at: 50,
+        }
+    }
+
+    fn connecting() -> HostPhase {
+        HostPhase::Connecting {
+            attempt: 1,
+            stage: None,
+            last_error: None,
+        }
+    }
+
+    fn connected() -> HostPhase {
+        HostPhase::Connected {
+            identity: None,
+            build_version: "test".into(),
+            old_version: false,
+            newer_version: false,
+            refresh: RefreshHealth::Pending,
+        }
+    }
+
+    /// The starting suspension, still showing with the same marks while the
+    /// wake's Resume is refused as busy, and again after another Suspend's
+    /// hold (a repeated Suspend republishes the stored marks), keeps the wake
+    /// waiting until it connects.
+    #[test]
+    fn the_starting_suspension_seen_again_after_a_hold_keeps_waiting() {
+        let mut watch = WakeWatch::new(suspended(10, Some(10)));
+        assert_eq!(watch.step(suspended(10, Some(10))), WakeStep::Wait);
+        assert_eq!(
+            watch.step(held(LifecycleDirection::Suspending)),
+            WakeStep::Wait
+        );
+        assert_eq!(watch.step(suspended(10, Some(10))), WakeStep::Wait);
+        assert_eq!(watch.step(connecting()), WakeStep::Wait);
+        assert_eq!(watch.step(connected()), WakeStep::Connected);
+    }
+
+    /// A Suspend from Farhelm, or an idle suspension Tensorlake reports,
+    /// stamps a later time than the starting suspension's, and that is the
+    /// host suspended again, during a hold or not.
+    #[test]
+    fn a_later_suspension_is_suspended_again() {
+        let mut watch = WakeWatch::new(suspended(10, Some(10)));
+        assert_eq!(
+            watch.step(held(LifecycleDirection::Suspending)),
+            WakeStep::Wait
+        );
+        assert_eq!(
+            watch.step(suspended(10, Some(20))),
+            WakeStep::SuspendedAgain
+        );
+
+        let mut watch = WakeWatch::new(suspended(10, None));
+        assert_eq!(watch.step(suspended(30, None)), WakeStep::SuspendedAgain);
+    }
+
+    /// Once the connection itself has published a phase (Connecting here), a
+    /// suspension cannot be the stale starting one, whatever its marks; and a
+    /// wake that did not start suspended has no starting suspension at all.
+    #[test]
+    fn a_suspension_after_the_connection_moved_on_is_suspended_again() {
+        let mut watch = WakeWatch::new(suspended(10, Some(10)));
+        assert_eq!(watch.step(connecting()), WakeStep::Wait);
+        assert_eq!(
+            watch.step(suspended(10, Some(10))),
+            WakeStep::SuspendedAgain
+        );
+
+        let mut watch = WakeWatch::new(HostPhase::Stopped {
+            start_failed: None,
+            waiting_for_place: false,
+        });
+        assert_eq!(watch.step(suspended(10, None)), WakeStep::SuspendedAgain);
+    }
+
+    /// A failed resume on the starting suspension fails the wake with the
+    /// provider's diagnosis rather than waiting it out.
+    #[test]
+    fn a_failed_resume_on_the_starting_suspension_fails() {
+        let mut watch = WakeWatch::new(suspended(10, None));
+        let failed = HostPhase::Suspended {
+            observed_at: 10,
+            suspended_by_farhelm_at: None,
+            resume_failed: Some("restore failed".into()),
+        };
+        assert_eq!(watch.step(failed), WakeStep::ResumeFailed);
+    }
+
+    /// A host whose earlier Resume failed still shows that failure while this
+    /// wake's Resume is refused as busy behind an operation that publishes no
+    /// hold (an update run, say). That failure is the starting reading, not
+    /// this wake's, so the wake keeps waiting and connects once its Resume
+    /// runs; it does not fail with "could not resume".
+    #[test]
+    fn a_failed_resume_the_wake_started_from_keeps_waiting() {
+        let failed = || HostPhase::Suspended {
+            observed_at: 10,
+            suspended_by_farhelm_at: None,
+            resume_failed: Some("restore failed".into()),
+        };
+        let mut watch = WakeWatch::new(failed());
+        assert_eq!(watch.step(failed()), WakeStep::Wait);
+        assert_eq!(watch.step(failed()), WakeStep::Wait);
+        assert_eq!(watch.step(connecting()), WakeStep::Wait);
+        assert_eq!(watch.step(connected()), WakeStep::Connected);
     }
 }

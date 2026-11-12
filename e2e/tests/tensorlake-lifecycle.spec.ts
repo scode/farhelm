@@ -49,6 +49,10 @@ async function fleet(
   feed.notifyOnConnect(1);
   let revision = 1;
   let suspended = initiallySuspended;
+  // Stable like the helm's own marks, which a launch's wake compares to tell
+  // a new suspension from the one it started from.
+  let suspendedAt = Date.now();
+  let reads = 0;
   let publishedState: Record<string, unknown> | undefined;
   let nextRead: { gate: ReturnType<typeof routeGate>; entered: () => void } | undefined;
   const calls: string[] = [];
@@ -66,12 +70,13 @@ async function fleet(
             kind: "tensorlake",
             incarnation: suspended ? remote.incarnation + 10000 : h.incarnation,
             state: publishedState ?? (suspended
-              ? { phase: "suspended", observed_at: Date.now(), suspended_by_farhelm_at: null, resume_failed: null }
+              ? { phase: "suspended", observed_at: suspendedAt, suspended_by_farhelm_at: null, resume_failed: null }
               : runningState ?? h.state),
             tensorlake: { sandbox: "farhelm-host-test", recipe: "test", size: { cpus: 2, memory_gb: 4, disk_gb: 20 } },
           }
           : h
       );
+      reads++;
       const held = nextRead;
       nextRead = undefined;
       if (held) {
@@ -86,6 +91,7 @@ async function fleet(
       await drainedRoute(page, `**/api/hosts/${remote.id}/${verb}`, async (route) => {
         calls.push(verb);
         suspended = verb === "suspend";
+        if (suspended) suspendedAt = Date.now();
         await route.fulfill({
           status: 200,
           headers: { "x-farhelm-build": response.headers()["x-farhelm-build"] },
@@ -101,6 +107,10 @@ async function fleet(
     calls,
     buildStamp,
     suspended: () => suspended,
+    /** Host listings served so far, to wait for the page to read a state. */
+    reads: () => reads,
+    /** The suspended phase as currently displayed, marks included. */
+    suspendedState: () => ({ phase: "suspended", observed_at: suspendedAt, suspended_by_farhelm_at: null, resume_failed: null }),
     /** Keep the next displayed host read stale while the resume helper makes
      * a separate fresh GET. Arm this before its POST returns, when only the
      * page's ordinary reader can have a GET in flight. */
@@ -501,6 +511,116 @@ test("an uninterrupted quick launch opens its session and naming after wake", as
     ]);
   }
 });
+
+/** A launch's wake beside other lifecycle work (SPEC.md, "Topology"): a Resume
+ * refused only because the host is busy is sent again and the launch goes on;
+ * the host suspended again (a later mark) while the wake waits fails the launch
+ * at once, long before its 60-second budget; and the suspension it started from
+ * still showing is not mistaken for that. The real helm shows that starting
+ * reading while the wake's Resume is refused as busy, not after an accepted
+ * one; the third case serves it after acceptance only to pin the rule itself. */
+for (const scenario of ["busy, then accepted", "suspended again", "stale suspension after the resume"] as const) {
+  test(`a quick launch's wake: ${scenario}`, async ({ page, request }) => {
+    const fixture = await fleet(page, request);
+    const previous = await readPreferences(request);
+    const name = `wake-${scenario.split(",")[0].replaceAll(" ", "-")}-${Date.now()}`;
+    const owned: string[] = [];
+    const answered = routeGate();
+    let stopResume: (() => Promise<void>) | undefined;
+    let stopCreate: (() => Promise<void>) | undefined;
+    let resumes = 0;
+    let creates = 0;
+    let created: string | undefined;
+    let bodyFailed = true;
+    try {
+      const other = await createSession(request, { title: `${name}-origin`, host: await localHostId(request) });
+      owned.push(other.id);
+      const saved = await request.put(`/api/templates/${encodeURIComponent(name)}`, { data: {
+        kind: "command", command: FAKE_AGENT, yolo: false, name,
+        host: fixture.remote.identity, destination: { folder: "/tmp" },
+      } });
+      expect(saved.ok(), await saved.text()).toBe(true);
+      await patchPreferences(request, { welcome_seen: true, quick_launch_template: name, name_session_on_quick_launch: false });
+      const starting = fixture.suspendedState();
+      stopResume = await drainedRoute(page, `**/api/hosts/${fixture.remote.id}/resume`, async (route) => {
+        if (++resumes === 1 && scenario === "busy, then accepted") {
+          await route.fulfill({ status: 409, body: "This host is busy; try again after its current operation finishes", headers: {
+            "x-farhelm-build": fixture.buildStamp, "x-farhelm-host-busy": "operation-in-progress",
+          } });
+          return;
+        }
+        if (scenario === "busy, then accepted") return route.fallback();
+        // Accepted, with the host not yet connected: the starting suspension
+        // (stale) or a connection attempt the host published itself.
+        await fixture.publishState(scenario === "suspended again" ? { phase: "connecting", attempt: 1, last_error: null } : starting);
+        await route.fulfill({ status: 200, headers: { "x-farhelm-build": fixture.buildStamp }, json: {} });
+        answered.release();
+      });
+      stopCreate = await drainedRoute(page, "**/api/sessions", async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        creates++;
+        const response = await route.fetch();
+        // Accepted by the real helm and supervisor, on the woken connection:
+        // a create sent with the suspended connection's token is refused.
+        expect(response.ok(), await response.text()).toBe(true);
+        created = (await response.json()).id;
+        owned.push(created!);
+        await route.fulfill({ response });
+      });
+      await pinAutoSelect(page, other.id);
+      await page.goto("/");
+      await attachSession(page, other.id);
+      await waitForTermText(page, "> ");
+      const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
+      await expect(page.locator(".quick-launch-trigger")).toBeEnabled();
+      await page.keyboard.press(mac ? "Meta+p" : "Control+Shift+p");
+
+      if (scenario === "busy, then accepted") {
+        await expect.poll(() => resumes, { message: "the busy refusal is followed by a second Resume" }).toBe(2);
+      } else {
+        await answered.wait();
+        // Two more listings after the answer: the wake has read the state the
+        // Resume left before anything changes it.
+        const read = fixture.reads();
+        await expect.poll(() => fixture.reads() - read).toBeGreaterThanOrEqual(2);
+        expect(creates, "no create while the host has not connected").toBe(0);
+        if (scenario === "suspended again") {
+          const now = Date.now();
+          await fixture.publishState({ phase: "suspended", observed_at: now, suspended_by_farhelm_at: now, resume_failed: null });
+          await expect(page.getByText("The host was suspended again while it was waking")).toBeVisible({ timeout: 15_000 });
+          expect(creates, "a launch whose host was suspended again sends no create").toBe(0);
+          bodyFailed = false;
+          return;
+        }
+        await fixture.publishState();
+      }
+      await expect.poll(() => created, { message: "the woken launch creates its session" }).toEqual(expect.any(String));
+      expect(creates).toBe(1);
+      await expect(page.getByText(/Resuming the host failed|stayed busy|suspended again/)).toHaveCount(0);
+      bodyFailed = false;
+    } finally {
+      answered.release();
+      await cleanupOwnedSteps(bodyFailed, [
+        ["Resume route", async () => { await stopResume?.(); }],
+        ["submitted owner", async () => { await page.goto("about:blank"); }],
+        ["create route", async () => { await stopCreate?.(); }],
+        ["owned sessions", async () => {
+          await cleanupOwnedSteps(bodyFailed, owned.reverse().map((id): [string, () => Promise<void>] =>
+            ["owned session", () => cleanupSession(request, id)]));
+        }],
+        ["quick template", async () => {
+          const removed = await request.delete(`/api/templates/${encodeURIComponent(name)}`);
+          expect(removed.ok() || removed.status() === 404).toBe(true);
+        }],
+        ["preferences", () => patchPreferences(request, {
+          welcome_seen: previous.welcome_seen ?? null,
+          quick_launch_template: previous.quick_launch_template ?? null,
+          name_session_on_quick_launch: previous.name_session_on_quick_launch ?? null,
+        })],
+      ]);
+    }
+  });
+}
 
 /** Managed Replace with must claim its source at acceptance, including work
  * before any replace POST exists. Wake and the fresh preview retain that same

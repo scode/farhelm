@@ -330,9 +330,12 @@ an agent on that host is working, its status is unknown or stale, or activity ca
 Suspend requires a connected host after the activity read and a complete listing with conclusive non-working statuses.
 An offline or unknown host asks even when its cached listing is empty. Suspension preserves running processes and
 sessions. A session on a suspended host says **&lt;host&gt; is suspended; this session continues when it resumes** and
-offers **Resume host**. Launching on a suspended host resumes it first and waits for a fresh connection. For a fresh
-GitHub checkout, the folder is allocated once the host is ready and the session starts without a second press. Only a
-fresh preview on the new connection can authorize that create. Farhelm does not suspend automatically.
+offers **Resume host**. Launching on a suspended host resumes it first and waits for a fresh connection. While another
+operation on that host (a Suspend or Resume from elsewhere, setup, an update) holds it, the launch keeps asking within
+the same minute it allows for the connection, and a Resume that finishes elsewhere meanwhile is enough. If the host is
+suspended again while the launch waits, the launch fails at once and says so. Any other refusal fails it at once. For a
+fresh GitHub checkout, the folder is allocated once the host is ready and the session starts without a second press.
+Only a fresh preview on the new connection can authorize that create. Farhelm does not suspend automatically.
 
 An explicit Suspend shows **Suspending…**, with a spinner and how long ago Tensorlake was asked, until Tensorlake
 confirms suspension. Only then does the host show **Suspended**, with Farhelm's own completion time. A failed or

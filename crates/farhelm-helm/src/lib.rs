@@ -2676,7 +2676,9 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             | manager::ManagerError::AdoptionSuperseded { .. } => ErrorKind::Conflict,
         };
     }
-    if find_cause::<precondition::IncarnationStale>(e).is_some() {
+    if find_cause::<precondition::IncarnationStale>(e).is_some()
+        || find_cause::<environment::lifecycle::HostBusy>(e).is_some()
+    {
         return ErrorKind::Conflict;
     }
     find_cause::<SupervisorError>(e)
@@ -2776,6 +2778,14 @@ fn http_error(e: anyhow::Error) -> axum::response::Response {
         response.headers_mut().insert(
             farhelm_proto::http::YOLO_CONFIRMATION_HEADER,
             axum::http::HeaderValue::from_static(farhelm_proto::http::YOLO_CONFIRMATION_REQUIRED),
+        );
+    }
+    // Helm-only like the two above: it tells a launch waking this host that
+    // waiting can clear the refusal (`environment::lifecycle::HostBusy`).
+    if find_cause::<environment::lifecycle::HostBusy>(&e).is_some() {
+        response.headers_mut().insert(
+            farhelm_proto::http::HOST_BUSY_HEADER,
+            axum::http::HeaderValue::from_static(farhelm_proto::http::HOST_BUSY_OPERATION),
         );
     }
     if unaccepted {
