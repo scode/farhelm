@@ -1,0 +1,332 @@
+//! Behavior tests for the components, on GPUI's simulated platform.
+//!
+//! These cover what a component promises beyond its looks (the goldens pin those): activation, the disabled state,
+//! hover help reaching the layer manager and leaving with its control, and the dialog frame keeping its answers
+//! reachable. Each step ends with the harness's invariant hook, empty until the focus coordinator fills it.
+
+use std::cell::Cell;
+use std::rc::Rc;
+
+use gpui::{
+    AnyElement, App, Bounds, Context, InteractiveElement, IntoElement, Modifiers, ParentElement,
+    Pixels, Point, Render, ScrollDelta, ScrollEvent, Styled, Subscription, TestAppContext,
+    VisualTestContext, Window, div, point, px, size,
+};
+
+use gpui::prelude::FluentBuilder as _;
+
+use super::{Button, DialogFrame, HoverHelp, Role, Tier};
+use crate::{layers, test_support};
+
+/// Draws whatever the test gives it, centered, with the layer manager's overlay on top as the main view does, and
+/// redraws when the overlay changes, as the main view does.
+struct Harness {
+    draw: Box<Draw>,
+    _layers: Option<Subscription>,
+}
+
+/// What a test draws in its window.
+type Draw = dyn Fn(&mut Window, &mut App) -> AnyElement;
+
+impl Render for Harness {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child((self.draw)(window, cx))
+            .children(layers::overlay(window, cx))
+    }
+}
+
+/// A bootstrapped window drawing `draw`.
+fn open(
+    cx: &mut TestAppContext,
+    draw: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
+) -> &mut VisualTestContext {
+    test_support::install(cx);
+    let (_, cx) = cx.add_window_view(|_, cx| Harness {
+        draw: Box::new(draw),
+        _layers: layers::observe(cx),
+    });
+    cx.run_until_parked();
+    cx
+}
+
+/// Where the element a test selected was drawn; it must have been.
+fn bounds(cx: &mut VisualTestContext, selector: &'static str) -> Bounds<Pixels> {
+    match cx.debug_bounds(selector) {
+        Some(bounds) => bounds,
+        None => panic!("{selector} was not drawn"),
+    }
+}
+
+/// The center of the element a test selected.
+fn center(cx: &mut VisualTestContext, selector: &'static str) -> Point<Pixels> {
+    bounds(cx, selector).center()
+}
+
+/// Run the harness's per-step checks against this test's window.
+fn check(cx: &mut VisualTestContext) {
+    cx.update(test_support::check_invariants);
+}
+
+/// A click activates an enabled button, and a disabled one ignores it: the old app's disabled buttons were inert, and a
+/// dimmed button that still acted would send a command the user was told was unavailable.
+#[gpui::test]
+fn a_click_activates_an_enabled_button_and_not_a_disabled_one(cx: &mut TestAppContext) {
+    let clicks = Rc::new(Cell::new((0, 0)));
+    let counted = clicks.clone();
+    let cx = open(cx, move |_, _| {
+        let (on, off) = (counted.clone(), counted.clone());
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(
+                Button::new("on", "Save", HoverHelp::tooltip("Save it"), Role::Button)
+                    .tier(Tier::Primary)
+                    .on_click(move |_, _, _| on.set((on.get().0 + 1, on.get().1))),
+            )
+            .child(
+                Button::new("off", "Save", HoverHelp::tooltip("Save it"), Role::Button)
+                    .tier(Tier::Primary)
+                    .disabled(true)
+                    .on_click(move |_, _, _| off.set((off.get().0, off.get().1 + 1))),
+            )
+            .into_any_element()
+    });
+
+    let on = center(cx, "on");
+    cx.simulate_click(on, Modifiers::none());
+    check(cx);
+    let off = center(cx, "off");
+    cx.simulate_click(off, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        clicks.get(),
+        (1, 0),
+        "the enabled button ran once, the disabled one never"
+    );
+}
+
+/// The text of the tooltip showing now, if any.
+fn tooltip(cx: &mut VisualTestContext) -> Option<gpui::SharedString> {
+    cx.update(|_, cx| layers::shown_tooltip(cx))
+        .map(|shown| shown.text)
+}
+
+/// Hovering a control shows its help through the layer manager and leaving it takes the help down. This is the old
+/// app's "every control has hover help" rule, now carried by the constructor instead of a page-walking test.
+#[gpui::test]
+fn hovering_shows_the_controls_help_and_leaving_hides_it(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        Button::new(
+            "save",
+            "Save",
+            HoverHelp::tooltip("Save the title"),
+            Role::Button,
+        )
+        .into_any_element()
+    });
+
+    let save = center(cx, "save");
+    cx.simulate_mouse_move(save, None, Modifiers::none());
+    check(cx);
+    assert_eq!(tooltip(cx), Some("Save the title".into()));
+
+    cx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
+    check(cx);
+    assert_eq!(tooltip(cx), None, "leaving to empty space hid it");
+}
+
+/// Moving straight from one control onto its neighbor shows the neighbor's help, whichever hover event GPUI delivers
+/// first. If the first control's leave could take down any tooltip, the neighbor's help would vanish the moment it
+/// appeared, and it would also do so for two controls that merely share an id in different parts of the window.
+#[gpui::test]
+fn one_controls_leave_never_hides_anothers_tooltip(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        div()
+            .flex()
+            .child(Button::new(
+                "same",
+                "Save",
+                HoverHelp::tooltip("Save the title"),
+                Role::Button,
+            ))
+            // A second "same" in another part of the window: an id is unique only among siblings, so it may repeat
+            // under a different parent. (Under the same element path GPUI would treat the two as one element.)
+            .child(
+                div()
+                    .id("panel")
+                    .debug_selector(|| "panel".into())
+                    .child(Button::new(
+                        "same",
+                        "Rename",
+                        HoverHelp::tooltip("Give it a new title"),
+                        Role::Button,
+                    )),
+            )
+            .into_any_element()
+    });
+    // Two controls share the selector "same", so locate them through the panel that holds the second: the first sits
+    // immediately left of it, with no gap.
+    let panel = bounds(cx, "panel");
+    let first = point(panel.left() - px(4.), panel.center().y);
+    let second = point(panel.left() + px(4.), panel.center().y);
+    cx.simulate_mouse_move(first, None, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("Save the title".into()),
+        "the premise: the first control's help shows"
+    );
+
+    cx.simulate_mouse_move(second, None, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("Give it a new title".into()),
+        "the neighbor's help shows, and the first control's leave did not take it down"
+    );
+}
+
+/// A tooltip closes when its control is gone, though no hover-leave ever fires for a control that simply stops being
+/// drawn (a dialog closing on Enter, a deleted row). SPEC_impl.md: an overlay closes when its subject is gone.
+#[gpui::test]
+fn a_tooltip_closes_when_its_control_is_no_longer_drawn(cx: &mut TestAppContext) {
+    let shown = Rc::new(Cell::new(true));
+    let drawn = shown.clone();
+    let cx = open(cx, move |_, _| {
+        div()
+            .size(px(200.))
+            .when(drawn.get(), |area| {
+                area.child(Button::new(
+                    "gone",
+                    "Delete",
+                    HoverHelp::tooltip("Delete it"),
+                    Role::Button,
+                ))
+            })
+            .into_any_element()
+    });
+    let at = center(cx, "gone");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("Delete it".into()),
+        "the premise: its help shows"
+    );
+
+    // The harness draws from a plain cell that notifies nothing, so redraw it the way a view's own change would.
+    shown.set(false);
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    check(cx);
+    assert!(
+        cx.debug_bounds("gone").is_none(),
+        "the premise: the control is no longer drawn"
+    );
+    assert_eq!(tooltip(cx), None, "its tooltip went with it");
+}
+
+/// In a short window a long dialog body scrolls while the answers stay inside the visible frame. The old app lost
+/// answers below the window edge more than once before its frame guaranteed this; the frame now does it for every
+/// dialog.
+#[gpui::test]
+fn a_long_dialog_body_scrolls_and_the_answers_stay_visible(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        DialogFrame::new(
+            "long",
+            "A long dialog",
+            div().children((0..60).map(|line| div().child(format!("line {line}")))),
+            vec![
+                Button::new(
+                    "cancel",
+                    "Cancel",
+                    HoverHelp::tooltip("Close"),
+                    Role::Button,
+                )
+                .tier(Tier::Neutral),
+                Button::new("ok", "Continue", HoverHelp::tooltip("Go on"), Role::Button)
+                    .tier(Tier::Primary),
+            ],
+        )
+        .into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    cx.run_until_parked();
+    check(cx);
+
+    let frame = bounds(cx, "long");
+    let answers = bounds(cx, "long-answers");
+    let body = bounds(cx, "long-body");
+    assert!(
+        frame.size.height <= px(400. - 48.),
+        "the frame keeps its margin to the window edges: {frame:?}"
+    );
+    assert!(
+        frame.bottom() >= answers.bottom(),
+        "the answers are inside the frame: {answers:?} in {frame:?}"
+    );
+    assert!(
+        body.size.height < px(60. * 12.),
+        "the body is clipped to scroll, not grown to its content: {body:?}"
+    );
+}
+
+/// When even the title and the answers do not fit a very short window, the whole frame scrolls, so the answers stay
+/// reachable instead of being cut off (the old `.host-dialog-framed`). The body keeps its three-line floor rather than
+/// collapsing to nothing.
+#[gpui::test]
+fn a_frame_too_tall_for_the_window_scrolls_as_a_whole(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        DialogFrame::new(
+            "short",
+            "A dialog in a very short window",
+            div().children((0..20).map(|line| div().child(format!("line {line}")))),
+            vec![
+                Button::new("ok", "Continue", HoverHelp::tooltip("Go on"), Role::Button)
+                    .tier(Tier::Primary),
+            ],
+        )
+        .summary("with a summary line under the title")
+        .into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(160.)));
+    cx.run_until_parked();
+    check(cx);
+
+    let frame = bounds(cx, "short");
+    let answers = bounds(cx, "short-answers");
+    assert!(
+        frame.size.height <= px(160. - 48.),
+        "the frame keeps its margin: {frame:?}"
+    );
+    assert!(
+        answers.bottom() > frame.bottom(),
+        "the premise: the answers do not fit the frame before scrolling: {answers:?} in {frame:?}"
+    );
+    assert!(
+        bounds(cx, "short-body").size.height >= px(36.),
+        "the body keeps its floor"
+    );
+
+    cx.simulate_event(ScrollEvent {
+        position: frame.center(),
+        delta: ScrollDelta::Pixels(point(px(0.), px(-1000.))),
+        modifiers: Modifiers::none(),
+        ..Default::default()
+    });
+    cx.run_until_parked();
+    check(cx);
+    let frame = bounds(cx, "short");
+    let answer = bounds(cx, "ok");
+    // The answer button, not the whole footer: GPUI's scroll extent leaves the frame's own border width of the footer's
+    // bottom padding below the fold, which hides nothing the user needs.
+    assert!(
+        answer.top() >= frame.top() && answer.bottom() <= frame.bottom(),
+        "scrolling the frame brought the answer into view: {answer:?} in {frame:?}"
+    );
+}

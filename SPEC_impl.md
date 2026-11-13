@@ -491,8 +491,8 @@ tooltip becomes something the compiler checks; the test bridge also reads roles 
 old coverage rule exempted items that carry a visible description, a constructor's description counts as its hover help.
 Colors come only from theme tokens, which are copied from the old stylesheet (`crates/farhelm-ui/assets/app.css` at the
 reference commit). One dialog frame keeps the answer buttons pinned and scrolls the body, and when even those do not
-fit, the whole frame scrolls, as today's dialogs do. The window has a minimum size, to be written into SPEC.md when
-chosen.
+fit, the whole frame scrolls, as today's dialogs do. The window's minimum size is in SPEC.md ("Desktop window chrome";
+`MIN_WINDOW_SIZE` in the app's bootstrap holds it).
 
 GPUI Kit is used for `Root`, text inputs and named primitives, as the prototype did. Kit's own overlays (dialogs,
 sheets, popovers, menus, notifications, tooltips) are not used, not even inside the component layer: Kit moves focus

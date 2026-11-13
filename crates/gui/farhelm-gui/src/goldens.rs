@@ -1,0 +1,304 @@
+//! Headless screenshot goldens: one per component and per dialog frame, in both appearances, compared pixel for pixel.
+//!
+//! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
+//! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
+//! They render with the bundled fonts only and the platform's headless renderer (software Vulkan on Linux), so the same
+//! tree gives the same pixels from run to run; a different renderer version can still move antialiased edges, which is
+//! why references are per platform and rewritten deliberately. References live under `tests/goldens/<os>/`. They are
+//! ignored in ordinary test runs because they need that renderer selected; run them with `scripts/check-gui-goldens.py`
+//! (`--update` rewrites the references after an intended change).
+
+use std::path::Path;
+
+use gpui::{
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    Subscription, Window, WindowAppearance, div, point, px, size,
+};
+use gpui_component::Root;
+
+use crate::assets::Icon;
+use crate::components::{
+    Button, DialogFrame, HoverHelp, IconButton, Role, TextInput, TextInputState, Tier,
+};
+use crate::layers::{self, TooltipOwner};
+use crate::test_support;
+use crate::theme::{self, Preference};
+
+/// How many frames a scene may take to settle before the test gives up: icons decode on the background executor, so
+/// the first frame can lack them. Two consecutive identical captures is the readiness signal; a scene that never
+/// settles is a failure that says so, not a flaky pixel mismatch.
+const MAX_SETTLE_FRAMES: usize = 6;
+
+/// One scene: a name, its size in logical pixels, what it draws, and what it sets up once its window exists.
+struct Scene {
+    name: &'static str,
+    size: (f32, f32),
+    draw: fn(&SceneState, &mut Window, &mut App) -> AnyElement,
+    setup: fn(&SceneState, &mut Window, &mut App),
+}
+
+/// State a scene keeps across frames: a text input's editable state, and the owner token a tooltip scene shows its
+/// tooltip for (it must stay alive, or the layer manager takes the tooltip down).
+struct SceneState {
+    input: TextInputState,
+    tooltip_owner: Entity<TooltipOwner>,
+}
+
+/// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
+struct SceneView {
+    scene: &'static Scene,
+    state: SceneState,
+    _layers: Option<Subscription>,
+}
+
+impl Render for SceneView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = theme::palette(cx);
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p(px(12.))
+            .bg(theme::color(palette.bg_0))
+            .font_family(crate::assets::UI_FONT)
+            .child((self.scene.draw)(&self.state, window, cx))
+            .children(layers::overlay(window, cx))
+    }
+}
+
+/// Scenes with nothing to set up.
+fn no_setup(_: &SceneState, _: &mut Window, _: &mut App) {}
+
+/// Every button tier, a disabled main action and an icon button, in one row.
+fn buttons(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let help = || HoverHelp::tooltip("Golden scene control");
+    div()
+        .flex()
+        .gap(px(8.))
+        .items_center()
+        .child(Button::new("ghost", "Ghost", help(), Role::Button))
+        .child(Button::new("neutral", "Cancel", help(), Role::Button).tier(Tier::Neutral))
+        .child(Button::new("primary", "Save", help(), Role::Button).tier(Tier::Primary))
+        .child(
+            Button::new("primary-off", "Save", help(), Role::Button)
+                .tier(Tier::Primary)
+                .disabled(true),
+        )
+        .child(
+            Button::new("danger", "Delete", help(), Role::Button)
+                .icon(Icon::Trash)
+                .tier(Tier::Danger),
+        )
+        .child(IconButton::new(
+            "more",
+            Icon::More,
+            "More actions",
+            help(),
+            Role::Button,
+        ))
+        .into_any_element()
+}
+
+/// Put a value in the text input, so the golden pins the font and size Kit's input draws with, not only its box.
+fn text_input_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    state.input.set_text("api-refactor", window, cx);
+}
+
+/// A labeled text input holding a value.
+fn text_input(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div()
+        .w(px(280.))
+        .child(TextInput::new(
+            "title",
+            &state.input,
+            "Session title",
+            HoverHelp::tooltip("The session's new title"),
+        ))
+        .into_any_element()
+}
+
+/// The dialog frame with a title, a summary, a short body and a pinned Cancel/Delete pair.
+fn dialog(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    DialogFrame::new(
+        "delete",
+        "Delete session?",
+        div().child(
+            "The session's terminal and its history are removed. The working directory stays.",
+        ),
+        vec![
+            Button::new(
+                "cancel",
+                "Cancel",
+                HoverHelp::tooltip("Keep the session"),
+                Role::Button,
+            )
+            .tier(Tier::Neutral),
+            Button::new(
+                "confirm",
+                "Delete",
+                HoverHelp::tooltip("Delete the session"),
+                Role::Button,
+            )
+            .tier(Tier::Danger),
+        ],
+    )
+    .summary("api-refactor, on this machine")
+    .into_any_element()
+}
+
+/// The tooltip scene's help: long enough to wrap inside the tooltip's 280-pixel cap.
+const RESTART_HELP: &str = "Stop the agent and start it again in the same terminal, keeping the session's history and working directory.";
+
+/// A neutral button, and its tooltip as the layer manager draws it (shadow, padding, wrapping inside the 280-pixel cap).
+fn tooltip(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div()
+        .flex()
+        .items_start()
+        .w(px(380.))
+        .h(px(120.))
+        .child(
+            Button::new(
+                "restart",
+                "Restart",
+                HoverHelp::tooltip(RESTART_HELP),
+                Role::Button,
+            )
+            .tier(Tier::Neutral),
+        )
+        .into_any_element()
+}
+
+/// Show a long tooltip as if the pointer had come to rest over the button.
+fn tooltip_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    layers::show_tooltip_at(
+        &state.tooltip_owner,
+        RESTART_HELP.into(),
+        point(px(40.), px(30.)),
+        cx,
+    );
+}
+
+static SCENES: [Scene; 4] = [
+    Scene {
+        name: "buttons",
+        size: (560., 64.),
+        draw: buttons,
+        setup: no_setup,
+    },
+    Scene {
+        name: "text-input",
+        size: (320., 64.),
+        draw: text_input,
+        setup: text_input_setup,
+    },
+    Scene {
+        name: "dialog",
+        size: (540., 300.),
+        draw: dialog,
+        setup: no_setup,
+    },
+    Scene {
+        name: "tooltip",
+        size: (400., 140.),
+        draw: tooltip,
+        setup: tooltip_setup,
+    },
+];
+
+/// Draw and capture `window` until two consecutive captures match, at most [`MAX_SETTLE_FRAMES`] times.
+fn settle(
+    cx: &mut gpui::HeadlessAppContext,
+    window: gpui::AnyWindowHandle,
+    name: &str,
+) -> anyhow::Result<image::RgbaImage> {
+    let mut previous = None;
+    for _ in 0..MAX_SETTLE_FRAMES {
+        cx.run_until_parked();
+        cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx))?;
+        let capture = cx.capture_screenshot(window)?;
+        if previous.as_ref() == Some(&capture) {
+            return Ok(capture);
+        }
+        previous = Some(capture);
+    }
+    anyhow::bail!("{name} never settled: {MAX_SETTLE_FRAMES} frames, no two in a row the same")
+}
+
+/// Every scene in both appearances matches its reference exactly. Run through `scripts/check-gui-goldens.py`, which
+/// selects the headless renderer; `FARHELM_UPDATE_GOLDENS=1` (set by that script's `--update`) rewrites references.
+#[test]
+#[ignore = "needs the headless renderer selected; run scripts/check-gui-goldens.py"]
+fn component_goldens() -> anyhow::Result<()> {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let references = manifest.join("tests/goldens").join(std::env::consts::OS);
+    // Captures go beside the test binary, inside the build directory, so a failure leaves the new picture to compare.
+    let captures = std::env::current_exe()?
+        .parent()
+        .map(|deps| deps.join("gui-goldens"))
+        .ok_or_else(|| anyhow::anyhow!("the test binary has no directory"))?;
+    let update = std::env::var_os("FARHELM_UPDATE_GOLDENS").is_some_and(|value| value == "1");
+    std::fs::create_dir_all(&captures)?;
+    if update {
+        std::fs::create_dir_all(&references)?;
+    }
+    let mut failures = Vec::new();
+    for scene in &SCENES {
+        for (appearance, preference) in [("light", Preference::Light), ("dark", Preference::Dark)] {
+            let name = format!("{}--{appearance}.png", scene.name);
+            let mut cx = test_support::headless()?;
+            cx.update(|cx| {
+                theme::follow_system(WindowAppearance::Light, cx);
+                theme::set_preference(preference, cx);
+            });
+            let mut view = None;
+            let window =
+                cx.open_window(size(px(scene.size.0), px(scene.size.1)), |window, cx| {
+                    let state = SceneState {
+                        input: TextInputState::new(window, cx),
+                        tooltip_owner: cx.new(|_| TooltipOwner),
+                    };
+                    let scene_view = cx.new(|cx| SceneView {
+                        scene,
+                        state,
+                        _layers: layers::observe(cx),
+                    });
+                    view = Some(scene_view.clone());
+                    cx.new(|cx| Root::new(scene_view, window, cx))
+                })?;
+            let view =
+                view.ok_or_else(|| anyhow::anyhow!("{name}: the scene view was not built"))?;
+            cx.update_window(window.into(), |_, window, cx| {
+                let state = &view.read(cx).state;
+                // Cheap clones: an input handle and an entity handle.
+                let (input, owner) = (state.input.clone(), state.tooltip_owner.clone());
+                let staged = SceneState {
+                    input,
+                    tooltip_owner: owner,
+                };
+                (scene.setup)(&staged, window, cx);
+            })?;
+            let screenshot = settle(&mut cx, window.into(), &name)?;
+            screenshot.save(captures.join(&name))?;
+            let reference = references.join(&name);
+            if update {
+                screenshot.save(&reference)?;
+                continue;
+            }
+            match image::open(&reference).map(|expected| expected.into_rgba8()) {
+                Ok(expected) if expected == screenshot => {}
+                Ok(_) => failures.push(format!(
+                    "{name} differs from its reference (capture in {})",
+                    captures.display()
+                )),
+                Err(error) => failures.push(format!("{}: {error}", reference.display())),
+            }
+        }
+    }
+    anyhow::ensure!(
+        failures.is_empty(),
+        "golden failures: {}",
+        failures.join("; ")
+    );
+    Ok(())
+}
