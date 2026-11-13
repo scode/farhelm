@@ -42,9 +42,12 @@ const PROXY_NAMES: [&str; 10] = [
 /// credentials, so receive it through stdin into a mode-0600 temporary and
 /// remove it before reporting success or capturing an image. A script file
 /// also keeps package tools from consuming the remaining script as their stdin.
+/// Use `/var/tmp`: a newly started systemd container can clear `/tmp` during
+/// boot, after this wrapper writes the script but before the child opens it.
+/// The first login probe runs before the image's systemd readiness check.
 const PRIVATE_SCRIPT: &str = r#"
 umask 077
-file=$(mktemp /tmp/farhelm-private-script.XXXXXXXXXX) || exit 1
+file=$(mktemp /var/tmp/farhelm-private-script.XXXXXXXXXX) || exit 1
 trap 'rm -f -- "$file"' EXIT
 trap 'exit 1' HUP INT TERM
 cat > "$file" || exit 1

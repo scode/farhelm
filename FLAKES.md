@@ -4868,3 +4868,39 @@ variables; per-case load unavailable. The failed run directories are kept privat
 Class: fixture-premise
 
 Cause: hypothesis
+
+## 2026-11-13 — container boot removes its private setup script (crates/farhelm/tests/e2e/podman_environments.rs)
+
+`podman_environments::real_local_environment_lifecycle_and_owned_image_cleanup` was the only reported failure in the
+x86_64 Linux gate for v0.39.0-rc.2, refusing the initial environment launch after 13.04 seconds. The private setup
+wrapper wrote its script in `/tmp`, which a newly started systemd container can clear before the child shell opens it.
+The wrapper was unchanged from RC1. A focused reproduction using the production managed-base bootstrap and wrapper, with
+a 0.5-second observation window between writing and opening the script, observed the file before that window and its
+absence after in five of five fresh container boots. Moving the private script to `/var/tmp` preserved it and ran it
+successfully in five of five equivalent boots. Fixed in [#3388](https://github.com/scode/farhelm/pull/3388/changes). The
+existing script-byte and success/failure cleanup unit test also passed. The exact boot service that removed the file was
+not traced; the reproduced boundary is the loss of the new `/tmp` file during boot, not an attribution to a particular
+systemd unit.
+
+```text
+real environment launch failed: {"error":"Not launched. container setup failed: sh: 0: cannot open /tmp/farhelm-private-script.<random>: No such file"}
+```
+
+Evidence: release workflow `43436416498`, job `131922894386`, recorder `53af81a8-b32e-4a0c-8c22-28e8f1284856`, clean
+commit `5db1bf47272d837326f14d832236d407c52fba59`; whole workspace except desktop, four nextest slots and zero retries.
+Hosted failure evidence was downloaded before reproducing it and remains private; hosted copies expire. The runner
+reported Ubuntu 24.04, Linux 6.14.0-1017-azure, eight CPUs, Python 3.12.3 and C.UTF-8. Per-case load and runtime Podman
+identity were not retained in that record. Narrow old-wrapper observations are in run
+`219fe0ed-60b3-43b8-bdf3-6af7440f6381`; corrected observations in `0aaaa5ee-2985-4be0-8371-15b19d50c6ea`, on the same
+source with only the wrapper path/docstring changed. These were generic recorder commands around a temporary Deno
+reproducer, one owned container at a time, not nextest case counts. Both orchestration commands exited zero; the five
+old-wrapper child exits were 2 and the five corrected exits were 0. Local substrate: x86_64 Linux 6.8.0-149-generic,
+Podman reporting 4.9.3, systemd cgroup v2, C.UTF-8; each boot used the managed Ubuntu base's pinned digest. The
+corrected observations overlapped compilation of the targeted unit test, whose run
+`bdd985ff-67c0-4e72-9386-ec911bb320d0` passed one selected case. No broader local suite was rerun. All recorder children
+scrubbed ambient Farhelm names and retained only recorder-owned `FARHELM_TEST_TRACE_DIR`. The owned containers and
+custom images were removed after observation.
+
+Class: product
+
+Cause: established
