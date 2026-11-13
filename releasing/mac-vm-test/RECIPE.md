@@ -97,46 +97,38 @@ not successful agent execution.
    disabled and provision Linux through that old app. Verify old app/local/remote versions. Then, still on the old app,
    start one genuine Codex session on the local host and one on the remote host, send each one prompt that also asks it
    to remember a word, require a meaningful reply and the conversation captured in Farhelm (Restart is offered only
-   after capture), and record each session's and conversation's identities and, if it runs in a terminal host, the
-   host's and its child's process identities (`old-fixture`). Leave both sessions running. No saved template, changed
-   preference or counter command is needed. Reobserve `/latest`, select the ordinary or stable-override path below, and
-   explicitly click **Check for updates** in the old app. Require it to discover and install the candidate
-   (`update-discovery`), then use the actual **Restart to update** action and require the candidate app to return, with
-   the same supervisor handover as step 2 (`update-relaunch`). Verify override forwarding and removal when applicable.
-   An RC/dev candidate or old app without override support may lack a genuine pre-promotion discovery path; report that
-   step and P0 as could not run and stop. A manual installer cannot satisfy step 3.
+   after capture), and record each session's and conversation's identities and its terminal host's and that host's
+   child's process identities (`old-fixture`). Leave both sessions running. No saved template, changed preference or
+   counter command is needed. Reobserve `/latest`, select the ordinary or stable-override path below, and explicitly
+   click **Check for updates** in the old app. Require it to discover and install the candidate (`update-discovery`),
+   then use the actual **Restart to update** action and require the candidate app to return, with the same supervisor
+   handover as step 2 (`update-relaunch`). Verify override forwarding and removal when applicable. An RC/dev candidate
+   or old app without override support may lack a genuine pre-promotion discovery path; report that step and P0 as could
+   not run and stop. A manual installer cannot satisfy step 3.
 4. **Local supervisor upgrade, one successful agent and the old session.** On the step 3 fixture, require the local
    supervisor to connect at the candidate version. The Mac app normally upgrades its managed local supervisor when it
    relaunches; observe that transition rather than requiring an extra Update click. If the product offers a local Update
    action, exercise it and verify the result. A stranded local host with an unusable Update action is a failure. Launch
    one genuine authenticated agent through Farhelm on the local host, send a small prompt, and require a meaningful
-   reply and responsive terminal; take the fixed terminal-host sample, which the import checks against the session's
-   stored terminal kind (`local-supervisor-agent`; the candidate's session details name no kind), and leave that session
-   running: the old-session check samples its terminal. Then check the old local session from step 3
+   reply and responsive terminal (`local-supervisor-agent`). Then check the old local session from step 3
    (`local-old-session`). First, before the session is touched, the fixed survival comparison checks that it survived
-   the upgrade (same session, same launch generation) and settles the branch from its observed terminal kind:
-   - **tmux:** it answers a new typed question whose answer (48) differs from the earlier turn's 42 still on screen. If
-     the candidate creates terminal hosts (a host the old fixture did not have is running for the new session), the
-     session offers Restart (only Clone or Replace would be a failure for a captured conversation); Restart moves it to
-     a host terminal, as the final sample checks, and the resumed agent names the word from the earlier turn, which
-     proves the resumed conversation rather than just any reply. If the candidate creates no terminal hosts, no restart
-     is expected and the session keeps its launch generation.
-   - **host:** the host and its child are the same processes as at step 3 (pid and start identity), the rediscovered
-     terminal still shows its earlier screen and answers the new question; only then Restart, which must land on a new
-     terminal host (not tmux) with the old host gone, and the resumed agent names the earlier turn's word.
-
-   The check ends with a fixed final sample of the session and its terminals, which the import compares with the
-   survival comparison.
+   the upgrade: same session, same launch generation, and its terminal host and that host's child the same processes as
+   at step 3 (pid and start identity). The rediscovered terminal still shows its earlier screen and answers a new typed
+   question whose answer (48) differs from the earlier turn's 42 still on screen. Only then the session's Restart (only
+   Clone or Replace would be a failure for a captured conversation), which must land on a new terminal host with the old
+   host gone, and the resumed agent names the word from the earlier turn, which proves the resumed conversation rather
+   than just any reply. The check ends with a fixed final sample of the session and its terminals, which the import
+   compares with the survival comparison.
 
    Keep version, GUI and command evidence. Preference preservation and other bonus conversations stay bonus checks.
 5. **Remote supervisor upgrade, one successful agent and the old session.** On that same fixture, use the app's remote
    **Update** action. Require the formerly old remote supervisor to return connected at the candidate version and
    independently verify its running service. Launch one genuine authenticated agent through Farhelm on that remote host,
-   send a small prompt, require a meaningful reply and responsive terminal, and take its terminal-host sample as in step
-   4 (`remote-supervisor-agent`). A plain shell command does not count as an agent. Then check the old remote session
-   from step 3 with the same branches as step 4 (`remote-old-session`); it runs after the remote Update because only
-   then does that host create terminal hosts. Save version, service and GUI/command evidence. The counter workload's
-   process survival and final quit/reopen belong to bonus coverage.
+   send a small prompt, require a meaningful reply and responsive terminal, and leave that session running for steps 6
+   and 7 (`remote-supervisor-agent`). A plain shell command does not count as an agent. Then check the old remote
+   session from step 3 as in step 4 (`remote-old-session`); it runs after the remote Update, so that the session
+   survives the upgrade of its own host's supervisor. Save version, service and GUI/command evidence. The counter
+   workload's process survival and final quit/reopen belong to bonus coverage.
 
 6. **Remove and re-add the remote host.** Keep both remote sessions from step 5 alive and record their identities. Call
    `remote_host_before`, then select the remote host menu's **Remove**, handling its ordinary confirmation if offered.
@@ -155,10 +147,9 @@ not successful agent execution.
    file/service changes to manufacture this result.
 
 P0 deliberately carries no template, changed setting or counter workload. The old sessions in steps 3–5 are its one
-exception, made at the maintainer's request while terminals move from tmux to terminal hosts: an upgrading user's
-existing sessions are what that move can break. Branch only on terminal kinds observed during the run, never on a
-release version: nobody can say in advance which release first creates terminal hosts. Where the previous tag's source
-has no terminal host at all, its old session must be on tmux.
+exception, made at the maintainer's request: an upgrading user's running sessions are what an upgrade can break. The old
+session must run in a terminal host on the previous stable; a previous stable that runs it anywhere else cannot be
+tested this way.
 
 Keep setup, signature verification and bounded evidence capture alongside the P0 step they support. Do not expand P0
 with release-specific feature checks or wait for historical-version investigations. Once all seven checks pass, answer
@@ -298,8 +289,12 @@ together. Historical manifests with no declared P1 check report it as not planne
    remote hosts, existing sessions and responsiveness. Recheck the remote process's continuity. Run the addendum,
    collect evidence, and delete only this pass's owned clones after evidence is safe.
 
-The supervisor is disposable; its sessions live in tmux or in terminal hosts, outside the supervisor, and must survive
-app or supervisor restarts. For lifecycle details, read [SPEC.md](../../SPEC.md), “Durability and resume” and “Lifecycle
+The supervisor is disposable; its sessions live in terminal hosts, outside the supervisor, and must survive app or
+supervisor restarts. A baseline older than v0.34.0, the first release with terminal hosts, ran its sessions in old
+terminals, which the upgrade ends (SPEC.md, “Terminal experience”): expect those sessions interrupted, to be continued
+with Restart. That includes the remote command of step 3, so for such a baseline the continuity checks of steps 7 and 8
+(and the harness's `remote-update` and `reopen` checks) cannot pass: report that failure as this known limit, not as a
+release regression. For lifecycle details, read [SPEC.md](../../SPEC.md), “Durability and resume” and “Lifecycle
 operations.” Do not reboot the guests during a continuity check: a host reboot legitimately ends its sessions.
 
 ## Select the upgrade path

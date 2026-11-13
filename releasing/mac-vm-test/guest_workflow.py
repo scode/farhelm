@@ -122,20 +122,20 @@ def source_url(source):
     return value
 
 
-# P0's old sessions carry the move from tmux terminals to terminal hosts across
-# the upgrade (a deliberate exception to P0's no-old-conversation rule, at the
-# maintainer's request). The remembered word is asked for only after Restart,
-# so a reply naming it shows the resumed conversation, not just any response.
+# P0's old sessions show that an upgrading user's running agent sessions keep
+# running across the upgrade and resume after Restart (a deliberate exception
+# to P0's no-old-conversation rule, at the maintainer's request). The
+# remembered word is asked for only after Restart, so a reply naming it shows
+# the resumed conversation, not just any response.
 def old_sessions_instructions(managed=True):
     """Have p0-updater-upgrade's old fixture start the old sessions the later checks compare against."""
     capture = ('''Call inspect_state and remote_inspect_state until each shows
 exactly one session with a captured conversation (the old app offers Restart
 only after capture). Then call terminal_hosts and remote_terminal_hosts: they
-record each session's terminal host and child process identities, or no host
-when the previous release runs it in tmux.''' if managed else '''Require each conversation captured in Farhelm (the old app
+record each session's terminal host and child process identities.''' if managed else '''Require each conversation captured in Farhelm (the old app
 offers Restart only after capture). Record both session and captured
 conversation identities, and each session's terminal host and child process
-identities (pid and start identity) if it runs in one, in shared_state.json.''')
+identities (pid and start identity), in shared_state.json.''')
     return '''P0 carries one old agent session per host into the upgrade. Still on the
 previous release, through the old app's normal GUI launch ONE genuine Codex
 session on local and ONE on the remote host, gpt-6.1-sol low effort, YOLO and
@@ -147,62 +147,53 @@ checkpoints use them. No feedback yet.'''
 
 
 def old_session_instructions(side, managed=True):
-    """Give one host's old-session checkpoint its branches, settled by the fixed samples rather than reading.
+    """Give one host's old-session checkpoint its steps, with survival settled by the fixed samples rather than reading.
 
-The branch (old session in tmux or in a terminal host), whether it survived and
-whether a Restart is due come from the `host_survival` comparison, which takes
-its own samples and must run before the session is touched: after a Restart its
-terminal is legitimately replaced. Every branch ends with the final sample, so
-no branch can stop short of what the import requires. The post-upgrade
-question's answer (48) differs from the old fixture's (42), so a frozen screen
-still showing the earlier answer cannot read as a response.
+Whether the old session and its terminal host survived comes from the
+`host_survival` comparison, which takes its own samples and must run before
+the session is touched: after its Restart the terminal host is legitimately
+replaced. The steps end with the final sample, so no path can stop short of
+what the import requires. The post-upgrade question's answer (48) differs from
+the old fixture's (42), so a frozen screen still showing the earlier answer
+cannot read as a response.
 """
     survival = 'remote_host_survival' if side == 'remote' else 'host_survival'
     final = 'remote_old_session_after' if side == 'remote' else 'old_session_after'
     if managed:
-        branch = f'''Call prior_receipts for the old-fixture facts. Before selecting the old
+        compare = f'''Call prior_receipts for the old-fixture facts. Before selecting the old
 {side} session, call {survival} exactly once. It samples on its own and
-reports branch (host: the old session ran in a terminal host; tmux: an old
-terminal), survived, kind_disagreements, candidate_creates_hosts and
-restart_required. If survived is false or kind_disagreements is not empty,
-report fail and stop, unless you already restarted or otherwise touched the old
-session before this call: then report automation-failure, since the comparison
-no longer describes the upgrade.'''
-        last = f'''In every branch, finish by calling {final} once the steps above are done
-(after the resumed answer if you restarted); it takes the final sample the
-import checks.'''
+reports survived: the same session and launch generation, still captured, in
+the same terminal host with the same child. If survived is false, report fail
+and stop, unless you already restarted or otherwise touched the old session
+before this call: then report automation-failure, since the comparison no
+longer describes the upgrade.'''
+        last = f'''Finish by calling {final} after the resumed answer; it takes the final
+sample the import checks.'''
         clicks = ', never brick_ui method restart'
     else:
-        branch = f'''Read the old-fixture {side} session, conversation and terminal facts from
+        compare = f'''Read the old-fixture {side} session, conversation and terminal facts from
 shared_state.json. Before touching the old session, independently compare its
-session's launch generation, and if it ran in a terminal host that host's and
-its child's process identities (pid and start identity), with the old-fixture
-ones: any change is a fail (but automation-failure if you touched the old
-session before comparing). Branch host means it ran in a terminal host, branch
-tmux an old terminal; whether a new terminal host process exists for the new
-{side} session says whether this candidate creates hosts, and a Restart is due
-in the host branch or when it does.'''
-        last = '''In every branch, finish by retaining the old session's launch generation and
-the terminal hosts present now, independently.'''
+launch generation and its terminal host's and child's process identities (pid
+and start identity) with the old-fixture ones: any change is a fail (but
+automation-failure if you touched the old session before comparing).'''
+        last = '''Finish by retaining the old session's launch generation and the terminal
+hosts present now, independently, after the resumed answer.'''
         clicks = ''
-    return branch + f'''
-Select the old {side} session from old-fixture. With context
-previous_can_create_hosts false the branch must be tmux. A mismatch, or any
-step below not working, is a fail.
-Branch host: the rediscovered terminal must still show the earlier 17 + 25
-answer. Branch tmux: attach it. In both, send: What is 6 times 8? Answer with
-the number only. Require the old agent's separate new answer 48.
-With a Restart due, in either branch: the session must offer Restart (offering
-only Clone or Replace for this captured conversation is a fail); use the
-session's ordinary Restart and its ordinary confirmation. It is the session's
-own action, not the app updater: use ordinary native clicks{clicks}.
-Branch tmux with no Restart due: do not restart; skip to the final step.
-After a Restart, the final sample checks that the session moved to one new
-terminal host. Ask: Which word did I ask you to remember in my first
+    return compare + f'''
+Select the old {side} session from old-fixture. Any step below not working is
+a fail. The rediscovered terminal must still show the earlier 17 + 25
+answer. Send: What is 6 times 8? Answer with the number only. Require the old
+agent's separate new answer 48.
+Then the session must offer Restart (offering only Clone or Replace for this
+captured conversation is a fail); use the session's ordinary Restart and its
+ordinary confirmation. It is the session's own action, not the app updater:
+use ordinary native clicks{clicks}.
+The final sample checks that the session moved to one new terminal host with
+the old one gone. Ask: Which word did I ask you to remember in my first
 message? Answer with the word only. Require a separate actual reply naming
 bluebird; never supply it.
 ''' + last + '''
-Capture native images of the session after any restart and of the answers.'''
+Capture native images of the session after the restart and of the answers.'''
 
 
 def instructions(check_id, pass_id, update_path=None):
@@ -339,22 +330,17 @@ native Farhelm GUI launch ONE genuine Codex session on local, model gpt-6.1-sol,
 low effort, yolo, per-run trust true. Send: What is 17 + 25? Explain in one short
 sentence. Require separate actual answer 42 with sensible explanation, terminal
 responsiveness and idle/completion. Retain native image and candidate running
-version evidence. Retain whether a new terminal host process exists for the new
-session; either way passes here. Leave the old session untouched.
-Leave this new session running;
-the old-session check samples its terminal. No
-settings/template prerequisites.''',
+version evidence. Leave the old session untouched. No settings/template
+prerequisites.''',
         'remote-supervisor-agent': '''Use native Farhelm remote Update. Require the formerly old remote supervisor
 connected at candidate, independently verify its running systemd user service
 over pinned SSH. Launch ONE genuine Codex session through Farhelm on that remote
 host, gpt-6.1-sol low effort yolo/trust true where supported. Send: What is 17 +
 25? Explain in one short sentence. Require actual answer 42, explanation,
 responsive terminal and completion. A plain command is insufficient. Retain
-native image plus remote version/service evidence. Retain whether a new
-terminal host process exists for the new session; either way passes here. Leave
-the old remote session untouched.
-Leave this new session running;
-the old-session check samples its terminal.''',
+native image plus remote version/service evidence. Leave the old remote
+session untouched. Leave this new session running: the remote host Remove and
+Uninstall checks carry it.''',
         'local-old-session': old_session_instructions('local', managed=False),
         'remote-old-session': old_session_instructions('remote', managed=False),
         'native-preflight': '''Before any Farhelm installation or product testing, use real native CUA to
@@ -453,11 +439,8 @@ connected at previous. Then call remote_version.''',
 Through Farhelm native GUI launch one genuine local Codex session, gpt-6.1-sol
 low effort YOLO and per-run trust where offered. Send: What is 17 + 25? Explain
 in one short sentence. Require a separate actual answer 42, sensible explanation,
-responsive terminal and completion. Call versions. Then call terminal_hosts: its
-new_hosts lists the new session's terminal host, which the import checks
-against the session's stored kind. Leave the old session from old-fixture
-untouched. Leave this new session running;
-the old-session check samples its terminal. Retain actual native images.''',
+responsive terminal and completion. Call versions. Leave the old session from
+old-fixture untouched. Retain actual native images.''',
         'remote-supervisor-agent': '''Through Farhelm native GUI use remote Update, including Update now when offered.
 Handle an ordinary product confirmation if offered; do not require an extra
 dialog. Update now can complete directly, and absence of a confirmation is not
@@ -466,11 +449,9 @@ to obtain a dialog.
 Require connected candidate remote, then call remote_version. Launch one genuine
 remote Codex session, gpt-6.1-sol low effort YOLO and per-run trust where offered.
 Send: What is 17 + 25? Explain in one short sentence. Require a separate actual
-answer 42, explanation, responsive terminal and completion. Then
-call remote_terminal_hosts: its new_hosts lists the new session's terminal host,
-which the import checks against the session's stored kind. Leave the old remote
-session from old-fixture untouched. Leave this new session running;
-the old-session check samples its terminal. Capture native images.''',
+answer 42, explanation, responsive terminal and completion. Leave the old
+remote session from old-fixture untouched. Leave this new session running: the
+remote host Remove and Uninstall checks carry it. Capture native images.''',
         'local-old-session': old_session_instructions('local'),
         'remote-old-session': old_session_instructions('remote'),
         'remote-provision': '''Add context.ssh.alias through native Add host and its ordinary confirmation.

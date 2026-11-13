@@ -15,19 +15,18 @@ profile there, read its operator policy and journal, and run **P0 checks first**
 `releasing/mac-vm-test/BRICK-TEST.md`, "The test and its scopes", with guest-only product mutations. P0 covers fresh
 install/start, a separate installer upgrade, click-to-upgrade discovery/relaunch, local supervisor upgrade with one
 successful agent, then remote supervisor upgrade with one successful agent; on each host, an agent session started on
-the previous stable must also survive the upgrade, then restart and resume its conversation, moving to a terminal host
-where the candidate creates them (a tmux session on a candidate that creates none only has to keep answering). Finally,
-Remove/re-add the remote host with its sessions preserved, then Uninstall after ending all its sessions. Stop at the
-first failure or missing prerequisite, except for bounded pre-action provider 429 recovery. After P0 passes, P1 sends
-one live feedback submission from the candidate on P0's last Mac guest, before that fixture is exported and cleaned up;
-broader work is bonus coverage after P1. A P1 failure is reported promptly with its separate verdict and does not
-invalidate P0, block cleanup or fence bonus passes. A request to **stop after P0 checks** ends after recording P0
-evidence and cleaning up its successful fixtures; no feedback is sent and no bonus fixture starts. **Stop after P1
-checks** ends after P0 and P1 evidence and the last fixture's cleanup. Answer **did P0 checks succeed?** from the
-separate P0 verdict and seven results, naming anything incomplete. Answer **did P1 checks succeed?** from its own
-verdict and named feedback check. The full verdict includes P1; whether its failure blocks promotion is the maintainer's
-call for that release. Missing prerequisites mean could not run; resolve them with the maintainer instead of guessing
-machine bindings. A test request does not authorize publication or release promotion.
+the previous stable must also survive the upgrade in its terminal host, then restart onto a new terminal host and resume
+its conversation. Finally, Remove/re-add the remote host with its sessions preserved, then Uninstall after ending all
+its sessions. Stop at the first failure or missing prerequisite, except for bounded pre-action provider 429 recovery.
+After P0 passes, P1 sends one live feedback submission from the candidate on P0's last Mac guest, before that fixture is
+exported and cleaned up; broader work is bonus coverage after P1. A P1 failure is reported promptly with its separate
+verdict and does not invalidate P0, block cleanup or fence bonus passes. A request to **stop after P0 checks** ends
+after recording P0 evidence and cleaning up its successful fixtures; no feedback is sent and no bonus fixture starts.
+**Stop after P1 checks** ends after P0 and P1 evidence and the last fixture's cleanup. Answer **did P0 checks succeed?**
+from the separate P0 verdict and seven results, naming anything incomplete. Answer **did P1 checks succeed?** from its
+own verdict and named feedback check. The full verdict includes P1; whether its failure blocks promotion is the
+maintainer's call for that release. Missing prerequisites mean could not run; resolve them with the maintainer instead
+of guessing machine bindings. A test request does not authorize publication or release promotion.
 
 Use the guest-native executor of `releasing/mac-vm-test/BRICK-TEST.md` for actual tests: an independent Codex process
 inside the Mac guest drives native CUA and survives Farhelm quit/restart. The host coordinates Tart lifecycle, pinned
@@ -90,12 +89,11 @@ run remains useful, but cannot gate the candidate's initial exposure.
 order: fresh installation and app startup; installer upgrade from the previous promoted stable; click-to-upgrade
 discovery and relaunch from that stable; local supervisor upgrade with one successful genuine agent; remote supervisor
 upgrade with one successful genuine agent. The two supervisor checks each include that host's old session, started on
-the previous stable: it must survive the upgrade, then restart and resume its conversation, moving to a terminal host
-once that host creates them (a tmux session on a candidate that creates none only has to keep answering). Stop on the
-first failure or unavailable prerequisite. Broader functionality and historical-version coverage are bonus work after P0
-and the separate P1 check, never prerequisites inserted between these seven checks. After the supervisor checks, P0 also
-exercises remote menu Remove/re-add with both sessions preserved, then Uninstall after ending all remote sessions,
-retaining their data. These are the sixth and seventh named P0 results.
+the previous stable: it must survive the upgrade in its terminal host, then restart onto a new terminal host and resume
+its conversation. Stop on the first failure or unavailable prerequisite. Broader functionality and historical-version
+coverage are bonus work after P0 and the separate P1 check, never prerequisites inserted between these seven checks.
+After the supervisor checks, P0 also exercises remote menu Remove/re-add with both sessions preserved, then Uninstall
+after ending all remote sessions, retaining their data. These are the sixth and seventh named P0 results.
 
 **P1** sends one real feedback submission through the candidate app after P0 passes, on the Mac guest of
 `p0-updater-upgrade`, before the final export and cleanup of that pair. Its first line is `[brick-test] vX.Y.Z`, naming
@@ -412,41 +410,35 @@ repairs residue to manufacture a clean fixture.
 `update-discovery` requires the old app's actual in-app check to discover and install the candidate. It cannot pass on a
 manual installer path. The two supervisor/agent checks require connected candidate supervisors, version evidence and a
 meaningful response from a genuine agent launched through Farhelm on the corresponding host. A plain command or CLI
-version alone cannot satisfy them. They also record a fixed terminal-host sample taken once the new session exists;
-where the database stores `terminal_kind`, the import requires the stored kind to agree with that sample (the
-candidate's session details name no terminal kind for the tester to read). Either kind passes there. The new session
-must keep running: the old-session check samples its terminal to decide whether the candidate creates terminal hosts.
+version alone cannot satisfy them. The remote check's new session must keep running: the Remove and Uninstall checks
+carry it.
 
 P0 requires no template, changed setting or counter continuity workload. Its one old conversation and resume test is a
-deliberate exception the maintainer asked for, because terminals are moving from tmux to terminal hosts and P0 must show
-that a user upgrading from the previous stable keeps their sessions. In `p0-updater-upgrade`, `old-fixture` starts one
-genuine Codex session on each host through the old app, submits one prompt, requires the captured conversation and
-records the session, conversation and terminal-host identities; its terminal sample is refused until that attempt has
-observed the captured session. The later checks branch on the terminal kind observed, never on a release version:
+deliberate exception the maintainer asked for: an upgrading user's running sessions are what an upgrade can break, and
+P0 must show that a user upgrading from the previous stable keeps them. In `p0-updater-upgrade`, `old-fixture` starts
+one genuine Codex session on each host through the old app, submits one prompt, requires the captured conversation and
+records the session, conversation and terminal-host identities. Its terminal sample is refused until that attempt has
+observed the captured session, and requires exactly one terminal host with one live child: a previous stable that runs
+the session anywhere else cannot be tested this way. The later checks:
 
 - `local-old-session` follows `local-supervisor-agent`; `remote-old-session` follows `remote-supervisor-agent`, whose
-  remote Update is what lets that host create terminal hosts. Each first runs its side's one-time survival comparison
+  remote Update upgrades that host's supervisor. Each first runs its side's one-time survival comparison
   (`host_survival` or `remote_host_survival`), which takes its own samples before the session is touched and compares
-  them with the old fixture's receipts. It also decides whether the candidate creates terminal hosts, from hosts running
-  then that the old fixture did not have (the new agent session must still exist). Each check ends with a final sample
-  (`old_session_after` or `remote_old_session_after`), refused unless the comparison ran first.
-- In both branches the old session must survive the upgrade: same session, same launch generation, still captured.
-- Old session in tmux: it must answer a new typed question (whose answer, 48, is not the earlier turn's 42 already on
-  screen). If the candidate creates terminal hosts, it must offer Restart; Restart must move it to a host terminal and
-  the resumed agent must name the word from the earlier turn. If the candidate creates none, no Restart is expected and
-  its launch generation must stay unchanged.
-- Old session in a terminal host: the host and its child must be the same processes (pid and start identity) as at the
-  old fixture, so a replacement that restores the screen and resumes the conversation fails. The rediscovered terminal
-  must show its earlier screen and answer the new question; then Restart, which must land on a new terminal host, not
-  tmux, with the old host gone, and the resumed agent must name the earlier turn's word.
+  them with the old fixture's receipts. Each check ends with a final sample (`old_session_after` or
+  `remote_old_session_after`), refused unless the comparison ran first.
+- The old session must survive the upgrade: same session, same launch generation, still captured, and its terminal host
+  and that host's child the same processes (pid and start identity) as at the old fixture, so a replacement that
+  restores the screen and resumes the conversation fails.
+- The rediscovered terminal must show its earlier screen and answer a new typed question (whose answer, 48, is not the
+  earlier turn's 42 already on screen). Then Restart, which must land on a new terminal host with the old host gone, and
+  the resumed agent must name the earlier turn's word.
 
-The coordinator refuses a pass whose fixed samples contradict this: an old session or host that did not survive, a
-stored `terminal_kind` that disagrees with the processes sampled, a launch generation that moved with no Restart due, a
-required Restart without a later generation, without exactly one new host or with the old host still running. Whether
-the resumed agent remembers the earlier turn remains the tester's observation. Calls made in the wrong order end in a
-refusal or an unavailable check, never a pass. The old session's kind is also cross-checked against the previous tag's
-source: one without the terminal host crate cannot have created a host. The report folds each old-session result into
-its host's supervisor question; the additional Remove and Uninstall checks bring P0 to seven named results.
+The coordinator refuses a pass whose fixed samples contradict this: an old session or host that did not survive, or a
+Restart without a later generation, without exactly one new host or with the old host still running. Whether the resumed
+agent remembers the earlier turn remains the tester's observation. Calls made in the wrong order end in a refusal or an
+unavailable check, never a pass. The report folds each old-session result into its host's supervisor question; the
+additional Remove and Uninstall checks bring P0 to seven named results. This test does not check that the upgrade ends
+the old terminals releases before terminal hosts left running; the supervisor's Rust tests cover that startup step.
 
 These checkpoints get longer tester turns than `--timeout`'s default: at least 2400 seconds for the updater pair's
 `old-fixture` and 1800 for each old-session check (never above the 3600-second maximum), since they wait on genuine

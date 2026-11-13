@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import time
 
-from checkpoint_contract import (SIDES, old_session_side, require_agent_terminal, require_old_session,
+from checkpoint_contract import (old_session_side, require_old_session,
                                  fixed_operations, required_operations, require_remote_host_effect)
 from window_geometry import require_drag_delivery, require_window_trace
 
@@ -270,9 +270,8 @@ def managed_result(task, root, value):
 The native model cannot waive a failed operation, omit a required independent
 receipt or pass a restart on installed bytes while the old process still runs.
 Nor can it pass an old session that did not survive the upgrade (a new
-launch generation, or a replaced terminal host or child), a required Restart
-that left no new generation and new host behind, or a stored terminal kind
-that contradicts the processes the operations sampled.
+launch generation, or a replaced terminal host or child), or one whose
+Restart left no new generation and new terminal host behind.
 Its original final reply remains separate from the enriched evidence record.
 """
     failure = root / 'managed-failure.json'
@@ -324,14 +323,11 @@ Its original final reply remains separate from the enriched evidence record.
                 if len(sessions) != 1 or not sessions[0].get('captured_conversation'):
                     raise TesterError('managed old-session capture premise was not established')
         side = old_session_side(task['check_id'])
-        agent_side = next((name for name, names in SIDES.items() if names['agent_check'] == task['check_id']), None)
-        try:
-            if side is not None:
+        if side is not None:
+            try:
                 require_old_session(record['observations'], side)
-            if agent_side is not None and task['pass_id'] == 'p0-updater-upgrade':
-                require_agent_terminal(record['observations'][SIDES[agent_side]['hosts']])
-        except (ValueError, KeyError, TypeError) as error:
-            raise TesterError('managed terminal-transition premise failed: ' + str(error)) from error
+            except (ValueError, KeyError, TypeError) as error:
+                raise TesterError('managed old-session premise failed: ' + str(error)) from error
         bonus_preflight = task['check_id'] == 'native-preflight' and not task['pass_id'].startswith('p0-')
         if task['check_id'] == 'window-drag' or bonus_preflight:
             try:

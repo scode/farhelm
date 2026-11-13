@@ -124,29 +124,6 @@ require the recipe's actual startup-log and GUI observations.
         return 'FARHELM_DESKTOP_UPDATE_LATEST' in self.git(
             'show', tag + ':crates/farhelm-ui/src/desktop/updater.rs')
 
-    def ships_terminal_host(self, tag):
-        """Report whether a tag's source contains the terminal host crate at all.
-
-Containing it does not mean that release created terminal hosts (its switch
-may be off); lacking it means it cannot have. `ls-tree` prints nothing for an
-absent path, so absence is an answer rather than a lookup failure.
-"""
-        version(tag)
-        return bool(self.git('ls-tree', '--name-only', tag, '--', 'crates/terminal-host/Cargo.toml').strip())
-
-
-def previous_can_create_hosts(source, previous, candidate):
-    """Cross-check the old session's observed terminal kind against the previous tag's source.
-
-False only when the candidate's source has the terminal host crate and the
-previous tag's lacks it: that previous release cannot have put the old session
-in a terminal host. True means it could have; None means this source layout
-gives no answer (the crate moved since), so the check does not apply.
-"""
-    if not source.ships_terminal_host(candidate):
-        return None
-    return source.ships_terminal_host(previous)
-
 
 def download(url):
     """Read bounded public metadata; archives and installation belong in guests."""
@@ -249,11 +226,11 @@ Continuity checkpoints require independent before/after receipts as well.
         # discovery by the old updater. P0 deliberately has no template,
         # settings or continuity workload prerequisites; those remain bonus
         # coverage. Its one exception, at the maintainer's request, is the old
-        # agent session per host that carries the move from tmux to terminal
-        # hosts: each old-session check follows its host's new-session check,
-        # whose still-running session shows whether this candidate creates
-        # terminal hosts, and the remote one follows the remote Update that
-        # switches that host over.
+        # agent session per host, which shows that an upgrading user's running
+        # sessions survive the upgrade and resume after Restart: each
+        # old-session check follows its host's new-session check, which
+        # establishes that host's candidate supervisor, so the remote one
+        # follows the remote Update that upgrades that host.
         items = ({'artifact-verification': False, 'fixture-clean': False,
                   'install': False, 'app-start': True} if pass_id == 'p0-fresh' else
                  {'artifact-verification': False, 'old-fixture': True,
@@ -789,9 +766,7 @@ it never retries feedback, uncertain actions or failed cleanup.
             # claim is saved, every mutation failure must leave a terminal state.
             context = {'candidate': self.data['plan']['candidate'], 'previous': entry['previous'],
                        'previous_commit': source.commit(entry['previous']), 'source_url': source_url(source),
-                       'pass_id': pass_id,
-                       'previous_can_create_hosts': previous_can_create_hosts(
-                           source, entry['previous'], self.data['plan']['candidate'])}
+                       'pass_id': pass_id}
             c = self.pair(pass_id)
             entry['tester'] = {'phase': 'running', 'check_id': check_id}
             self.save()

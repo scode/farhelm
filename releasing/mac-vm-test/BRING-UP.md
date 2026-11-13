@@ -43,21 +43,22 @@ portable recommendations in the repository.
 - macOS: pick a clean recent macOS image supported by the host and current Farhelm, for example a suitable Cirrus Labs
   public Tart image. A Cirrus Tahoe base was exercised with macOS 26.6.2. Install the genuine agent CLIs selected with
   the maintainer in the run addendum (the bring-up uses Codex only) and the prerequisites the public installer and
-  recipe need. Put the CLIs on the guest user's shell PATH through its startup files. Recommend Homebrew for tmux, in a
-  prefix the app probes, at a version both releases accept; verify launches from the app, not only a terminal. Resolve
-  authentication with the maintainer. Guest sign-in or an explicitly authorized copy of the selected CLI's
-  authentication file can be used in disposable validation clones. Install the official desktop bundle containing the
-  native CUA runtime, and Python 3.13+ for the tester. Record explicit guest runtime paths in the format-two profile.
-  Through the guest's normal Settings UI, grant Accessibility and Screen Recording to the official helper. Host computer
-  use is allowed for this setup only. Resolve administrator or interactive sign-in steps before freezing. Never copy
-  unrelated authentication stores or publish credentials. Stop agents before saving the base.
+  recipe need. Put the CLIs on the guest user's shell PATH through its startup files; verify launches from the app, not
+  only a terminal. Recommend Homebrew for tmux, in a prefix the app probes, at a version the upgrade baselines accept:
+  releases from before Farhelm stopped requiring tmux need it (the latest of them refuses to start without tmux 3.7c or
+  newer), though the candidate needs none. Resolve authentication with the maintainer. Guest sign-in or an explicitly
+  authorized copy of the selected CLI's authentication file can be used in disposable validation clones. Install the
+  official desktop bundle containing the native CUA runtime, and Python 3.13+ for the tester. Record explicit guest
+  runtime paths in the format-two profile. Through the guest's normal Settings UI, grant Accessibility and Screen
+  Recording to the official helper. Host computer use is allowed for this setup only. Resolve administrator or
+  interactive sign-in steps before freezing. Never copy unrelated authentication stores or publish credentials. Stop
+  agents before saving the base.
 - Linux: recommend an ARM64 Ubuntu 26.04 LTS Tart image, falling back to 24.04 LTS if a suitable 26.04 image is not
   available. The official Cirrus Ubuntu 24.04 image was exercised with Ubuntu 24.04.5 LTS; a suitable official 26.04
   image was not established during bring-up. Give it SSH access from the macOS guest by key, a working systemd user
   manager and the privileges needed to arrange persistent user services. Farhelm provisions its remote supervisor as a
   systemd user service; prove that user manager works before saving the base. Install genuine Codex on the SSH
-  login-shell PATH: P0 requires a successful remote agent. Recommend a base without tmux, so Farhelm provisions its
-  static tmux payload; record whether that path or a guest-provided tmux was exercised.
+  login-shell PATH: P0 requires a successful remote agent.
 
 Both reusable bases must contain **no agent authentication**. Remove inherited authentication files locally during
 setup; logging out a clone may revoke a shared login. Obtain explicit standing credential-copy consent for this
