@@ -99,7 +99,9 @@ systemd or SSH substrate ran.
 - `bash -n scripts/build-podman-test-payloads.sh` and `shellcheck scripts/build-podman-test-payloads.sh` inspect the
   focused payload producer. Its real artifact/install contract is exercised by the Podman e2e selection above.
 - `cargo fmt --all -- --check`
-- `cargo clippy --all-targets -- -D warnings`
+- `cargo clippy --all-targets -- -D warnings` — the default members include the GPUI desktop GUI (`farhelm-gui`), so
+  this lints it under the GUI bans in `crates/gui/clippy.toml` and needs the Linux packages named under the workspace
+  nextest run below.
 - `cargo clippy -p farhelm --bins -- -D warnings` — lints the shipped binary's configuration, in which the supervisor's
   `test-seams` feature is off; the `--all-targets` run above always has it on, because the e2e tests enable it through a
   dev-dependency.
@@ -658,9 +660,17 @@ systemd or SSH substrate ran.
   — preserves the desktop feature's separate doctest coverage. Desktop execution remains release-only in hosted CI.
 - `cargo check -p farhelm-desktop` — the shipped desktop binary sits outside `default-members` (so ordinary builds never
   compile WebKit), which means `-p` is the only thing that ever compiles it.
-- `cargo clippy -p farhelm-gui --all-targets -- -D warnings` — the GPUI desktop GUI also sits outside `default-members`
-  (so ordinary builds never compile GPUI), and the default-member clippy run never lints it. Needs the Linux packages
-  named under the workspace nextest run.
+- `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` — proves every ban in
+  `crates/gui/clippy.toml` still fires: it lints `crates/gui/lint-demo` (a non-default member that violates each ban on
+  purpose behind its `violations` feature) and fails when a demo's expected diagnostic is missing or a ban has no demo.
+  Clippy matches banned paths by name, so a GPUI or GPUI Kit upgrade that moves an item would otherwise end its ban
+  silently. Run it when `crates/gui/clippy.toml`, the demo crate, or the GPUI or GPUI Kit versions change. Reuses the
+  default-member clippy build; needs the same Linux packages. CI's `clippy` job runs both.
+- `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py` — from
+  `cargo metadata --all-features`, fails when a crate under `crates/gui/` reaches `farhelm-helm` or `farhelm-supervisor`
+  through normal or build dependencies, when one other than the GPUI app crates the script names reaches GPUI or GPUI
+  Kit, or when a GUI crate's manifest does not deny clippy's `unwrap_used` and `expect_used`. Seconds, nothing compiled.
+  Run it when a manifest under `crates/gui/` or `Cargo.lock` changes. CI's `deny` job runs both.
 - `scripts/check-desktop-assets.sh` — holds the desktop build's `asset!()` set and the web bundle's files to the same
   set, in both directions. The shipped desktop-artifact builder calls `--compare` on its actual embedded bundle, so
   release validation preserves parity without a duplicate CI rebuild. `--self-test` also proves head CSS/classic JS

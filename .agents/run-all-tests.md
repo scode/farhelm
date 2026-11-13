@@ -85,7 +85,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   venv in your scratch directory)
 - `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`
 - `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop`
-- `cargo clippy -p farhelm-gui --all-targets -- -D warnings`
+- `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` (every GUI lint ban fires)
+- `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py`
 - `scripts/check-desktop-assets.sh` (including its head-product-assets parity fixtures)
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts

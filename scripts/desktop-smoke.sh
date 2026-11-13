@@ -632,7 +632,9 @@ else
 fi
 
 echo "== building (cargo + web bundle + dx desktop build)"
-(cd "$REPO" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && cargo build --quiet') || fail "cargo build"
+# Only the two binaries this smoke runs: `farhelm` ($BUILT_FARHELM) and `farhelm-fixtures` ($BUILT_FIXTURES). A bare
+# `cargo build` would also compile the GPUI desktop GUI, a default member this smoke never touches.
+(cd "$REPO" && flock --close /tmp/fh-build.lock -c 'ulimit -c unlimited && cargo build --quiet -p farhelm -p farhelm-fixtures') || fail "cargo build"
 # `--package farhelm-ui` is not decoration. The workspace has `default-members`
 # (it excludes `farhelm-desktop` so ordinary builds never compile WebKit), and
 # dx 0.7.10 resolves those entries by canonicalizing each RELATIVE member path

@@ -18,3 +18,9 @@ gpui.workspace = true
 gpui-base.workspace = true
 gpui-component.workspace = true
 gpui_platform.workspace = true
+
+# A panic inside an AppKit callback aborts the app, and nearly all GUI code runs inside one, so the GUI crates never
+# unwrap or expect outside tests (crates/gui/clippy.toml lets tests). SPEC_impl.md, "Startup and quit: the bootstrap".
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

@@ -1,0 +1,155 @@
+# Bans for the GPUI GUI crates (SPEC_impl.md, "GUI architecture").
+#
+# Clippy reads the nearest clippy.toml above the crate being linted, so this file covers every crate under crates/gui/
+# and nothing else: the helm, the supervisor and the command line legitimately spawn threads, sleep and read clocks.
+# Each entry names the one owner allowed to make the call; that owner carries a single `#[allow]` (or
+# `#[expect]`) with the reason, and every such exception is counted in the foundation ownership table.
+#
+# `scripts/check-gui-lints.py` proves that every entry below still fires: it lints `crates/gui/lint-demo`, which
+# commits one violation per entry, and fails when a violation goes unreported (a renamed GPUI or Kit path stops
+# matching silently otherwise). Add a demo function there whenever an entry is added here.
+#
+# Struct-literal colors (`Hsla { h, s, l, a }`) cannot be expressed as a clippy ban, and neither can parsing a color
+# from a string through `Rgba: TryFrom<&str>`, and neither can GPUI Kit's generated palette functions
+# (`gpui_component::red_500()` and the like, about a dozen per palette color, produced by a macro); the review gate
+# covers all three.
+
+# Tests may unwrap: a panic there is a test failure, not an abort inside an AppKit callback.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+disallowed-methods = [
+  # Focus: only the focus coordinator moves focus. In GPUI a focus move also redraws the whole window and drops pending
+  # keystrokes, and every scattered focus call is a rule one path follows and a sibling misses.
+  { path = "gpui::Window::focus", reason = "only the focus coordinator moves focus" },
+  { path = "gpui::Window::blur", reason = "only the focus coordinator moves focus" },
+  { path = "gpui::Window::focus_next", reason = "only the focus coordinator moves focus" },
+  { path = "gpui::Window::focus_prev", reason = "only the focus coordinator moves focus" },
+  { path = "gpui::Window::disable_focus", reason = "only the focus coordinator moves focus" },
+  { path = "gpui::FocusHandle::focus", reason = "only the focus coordinator moves focus" },
+  { path = "gpui::Context::focus_view", reason = "only the focus coordinator moves focus" },
+  { path = "gpui::Context::focus_self", reason = "only the focus coordinator moves focus" },
+
+  # Overlays: only the layer manager draws on top of the window, so it alone knows the stacking and what covers a
+  # terminal link's disclosure.
+  { path = "gpui::deferred", reason = "only the layer manager draws overlays" },
+  { path = "gpui::anchored", reason = "only the layer manager draws overlays" },
+  { path = "gpui_component::WindowExt::open_dialog", reason = "Kit's dialog layer; the layer manager draws dialogs" },
+  { path = "gpui_component::WindowExt::open_alert_dialog", reason = "Kit's dialog layer; the layer manager draws dialogs" },
+  { path = "gpui_component::WindowExt::open_sheet", reason = "Kit's sheet layer; the layer manager draws overlays" },
+  { path = "gpui_component::WindowExt::open_sheet_at", reason = "Kit's sheet layer; the layer manager draws overlays" },
+  { path = "gpui_component::WindowExt::push_notification", reason = "Kit's notification layer; the notice center owns notices" },
+  { path = "gpui_component::menu::ContextMenuExt::context_menu", reason = "Kit's context menu; the layer manager draws menus" },
+  { path = "gpui_component::menu::DropdownMenu::dropdown_menu", reason = "Kit's dropdown menu; the layer manager draws menus" },
+  { path = "gpui_component::menu::DropdownMenu::dropdown_menu_with_anchor", reason = "Kit's dropdown menu; the layer manager draws menus" },
+  # Kit controls draw their own tooltips, outside the layer manager and invisible to the link-cover hit test; the
+  # component layer's hover help replaces them (the prototype hit this).
+  { path = "gpui_component::button::Button::tooltip", reason = "Kit tooltip; the component layer's hover help replaces it" },
+  { path = "gpui_component::button::Button::tooltip_with_action", reason = "Kit tooltip; the component layer's hover help replaces it" },
+  { path = "gpui_component::button::Toggle::tooltip", reason = "Kit tooltip; the component layer's hover help replaces it" },
+  { path = "gpui_component::checkbox::Checkbox::tooltip", reason = "Kit tooltip; the component layer's hover help replaces it" },
+  { path = "gpui_component::radio::Radio::tooltip", reason = "Kit tooltip; the component layer's hover help replaces it" },
+  { path = "gpui_component::switch::Switch::tooltip", reason = "Kit tooltip; the component layer's hover help replaces it" },
+  { path = "gpui_component::clipboard::Clipboard::tooltip", reason = "Kit tooltip; the component layer's hover help replaces it" },
+  { path = "gpui_component::input::InputGroupButton::tooltip", reason = "Kit tooltip; the component layer's hover help replaces it" },
+  { path = "gpui_component::attachment::Attachment::tooltip", reason = "Kit tooltip; the component layer's hover help replaces it" },
+  # GPUI's own element tooltips draw outside the layer manager too.
+  { path = "gpui::StatefulInteractiveElement::tooltip", reason = "GPUI tooltip; the component layer's hover help replaces it" },
+  { path = "gpui::StatefulInteractiveElement::hoverable_tooltip", reason = "GPUI tooltip; the component layer's hover help replaces it" },
+
+  # Questions: the prompt is the one way to ask, so its answers bind to what it showed. GPUI's native prompt asks
+  # outside it.
+  { path = "gpui::Window::prompt", reason = "questions go through the prompt type" },
+  { path = "gpui::AsyncWindowContext::prompt", reason = "questions go through the prompt type" },
+
+  # Work that finishes later: task handles live in the operation stores, so a detached task is work nobody owns.
+  { path = "gpui::Task::detach", reason = "operation stores hold task handles; nothing detaches" },
+  { path = "gpui::TaskExt::detach_and_log_err", reason = "operation stores hold task handles; nothing detaches" },
+  { path = "gpui::TaskExt::detach_and_log_err_with_backtrace", reason = "operation stores hold task handles; nothing detaches" },
+
+  # Threads, runtimes, sleeps and clocks: async work runs on GPUI's executor and time comes from the ticker, which keeps
+  # tests deterministic. Network I/O and its runtime live in the helm client crate, outside crates/gui/.
+  { path = "std::thread::spawn", reason = "GUI crates spawn no threads; the helm client crate owns the runtime" },
+  { path = "std::thread::Builder::spawn", reason = "GUI crates spawn no threads; the helm client crate owns the runtime" },
+  { path = "std::thread::scope", reason = "GUI crates spawn no threads; the helm client crate owns the runtime" },
+  { path = "std::thread::sleep", reason = "GUI crates never sleep; deadlines come from the ticker" },
+  { path = "std::time::Instant::now", reason = "time comes from the ticker, so tests control it" },
+  { path = "std::time::Instant::elapsed", reason = "time comes from the ticker, so tests control it" },
+  { path = "std::time::SystemTime::now", reason = "time comes from the ticker, so tests control it" },
+  { path = "std::time::SystemTime::elapsed", reason = "time comes from the ticker, so tests control it" },
+  # `tokio::spawn` is a re-export of `tokio::task::spawn`, so this entry bans both spellings.
+  { path = "tokio::task::spawn", reason = "GUI crates spawn no runtime tasks; the helm client crate owns the runtime" },
+  { path = "tokio::task::spawn_blocking", reason = "GUI crates spawn no runtime tasks; the helm client crate owns the runtime" },
+
+  # Animation time: the ticker alone schedules redraws over time (at most 10 a second, paused while inactive), and it
+  # and the channel watchdog are the only executor-timer users. GPUI animations are for one-shot transitions in the
+  # component layer only.
+  { path = "gpui::BackgroundExecutor::timer", reason = "only the ticker and the channel watchdog use timers" },
+  { path = "gpui::Window::request_animation_frame", reason = "only the ticker schedules redraws over time" },
+  { path = "gpui::Window::on_next_frame", reason = "only the ticker schedules redraws over time" },
+  { path = "gpui::Context::on_next_frame", reason = "only the ticker schedules redraws over time" },
+  { path = "gpui::AsyncWindowContext::on_next_frame", reason = "only the ticker schedules redraws over time" },
+  { path = "gpui::AnimationExt::with_animation", reason = "only the component layer animates, one-shot transitions only" },
+  { path = "gpui::AnimationExt::with_animations", reason = "only the component layer animates, one-shot transitions only" },
+  { path = "gpui_base::transition", reason = "only the component layer animates, one-shot transitions only" },
+  { path = "gpui_base::spring", reason = "only the component layer animates, one-shot transitions only" },
+  { path = "gpui_base::animate_keyframes", reason = "only the component layer animates, one-shot transitions only" },
+
+  # Colors come only from theme tokens, which the component layer defines from the old app's stylesheet.
+  { path = "gpui::rgb", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::rgba", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::hsla", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::black", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::white", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::red", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::green", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::blue", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::yellow", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::transparent_black", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::transparent_white", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::opaque_grey", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::Hsla::red", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::Hsla::green", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::Hsla::blue", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::Hsla::black", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::Hsla::white", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui::Hsla::transparent_black", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui_component::theme::hsl", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui_component::theme::try_parse_color", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui_component::theme::oklch", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui_component::theme::black", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui_component::theme::white", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui_component::theme::try_parse_background", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui_component::theme::ColorName::scale", reason = "colors come from theme tokens in the component layer" },
+  { path = "gpui_component::theme::Colorize::parse_hex", reason = "colors come from theme tokens in the component layer" },
+]
+
+disallowed-types = [
+  # GPUI Kit's and GPUI Base's own overlay layers move focus and stack outside the layer manager, where Farhelm's lints
+  # cannot see; Kit is used for Root, text inputs and named primitives only.
+  { path = "gpui_component::dialog::Dialog", reason = "Kit overlay; the layer manager draws dialogs" },
+  { path = "gpui_component::popover::Popover", reason = "Kit overlay; the layer manager draws popovers" },
+  { path = "gpui_component::menu::ContextMenu", reason = "Kit overlay; the layer manager draws menus" },
+  { path = "gpui_component::menu::PopupMenu", reason = "Kit overlay; the layer manager draws menus" },
+  { path = "gpui_component::notification::Notification", reason = "Kit overlay; the notice center owns notices" },
+  { path = "gpui_component::tooltip::Tooltip", reason = "Kit overlay; the component layer's hover help replaces it" },
+  { path = "gpui_component::sheet::Sheet", reason = "Kit overlay; the layer manager draws overlays" },
+  { path = "gpui_component::hover_card::HoverCard", reason = "Kit overlay; the layer manager draws overlays" },
+  { path = "gpui_component::select::Select", reason = "Kit control with its own popup; dropdowns go through the layer manager" },
+  { path = "gpui_component::combobox::Combobox", reason = "Kit control with its own popup; dropdowns go through the layer manager" },
+  { path = "gpui_component::date_picker::DatePicker", reason = "Kit control with its own popup; dropdowns go through the layer manager" },
+  { path = "gpui_base::Dialog", reason = "Kit overlay; the layer manager draws dialogs" },
+  { path = "gpui_base::AlertDialog", reason = "Kit overlay; the layer manager draws dialogs" },
+  { path = "gpui_base::Popover", reason = "Kit overlay; the layer manager draws popovers" },
+  { path = "gpui_base::DeferredPopover", reason = "Kit overlay; the layer manager draws popovers" },
+  { path = "gpui_base::HoverCard", reason = "Kit overlay; the layer manager draws overlays" },
+  { path = "gpui_base::Tooltip", reason = "Kit overlay; the component layer's hover help replaces it" },
+  { path = "gpui_base::TooltipOverlay", reason = "Kit overlay; the layer manager draws tooltips" },
+  { path = "gpui_base::Select", reason = "Kit control with its own popup; dropdowns go through the layer manager" },
+  { path = "gpui_base::Combobox", reason = "Kit control with its own popup; dropdowns go through the layer manager" },
+  { path = "gpui_base::DatePicker", reason = "Kit control with its own popup; dropdowns go through the layer manager" },
+  { path = "gpui_base::Popup", reason = "Kit overlay; the layer manager draws overlays" },
+  { path = "gpui_base::Toast", reason = "Kit notification; the notice center owns notices" },
+  { path = "gpui_base::ToastStack", reason = "Kit notification; the notice center owns notices" },
+  { path = "gpui_base::ToastManager", reason = "Kit notification; the notice center owns notices" },
+]

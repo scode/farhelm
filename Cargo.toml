@@ -13,6 +13,7 @@ members = [
   "crates/farhelm-testtrace-macros",
   "crates/farhelm-ui",
   "crates/gui/farhelm-gui",
+  "crates/gui/lint-demo",
   "crates/terminal-host",
 ]
 # The vendored, patched terminal and GPUI crates (vendor/README.md) are not members: they
@@ -43,10 +44,11 @@ exclude = [
 # That is what the `desktop` job's `cargo check -p farhelm-desktop` step is
 # for, and why it is not optional.
 #
-# `farhelm-gui` (the GPUI desktop GUI) is left out of the default members too: it compiles GPUI, which takes minutes
-# and needs Linux development packages (.agents/validation.md lists them). Commands on the default members (a bare
-# `cargo build`, `cargo clippy --all-targets`) skip it; `--workspace` runs, such as the workspace nextest and doctest
-# runs, DO build it, and `-p farhelm-gui` selects it on its own.
+# `farhelm-gui` (the GPUI desktop GUI) IS a default member, so the ordinary `cargo clippy --all-targets` lints it under
+# crates/gui/clippy.toml's bans (SPEC_impl.md, "GUI architecture"). It compiles GPUI, which needs a few Linux
+# development packages (.agents/validation.md lists them; CI's clippy job installs them). `farhelm-gui-lint-demo`
+# (crates/gui/lint-demo) is a member but not a default one: it exists to violate those bans on purpose, behind its
+# `violations` feature, for scripts/check-gui-lints.py.
 #
 # The tracing support crates are also selected explicitly for their own checks. Selecting them
 # as normal build roots would unify their Tokio test-util feature into application builds;
@@ -60,6 +62,7 @@ default-members = [
   "crates/farhelm-fixtures",
   "crates/farhelm-teststate",
   "crates/farhelm-ui",
+  "crates/gui/farhelm-gui",
   "crates/terminal-host",
 ]
 
