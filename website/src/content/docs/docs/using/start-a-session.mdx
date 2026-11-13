@@ -236,7 +236,7 @@ the trash (see [Stop or delete](/docs/using/stop-restart-resume/#stop-or-delete)
 [trash](/docs/using/session-list/#managed-checkout-trash) at the top of the session list shows where those directories are and lets you
 clean them up. In a new [container](/docs/agents/containerized-sessions/) or
 [sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox), the clone lives inside and Delete
-removes it permanently, without trash; deleting the last session there removes the whole environment too.
+removes it permanently, without trash, unless another session still uses it; deleting the last session there removes the whole environment too.
 
 Choose **Managed checkout** under destination, enter the repository as `owner/repo`, and select its
 suggestion. You can also type `gh:owner/repo` in the search box and choose **Managed checkout: owner/repo**. Farhelm

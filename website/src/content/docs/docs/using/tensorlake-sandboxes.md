@@ -290,8 +290,8 @@ It always asks for confirmation, even with **Remove hosts without asking** on. T
 option for these hosts. Keep any work you need elsewhere before deleting. The recipe and its prepared snapshot remain
 available for another host.
 
-If deletion fails, the host stays listed with the reason; choose **Delete sandbox** again to finish. A saved API key is
-needed to delete it. Agents cannot delete Tensorlake hosts.
+While Farhelm deletes it, the host shows **Deleting…**. If deletion fails, the host stays listed with the reason; choose
+**Delete sandbox** again to finish. A saved API key is needed to delete it. Agents cannot delete Tensorlake hosts.
 
 ### Sandboxes not on this helm
 

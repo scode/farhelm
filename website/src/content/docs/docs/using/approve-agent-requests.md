@@ -89,18 +89,19 @@ only that container or sandbox. Deleting another session there removes just that
 stays, since the agent's own session is still in it.
 
 It can also ask to [open links](#open-links-from-a-remote-session), under the container's or sandbox's own link
-permissions, and start a session from a launch template that names no host. Farhelm refuses, with "Agents in sandbox and
-container sessions can only act within their own sandbox or container.", anything aimed at another host, copying a
-session, listing or changing launch templates, and host changes. Its requests ask you the same way as anywhere else,
-using the container's or sandbox's own [settings](#stop-asking-for-a-host), which start out asking.
+permissions, and start a session from a launch template that sets no host and no recipe. Farhelm refuses, with "Agents
+in sandbox and container sessions can only act within their own sandbox or container.", anything aimed at another host
+or at a new sandbox or container, copying a session, listing or changing launch templates, and host changes. Its
+requests ask you the same way as anywhere else, using the container's or sandbox's own
+[settings](#stop-asking-for-a-host), which start out asking.
 
 ## New sandboxes and containers
 
 An agent on an ordinary host can ask for a session in a new [sandbox](/docs/using/tensorlake-sandboxes/) or
 [container](/docs/agents/containerized-sessions/), built from one of your recipes:
 
-- `farhelm agent create --recipe dev-box --command true --no-yolo` asks for a new Tensorlake sandbox from the `dev-box`
-  recipe. Add `--container-host build-box` for a container on that host instead.
+- `farhelm agent create --recipe dev-box --agent claude` asks for a new Tensorlake sandbox from the `dev-box` recipe.
+  Add `--container-host build-box` for a container on that host instead.
 - `farhelm agent create --template <name>` does the same when the template's **Runs on** is a recipe.
 - `farhelm agent clone --source-session <id>` of a sandbox or container session asks for a new one from the same recipe,
   with the same agent and repository, like **Clone** in the session menu.
@@ -185,8 +186,8 @@ When an agent or a command in a remote session tries to open a web link through 
 your machine. The card names the session and host and shows the site it would open and the full URL. Only HTTP and HTTPS
 links are accepted. **Allow** opens it in your default browser from the Mac app, or in a new tab from Farhelm's web UI.
 **Deny** opens nothing. Commands can also ask directly with `farhelm agent open-url -- https://example.com`, from any
-ordinary host session, including ones on your Mac. Container and session-owned sandbox environments keep the
-[request restriction above](/docs/using/approve-agent-requests/).
+session, including ones on your Mac. In a [sandbox or container](#agents-in-sandboxes-and-containers), its own link
+permissions apply.
 
 The host settings have two separate permissions, both off initially. **Open links without asking** covers public
 addresses. **Open local-network links without asking** covers addresses on your own machine or private network; those

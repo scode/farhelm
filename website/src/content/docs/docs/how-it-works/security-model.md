@@ -33,11 +33,11 @@ new releases and downloads them, checking each one's signature, by itself unless
 [ntfy alerts](/docs/using/session-list/#ntfy-alerts), your helm sends a waiting session's name and its host's name to
 the ntfy server you chose, where anyone who knows the topic can read them. And downloading a file from a session's
 terminal: the helm can read any file the session's account can read on that host. In the desktop app, Cmd-click
-(Ctrl-click on Linux) also opens the saved copy in its default app for `.md`, `.txt` and `.json` files by default. The
-[desktop setting](/docs/using/session-list/#terminal-links) can allow any file type you add, including one that may run
-code in its default app. The dialog warns beside each type Farhelm does not recognize as safe. An opened HTML-like page
-can run browser scripts and send requests to services on your computer, including localhost on other ports. Plain clicks
-and browser clicks only download; check the disclosed host and path first
+(Ctrl-click on Linux) also opens the saved copy in its default app for Markdown, text and JSON files and common image
+types by default. The [desktop setting](/docs/using/session-list/#terminal-links) can allow any file type you add,
+including one that may run code in its default app. The dialog warns beside each type Farhelm does not recognize as
+safe. An opened HTML-like page can run browser scripts and send requests to services on your computer, including
+localhost on other ports. Plain clicks and browser clicks only download; check the disclosed host and path first
 ([Work in a session](/docs/using/work-in-a-session/#copy-paste-and-links)). And opening links: with your approval, or a
 host's link permission, an agent on that host can make your browser open a web address, and the local-network permission
 lets it reach addresses on your own machine and network without asking. The Mac app's optional localhost tunnels also

@@ -127,7 +127,7 @@ including extra mounts or environment settings you configure yourself.
 
 **Stop** ends the chosen agent and its tabs, leaving the container running. **Suspend** pauses the whole container.
 Processes freeze and their memory stays allocated on the host. **Resume** continues them. **Stop and suspend** stops the
-chosen session first, then pauses the whole container, including any leftover sessions.
+chosen session first, then pauses the whole container, including any other sessions in it.
 
 A host reboot, external `podman stop` or an out-of-memory kill leaves the container **Stopped**, with files retained.
 When Farhelm is connected to the container host, it attempts to start a stopped container once. Failure shows the reason
@@ -151,10 +151,11 @@ and process in it, its checkouts, files and unpushed work will be destroyed, inc
 That works while paused or while the supervisor is disconnected, without Resume, if the container host is reachable. To
 delete just the one session, resume or update the container first.
 
-While Farhelm deletes a container, **Hosts** and the sidebar show it as **Deleting…**. If that fails after its last
-session was deleted, it shows **Deleting failed** with the reason, and **Retry** deletes it again. Farhelm forgets the
-container only after confirming its removal. Deleting several marked sessions works one session at a time in the same
-way, as for [sandboxes](/docs/using/tensorlake-sandboxes/#delete-a-session-in-its-own-sandbox).
+While Farhelm deletes a container, **Hosts** and the sidebar show it as **Deleting…**, and its sessions' actions are
+unavailable. If that fails after its last session was deleted, it shows **Deleting failed** with the reason, and
+**Retry** deletes it again. Farhelm forgets the container only after confirming its removal. Deleting several marked
+sessions works one session at a time in the same way, as for
+[sandboxes](/docs/using/tensorlake-sandboxes/#delete-a-session-in-its-own-sandbox).
 
 **Delete container** in Hosts always destroys the whole container after its own confirmation. A failure there keeps the
 container and reason visible so you can retry.
@@ -166,10 +167,10 @@ or changing that host's destination. A refusal names what still needs cleanup.
 ## Earlier containerized sessions
 
 The earlier experimental feature ran only the agent and tabs inside a container and mounted a host checkout. Those
-sessions now support **Delete only**. Their rows are marked **Retired container**, and their agents keep running until
-you delete them. Terminal access, Stop, Restart, Clone and Replace are unavailable. Stored templates and recent setups
-still load. Remove their retired container choice before launching again, then select a recipe-based container in the
-launcher or template editor.
+sessions now support **Delete only**. Their rows are marked **Retired container**, and an agent still running in one
+keeps running until you delete it. Terminal access, Stop, Restart, Clone and Replace are unavailable. Stored templates
+and recent setups still load. Remove their retired container choice before launching again, then select a recipe-based
+container in the launcher or template editor.
 
 Continue with [Start a session](/docs/using/start-a-session/) or
 [make a shared recipe](/docs/using/tensorlake-sandboxes/#make-a-recipe).
