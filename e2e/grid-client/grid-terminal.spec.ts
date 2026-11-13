@@ -228,7 +228,7 @@ test("a recorded attach draws its text, wide boxes, styles and cursor in their c
   expect(byText("中").width).toBeCloseTo(2 * width, 0);
   expect(byText("文").left).toBeCloseTo(8 * width, 0);
   expect(byText("web").left).toBeCloseTo(11 * width, 0);
-  // Bold green draws bright green (#B9CA4A), as in old terminals.
+  // Bold green draws bright green (#B9CA4A).
   expect(byText("hello").color).toBe("rgb(185, 202, 74)");
   expect(Number(byText("hello").weight)).toBeGreaterThanOrEqual(700);
   // An underlined run with its own underline color (blue).
@@ -598,9 +598,8 @@ test("the alternate screen sends wheel steps without mouse reporting", async ({ 
 
 test("an ended program's exit status is shown by the client, below its last row", async ({ page }) => {
   // The exit line is the client's, outside the program's output: it may
-  // move the screen up (as tmux's line scrolled the pane) but never covers
-  // a row. The fixture's 4 rows leave plenty of room; a full-height screen
-  // leaves less than a line.
+  // move the screen up but never covers a row. The fixture's 4 rows leave
+  // plenty of room; a full-height screen leaves less than a line.
   await openGrid(page);
   const exitLine = page.locator(".grid-terminal-exit");
   const overlap = () =>
@@ -701,7 +700,7 @@ async function settled(page: Page): Promise<void> {
 /**
  * The page position in cell (`x`, visible row `y`), `fx` of the way across
  * it (the middle by default). A selection's ends move to the nearest cell
- * boundary, and exactly mid-cell to the left one (old terminals' rounding);
+ * boundary, and exactly mid-cell to the left one (the grid's rounding);
  * a drag ending exactly mid-cell would still leave the rounding to sub-pixel
  * layout, so the drags below end clearly to one side, and the midpoint
  * itself is tested where its position is a whole pixel.
@@ -715,9 +714,9 @@ async function cellAt(page: Page, x: number, y: number, fx = 0.5): Promise<{ x: 
 test("the wheel scrolls back through history, which stays put while output arrives, and typing returns to the bottom", async ({ page }) => {
   const mac = await macField(page);
   // Scrollback is the client's own view over the history it holds. A
-  // scrolled-back view is anchored to its lines, as an old terminal's
-  // is, so new output does not drag it along; any input sent to the
-  // program brings it back to the bottom (`scrollOnUserInput`).
+  // scrolled-back view is anchored to its lines, so new output does not
+  // drag it along; any input sent to the program brings it back to the
+  // bottom (grid-terminal.js's `sendUserInput`).
   await openGrid(page);
   await feed(page, attachWithHistory(20, 4, 30));
   await settled(page);
@@ -817,7 +816,7 @@ test("the alternate screen has no history to scroll, and lost history is marked 
  * after it.
  *
  * Why: that is the grid's documented rounding, `ceil(x / width + 0.5) - 1`
- * (old terminals round the same way), and the grid once rounded the midpoint
+ * (from the ported `getCoords`), and the grid once rounded the midpoint
  * right instead (`Math.round`), so a live drag starting 4px into an 8px cell
  * lost the first character it was aimed at. Spec: on a row
  * `abcdefghij`, a drag from the exact midpoint of a cell `k` to the row's end
@@ -1002,10 +1001,10 @@ test("a click on a link reports it; a drag across one never does; a withheld pre
 });
 
 test("a paste goes to the program as paste messages and brings the view back", async ({ page }) => {
-  // Without terminal.js's attachment interception (covered with the
-  // island) the component pastes plain text itself, as an old terminal's
-  // own handler does. The supervisor adds bracketed-paste markers and converts
-  // line endings; the client only splits at the format's bounds.
+  // Without terminal.js's attachment interception (covered with the island)
+  // the component pastes plain text itself. The supervisor adds
+  // bracketed-paste markers and converts line endings; the client only
+  // splits at the format's bounds.
   await openGrid(page);
   await feed(page, attachWithHistory(20, 3, 10));
   await settled(page);

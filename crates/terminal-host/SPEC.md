@@ -123,9 +123,7 @@ ignored would leave Ctrl-C and broken pipes dead in everything it runs. It inher
 
 The pty starts with the kernel's default terminal settings for a new pty, then `VERASE` set to DEL (0x7f) and `IUTF8`
 set: DEL is what terminals send for Backspace, so the line discipline's erase works on it, and IUTF8 makes that erase
-remove a whole UTF-8 character rather than one byte of it. Both are also what an old Farhelm terminal's tmux pane has,
-so a program that ran in an old terminal sees the same settings when it runs in a host. Its window size is `cols` x
-`rows` (pixel sizes 0).
+remove a whole UTF-8 character rather than one byte of it. Its window size is `cols` x `rows` (pixel sizes 0).
 
 ### Child exit and end of output
 

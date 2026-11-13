@@ -2,20 +2,20 @@ import { setCompact } from "./helpers/list-header";
 // The browser-level M1 acceptance suite (PLAN_M1.md criterion 5), grown by
 // PLAN_M2.md step 7 to cover the list view and navigation and by step 8 to
 // cover the create dialog and per-row stop/delete actions. The remaining
-// tests cover terminal rendering and input, resize and takeover, the session
-// list, the create/stop/delete UI, and the list/terminal navigation lifecycle
-// against a real helm, supervisor, tmux, and fake agent. A handful of
-// deliberate exceptions intercept `page.route` instead: the
-// truncation banner (pinning a ~500-session-cap reply without actually
+// tests cover terminal rendering and input, resize and takeover, the
+// session list, the create/stop/delete UI, and the list/terminal navigation
+// lifecycle against a real helm, supervisor, terminal hosts, and fake
+// agent. A handful of deliberate exceptions intercept `page.route` instead:
+// the truncation banner (pinning a ~500-session-cap reply without actually
 // creating hundreds of sessions), the Unknown-status confirm wording
 // (provoking that status needs an old-shaped peer, not anything this
 // build's own supervisor can produce — see that test's own docs), the
 // stop/delete failure-surfacing tests (forcing failures a healthy stack
-// would never hand back on its own), two confirming-state poll tests
-// (a synthetic marker-carrying listing to prove a refetch's RESULT
-// reached the DOM, and a synthetic one-shot 500 to prove a failed refetch
-// doesn't clear `confirming` — neither is reachable by driving the real
-// stack alone). Every other test drives the real stack end to end.
+// would never hand back on its own), two confirming-state poll tests (a
+// synthetic marker-carrying listing to prove a refetch's RESULT reached the
+// DOM, and a synthetic one-shot 500 to prove a failed refetch doesn't clear
+// `confirming` — neither is reachable by driving the real stack alone).
+// Every other test drives the real stack end to end.
 // Direct fixture Stop requests explicitly authorize their owned agent and
 // tabs. Bodyless HTTP Stop instead protects callers that never authorized tabs.
 //
@@ -1253,9 +1253,9 @@ test("stop and delete a session through the HTTP API", async ({ page, request })
     expect(stopped.status()).toBe(200);
     expect(await stopped.json()).toEqual({});
 
-    // tmux marks the pane dead asynchronously once the killed process is
-    // reaped, so the next list poll (not the stop response itself) is what
-    // proves the kill actually took effect.
+    // The terminal host reports the child's exit asynchronously once the
+    // killed process is reaped, so the next list poll (not the stop
+    // response itself) is what proves the kill actually took effect.
     await expect
       .poll(
         async () => {
@@ -2357,11 +2357,12 @@ test("a failed listing read while confirming does not clear the confirming state
 // Driven through a synthetic, route-intercepted listing (like the
 // truncation-banner test above) rather than a real session: a supervisor
 // restart is NOT how to provoke this — PLAN_M2.md's restart-gap behavior
-// yields `Exited { exit_code: None }` when tmux did not survive (an
-// explicit "known dead, unknown code", not "unknown whether alive" — see
-// `SessionStatus::Exited` in lib.rs), and ordinary `Alive`/`Exited` when
-// it did. Genuine `Unknown` only ever comes from `Session::status`'s
-// serde default kicking in on an old-shaped reply with no `status` field
+// yields `Exited { exit_code: None }` when the session's terminal did not
+// survive (an explicit "known dead, unknown code", not "unknown whether
+// alive" — see `SessionStatus::Exited` in lib.rs), and ordinary
+// `Alive`/`Exited` when it did. Genuine `Unknown` only ever comes from
+// `Session::status`'s serde default kicking in on an old-shaped reply with
+// no `status` field
 // PLAN_M6_75.md item 3's no-badge-until-classified rule, on the CREATE
 // path — the half with no prior status to fall back on.
 //
@@ -3291,8 +3292,8 @@ test("list refreshes an existing row from alive to exited, then drops it on dele
     // genuine race is whether the trap's `exit 7` completes before that
     // grace period does: if it does not, the process is still alive at
     // re-enumeration time and gets SIGSTOPped then SIGKILLed instead,
-    // turning the eventual death into a signal death tmux cannot reduce
-    // to a code. The badge could legitimately read "Exited (code 7)" or
+    // turning the eventual death into a signal death, which has no exit
+    // code. The badge could legitimately read "Exited (code 7)" or
     // plain "Exited" either way; only the COARSE state transition is
     // asserted here. The exact text each `SessionStatus` renders into is
     // already pinned unconditionally by

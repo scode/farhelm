@@ -908,10 +908,10 @@ test("replacing a live session creates a fresh row in its place, selected, with 
     await expect(replacementRow).toHaveAttribute("data-session-selected", "true");
 
     // The terminal now showing is the replacement's own: a fresh READY
-    // banner, and — the property this whole test exists to pin — no trace
-    // of the marker the SOURCE's agent echoed. A broken replace that
-    // reused the old terminal (or the old session's id under a new label)
-    // would leave the marker right there.
+    // banner, and — the property this whole test exists to pin — no trace of
+    // the marker the SOURCE's agent echoed. A broken replace that reused the
+    // source's terminal (or the old session's id under a new label) would
+    // leave the marker right there.
     //
     // The READY text is already there for the source's own instance before any
     // of this runs, so it cannot prove the replacement's terminal has actually

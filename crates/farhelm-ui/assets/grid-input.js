@@ -40,10 +40,11 @@
 // ## Mouse and wheel
 //
 // Mouse events become `mouse` messages in cell coordinates, sent only for what
-// the program's mouse mode asks for (`state.mouse`), with the cell rounding,
-// clamping and move de-duplication xterm.js uses. Wheel steps accumulate pixel
-// deltas into lines, so a trackpad scrolls a program at the same rate as in
-// xterm.js.
+// the program's mouse mode asks for (`state.mouse`), with ported cell rounding,
+// clamping and move de-duplication (`mouseCell`, `createMouseDeduper`). Wheel
+// steps accumulate pixel deltas into lines (`createWheelAccumulator`, also
+// ported), so a trackpad scrolls a program at the rate terminals scrolled
+// before the grid.
 (function (root) {
   "use strict";
 
@@ -109,13 +110,14 @@
    * `type` whether it is instead a local page scroll or select-all, and
    * `cancel` whether the event is cancelled anyway.
    *
-   * Kept line for line with the original's branches rather than
-   * simplified, because its value is giving exactly xterm.js's
-   * answer; the key table (js-tests/grid-input-tables.js) pins it. The
-   * supervisor's encoder makes the same computation with the program's real
-   * modes; the page only needs `type`, `cancel` and whether `key` exists.
-   * `macOptionIsMeta` is kept from the original's signature, but Farhelm
-   * only ever passes false, and only false is pinned by the tables.
+   * Kept line for line with the original's branches rather than simplified,
+   * because its value is giving exactly the ported original's answer, the
+   * bytes programs already expect from each key; the key table
+   * (js-tests/grid-input-tables.js) pins it. The supervisor's encoder makes
+   * the same computation with the program's real modes; the page only needs
+   * `type`, `cancel` and whether `key` exists. `macOptionIsMeta` is kept from
+   * the original's signature, but Farhelm only ever passes false, and only
+   * false is pinned by the tables.
    *
    * Ported from xterm.js 6.0.0's `evaluateKeyboardEvent`
    * (src/common/input/Keyboard.ts), MIT; THIRD_PARTY_NOTICES.md, "Code ported
@@ -293,8 +295,8 @@
   }
 
   /**
-   * What the grid does with one keydown (Option not acting as Meta, and no
-   * screen-reader mode, as Farhelm configured xterm.js too):
+   * What the grid does with one keydown (with the ported original's
+   * Option-as-Meta and screen-reader options both off):
    *
    * - `"send"`: send a `key` message and cancel the event;
    * - `"pass"`: leave the event to the browser, whose text input (if any)
@@ -493,7 +495,7 @@
   /**
    * The cell under a pointer offset (pixels from the screen's top left): a
    * boundary pixel belongs to the cell before it, and a point outside the
-   * grid clamps to its edge, as in xterm.js.
+   * grid clamps to its edge.
    *
    * Ported from xterm.js 6.0.0's `getCoords` (src/browser/input/Mouse.ts), MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -590,11 +592,11 @@
 
   /**
    * How many lines one wheel event scrolls a program, accumulating partial
-   * lines from pixel deltas across events (damped to 0.3 under 50 px, which is
-   * how a trackpad's events look), at sensitivity 1, and 5 under Alt or Ctrl.
-   * Shift+wheel is horizontal and scrolls nothing. The grid sends one report
-   * (or one arrow key) per event whose amount is not zero, as xterm.js does, so
-   * callers only need the sign of `deltaY` once this says the event counts.
+   * lines from pixel deltas across events (damped to 0.3 under 50 px, which
+   * is how a trackpad's events look), at sensitivity 1, and 5 under Alt or
+   * Ctrl. Shift+wheel is horizontal and scrolls nothing. The grid sends one
+   * report (or one arrow key) per event whose amount is not zero, so callers
+   * only need the sign of `deltaY` once this says the event counts.
    *
    * Ported from xterm.js 6.0.0's `CoreMouseService.consumeWheelEvent`, MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".

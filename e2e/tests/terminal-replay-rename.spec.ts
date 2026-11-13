@@ -905,7 +905,7 @@ test("rename-refused-pasted-newline: a multi-line title reaches the supervisor i
 });
 
 // A socket that never finishes connecting is the one state where revealing
-// the terminal would be a lie: `term.onData` drops keystrokes on a socket
+// the terminal would be a lie: terminal.js drops keystrokes on a socket
 // that is not OPEN, so a normal-looking pane would swallow everything
 // typed into it with nothing on screen to say why — the silent failure
 // SPEC.md requires be reported instead of left to be inferred.

@@ -1,15 +1,15 @@
 // The one place that says how many stacks the browser suite runs and how a
 // worker finds its own.
 //
-// The suite runs one stack (helm, both supervisors, private tmux servers,
-// startup session; see start-stack.sh) per Playwright worker slot, and each
-// worker drives only its slot's stack. Playwright's `parallelIndex` is the
-// slot: it is stable for the lifetime of the run (a replacement worker after a
-// crash, or the fresh worker every (engine, spec file) project gets, inherits
-// the slot it replaces), and it never reaches or exceeds the worker count.
-// That is what lets Playwright hand any project to any free worker while the
-// stacks themselves stay long-lived, booted once per run by the config's
-// `webServer` entries.
+// The suite runs one stack (helm, both supervisors and the terminal hosts they
+// start, startup session; see start-stack.sh) per Playwright worker slot, and
+// each worker drives only its slot's stack. Playwright's `parallelIndex` is
+// the slot: it is stable for the lifetime of the run (a replacement worker
+// after a crash, or the fresh worker every (engine, spec file) project gets,
+// inherits the slot it replaces), and it never reaches or exceeds the worker
+// count. That is what lets Playwright hand any project to any free worker
+// while the stacks themselves stay long-lived, booted once per run by the
+// config's `webServer` entries.
 //
 // Everything a test needs to reach its stack is derived here and nowhere
 // else: the port, the base URL, where the stack script publishes what it
@@ -31,8 +31,8 @@ import { harnessStackPorts } from "./stack-port";
  * Picked rather than measured: the maintainer chose three to start with, to
  * get the suite running in parallel rather than to find an optimum, on a
  * machine whose CPU other agents share. Each stack is a helm, two
- * supervisors and their tmux servers, and each worker drives its own browser,
- * so the suite's CPU and memory use grow with this number.
+ * supervisors and their sessions' terminal hosts, and each worker drives its
+ * own browser, so the suite's CPU and memory use grow with this number.
  * `scripts/test_run_playwright.py` pins the recorder's worker count to the
  * same value and its tests check that the two agree; change both together.
  */

@@ -597,12 +597,12 @@ test("a URL beginning above the viewport activates from its visible continuation
  * still on a row below its head, on screen and away from the last cell, and
  * a click on it opens the full URL in a new tab with no confirm dialog.
  *
- * The URL's head need not stay on screen. The emulator behind a new terminal
- * reflows as alacritty does, keeping the cursor's row and pushing the lines
- * above it into history (seen here: the head left the screen with twenty
- * blank rows below the cursor). So the wrap is
- * judged over every line the view can scroll to, and the click on the visible
- * tail is what must reach the head, wherever it now is.
+ * The URL's head need not stay on screen. The supervisor's emulator reflows
+ * as alacritty does, keeping the cursor's row and pushing the lines above it
+ * into history (seen here: the head left the screen with twenty blank rows
+ * below the cursor). So the wrap is judged over every line the view can
+ * scroll to, and the click on the visible tail is what must reach the head,
+ * wherever it now is.
  */
 test("a wrapped URL still activates after a resize reflows it", async ({
   page,

@@ -152,14 +152,15 @@ test("a paste of more than one megabyte into a grid terminal arrives whole and k
   }
 });
 
-// Regression test for the tmux paste-buffer input-mangling bug at the browser
-// level: real Backspace and Ctrl+C keypresses go through the grid's own key
-// handling (grid key messages the supervisor encodes as DEL and ETX — no custom
-// key binding intercepts them, see terminal.js), the WebSocket, and the framing
-// protocol exactly like any other keystroke, landing on `basic`'s pty in its
-// ordinary canonical/cooked mode (nothing here puts it in raw mode, unlike the
-// `hexecho` fixture a Rust e2e test once used for byte-exact coverage of every
-// mangled control byte, including ESC/arrow-up).
+// Regression test, at the browser level, for an old input-mangling bug in which
+// control keys reached the program as literal caret text (`^?`, `^C`) instead
+// of their bytes: real Backspace and Ctrl+C keypresses go through the grid's
+// own key handling (grid key messages the supervisor encodes as DEL and ETX —
+// no custom key binding intercepts them, see terminal.js), the WebSocket, and
+// the framing protocol exactly like any other keystroke, landing on `basic`'s
+// pty in its ordinary canonical/cooked mode (nothing here puts it in raw mode,
+// unlike the `hexecho` fixture a Rust e2e test once used for byte-exact
+// coverage of every mangled control byte, including ESC/arrow-up).
 //
 // ArrowUp is deliberately NOT exercised here, after checking what a
 // canonical-mode pty actually does with it: Linux's ECHOCTL local-echo
@@ -169,9 +170,9 @@ test("a paste of more than one megabyte into a grid terminal arrives whole and k
 // rendered output is identical either way, so `basic`'s canonical pty gives
 // no browser-observable signal for ESC at all; that gap is exactly what
 // `hexecho`'s raw mode (no ECHOCTL, no canonical processing) exists to
-// close. The Rust e2e test that covered it end to end ran on tmux terminals
-// and is gone, so that end-to-end check is not covered any more; the grid
-// input encoder's key table still pins the bytes each key sends.
+// close. The Rust e2e test that covered it end to end is gone, so that
+// end-to-end check is not covered any more; the grid input encoder's key
+// table still pins the bytes each key sends.
 //
 // Backspace escapes that trap because DEL, unlike ESC, has a special
 // canonical-mode role: a correctly delivered 0x7f is consumed as the ERASE
@@ -201,18 +202,18 @@ test("a paste of more than one megabyte into a grid terminal arrives whole and k
 // passed every targeted run (where `beforeAll` hands them a fresh one), and
 // failed in the FULL suite on both engines — the first of them waiting
 // fifteen seconds for a banner that a multi-megabyte flood test, which then
-// ran before them in this file, had already pushed out of the pane's history. It failed exactly once per run,
-// which made it look like a flake: Playwright restarts its worker after a
-// failure, and the new worker's `beforeAll` recreates the fixture for
-// everything that follows. This file's per-file stack reset now contains
-// that damage before the next terminal spec starts.
+// ran before them in this file, had already pushed out of the pane's history.
+// It failed exactly once per run, which made it look like a flake: Playwright
+// restarts its worker after a failure, and the new worker's `beforeAll`
+// recreates the fixture for everything that follows. This file's per-file
+// stack reset now contains that damage before the next terminal spec starts.
 //
-// This does NOT end the tmux session, despite ending the fake-agent
-// process: `remain-on-exit on` (SPEC.md) keeps a dead pane's session and
-// window around so its terminal stays viewable, it just stops accepting
-// input. Killing the agent is still sufficient for the assertion; this
-// file's per-file stack reset contains its destruction of the shared
-// fixture before another terminal spec begins.
+// This does NOT end the session's terminal, despite ending the fake-agent
+// process: an exited session's terminal stays viewable while its host is up
+// (SPEC.md, "Terminal experience"), it just stops accepting input. Killing
+// the agent is still sufficient for the assertion; this file's per-file stack
+// reset contains its destruction of the shared fixture before another
+// terminal spec begins.
 test("real backspace erases; real ctrl-c kills the fake agent", async ({
   page,
 }) => {

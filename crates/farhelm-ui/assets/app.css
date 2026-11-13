@@ -8569,11 +8569,11 @@ a:any-link,
    a CSS visibility change, never an attach cutover).
 
    `visibility`, NOT `display: none`, and that is load-bearing rather than
-   stylistic. A `display: none` element has no layout box, so
-   `FitAddon.fit()` would size an unselected terminal to zero columns — and
-   in a session with more than one terminal, every tab mounts while
-   unselected. `position: absolute; inset: 0` gives every pane the
-   container's full box whether or not it is showing, so a hidden
+   stylistic. A `display: none` element has no layout box, so an unselected
+   terminal could not be fitted to its pane (the grid's fit proposes nothing
+   without one) — and in a session with more than one terminal, every tab
+   mounts while unselected. `position: absolute; inset: 0` gives every pane
+   the container's full box whether or not it is showing, so a hidden
    terminal's geometry matches the visible one's and stays correct the
    moment it is selected. Hiding this way also makes hidden panes
    non-interactive, which is what keeps keystrokes from reaching a terminal
@@ -8623,8 +8623,8 @@ a:any-link,
    deliberate: a stylesheet rule per style invalidates the whole page, which
    the renderer benchmark showed collapsing WebKit (grid-style.js's header). */
 /* The 4px padding is part of the fit contract: the fit subtracts it from
-   the room (grid-terminal.js, "Size"), which first matched the inset xterm.js
-   got from `.terminal`, so panes kept their rows and columns. */
+   the room (grid-terminal.js, "Size"). It is the inset terminals had before
+   the grid, kept so that panes did not change their rows and columns. */
 .grid-terminal {
   position: relative;
   box-sizing: border-box;
@@ -8708,10 +8708,10 @@ a:any-link,
 }
 
 /* The scrollback's scrollbar, in the 14px the fit reserves at the right
-   edge, first modeled on xterm.js 6.0's (VS Code's): a slider in the foreground color
-   at 20% (40% hovered, 50% dragged), shown only when there is history to
-   scroll, while the pointer is over the terminal and for a moment after a
-   scroll, fading out over 800ms. */
+   edge: a slider in the foreground color at 20% (40% hovered, 50%
+   dragged), shown only when there is history to scroll, while the pointer
+   is over the terminal and for a moment after a scroll, fading out over
+   800ms. */
 .grid-terminal-scrollbar {
   position: absolute;
   top: 0;
@@ -8760,7 +8760,7 @@ a:any-link,
   direction: ltr;
 }
 
-/* The cursor blink (first xterm.js's): one second, two visible changes, only while the
+/* The cursor blink: one second, two visible changes, only while the
    terminal has focus (the script adds the class only then). The window's
    inactive pause below stops it like every other animation. */
 .grid-terminal-cursor.grid-terminal-cursor-blink {
@@ -8773,10 +8773,9 @@ a:any-link,
   }
 }
 
-/* The exit status of an ended program, which the client shows itself
-   (there is no tmux "Pane is dead" line). The script places it directly
-   below the last row, never over one, and sets its colors from the
-   terminal's defaults. */
+/* The exit status of an ended program, which the client shows itself. The
+   script places it directly below the last row, never over one, and sets
+   its colors from the terminal's defaults. */
 .grid-terminal-exit {
   display: none;
   position: absolute;
@@ -8804,10 +8803,10 @@ a:any-link,
   white-space: nowrap;
 }
 
-/* The span fallback of the character measurement, shaped like xterm.js's
-   character measure element, whose measurement the fit was ported from. The glyph measure (which characters may
-   flow inline) adds the row spans' bidi settings, so it measures in their
-   context. */
+/* The span fallback of the character measurement, shaped like the measure
+   element of the code that measurement was ported from (grid-terminal.js's
+   `measureChar`). The glyph measure (which characters may flow inline) adds
+   the row spans' bidi settings, so it measures in their context. */
 .grid-terminal-measure {
   display: inline-block;
   position: absolute;

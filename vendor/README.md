@@ -7,9 +7,9 @@ patch file together.
 The supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`) runs on `alacritty_terminal` 0.26.0 and its
 parser `vte` 0.15.0. Both are used as published on crates.io except for a few small patches: accessors that snapshot and
 restore need, caps on what hostile program output can make them store, two history counters for the grid stream, one
-more query for the handler to answer, nine bug fixes, emoji variation widths following Ghostty, and one mode change that
-follows tmux over xterm (the UTF-8 and SGR mouse encodings as separate modes). The root `Cargo.toml` swaps these trees
-in for the crates.io versions with `[patch.crates-io]`.
+more query for the handler to answer, nine bug fixes, emoji variation widths following Ghostty, and one mode change (the
+UTF-8 and SGR mouse encodings as separate modes, which upstream, like xterm, makes exclusive). The root `Cargo.toml`
+swaps these trees in for the crates.io versions with `[patch.crates-io]`.
 
 ## What is here
 
@@ -81,14 +81,14 @@ it reaches the parser: a pre-scan would need a second parser to know where seque
   hyperlink when the dropped sequence is an OSC 8; otherwise a link made long enough for the parser to drop would leave
   the previous link on the text after it, where a slightly shorter one is rejected by the hyperlink cap below. After
   every OSC the buffer is shrunk back to 1 KiB if it grew beyond that. The value is set by OSC 52 clipboard writes,
-  which carry the whole selection base64-encoded: xterm.js, which rendered Farhelm's terminals when this limit was set,
-  drops OSC payloads over 10,000,000 characters (`PAYLOAD_LIMIT` in its 6.0.0 release), so 10 MiB accepts every copy
-  that worked there, about 7.5 MB of copied text. The `no_std` parser has its own fixed buffer and is unchanged.
+  which carry the whole selection base64-encoded: 10 MiB carries about 7.5 MB of copied text, which is at least as much
+  as a program could copy in Farhelm's terminals when the limit was set (the per-patch record below has the numbers).
+  The `no_std` parser has its own fixed buffer and is unchanged.
 - Zero-width characters per cell, `alacritty_terminal::term::cell::MAX_ZEROWIDTH_CHARS` = 16. Upstream appends every
   combining character to the previous cell, four bytes each, without limit. Further ones are dropped. Real text needs
   far fewer: stacked diacritics and Hangul jamo use two or three per cell, a subdivision flag such as Scotland's six.
-  tmux, whose screen Farhelm reads today, stores at most 32 bytes of UTF-8 per cell, which in practice is fewer marks
-  than this.
+  For comparison, tmux stores at most 32 bytes of UTF-8 per cell, which in practice is fewer marks than this, so 16
+  leaves real text room to spare.
 - Hyperlink length, `alacritty_terminal::term::MAX_HYPERLINK_URI_BYTES` = 2083 and `MAX_HYPERLINK_ID_BYTES` = 250. Every
   cell printed while an OSC 8 hyperlink is active holds it, and a program can start a new one before every character, so
   the length multiplies into the grid's memory. An OSC 8 over either limit ends the active hyperlink, and the text after
@@ -96,8 +96,7 @@ it reaches the parser: a pre-scan would need a second parser to know where seque
   [OSC 8 specification](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) documents (iTerm2 uses the
   same URI limit). Separately, an OSC 8 that repeats the active link's explicit `id` and URI keeps the active link
   instead of building an equal copy, so the cells after it share one allocation. A link without an `id` always gets a
-  fresh generated one, so it is never equal to the active link and is built as before (xterm.js also keeps such links
-  apart).
+  fresh generated one, so it is never equal to the active link and is built as before.
 - Cell extra storage per terminal, `alacritty_terminal::term::MAX_EXTRA_STORAGE_BYTES` = 64 MiB. A cell keeps its
   combining characters, underline color and hyperlink in a separate allocation (a cell extra), shared by the cells
   printed with one cursor template but made anew whenever a program varies them from cell to cell: a combining mark on
@@ -156,8 +155,8 @@ application (outside the crate) was read at the master commit below. "Observed" 
 crates: the published, unpatched ones unless the record names another configuration (the patched trees, or Farhelm's
 emulator). A result read from the code, an estimate, or a figure measured on another build says so. The fixes that keep
 the emulator's screen where tmux keeps it were found by the supervisor's comparison with a live tmux 3.7c (its
-`emulator_parity` tests, removed in 2026-11 once new terminals stopped using tmux as their reference); the tests each
-record names now are the vendored crates' and the emulator's own.
+`emulator_parity` tests, replaced in 2026-11 by checks that need no tmux); the tests each record names now are the
+vendored crates' and the emulator's own.
 
 Each status says whether the behavior was checked against upstream's current source on 2026-11-03: `alacritty/alacritty`
 master at `aecf0f600fa840a415b55da5cf34fbeaec39ac32` (`alacritty_terminal` 0.26.1-dev; crates.io's newest is still
@@ -255,10 +254,10 @@ records" after the records).
   [`Terminal.zig:1929–2126`](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1929-L2126)
   chooses the target, changes width before appending the mark, overwrites rather than inserts the new tail, and
   relocates a wrapping base with the current pen. Its early return keeps REP's printable base (`:2117–2187`). These are
-  source-derived results. xterm-412 selector behavior was not checked for this record; the xterm.js path was out of
-  scope. tmux 3.7c's `screen_write_combine` in `screen-write.c` widens any narrow cell followed by FE0F, never narrows
-  for FE0E, and retains the selector as REP's character (`input.c`, `INPUT_CSI_REP`); the supervisor's known differences
-  pin those choices against a live tmux.
+  source-derived results. xterm-412 and xterm.js selector behavior was not checked for this record. tmux 3.7c's
+  `screen_write_combine` in `screen-write.c` widens any narrow cell followed by FE0F, never narrows for FE0E, and
+  retains the selector as REP's character (`input.c`, `INPUT_CSI_REP`); until 2026-11 the supervisor's known differences
+  pinned those choices against a live tmux (since removed with the rest of that comparison).
 - Fix: `Term::input_emoji_selector` chooses from the current grid and its stored suffix, with no new remembered input.
   `unicode-width`'s sequence widths identify eligible bases, plus eight literal narrowing exceptions from Unicode 18.0's
   variation-sequence data. Formatting inputs Ghostty discards never become selector predecessors, and incoming V/T
@@ -297,8 +296,8 @@ records" after the records).
   legacy switch. Paired `grapheme_continuations_keep_the_printable_rep_base` and
   `legacy_width_switch_also_restores_the_legacy_rep_policy` cover the actual parser interaction. vte's
   `rep_policy_preserves_the_existing_register_and_default` pins the additive default. Farhelm adds snapshot boundary and
-  old-style stream tests, genuine bare-Term delegation, generated round trips, live tmux differences and host-only
-  browser checks of replayed width and a narrowed glyph's one-cell box.
+  old-style stream tests, genuine bare-Term delegation, generated round trips and browser checks of replayed width and a
+  narrowed glyph's one-cell box.
 - Upstream status: not yet reported. Checked against alacritty `aecf0f6` and vte `89c9c22`: still absent. This is a
   choice of width policy, rather than a claim that upstream's current behavior violates its own contract. An upstream
   change would need its own policy/default decision and a compatible parser integration.
@@ -364,7 +363,9 @@ records" after the records).
   back to 1 KiB (`MAX_OSC_RAW`, the size of upstream's `no_std` buffer). The `no_std` parser, which has a fixed buffer,
   is unchanged.
 - Why Farhelm needs it: one program must not grow the shared supervisor's memory without bound. The limit is set so that
-  every OSC 52 copy that worked in the browser's xterm.js when it was set, about 7.5 MB of text, still works.
+  every OSC 52 copy that worked in Farhelm's terminals when it was set, about 7.5 MB of text, still works: the browser
+  renderer Farhelm used then dropped payloads over 10,000,000 characters (xterm.js's `PAYLOAD_LIMIT`, above), and 10 MiB
+  is just over that.
 - Upstream code: `vte/src/lib.rs`, `Parser::action_osc_put` and `Parser::osc_end`.
 - Patch hunks (vte, `lib.rs`): `@@ -45,6 +50,23 @@` (`OSC_PAYLOAD_LIMIT`); `@@ -64,6 +86,13 @@` (the `osc_overflow`
   field, shared with the next record: this one needs only whether the limit was hit, the next one the count of complete
@@ -647,8 +648,7 @@ records" after the records).
   3.7c answers `DCS > | tmux 3.7c ST` for a parameter of 0 or none (`input.c`, `INPUT_CSI_XDA`, where a missing
   parameter defaults to 0). xterm.js 6.0.0 does not answer it: it registers no handler for `CSI > q`
   (`src/common/InputHandler.ts` registers `CSI > c`, DA2, as its only CSI handler with the `>` prefix; its CSI handlers
-  ending in `q` are DECSCUSR and DECSCA), so the query goes unanswered. That matters only outside tmux; inside it, tmux
-  answers.
+  ending in `q` are DECSCUSR and DECSCA), so the query goes unanswered.
 - Fix: a `Handler::report_version` method with an empty default, called for `CSI > q` and `CSI > 0 q` only. A handler
   that does not implement it behaves as before.
 - Why Farhelm needs it: Claude Code asks XTVERSION first, and with no answer asks nothing further, including whether the
@@ -729,9 +729,10 @@ records" after the records).
   Every other reader of the flag (except `CSI J`, under its own record below) keeps upstream's code; with the flag
   meaning what its documentation says, they behave as tmux does in the cases above. Farhelm's cursor report
   (`farhelm-terminal-emulator`, `src/queries.rs`) reads the flag as a cursor one past the last column.
-- Why Farhelm needs it: the status readers were written against tmux's captures, and a kept last-column character or an
-  extra scroll changes the screen they read and viewers see. The recorded Claude Code and Codex sessions never turn
-  autowrap off, so this matters for other programs in a session's terminal.
+- Why Farhelm needs it: a kept last-column character or an extra scroll changes the screen status detection reads and
+  viewers see, and the status readers were written against the screens Farhelm's terminals showed before terminal hosts,
+  which neither keep that character nor scroll. The recorded Claude Code and Codex sessions never turn autowrap off, so
+  this matters for other programs in a session's terminal.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::input`.
 - Tests: `term::tests::writing_the_last_column_with_autowrap_off_raises_no_wrap` (vendored); the cursor-report rows of
   `identification_status_and_window_queries` (`farhelm-terminal-emulator`, `tests/queries.rs`). Until 2026-11 the
@@ -766,7 +767,8 @@ records" after the records).
   only with autowrap on, so an ordinary final-column write with autowrap off is erased, as tmux erases it. A reflowing
   resize can also raise the flag, as upstream does. Selector widening into the final pair raises it even with autowrap
   off, per the emoji-width record, and an erase then keeps that pair.
-- Why Farhelm needs it: the status readers were written against tmux's captures, and the erased character changes them.
+- Why Farhelm needs it: the erased character changes the screen status detection reads, and the status readers were
+  written against the screens Farhelm's terminals showed before terminal hosts, which keep it.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::clear_screen`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1774,7 +2259,15 @@`; the test in `@@ -3299,4 +3832,1060 @@`.
 - Tests: `term::tests::erase_below_with_a_wrap_pending_keeps_the_last_column` (vendored: written with autowrap on, off,
@@ -814,8 +816,8 @@ records" after the records).
   xterm.js adds the offset a second time, as upstream does.
 - Fix: `goto_col` moves through `vertical_move` with no lines to move.
 - Why Farhelm needs it: a program that sets a scroll region and origin mode and then positions with CHA would draw each
-  such line the region's offset further down than tmux does, on the screen status detection reads and viewers see. No
-  recorded agent session was checked for origin mode; the comparison with a live tmux, since removed, covered this case.
+  such line the region's offset too far down, on the screen status detection reads and viewers see. No recorded agent
+  session was checked for origin mode; the comparison with a live tmux, since removed, covered this case.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::goto_col`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1180,7 +1661,9 @@`, which needs `vertical_move` from
   `@@ -1017,6 +1328,36 @@` (the relative moves record); the test in `@@ -3299,4 +3832,1060 @@`.
@@ -834,9 +836,8 @@ records" after the records).
   (`input.c`, `input_csi_dispatch_rm_private`, mode 6) and xterm.js.
 - Fix: the reset calls `goto(0, 0)` as the set does.
 - Why Farhelm needs it: a program that leaves origin mode and draws without moving the cursor first would draw where its
-  cursor was rather than at the top left, as tmux has it, on the screen status detection reads and viewers see. As for
-  CHA, no recorded agent session was checked for origin mode; the comparison with a live tmux, since removed, covered
-  it.
+  cursor was rather than at the top left, on the screen status detection reads and viewers see. As for CHA, no recorded
+  agent session was checked for origin mode; the comparison with a live tmux, since removed, covered it.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::unset_private_mode`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -2031,7 +2545,12 @@`; the test in `@@ -3299,4 +3832,1060 @@`.
 - Tests: `term::tests::resetting_origin_mode_homes_the_cursor` (vendored). Until 2026-11 also the supervisor's
@@ -861,17 +862,16 @@ records" after the records).
   released, so it cannot become SGR). In practice the event is SGR whenever a pane asks for any mouse mode, because tmux
   then turns 1006 on in its own outer terminal (`tty.c`, `tty_update_mode`), so a pane with both set gets SGR. Farhelm's
   grid events carry the button directly, so the encoder needs no such fallback and uses SGR whenever 1006 is set.
-  xterm.js, which renders Farhelm's terminals today, does not implement 1005 at all ("DECSET 1005 not supported"; DECRQM
-  1005 answers 4, permanently reset), so 1006 stays in force there whatever follows it. xterm, which upstream follows,
-  makes all its coordinate modes (1005, 1006, 1015, 1016) exclusive on purpose, the last one set winning, and resets one
-  only if it is the active one (`charproc.c`, `dpmodes`, the `srm_EXT_MODE_MOUSE` group: "Rather than choose an
-  arbitrary precedence among the coordinate modes, they are mutually exclusive").
+  xterm.js 6.0.0 does not implement 1005 at all ("DECSET 1005 not supported"; DECRQM 1005 answers 4, permanently reset),
+  so 1006 stays in force there whatever follows it. xterm, which upstream follows, makes all its coordinate modes (1005,
+  1006, 1015, 1016) exclusive on purpose, the last one set winning, and resets one only if it is the active one
+  (`charproc.c`, `dpmodes`, the `srm_EXT_MODE_MOUSE` group: "Rather than choose an arbitrary precedence among the
+  coordinate modes, they are mutually exclusive").
 - Fix: setting 1005 or 1006 sets only its own bit; resetting was already independent. An embedder that sees both uses
   SGR; the emulator's `Modes::from_term_mode` already reads SGR first (`farhelm-terminal-emulator`, `src/modes.rs`).
-- Why Farhelm needs it: the supervisor encodes viewers' mouse events from these modes for terminals in terminal hosts,
-  and must report to a program the way today's terminal does: a program that asks for SGR and then also for UTF-8 gets
-  SGR from xterm.js and from tmux, and would have got UTF-8 coordinates from the emulator. DECRQM answers now match
-  tmux's for both modes too.
+- Why Farhelm needs it: the supervisor encodes viewers' mouse events from these modes, and a program that asks for SGR
+  and then also for UTF-8 keeps getting SGR reports, as it always did in Farhelm's terminals; without the patch the
+  emulator would switch it to UTF-8 coordinates. DECRQM reports each mode from its own bit too.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::set_private_mode`.
 - Patch hunks (`alacritty_terminal`, `term/mod.rs`): `@@ -1968,15 +2484,13 @@`; the test in `@@ -3299,4 +3832,1060 @@`.
 - Tests: `term::tests::utf8_and_sgr_mouse_encodings_are_independent` (vendored: both orders, one sequence with both, and
@@ -1054,8 +1054,9 @@ behavior, which upstream gets as an issue, not a patch.
   alternate screen on entering for both modes. DECRQM reports both as the alternate screen's state. Mixing them with
   1049 (entering with one and leaving with the other) still leaves the cursor elsewhere than tmux would, because
   alacritty keeps a cursor per screen where tmux keeps one; that difference is pinned rather than fixed.
-- Why Farhelm needs it: tmux, which Farhelm's terminals ran under until now, implements both modes, so a program using
-  them would otherwise draw over the shell's screen, which status detection reads and viewers see.
+- Why Farhelm needs it: a program that uses either mode for a full-screen view would otherwise draw over the shell's
+  screen, which status detection reads and viewers see. Farhelm's terminals had both modes before terminal hosts, so
+  leaving them out would have taken them away from programs that use them.
 - Upstream code: `alacritty_terminal/src/term/mod.rs`, `Term::swap_alt`, `Term::set_private_mode`,
   `Term::unset_private_mode`; `vte/src/ansi.rs`, `PrivateMode::new` (no names for 47 and 1047).
 - Patch hunks: none. It depends on the `inactive_grid_mut()` accessor (`term/mod.rs` `@@ -953,6 +1033,235 @@`).
@@ -1128,8 +1129,8 @@ xterm on purpose, and the patch chooses tmux's instead (its record).
   the next row, where it does not fit either, and repeats that forever, allocating rows until memory runs out. One
   column is a valid size (the terminal host accepts it), and the emulator stays the size of the host's pty, so it cannot
   widen itself to avoid this. `Term::input` now drops a wide character on a one-column grid without moving the cursor,
-  and the reflow blanks it and its spacer. tmux has no consistent behavior to copy here: it ignores a wide character
-  that does not fit only while wrapping is off, and with wrapping on, a one-column pane shows the character anyway.
+  and the reflow blanks it and its spacer. tmux, for comparison, ignores a wide character that does not fit only while
+  wrapping is off, and with wrapping on, a one-column pane shows the character anyway.
 - A UTF-8 character split across two parser calls. When a call ends inside a multi-byte character, `vte`'s
   `advance_partial_utf8` completes it from the next call's first bytes. If an invalid byte follows within those few
   bytes, upstream printed the completed character but consumed the valid characters between it and the invalid byte

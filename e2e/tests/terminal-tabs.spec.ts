@@ -3,9 +3,9 @@
 //
 // SPEC.md's session view "supports additional terminal tabs: plain shells
 // spawned in the session's working directory". These drive the real strip
-// against a real supervisor, a real tmux, and a real login shell — the
-// fake agent is only ever the SESSION's agent here; every tab below runs
-// the user's actual `$SHELL`, which is the whole point of the feature.
+// against a real supervisor, real terminal hosts, and a real login shell —
+// the fake agent is only ever the SESSION's agent here; every tab below
+// runs the user's actual `$SHELL`, which is the whole point of the feature.
 //
 // Every test here works on its own session rather than the shared
 // "e2e-session": a leftover tab would be visible to every test after it in
@@ -167,7 +167,7 @@ test("a tab runs a real shell in the session's working directory, leaving the ag
     // same one: nothing typed into the tab may show up in it.
     expect(await termText(page)).not.toContain("TAB-CWD:");
     // ...and it is still live underneath, which is what makes the absence
-    // above meaningful rather than merely a dead pane.
+    // above meaningful rather than merely an exited terminal.
     await selectTerminal(page, "agent");
     await page.locator("#terminal").click();
     await page.keyboard.type("agent-still-live");
@@ -1029,7 +1029,7 @@ test("repeated activations while an open is in flight produce exactly one tab", 
 
 // SPEC.md requires an open that cannot happen to fail with a clear error
 // naming the reason, and PLAN_M4.md item 2 gives two of them: a working
-// directory that has vanished, and a session whose tmux session is gone
+// directory that has vanished, and a session whose agent terminal is gone
 // (which must be restarted first rather than growing a tab-only terminal).
 //
 // This drives the first against the REAL supervisor by deleting the
@@ -1276,9 +1276,10 @@ test("a failed close surfaces on that tab and leaves it attached", async ({
 
 // Hidden panes are hidden with `visibility`, never `display: none`, and
 // this is the assertion that pins the difference where it actually bites:
-// a `display: none` element has no layout box, so `FitAddon.fit()` would
-// size an unselected terminal to zero columns — and in a session with more
-// than one terminal, every tab mounts while unselected.
+// a `display: none` element has no layout box, so an unselected terminal
+// could not be fitted to its pane (the grid's fit proposes nothing without
+// one) — and in a session with more than one terminal, every tab mounts
+// while unselected.
 //
 // So the check is on the hidden terminal's GEOMETRY, not on its CSS: real
 // pixel dimensions, and a real non-degenerate grid.
@@ -1660,7 +1661,7 @@ test("a viewport resize reflows every island, hidden ones included", async ({
 // A tab closed from ANOTHER client must be torn down here, not merely
 // hidden: its island unmounted and its socket closed. A strip entry
 // removed while its WebSocket stayed open would leave the supervisor
-// holding an attachment for a window that no longer exists, invisible from
+// holding an attachment for a tab that no longer exists, invisible from
 // this side. The sibling is checked too — teardown must be surgical.
 test("a tab closed elsewhere is torn down here, leaving its sibling untouched", async ({
   page,
@@ -1924,10 +1925,9 @@ test("a tab whose shell exits is reaped: strip entry, island, and selection", as
 // assertion is shape-independent on purpose: whatever the host shell's
 // prompt looks like, its cursor ends on the last painted line, and
 // anything below that line is exactly the torn-snapshot artifact. The
-// fix behind it is the open path pre-sizing the tab window to the
-// agent's geometry, which makes the attach-time resize a no-op — a
-// snapshot-side consistency retry was tried and rejected because it
-// broke the cutover's losslessness (see tmux.rs's command-group comment).
+// fix behind it was opening the tab at the agent's geometry, which makes
+// the attach-time resize a no-op, and a tab's terminal host still starts
+// at the size of the agent's terminal (SPEC_impl.md, "Tabs in hosts").
 test("a tab opened after closing another starts with a clean island", async ({
   page,
   request,
@@ -1975,13 +1975,14 @@ test("a tab opened after closing another starts with a clean island", async ({
   }
 });
 
-// The other half of that split: a tab whose WINDOW is gone renders the
-// session view's existing no-terminal explanation rather than a blank
-// pane. Reaching that state honestly is not possible from outside the
-// supervisor — a window it lost track of is by definition one it no longer
-// lists — so the tab list is intercepted to name an id the supervisor
-// never minted, which takes the same attach-refused path a vanished window
-// takes and produces the same relayed explanation. Only the LISTING is
+// The counterpart of the reap test above: a tab whose terminal host is
+// gone renders the session view's existing no-terminal explanation rather
+// than a blank pane. Reaching that state honestly is not possible from
+// outside the supervisor — a terminal host it lost track of is by
+// definition one it no longer lists — so the tab list is intercepted to
+// name an id the supervisor never minted, which takes the same
+// attach-refused path a vanished terminal host takes and produces the same
+// relayed explanation. Only the LISTING is
 // synthetic; the attach, the refusal, and the banner are all real.
 //
 // It also stays put. A tab the supervisor cannot find is gone, so the

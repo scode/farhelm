@@ -64,7 +64,7 @@ export const LIVE_STATE = /^(running|waiting|idle)$/;
 // status", so the annotation QUALIFIES `Exited` rather than replacing it.
 //
 // The exit code is optional in the pattern because a stopped session may or
-// may not have one — a signal death tmux cannot reduce to a code leaves the
+// may not have one — a signal death, which has no exit code, leaves the
 // badge at plain `Exited`, and a shell that ran its EXIT trap first reports
 // a real code — and no test can predict which it gets. When the code is
 // absent the sidebar spells the absence out ("code unknown", the full-detail
@@ -163,10 +163,11 @@ export async function resetStack(request: APIRequestContext) {
     "the shared e2e-session must exist: a test deleted it, or an earlier project's reset died between delete and recreate",
   ).toBeTruthy();
 
-  // Delete everything (leaked per-test sessions included) and relaunch
-  // the shared session with its own recorded parameters. Deleting the
-  // polluted original rather than restarting its agent is what actually
-  // resets the SCROLLBACK: stop/relaunch would keep the tmux history.
+  // Delete everything (leaked per-test sessions included) and relaunch the
+  // shared session with its own recorded parameters. Deleting the polluted
+  // original rather than restarting its agent is what actually resets the
+  // SCROLLBACK: a restart carries the previous terminal's history over into
+  // the new one.
   for (const s of listing.sessions) {
     const deleted = await request.delete(`/api/sessions/${encodeURIComponent(s.id)}`);
     // A failed delete says what the helm actually replied. This assertion is

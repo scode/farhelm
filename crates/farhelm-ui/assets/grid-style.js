@@ -10,25 +10,25 @@
 //
 // ## The style rules
 //
-// The rules are Farhelm's own; they were first read from xterm.js 6.0.0's
-// `DomRendererRowFactory`, as Farhelm configured it while xterm.js drew its
-// terminals, so sessions kept their look when the grid replaced it:
+// The rules are Farhelm's own. They give the look terminals had before the
+// grid, kept so that sessions looked the same when the grid replaced the
+// earlier renderer:
 //
 // - Inverse swaps foreground and background first; a default color that
 //   gets swapped becomes the other default.
-// - Bold text in a palette color 0-7 draws in its bright twin 8-15
-//   (`drawBoldTextInBrightColors`, on by default), as does a palette
-//   underline color under bold.
+// - Bold text in a palette color 0-7 draws in its bright twin 8-15, as
+//   does a palette underline color under bold.
 // - Dim is the foreground at half opacity.
 // - Hidden text keeps its background and decorations; the renderer swaps
 //   its characters for spaces, so the text is not in the page at all.
 // - Blink (SGR 5) is not drawn: no text blinks.
 //
-// Two deliberate departures from that origin, both where xterm.js's CSS
-// lost a declaration to the cascade rather than choosing a look: a dim direct
-// color is dimmed (there, the inline color overrides the dim rule), and an
-// underlined, struck-through cell shows both lines (there, two classes
-// both set `text-decoration` and the later one wins).
+// Two deliberate departures from that earlier look, both where the earlier
+// renderer's stylesheet lost a declaration to the cascade rather than
+// choosing a look: a dim direct color is dimmed (in that renderer, the
+// inline color overrode the dim rule), and an underlined, struck-through
+// cell shows both lines (there, two classes both set `text-decoration` and
+// the later one won).
 //
 // ## Why inline styles, cached per style
 //
@@ -94,8 +94,8 @@
 
   /**
    * The 256-color palette: the theme's 16 named colors, then xterm's
-   * standard 6x6x6 cube and 24-step gray ramp (the same table xterm.js
-   * compute for indices the theme does not name).
+   * standard 6x6x6 cube and 24-step gray ramp for the indices the theme
+   * does not name.
    */
   function buildPalette(theme) {
     const palette = ANSI_NAMES.map((name) => themeColor(theme && theme[name], "#000000"));
@@ -117,7 +117,7 @@
     return `#${(value - DIRECT_COLOR_BASE).toString(16).padStart(6, "0")}`;
   }
 
-  /** `#rrggbb` at half opacity, the dim text color (as in xterm.js). */
+  /** `#rrggbb` at half opacity, the dim text color. */
   function halfOpacity(color) {
     const n = parseInt(color.slice(1), 16);
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},0.5)`;
