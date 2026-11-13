@@ -212,8 +212,7 @@ pub(crate) fn note_first_input(entry: &SessionEntry, before_input: ScreenState) 
 ///   (SPEC.md, "Terminal experience");
 /// - inside a bracketed paste (`ESC [200~` .. `ESC [201~`) in the same frame:
 ///   an agent with bracketed paste enabled keeps the paste in its composer
-///   unsubmitted. The scan dates from the old tmux terminals, whose browser
-///   xterm.js sent the markers as viewer input. The grid sender judges a
+///   unsubmitted. The grid sender judges a
 ///   bracketed paste as submitting nothing without scanning it
 ///   (`grid_stream.rs`, `collect_paste`), so markers reach this scan only
 ///   inside other bytes.

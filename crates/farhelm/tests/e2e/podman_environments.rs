@@ -188,8 +188,7 @@ async fn prerequisites() -> PathBuf {
         arch => panic!("no real Podman payload fixture for {arch}"),
     };
     // The farhelm archive is the only payload provisioning pushes to a Linux
-    // host, and so the only one `scripts/build-podman-test-payloads.sh` stages
-    // (provisioning no longer pushes a static tmux).
+    // host, and so the only one `scripts/build-podman-test-payloads.sh` stages.
     let archive = format!("farhelm-{target}.tar.gz");
     assert!(
         payload.join(&archive).is_file(),

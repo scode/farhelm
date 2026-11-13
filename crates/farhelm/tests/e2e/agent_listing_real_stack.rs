@@ -49,7 +49,7 @@ use farhelm_proto::{
     SessionStatus,
 };
 
-/// Convert a fixture's full REST identity only at a supervisor, store or tmux boundary.
+/// Convert a fixture's full REST identity only at a supervisor, store or terminal boundary.
 /// These callers already know the owning supervisor; bare input is a fixture bug, not a lookup hint.
 pub(crate) fn bare_session_id(reference: &str) -> String {
     reference
@@ -608,7 +608,7 @@ async fn allow_agents_without_asking(client: &reqwest::Client, base: &str) {
 /// is sitting on a machine it is not.
 #[farhelm_testtrace::test]
 async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
-    // A supervisor with its own tmux server, plus a session's agent: one
+    // A supervisor with its own terminal hosts, plus a session's agent: one
     // harness slot, held for the whole test.
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
 
@@ -700,7 +700,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     assert_eq!(own_host["id"], reference.entry_uuid());
 
     // The helm, supervisor and work directory are deliberately still alive here:
-    // they hold the processes, the tmux server, and the directories both
+    // they hold the processes, the terminal hosts, and the directories both
     // are still using. See `merged_hosts` for why an explicit drop would
     // only invite someone to reorder them.
 }

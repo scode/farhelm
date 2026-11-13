@@ -162,8 +162,7 @@ pub struct LaunchSpec {
     pub argv: Vec<String>,
     /// The directory the agent must enter after login-shell initialization and checkout
     /// preparation. The terminal's start directory is not enough: shell startup can
-    /// change it again (and tmux, which ran terminals in earlier releases, silently fell
-    /// back to HOME when it could not enter one). The shim enters this directory
+    /// change it again. The shim enters this directory
     /// before exec and supplies matching PWD. Absent only for older supervisors' specs.
     #[serde(default)]
     pub working_directory: Option<PathBuf>,
@@ -721,9 +720,8 @@ pub fn window_command(
 /// Build the terminal tab's directory-enforcing helper command, inside its scope.
 /// The helper enters the requested folder before execing the user's interactive
 /// login shell, so a folder it cannot enter fails the tab open's liveness check
-/// instead of opening elsewhere. (It was written for tmux, which silently fell back
-/// to HOME; it also keeps the folder the shell starts in independent of the scope
-/// wrapper's own directory.)
+/// instead of opening elsewhere. (It also keeps the folder the shell starts in
+/// independent of the scope wrapper's own directory.)
 /// Tabs need no spec or sentinel: a shell that dies during open already refuses the
 /// open with its last output, while a later exit silently reaps the tab.
 ///
@@ -4549,8 +4547,7 @@ printf 'AGENT-RAN\n'
     /// Why: a Farhelm terminal is not a tmux pane, and with them a `tmux
     /// new-window` typed by an agent (or by a hook) would land in whatever
     /// server they name instead of behaving as in an SSH login
-    /// (`PRIVATE_TMUX_ENV_VARS`); earlier releases ran agents in a hidden
-    /// private server where such windows escaped every cleanup. Specified:
+    /// (`PRIVATE_TMUX_ENV_VARS`). Specified:
     /// when the shim itself inherits both, the clone, the preparation hook
     /// and the agent all run with both unset.
     #[farhelm_testtrace::test]
@@ -4586,7 +4583,7 @@ printf 'AGENT-RAN\n'
             assert_eq!(
                 std::fs::read_to_string(fixture.tmp.path().join(stage)).unwrap(),
                 "unset\nunset\n",
-                "{stage} must run without the private tmux variables",
+                "{stage} must run without TMUX and TMUX_PANE",
             );
         }
     }

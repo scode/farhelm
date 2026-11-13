@@ -174,8 +174,9 @@ pub fn unit_name(session_id: &str, generation: i64) -> Option<String> {
 ///
 /// Both ids go through the same UUID-shape refusal `unit_name` documents,
 /// and for the same reason — plus one this name has and that one does not:
-/// earlier releases read a tab id back out of a tmux WINDOW MARKER, which
-/// any process that inherited `TMUX` could write. A unit name derived from
+/// a tab id is read back from places other processes can write (a process's
+/// `FARHELM_TAB_ID`, and at startup an old tmux pane's markers; see
+/// [`is_uuid_shaped`]). A unit name derived from
 /// an id this supervisor did not mint could aim a kill at something else
 /// entirely, so an unrecognized shape selects the same fallback a missing
 /// user manager does — the marker sweep alone.
@@ -226,7 +227,7 @@ pub fn is_tab_unit(unit: &str) -> bool {
 /// Delete asks the manager for these names because the row only
 /// records its current generation. A prior generation can still contain a
 /// daemon after its portable sweep reported clean, and nothing else records
-/// that scope once the old terminal is gone. The `[0-9]*` suffix is deliberately
+/// that scope once that generation's terminal is gone. The `[0-9]*` suffix is deliberately
 /// narrower than `*`: launch generations are digits, so this cannot match a
 /// tab scope's `-tab-` infix.
 pub fn launch_unit_glob(session_id: &str) -> Option<String> {
@@ -1750,8 +1751,9 @@ mod tests {
     /// one that is not the shape this supervisor mints.
     ///
     /// The tab id is the half that matters most, and for a reason the
-    /// session id does not share: earlier releases read it back out of a
-    /// tmux window option that anything inside a pane could write. A name
+    /// session id does not share: it is read back from markers other
+    /// processes can write (a process's `FARHELM_TAB_ID`, and at startup an
+    /// old tmux pane's). A name
     /// derived from an attacker-chosen (or merely corrupted) marker would aim a `systemctl kill` at whatever unit that marker
     /// spelled. Refusing is what makes that unconstructible, exactly as
     /// for [`unit_name`].

@@ -28,8 +28,7 @@ use std::path::Path;
 // ---- Fixtures -------------------------------------------------------------------
 
 /// One test's state across its supervisors: the state directory (whose
-/// drop ends any host left in it) and the session's working directory. No
-/// tmux guard: these supervisors create only terminal hosts.
+/// drop ends any host left in it) and the session's working directory.
 pub(crate) struct Stack {
     pub(crate) state: farhelm_teststate::TestDir,
     pub(crate) work: farhelm_teststate::TestDir,
@@ -300,7 +299,7 @@ fn checkpointing_host_seams() -> SupervisorSeams {
 /// same host for the session (same socket, same host process, same child),
 /// recovered from that snapshot (its last known snapshot is the stop's),
 /// showing exactly the screen the stopped one showed once caught up; the
-/// row is still `Running` with the socket's name in `pane`, also after an
+/// row is still `Running` with the socket's name in `terminal_address`, also after an
 /// observation pass, the session lists as `Unknown` (any reloaded session's
 /// status until its screen is sampled, which these harnesses never do; an
 /// exit would list as exited). The stop also closed its runtime (its task,
@@ -484,16 +483,16 @@ async fn a_crash_recovers_a_host_terminal_from_its_snapshot_and_tail() {
 /// supervisor.
 ///
 /// Why: the plan's PR 17, "a host row with no terminal but a live host of
-/// its launch is recovered". The row's `pane` is empty until the launch is
+/// its launch is recovered". The row's `terminal_address` is empty until the launch is
 /// confirmed, so only the host's tag (session and launch generation) ties
 /// the running agent to its session; without it, the session would wait
 /// for a retry that may never come, its agent running unlisted. Spec: a
 /// create of the fake agent interrupted during its launch leaves a
-/// launching row with an empty `pane` and a host process serving the socket
+/// launching row with an empty `terminal_address` and a host process serving the socket
 /// its launch record names (premise). The next supervisor publishes that
 /// host for the
 /// session, showing the agent's ready marker, and records the launch: the
-/// row is `Running` with the host's socket name in `pane`, also after an
+/// row is `Running` with the host's socket name in `terminal_address`, also after an
 /// observation pass, and the session lists as `Unknown` until sampled.
 #[farhelm_testtrace::test]
 async fn an_unconfirmed_host_launch_is_found_by_its_tag() {
@@ -859,13 +858,12 @@ async fn a_stop_that_ran_out_of_time_leaves_the_previous_snapshot_and_tail() {
 /// (its login shell failed before the launch step read its spec), ends as a
 /// launch error once the next supervisor has replayed the host's exit.
 ///
-/// Why: for a tmux pane reload classifies a dead pane's launch itself; for
-/// a host, reload confirms the launch it finds by the host's tag before the
+/// Why: reload confirms the launch it finds by the host's tag before the
 /// exit record is replayed, and the never-started classification then
 /// falls to the observer. Without it the session would read as an
 /// ordinary exit of an agent that never ran. Spec: with a login shell that
 /// exits at once without running anything, a create interrupted during its
-/// launch leaves a launching row with an empty `pane` and a host serving
+/// launch leaves a launching row with an empty `terminal_address` and a host serving
 /// the socket its launch record names (premise), whose child exits while no
 /// supervisor runs. The next supervisor publishes that host, whose runtime
 /// reports the exit once replayed; after an observation pass the row is an

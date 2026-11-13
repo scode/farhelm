@@ -104,10 +104,12 @@ pub struct HelmUnitInputs<'a> {
 /// which POSIX would read as the current directory.
 ///
 /// `KillMode=process` in the template is equally deliberate: the terminals
-/// own the durable sessions (each new terminal's terminal host, and the
-/// private tmux server that holds old ones), and they live in the unit's
-/// control group, so restarting their manager must stop only the
-/// supervisor process rather than systemd's default whole control group.
+/// own the durable sessions (each terminal's terminal host), and they live
+/// in the unit's control group, so restarting their manager must stop only
+/// the supervisor process rather than systemd's default whole control group.
+/// A private tmux server an earlier release left there survives a restart
+/// the same way, so the new supervisor's startup step can end it and sweep
+/// what it held (the supervisor's `service::core::old_terminals`).
 ///
 /// So is `UnsetEnvironment=` for the three session markers
 /// (`FARHELM_SESSION_ID`, `FARHELM_AGENT_ID`, `FARHELM_TAB_ID`). The kill

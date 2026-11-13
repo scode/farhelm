@@ -97,8 +97,8 @@ fn ignore_diagnostic_panic(body: impl FnOnce() + std::panic::UnwindSafe) {
     }
 }
 
-/// Resolve a cleanup candidate without changing the supervisor's launch policy.
-/// Empty and relative PATH entries use the launch cwd. Access checks reject
+/// Resolve a cleanup candidate by the `PATH` lookup a plain `Command::new`
+/// makes. Empty and relative PATH entries use the launch cwd. Access checks reject
 /// ordinary permission/noexec shadows, but cannot prove future exec success or
 /// prevent replacement between lookups. Forced cleanup independently verifies
 /// the socket peer's executable; this path alone never authorizes a signal.

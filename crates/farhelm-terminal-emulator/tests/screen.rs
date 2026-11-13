@@ -4,8 +4,9 @@
 //! this text, so every expected value below is part of the format's contract
 //! (`src/screen.rs`), on a terminal of the size given (20 by 6 unless named).
 //! The values were first taken from tmux 3.7c's capture of the same output,
-//! since old terminals' text comes from tmux and one set of reader rules
-//! serves both kinds; they are pinned here as Farhelm's own. The
+//! since the status readers were first written against tmux's captures (the
+//! format's module docs say why it keeps that shape); they are pinned here as
+//! Farhelm's own. The
 //! supervisor's tests, where the status readers are, run every reader on
 //! this emulator's repaint of the captured agent screens.
 
@@ -193,7 +194,7 @@ fn titles_read_as_the_program_set_them() {
     assert_eq!(
         title("\x1b]0;#(evil) x\x07"),
         "#(evil) x",
-        "kept as set; only old terminals rewrite `#(`"
+        "kept as set, `#(` included"
     );
     assert_eq!(title("\x1b]2;hello\x07\x1bc"), "", "RIS clears the title");
 }

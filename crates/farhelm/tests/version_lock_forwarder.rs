@@ -313,8 +313,8 @@ fn a_program_started_through_the_forwarder_holds_its_version_while_it_runs() {
 /// so nothing holds the version once the shell runs.
 ///
 /// Why: tabs start the tab helper through the forwarder so their version is
-/// claimed from before the helper runs (tmux can start a tab's window after
-/// its supervisor has stopped); the helper must then hand over a clean
+/// claimed from before the helper runs (a tab's terminal host can start its
+/// child after its supervisor has stopped); the helper must then hand over a clean
 /// shell, because a tab shell that kept the lock would hold its version for
 /// as long as the tab stays open and stop installs from ever pruning it.
 /// The stand-in shell reports what it was given and waits on its input, so

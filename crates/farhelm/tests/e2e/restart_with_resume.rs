@@ -56,7 +56,7 @@ async fn restart_with_fixture(fixture: FakeHarness) -> (Harness, FakeHarness, Se
 
 /// Create a Claude agent launch whose choices can be changed on resume.
 ///
-/// The executable wrapper carries real argv through tmux; the launch is the
+/// The executable wrapper carries real argv through the launch path; the launch is the
 /// shape the helm's compiler composes, around the fixture's program.
 async fn structured_claude_session(h: &Harness, fixture: &FakeHarness) -> SessionInfo {
     let selection = farhelm_proto::LaunchSelection {
@@ -161,7 +161,7 @@ async fn named_restart_with_refuses_malformed_argv_without_stopping_the_old_run(
 /// A supplied conversation must work even when reporting never captured one.
 /// It changes only this start; reports still establish identity, an existing
 /// capture survives until that report, and a later clone uses the ordinary
-/// fresh command. Real tmux argv distinguishes a literal selector from shell
+/// fresh command. Real launched argv distinguishes a literal selector from shell
 /// interpretation and the store checks distinguish capture from request data.
 ///
 /// The test finds the restart's argv by the wrapper's generation number, and
@@ -681,8 +681,8 @@ async fn restart_with_refuses_a_bundle_loading_would_refuse_and_stops_nothing() 
 ///
 /// The caller must first stop any accept loop and drop its clients, leaving
 /// only the supervisor reference borrowed here. This observes connection
-/// cleanup; the caller still owns dropping the supervisor and killing tmux
-/// when the scenario models a reboot.
+/// cleanup; the caller still owns dropping the supervisor and ending the
+/// terminals when the scenario models a reboot.
 async fn wait_for_resume_connections_to_drain(sup: &Arc<Supervisor>) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while Arc::strong_count(sup) > 1 {
@@ -842,7 +842,7 @@ async fn a_vanished_working_directory_refuses_the_restart_and_keeps_the_annotati
 
     wait_for_agent_ready(&h, &session.id).await;
     h.client.stop_session(&session.id).await.expect("stop");
-    // On a new terminal the annotation arrives with the host's exit record,
+    // The annotation arrives with the host's exit record,
     // which a listing right after Stop can still precede.
     wait_for_reconciled_listing(&h.sup, &h.client, 20, "the stop annotation", |rows| {
         rows.iter()
@@ -1132,7 +1132,7 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
     };
     let (conversation, session) = conversation;
 
-    // The reboot: tmux dies with the host, and the next supervisor reads a
+    // The reboot: the terminal hosts die with the machine, and the next supervisor reads a
     // different boot id.
     end_all_terminals(state.path()).await;
     let sup = Supervisor::new_with_seams(
@@ -1220,8 +1220,8 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
     )
     .await;
     // Do not infer launch-versus-resume from the echoed argv. Both commands
-    // carry `--record-home`, and tmux replay represents a visual wrap as a
-    // real newline because `capture-pane` intentionally runs without `-J`.
+    // carry `--record-home`, and the replayed screen text ends a row that
+    // soft-wraps on screen with a real newline (the harness's `grid_text`).
     // `RECORD-RESUMED:<id>` is the discriminating fact: the fixture prints it
     // only after the template-supplied id locates an existing record.
 
@@ -1403,7 +1403,7 @@ async fn an_interrupted_hook_reported_session_resumes_its_conversation() {
         session
     };
 
-    // The reboot: tmux dies with the host, and the next supervisor reads a
+    // The reboot: the terminal hosts die with the machine, and the next supervisor reads a
     // different boot id.
     end_all_terminals(state.path()).await;
     let sup = Supervisor::new_with_seams(

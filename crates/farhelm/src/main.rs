@@ -1578,7 +1578,7 @@ fn run_install(args: InstallArgs) -> anyhow::Result<()> {
 }
 
 /// `internal agent-screen --size`: `COLSxROWS`, each from 1 to 10,000 (the
-/// clamp a supervisor applies to a new terminal's size).
+/// clamp a supervisor applies to a terminal's size).
 fn parse_terminal_size(text: &str) -> Result<(u16, u16), String> {
     let parse = |part: &str| {
         part.parse::<u16>()

@@ -223,12 +223,12 @@ async fn exec_that_succeeds_and_exits_126_or_127_is_exited_never_error() {
 /// raced out of a genuine shim run: `create_session` never itself hands
 /// the shim a torn or missing spec (the write-then-launch ordering in
 /// `service.rs`'s `create_session` guarantees a valid spec exists before
-/// the tmux window that would read it is even created), so reaching this
+/// the terminal host that would read it is even started), so reaching this
 /// failure class end-to-end would mean deliberately corrupting
 /// supervisor-internal state anyway. Planting the sentinel directly tests
 /// the piece this PR actually owns — the SUPERVISOR's reader and
 /// classifier — independent of which shim code path produced the file,
-/// and does so deterministically rather than racing a real tmux window.
+/// and does so deterministically rather than racing a real launch.
 ///
 /// The session's REAL agent is left running throughout: this also proves
 /// a sentinel outranks even a genuinely alive pane (PLAN_M3.md item 3's
@@ -275,7 +275,7 @@ async fn a_planted_malformed_spec_sentinel_classifies_error_with_its_detail() {
 /// bug this pins is that the sentinel branch used to `continue` before
 /// ever recording the terminal it had already found, leaving `Attach`
 /// refusing a session whose terminal (a host keeping its exited child's
-/// screen, or a dead tmux pane) genuinely still exists, and
+/// screen) genuinely still exists, and
 /// `DeleteSession`'s kill sweep with nothing to act on at all (a leaked
 /// terminal). Attach must succeed (the exited terminal is viewable, exactly
 /// like any other exited session), and delete must actually end the real
@@ -529,11 +529,11 @@ async fn a_corrupt_sentinel_defers_reconciliation_but_lists_succeed() {
 }
 
 /// Review-swarm fix batch item 13: the dead-or-absent gate itself, both
-/// directions in one test. A genuinely ALIVE pane must never have its
-/// sentinel even READ (the live status wins outright, and the planted file is left
-/// untouched) — planting a sentinel behind a still-running agent is
+/// directions in one test. A genuinely ALIVE terminal must never have its
+/// sentinel even READ (the live status wins outright, and the planted file
+/// is left untouched) — planting a sentinel behind a still-running agent is
 /// exactly the scenario that must NOT retroactively classify it error.
-/// Once the pane is absent, reconciliation reads the SAME planted file
+/// Once the terminal is absent, reconciliation reads the SAME planted file
 /// and the subsequent reply shows error.
 #[farhelm_testtrace::test]
 async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the_pane_dies() {
@@ -543,12 +543,12 @@ async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the
 
     let detail = "exec_failed argv0=/nope errno=2".to_string();
     let status_path = status_path_for_spec(&spec_path_for_launch(h.state.path(), &session.id, 0));
-    std::fs::write(&status_path, &detail).expect("plant a sentinel behind a live pane");
+    std::fs::write(&status_path, &detail).expect("plant a sentinel behind a live terminal");
     h.sup.reconcile_for_test().await;
 
     assert!(
         listed(&h.client, &session.id).await.status.is_live(),
-        "a live pane must win outright; its sentinel is not even consulted"
+        "a live terminal must win outright; its sentinel is not even consulted"
     );
     assert!(
         status_path.exists(),
@@ -581,6 +581,6 @@ async fn the_dead_or_absent_gate_ignores_a_sentinel_behind_a_live_pane_until_the
     assert_eq!(
         status,
         SessionStatus::Error { detail },
-        "once the pane is dead-or-absent, the same planted sentinel classifies error: {status:?}"
+        "once the terminal is gone, the planted sentinel classifies error: {status:?}"
     );
 }

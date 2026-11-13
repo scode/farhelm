@@ -1,5 +1,5 @@
-//! The supervisor's terminal switch points with a real terminal host behind
-//! a session's agent: exit recording, Stop, Restart's stop first, Delete (its
+//! The supervisor's lifecycle verbs with a real terminal host behind a
+//! session's agent: exit recording, Stop, Restart's stop first, Delete (its
 //! guard, its process roots and ending the session's hosts) and attach. What
 //! Restart's new host keeps, and how a failed or interrupted one is unwound,
 //! is in `host_relaunches.rs`.
@@ -32,7 +32,7 @@
 //!
 //! What needs a host to behave on cue (status, the never-started excerpt,
 //! Stop before the host's exit record, an unreadable host, the ticker's
-//! wake and a failed tmux probe, the hook anchor, the hold wait, prompts) is
+//! wake and a failed probe, the hook anchor, the hold wait, prompts) is
 //! tested against a stand-in host in the supervisor's own unit tests
 //! (`service::core::tests::host_terminals`).
 

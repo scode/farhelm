@@ -248,8 +248,8 @@ async fn launch_pin_fixture(
         .expect("create Codex pin fixture")
 }
 
-/// A resident native launcher and its child must both exist in the owned pane.
-/// The live tmux root and process relationship distinguish this from an exec
+/// A resident native launcher and its child must both exist in the owned terminal.
+/// The live agent root and process relationship distinguish this from an exec
 /// wrapper that could pass the old exactly-one-image attribution rule.
 async fn assert_resident_launcher(h: &Harness, id: &str, transcript: &[u8]) {
     let text = String::from_utf8_lossy(transcript);
@@ -813,8 +813,8 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
         "recovery must adopt the existing foreground process, not silently relaunch it",
     );
     // Recovery published the session; its waiting report is applied on the
-    // next pass, through the full ownership contract, with the pane now
-    // recovered from tmux.
+    // next pass, through the full ownership contract, with the terminal now
+    // recovered from its host.
     h.sup.reconcile_for_test().await;
     let (recovered, provenance, source) = durable_binding(h.state.path(), &id).await;
     assert_eq!(source.as_deref(), Some("hook"));

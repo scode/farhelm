@@ -11,7 +11,7 @@
 //! answers none of the program's queries, and agents wait on some of those
 //! answers before they draw anything (the cursor position, the terminal's
 //! attributes). So this adopts the host with the supervisor's own runtime
-//! ([`HostTerminal`]), whose emulator answers them as for any new terminal,
+//! ([`HostTerminal`]), whose emulator answers them as for any session's terminal,
 //! and gives the child the environment a supervisor gives an agent's host
 //! ([`crate::service::host_child_env`]). What a script reads back is the
 //! text status detection reads (`Emulator::screen_text`, the whole visible

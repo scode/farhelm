@@ -49,14 +49,14 @@
 //!   alternate screen with mouse reporting off, a wheel step becomes an up
 //!   or down arrow key, so a full-screen program without mouse support still
 //!   scrolls. The modes come from the emulator, which departs from the
-//!   xterm.js encoding in two places. X10 mode 9 is not tracked, so a program
-//!   that sets only it gets no reports. UTF-8 coordinates (1005), which
-//!   xterm.js ignores (sending the default encoding, which a 1005 program
+//!   ported encoding in two places. X10 mode 9 is not tracked, so a program
+//!   that sets only it gets no reports. UTF-8 coordinates (1005), which the
+//!   ported code ignored (sending the default encoding, which a 1005 program
 //!   misreads past column 94), are encoded as the program asked, unless SGR
-//!   (1006) is set too: then SGR wins, whichever the program set first, as in
-//!   tmux and xterm.js (the emulator keeps the two modes apart and reports SGR
-//!   when both are set). De-duplicating motion is the client's
-//!   job (`GridInput::Mouse`'s docs).
+//!   (1006) is set too: then SGR wins, whichever the program set first, as
+//!   it did in Farhelm's terminals before this encoder (the emulator keeps
+//!   the two modes apart and reports SGR when both are set). De-duplicating
+//!   motion is the client's job (`GridInput::Mouse`'s docs).
 //! - **Focus**: `CSI I` and `CSI O`, only while the program set mode 1004.
 //!
 //! Every message's bytes fit one host `Input` frame (at most
@@ -141,7 +141,7 @@ impl InputEncoder {
     /// For a message that passed [`GridInput::validate`], the bytes fit one
     /// `Input` frame. `size` matters only for mouse events: one past the
     /// current screen (the screen shrank after the client sent it) is
-    /// dropped, as xterm.js drops one outside its grid.
+    /// dropped.
     pub fn encode(
         &mut self,
         input: &GridInput,
@@ -225,7 +225,7 @@ impl InputEncoder {
         let mut paste = match self.paste.take() {
             Some(paste) => paste,
             // An empty paste writes nothing, not a pair of markers around
-            // nothing (xterm.js's paste path drops it the same way).
+            // nothing.
             None if data.is_empty() && last => return out,
             None => {
                 let bracketed = modes.bracketed_paste;
@@ -577,7 +577,7 @@ fn utf16_len(text: &str) -> usize {
 ///   `text.replace(/\x1b\[201~|\x1b/g, "")`: every end-of-paste marker goes
 ///   whole and every other ESC alone, so pasted text can never close the
 ///   bracketed paste around it and have the rest run as typed commands.
-///   The page applies it before handing a paste to either kind of terminal;
+///   The page applies it before handing a paste to the terminal;
 ///   applying it again changes nothing (the first pass
 ///   leaves no ESC). It is applied here as well because the supervisor now
 ///   writes the markers, so the guarantee that pasted text stays inside them

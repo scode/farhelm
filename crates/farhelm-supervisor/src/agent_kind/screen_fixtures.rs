@@ -8,15 +8,15 @@
 //! terminal's title beside it in a `.title` file. The tool captures in a real
 //! terminal host with the environment a supervisor gives an agent (the
 //! emulator's `screen_text`); versions captured before November 2026 are a
-//! tmux pane's `capture-pane -p`, the old terminals' form, and stay because
-//! agents started before their new terminal's environment changed still
-//! draw those screens. The expected state in the
+//! tmux pane's `capture-pane -p`, and stay because agents in a terminal host
+//! started before the host environment changed (v0.34 and v0.35) still draw
+//! those screens until they are restarted. The expected state in the
 //! name is the tool's ground truth, never a reader's verdict, which is what
 //! lets these screens act as an oracle for the per-harness screen readers:
 //! after a vendor upgrade, re-running the tool and then these tests shows which
 //! new screens the readers no longer understand. The last tests paint every
 //! screen into the supervisor's terminal emulator, so the readers are held to
-//! a new terminal's text as well as to the captured text.
+//! the emulator's text as well as to the captured text.
 //!
 //! Screens are committed to a public repository, so the capture tool scrubs
 //! them and this module refuses any that still look identifying — a second,
@@ -486,7 +486,7 @@ fn codex_working_widget_alone_reads_real_screens_as_working() {
 
 // ---- The emulator's repaint of the captured screens ---------------------------
 //
-// A new terminal's text comes from the supervisor's emulator, not from a
+// A live terminal's text comes from the supervisor's emulator, not from a
 // capture like the ones stored here, so the readers' expectations must
 // survive that move too. The fixtures hold captured text, never the bytes the
 // agent wrote, so the readers cannot be run on the emulator's version of the
@@ -502,10 +502,11 @@ fn codex_working_widget_alone_reads_real_screens_as_working() {
 /// `PANE_COLUMNS`); a screen's height is its number of rows.
 const CAPTURE_COLUMNS: u16 = 133;
 
-/// The capture tool's stand-in for the host name an old terminal reports as
-/// its title before a program sets one. The repaint sets no title for it, so
-/// the emulator's empty title is what reaches the reader, as it would for a
-/// new terminal whose program set none.
+/// The capture tool's stand-in for the host name tmux reported as a pane's
+/// title before a program set one (the screens captured before November
+/// 2026). The repaint sets no title for it, so the emulator's empty title is
+/// what reaches the reader, as it does for any terminal whose program set
+/// none.
 const SCRUBBED_HOST: &str = "host";
 
 /// The bytes that paint `rows`, each at its own absolute position, and set
@@ -526,12 +527,12 @@ fn repaint(rows: &[&str], title: &str) -> Vec<u8> {
 /// the captured screen does.
 ///
 /// Why: status detection's readers are held to these screens, which change only
-/// by re-capture, and a new terminal hands them the emulator's text instead of
+/// by re-capture, and a live terminal hands them the emulator's text instead of
 /// a capture. A character the emulator draws wide enough to push a row past the
 /// capture's width, or a format rule it spells differently, would turn a
-/// recognized prompt into an unrecognized one only in new terminals, where
-/// nothing else would notice. This replaced a comparison with a live tmux; it
-/// needs none, because the captured text itself is the expected value. Spec:
+/// recognized prompt into an unrecognized one only in live terminals, where
+/// nothing else would notice. The captured text itself is the expected value.
+/// Spec:
 /// for each fixture, the emulator's screen text equals the fixture (the premise
 /// that the repaint reproduces the screen, which a row drawn too wide would
 /// break), and the fixture's reader, given the emulator's own tail

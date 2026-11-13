@@ -586,7 +586,7 @@ pub(crate) static SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_
 /// How long a real-stack test waits for a multi-process stack to reach a
 /// state.
 ///
-/// Generous rather than tight: supervisors, tmux servers, an ssh handshake
+/// Generous rather than tight: supervisors, terminal hosts, an ssh handshake
 /// and a helm all have to come up, and on a loaded runner that is genuinely
 /// slow. The failure this bound reports — "it never got there" — is not
 /// diagnosed any better by a shorter wait.
@@ -960,8 +960,8 @@ impl Harness {
     /// and only then build the next one with `build` and connect a new
     /// client to it.
     ///
-    /// The order is what a supervisor restart is, and on new terminals it is
-    /// required: a terminal host serves one connection and every new one
+    /// The order is what a supervisor restart is, and with terminal hosts it
+    /// is required: a terminal host serves one connection and every new one
     /// takes it over, so a second supervisor built beside a live first one
     /// would fight it for every host (and start read-only, without the
     /// state directory's claim). The slot and the state directory carry
@@ -1056,21 +1056,22 @@ pub(crate) const AGENT_READY_MARKER: &str = "FAKE-AGENT READY";
 /// rather than being tuned down: this is a setup barrier on a machine that
 /// may be running four harnesses plus a full workspace suite, so it has to
 /// be generous enough that a merely SLOW launch never fails it. What keeps
-/// the generosity honest is that a DEAD pane fails immediately rather than
-/// waiting the budget out, and the panic reports the pane's own state.
+/// the generosity honest is that a host whose child already exited fails
+/// immediately rather than waiting the budget out, and the panic reports the
+/// host's liveness and screen.
 const AGENT_READY_SECS: u64 = 30;
 
-/// Wait until `session_id`'s agent on `h` has actually STARTED, whichever
-/// kind of terminal it runs in: [`wait_for_agent_ready_on`] for the
-/// harness's own supervisor.
+/// Wait until `session_id`'s agent on `h` has actually STARTED:
+/// [`wait_for_agent_ready_on`] for the harness's own supervisor.
 pub(crate) async fn wait_for_agent_ready(h: &Harness, session_id: &str) {
     wait_for_agent_ready_on(&h.sup, h.state.path(), session_id).await;
 }
 
 /// Whether `session_id`'s durable row on `state_dir` says its agent runs in
-/// a terminal host: how every kind-aware helper here decides which way to
-/// look, so that a host row whose runtime is missing fails by name instead
-/// of being read as an old terminal.
+/// a terminal host. The helpers here that read an agent's terminal assert it
+/// first, so that a row of the kind an earlier release wrote (which only
+/// tests that model an earlier release's rows write) fails by name rather
+/// than being read as something it is not.
 pub(crate) async fn is_host_row(state_dir: &std::path::Path, session_id: &str) -> bool {
     SessionStore::open(&state_dir.join("supervisor.db"), false)
         .await
@@ -1086,10 +1087,11 @@ pub(crate) async fn is_host_row(state_dir: &std::path::Path, session_id: &str) -
 /// The runtime `sup` publishes for `session_id`'s agent terminal host.
 ///
 /// Every session a supervisor runs has its agent in a terminal host, so a
-/// row that says otherwise (an old-kind row, which only the startup tests
-/// of ending old terminals write) or a host row without a published runtime
-/// (a reload that has not adopted it, an entry left without a terminal)
-/// fails the test by name rather than being read some other way.
+/// row that says otherwise (a row of the kind an earlier release wrote,
+/// which only tests that model an earlier release's rows write) or a host
+/// row without a published runtime (a reload that has not adopted it, an
+/// entry left without a terminal) fails the test by name rather than being
+/// read some other way.
 pub(crate) async fn agent_host(
     sup: &Supervisor,
     state_dir: &std::path::Path,

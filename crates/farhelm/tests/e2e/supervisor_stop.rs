@@ -339,8 +339,7 @@ async fn an_inherited_ignored_hangup_leaves_the_supervisor_running() {
 /// began, a tethering parent that went away during that wait would leave
 /// its supervisor running with no parent. Nothing streams before startup
 /// finishes, so there is nothing to close in order; the process should
-/// simply go. (This test once held startup in a tmux command; startup runs
-/// none now.) The premise is the waiting supervisor's own probe of the
+/// simply go. The premise is the waiting supervisor's own probe of the
 /// state directory's socket, which this test's listener accepts and drops
 /// before the hello, the way a holder on its way out does.
 #[farhelm_testtrace::test]

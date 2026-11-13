@@ -1,4 +1,4 @@
-//! Prompt delivery through the shipped CLI, real helm and real tmux.
+//! Prompt delivery through the shipped CLI, real helm and real terminal hosts.
 //!
 //! A raw terminal recorder makes the delivery contract observable without
 //! running a vendor agent. The real supervisor samples activity, so the

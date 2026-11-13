@@ -43,7 +43,7 @@
 //! ## Which directory, exactly
 //!
 //! Not always the same string. The value substituted is whatever the
-//! launch hands TMUX as the pane's working directory: the user's own
+//! launch hands the terminal host as its child's working directory: the user's own
 //! spelling at create, and the verified resolution of it on a restart
 //! (plan D1). Only
 //! [`a_wrapper_gets_the_literal_spelling_at_create_and_the_verified_path_on_restart`]
@@ -715,13 +715,13 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
 /// matter which rule the code followed.
 ///
 /// Both values are right, and they are right for the same reason: the
-/// substituted value is whatever the launch hands TMUX as the pane's
-/// working directory, never a second opinion computed alongside it. So
-/// the wrapper's directory and the pane's directory are the same string
+/// substituted value is whatever the launch hands the terminal host as its
+/// child's working directory, never a second opinion computed alongside it.
+/// So the wrapper's directory and the agent's directory are the same string
 /// on every path, and the agent's `getcwd()` still equals the session's
 /// canonical cwd for later relaunch identity checks. A create has no prior
 /// identity to check the path against, so the user's spelling is what
-/// tmux gets. A restart does have one: `ensure_cwd_identity` confirms the
+/// the host gets. A restart does have one: `ensure_cwd_identity` confirms the
 /// path still resolves to the identity recorded at create and hands back
 /// the RESOLVED path, which the relaunch then uses — a symlink repointed
 /// between the check and the launch would otherwise put the agent

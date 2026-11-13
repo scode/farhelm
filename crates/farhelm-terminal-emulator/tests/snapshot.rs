@@ -354,7 +354,7 @@ fn a_hand_built_v1_blob_restores_as_its_layout_says() {
 }
 
 /// Version 1 streams keep the widths older supervisors painted, even when
-/// their selectors would change those widths in a new terminal. The next
+/// their selectors would change those widths under the live rule. The next
 /// cell's CHA must not erase a heart that the decoder wrongly widened.
 ///
 /// These blobs use the old painter's character/marks/CHA representation,

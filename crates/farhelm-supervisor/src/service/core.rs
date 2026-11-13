@@ -689,7 +689,7 @@ pub type ReclaimListingFault = Arc<dyn Fn(Option<&str>) -> bool + Send + Sync>;
 ///
 /// A listing that lands inside that window must still show the session (see
 /// [`Supervisor::restarting_rows`]). The window lasts as long as detaching the
-/// old terminal and relaunching, which a test cannot time a listing into, so a
+/// previous terminal and relaunching, which a test cannot time a listing into, so a
 /// test holds it open here. Production installs none.
 pub type RestartWindowGate = BoundaryGate;
 
@@ -2166,8 +2166,7 @@ struct SessionIdentity {
 /// hold back Stop, Restart and Delete) behind a program that does not read its
 /// terminal: long enough for a busy program to get to its input, short enough
 /// that a wedged one fails the prompt with a visible error instead of holding
-/// the session. Ten seconds matches the budget old terminals give one input
-/// exchange; nothing ties the two otherwise.
+/// the session.
 const HOST_PROMPT_DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Type a prompt into a host terminal: the bracketed `paste`, then the
@@ -2737,14 +2736,15 @@ enum RelaunchDisposition {
     /// This exists because classifying such a failure as merely `Ambiguous`
     /// was actively destructive rather than conservative. The recovery path
     /// republishes the entry built from the PRE-restart `SessionEntry` — the
-    /// old terminal, the old generation's pane, a `Launching` outcome — so a
-    /// reply-build failure would overwrite the entry the relaunch had just
-    /// published moments earlier. On a fresh-terminal restart that discards
-    /// the live terminal outright: the map ends up pointing at a pane the
-    /// restart replaced, while the agent it actually started runs in a
-    /// terminal nothing references. SPEC.md's restart contract is that a
-    /// successful restart's live terminal is what the session has, and a
-    /// failure to build a REPLY has no standing to revise that.
+    /// previous terminal, the old generation's address, a `Launching`
+    /// outcome — so a reply-build failure would overwrite the entry the
+    /// relaunch had just published moments earlier. On a fresh-terminal
+    /// restart that discards the live terminal outright: the map ends up
+    /// pointing at a terminal the restart replaced, while the agent it
+    /// actually started runs in a terminal nothing references. SPEC.md's
+    /// restart contract is that a successful restart's live terminal is what
+    /// the session has, and a failure to build a REPLY has no standing to
+    /// revise that.
     ///
     /// The independent error still surfaces, but the published state stands
     /// and restart-with still attempts its post-spawn bundle write. The next
@@ -3444,13 +3444,12 @@ async fn ensure_cwd_identity(cwd: &str, canonical: Option<&str>) -> anyhow::Resu
 /// UTF-8"). The canonical spelling is the directory's recorded identity, and
 /// a restart or the retry of an unfinished create launches into it, so a
 /// lossy conversion was worse than useless there: it named a different,
-/// usually nonexistent, directory, the tmux that ran terminals then fell
-/// back to the home directory for one it could not enter, and the relaunch
-/// reported success with the agent somewhere else. A first create launched into the caller's own spelling
-/// and worked; it refuses too because it is what records the identity those
-/// relaunches would check and launch into. `cwd` is the spelling the caller
-/// gave, which is valid UTF-8 even when a symlink in it leads somewhere that
-/// is not.
+/// usually nonexistent, directory, and the relaunch reported success with
+/// the agent somewhere else. A first create launched into the caller's own
+/// spelling and worked; it refuses too because it is what records the
+/// identity those relaunches would check and launch into. `cwd` is the
+/// spelling the caller gave, which is valid UTF-8 even when a symlink in it
+/// leads somewhere that is not.
 fn canonical_cwd_text(cwd: &str, resolved: std::path::PathBuf) -> anyhow::Result<String> {
     resolved.into_os_string().into_string().map_err(|raw| {
         RequestError::new(
@@ -4011,8 +4010,8 @@ struct RelaunchPlan {
     launch_cwd: String,
     restart_with: Option<RestartWithBundle>,
     /// The new host's history seed, read from the old host before the
-    /// generation was claimed; `None` for a restart with no old terminal to
-    /// read.
+    /// generation was claimed; `None` for a restart with no previous terminal
+    /// to read.
     seed: Option<host_restart::RestartSeed>,
 }
 
@@ -12443,7 +12442,7 @@ impl Supervisor {
             .context("reaping the prior run's leftover descendants before relaunching")?;
         }
 
-        // A new host starts from the old terminal's history, read here,
+        // A new host starts from the previous terminal's history, read here,
         // after the stop and before the generation is claimed, so that a
         // crash or an orderly stop while it is read leaves the session as it
         // was (`host_restart`, "restart_seed").
@@ -12645,7 +12644,7 @@ impl Supervisor {
         //
         // Still LISTED for the duration, though, from a held row (see
         // `Supervisor::restarting_rows`): the window covers detaching the
-        // old terminal and the whole relaunch, and a `ListSessions` landing
+        // previous terminal and the whole relaunch, and a `ListSessions` landing
         // in it that omitted the session made every client with it open
         // deselect it for good. The held row is the session as last listed
         // before the restart, status included, rather than anything read
@@ -12887,9 +12886,9 @@ impl Supervisor {
                 // terminals it closes (`Self::publishable`, as for a
                 // successful relaunch): the runtime was off the map while the
                 // stop gathered, so nothing else would close it.
-                // A launch went to a new host, never into the old terminal,
-                // so an ambiguous one leaves no terminal to name even when
-                // the old one survives.
+                // A launch went to a new host, never into the previous
+                // terminal, so an ambiguous one leaves no terminal to name
+                // even when the previous one survives.
                 let terminal = if still_exists {
                     self.publishable(republished_terminal(definitive, entry.terminal.clone()))
                 } else {
@@ -13760,11 +13759,11 @@ impl Supervisor {
 
     /// The `systemd-run --user --scope` prefix a new tab's command runs
     /// under, empty when it opens without a scope of its own, and the unit's
-    /// name when one could be named. Shared by both kinds of tab: the scope
-    /// is decided per OPEN the way an agent's is decided per launch, and
-    /// since a tab has no durable row, the unit NAME is re-derived at close
-    /// from the same two ids, while whether this open selected a scope at
-    /// all is recorded with the tab, in its host's client tag.
+    /// name when one could be named. The scope is decided per OPEN the way
+    /// an agent's is decided per launch, and since a tab has no durable row,
+    /// the unit NAME is re-derived at close from the same two ids, while
+    /// whether this open selected a scope at all is recorded with the tab, in
+    /// its host's client tag.
     async fn tab_scope_prefix(
         &self,
         session_id: &str,
@@ -14662,8 +14661,8 @@ impl Supervisor {
             ErrorKind::Conflict,
             format!(
                 "session {} was being created in an old terminal (tmux) when an earlier \
-                 supervisor stopped, and this supervisor creates only new terminals, so the \
-                 create was not retried; create the session again",
+                 supervisor stopped, and this supervisor starts every terminal in a terminal \
+                 host, so the create was not retried; create the session again",
                 truncate_for_error(id)
             ),
         ));
@@ -15525,7 +15524,7 @@ impl Supervisor {
     /// the host its create started, and return the runtime it now runs
     /// through.
     ///
-    /// This is how tests reach the switch points' host arms with a host
+    /// This is how tests reach the supervisor's lifecycle verbs with a host
     /// whose child they choose (started by the test from the real `farhelm`
     /// binary, never inside the test process, since a host forks) rather
     /// than an agent's launch chain: one whose processes carry no session
@@ -15536,7 +15535,7 @@ impl Supervisor {
     /// terminal, records the row as a host row whose `terminal_address`
     /// holds the socket's name (the plan's D-14), and then shuts down the
     /// host the create started, so the session looks like one created in the
-    /// test's host. The entry is swapped before the old terminal ends, so
+    /// test's host. The entry is swapped before the create's own host ends, so
     /// nothing ever observes the session without a terminal. Compiled only
     /// for tests and the `test-seams` feature.
     #[cfg(any(test, feature = "test-seams"))]
@@ -15912,9 +15911,7 @@ const STATE_DIR_CLAIM_RETRY: Duration = Duration::from_millis(50);
 /// of this function's shape, not ceremony: without it every planned stop,
 /// restart, or upgrade (which `KillMode=process` makes a SIGTERM to this
 /// process alone) killed the process with every output client still
-/// streaming (earlier releases' tmux could abort its whole private server,
-/// and every session on the host, when such a client saw EOF with output
-/// queued), and with no host checkpointed. See
+/// streaming, and with no host checkpointed. See
 /// [`Supervisor::shutdown_output_clients`] and
 /// [`Supervisor::checkpoint_hosts_for_exit`]. SIGKILL, OOM kills and crashes
 /// run no handler: viewers lose their streams, and the next supervisor
@@ -18354,7 +18351,7 @@ pub(crate) mod tests {
     /// re-publishes the entry with no terminal rather than the old one; a
     /// definitive failure keeps the prior terminal.
     ///
-    /// Why it matters: the old terminal made a later Restart or Delete read
+    /// Why it matters: the previous terminal made a later Restart or Delete read
     /// the session as gone, skip its "still running" confirmation, and reap
     /// the possibly-live new agent. With no terminal the existing
     /// terminal-less guard applies instead. Specified: ambiguous gives
@@ -20183,7 +20180,7 @@ pub(crate) mod tests {
     /// described as it was last listed before the restart began.
     ///
     /// Why it matters: the restart takes the session off the supervisor's
-    /// map while it detaches the old terminal and relaunches, and a listing
+    /// map while it detaches the previous terminal and relaunches, and a listing
     /// in that window used to leave the session out. The helm passes that
     /// listing on, and a client that had the session open deselects it and
     /// never selects it again (the browser build's sidebar closes it, the
@@ -30301,11 +30298,10 @@ exit 1
     ///
     /// Why it matters: the canonical path is the directory's recorded
     /// identity, and a restart or create retry launches into it. Converted
-    /// lossily it named a directory that does not exist, the tmux that ran
-    /// terminals then started the agent in the home directory instead, and the relaunch reported
-    /// success. Rows created before this fix carry that lossy text, which the
-    /// old check computed again and so waved through; the relaunch half
-    /// below uses exactly that value.
+    /// lossily it named a directory that does not exist, and the relaunch
+    /// reported success with the agent somewhere else. Rows created before
+    /// this fix carry that lossy text, which the old check computed again and
+    /// so waved through; the relaunch half below uses exactly that value.
     /// Farhelm does not support such paths (SPEC.md "Paths that are not
     /// valid UTF-8"), so the spec is a clear `InvalidRequest` naming the
     /// path. The caller's own spelling is a valid UTF-8 symlink here, which

@@ -11,8 +11,8 @@
 //! `FARHELM_*` markers, and old-kind rows in the store naming those panes.
 //! Then a supervisor of this release starts on the same state directory and
 //! the test looks at processes, files, rows and the listing's notifications.
-//! The window options and markers are spelled out here rather than taken from
-//! the supervisor's tmux module, which goes away while these tests stay.
+//! The window options and markers are spelled out here, since the supervisor
+//! no longer has a tmux module to take them from.
 
 use crate::harness::*;
 use farhelm_supervisor::store::{StoredSession, TerminalKind};

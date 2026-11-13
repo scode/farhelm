@@ -723,13 +723,13 @@ async fn a_reclaim_whose_discovery_runs_out_of_time_ends_nothing() {
 ///
 /// Why: every host reads as an orphan of an empty database, and one that
 /// went missing (moved aside, reset, a partial restore) is not the user
-/// deleting every session: with tmux those sessions survived and came back
-/// with their database, and hosts must not be ended for good instead. Spec:
-/// a state directory with no database and an unrecorded host tagged for a
-/// session no store holds; a supervisor serves there, and the host still
-/// runs. Then, with the database that start created now there and still no
-/// session in it (premise checked), a second supervisor serves, and the host
-/// still runs.
+/// deleting every session, and such a database must never cost a running
+/// terminal (SPEC_impl.md, "Terminal host": the startup reclaim of orphaned
+/// hosts). Spec: a state directory with no database and an unrecorded host
+/// tagged for a session no store holds; a supervisor serves there, and the
+/// host still runs. Then, with the database that start created now there and
+/// still no session in it (premise checked), a second supervisor serves, and
+/// the host still runs.
 #[farhelm_testtrace::test]
 async fn nothing_is_reclaimed_for_a_missing_or_empty_database() {
     let stack = Stack::new().await;

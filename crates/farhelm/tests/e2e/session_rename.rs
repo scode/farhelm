@@ -177,7 +177,7 @@ async fn a_rename_is_visible_in_the_next_list_reply_without_a_restart() {
 /// the session's create reported.
 ///
 /// A tab is not part of the session's row: a host tab lives in the session's
-/// tab cells (an old terminal's in a tmux window marker), so a tab opened
+/// tab cells, so a tab opened
 /// after the session was created can appear in a rename reply only if that
 /// reply really was rebuilt from the session's current terminals. This is
 /// the cheapest of the three built-not-echoed pins; the other two cover

@@ -488,7 +488,7 @@ impl LaunchArtifacts {
             Self::remove_file_best_effort(self.waypoint(), "launch waypoint").await;
         // Not the host record: an error settles the agent, not its terminal
         // host, which may still run (holding the failed launch's final
-        // screen) with nothing else naming its socket while the row's `pane`
+        // screen) with nothing else naming its socket while the row's `terminal_address`
         // is empty. It goes only with a confirmed end of that host, or with
         // the retry that found nothing left of the launch.
         status_removed && spec_removed && waypoint_removed

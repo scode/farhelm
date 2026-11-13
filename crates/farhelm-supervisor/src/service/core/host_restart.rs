@@ -163,9 +163,9 @@ pub enum HostRestartStage {
 /// the session's row to race a Delete. Production installs none.
 pub type HostRestartFault = Arc<dyn Fn(HostRestartStage) -> anyhow::Result<()> + Send + Sync>;
 
-/// What a Restart's new host starts with: the old terminal's history seed,
+/// What a Restart's new host starts with: the previous terminal's history seed,
 /// read before the generation is claimed ([`Supervisor::restart_seed`]),
-/// and the old terminal's size.
+/// and the previous terminal's size.
 pub(super) struct RestartSeed {
     /// The initial snapshot; `None` when there is no old history to keep (a
     /// host's emulator lost), which starts the new terminal empty.
@@ -176,7 +176,7 @@ pub(super) struct RestartSeed {
 
 impl Supervisor {
     /// `relaunch_into_terminal`'s work: start the new launch of session
-    /// `entry` in a new terminal host seeded with the old terminal's
+    /// `entry` in a new terminal host seeded with the previous terminal's
     /// history, confirm and publish it, then end the old host, `replacing`
     /// (module docs).
     ///
@@ -321,7 +321,7 @@ impl Supervisor {
             Err(error) => {
                 // The agent runs and this process could not record it: the
                 // new host is published as launching so the session stays
-                // reachable. The old terminal is
+                // reachable. The previous terminal is
                 // ended all the same: its history is in the new host's seed
                 // and its program was stopped, and leaving an old host to the
                 // next start would leave it running for good if the new host
@@ -444,7 +444,7 @@ impl Supervisor {
         .await;
         if in_time.is_err() && !settled(old) {
             warn!(session = %id, bound = ?SEED_SETTLE, status = ?old.status(),
-                "the old terminal had not settled when the restart read its history; the \
+                "the previous terminal had not settled when the restart read its history; the \
                  restarted terminal keeps what had been processed by then");
         }
         let size = old.size();
@@ -473,12 +473,12 @@ impl Supervisor {
             }
             None if gone => {
                 info!(session = %id,
-                    "the old terminal's host is gone, so the restarted terminal starts empty");
+                    "the previous terminal's host is gone, so the restarted terminal starts empty");
                 None
             }
             None => {
                 warn!(session = %id,
-                    "the old terminal's history could not be read, so the restarted terminal \
+                    "the previous terminal's history could not be read, so the restarted terminal \
                      starts empty");
                 None
             }

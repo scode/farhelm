@@ -415,8 +415,7 @@ impl Transition {
     ///   one.
     /// - **`Exited` enriches monotonically.** A terminal can read as dead
     ///   before its exit code is known (a host's exit record arrives after
-    ///   the child is gone; tmux, in earlier releases, published
-    ///   `pane_dead` before `pane_dead_status`), so the FIRST observer of an
+    ///   the child is gone), so the FIRST observer of an
     ///   exit routinely has no code while a later one does; SPEC.md
     ///   requires showing the code when it is known, so a known code
     ///   replaces a missing one and never the reverse. The stop annotation
@@ -5135,7 +5134,7 @@ impl SessionStore {
     /// silently dropped (the committed outcome is still returned), because
     /// it describes a run this session has already moved past: the classic
     /// case is a `ListSessions` pass that cloned an entry, read its terminal,
-    /// and came back with the OLD terminal's death after a restart replaced it
+    /// and came back with the PREVIOUS terminal's death after a restart replaced it
     /// (see [`StoredSession::generation`]).
     ///
     /// `Ok(None)` means the row no longer exists (a concurrent delete);

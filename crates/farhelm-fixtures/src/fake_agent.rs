@@ -51,10 +51,10 @@ pub enum Script {
     /// idle until driven, which keeps the fixture deterministic instead of
     /// recursively creating descendants on launch.
     Spawn,
-    /// Like `Spawner`, but the child ignores SIGTERM (and the SIGHUP
-    /// cascade tmux sends the pane's process group once the pane process
-    /// dies, which would otherwise end it moments after the sweep's
-    /// SIGTERM anyway) — the acceptance subject for the SIGKILL half of
+    /// Like `Spawner`, but the child ignores SIGTERM (and the SIGHUP the
+    /// kernel sends the terminal's foreground process group once the
+    /// terminal's own process dies, which would otherwise end it moments
+    /// after the sweep's SIGTERM anyway) — the acceptance subject for the SIGKILL half of
     /// `kill_process_tree`'s sequence, and the fixture that holds a stop
     /// inside its grace for the whole bound. Its child writes
     /// `stubborn-ready` in the session's working directory once the trap
@@ -301,9 +301,9 @@ pub fn run(
         Script::Spawner => spawn_and_echo("sleep 3600; exit $?", "spawner"),
         Script::Spawn => spawn_session(),
         Script::SpawnerStubborn => spawn_and_echo(
-            // HUP as well as TERM: the pane process itself dies to the
-            // sweep's SIGTERM, and tmux then SIGHUPs the pane's whole
-            // process group. A child that ignored only TERM died to that
+            // HUP as well as TERM: the terminal's own process dies to the
+            // sweep's SIGTERM, and the kernel then SIGHUPs the terminal's
+            // foreground process group. A child that ignored only TERM died to that
             // cascade a few milliseconds into the grace, which made it a
             // fixture that survived SIGTERM in name only.
             "trap '' TERM HUP; touch stubborn-ready; sleep 3600",
@@ -1604,21 +1604,21 @@ fn fresh_conversation_id() -> String {
 /// exercise scrollback, real PTY geometry, and clean exit respectively;
 /// `busy` keeps the screen changing so the session reads as working.
 /// Bracketed paste stays enabled so reattach tests can assert the mode
-/// survives replay (the audited silent-loss case in SPEC_impl.md).
+/// survives replay.
 ///
 /// The `> ` prompt is the fixture's SAFE-TO-TYPE barrier, and a test that
-/// asserts on what the startup output left in tmux's grid must wait for it
-/// rather than for `FAKE-AGENT READY`. The marker's text can reach a
-/// reader while its own line is still half-written, and a pty echoes
-/// incoming input into the middle of an in-flight write — so input sent on
-/// the strength of the marker alone can be echoed ON TOP of the marker row
-/// and erase it. The prompt is only written once the marker line is fully
-/// out, so nothing typed after it can land there.
+/// asserts on what the startup output left in the terminal's grid must
+/// wait for it rather than for `FAKE-AGENT READY`. The marker's text can
+/// reach a reader while its own line is still half-written, and a pty
+/// echoes incoming input into the middle of an in-flight write — so input
+/// sent on the strength of the marker alone can be echoed ON TOP of the
+/// marker row and erase it. The prompt is only written once the marker
+/// line is fully out, so nothing typed after it can land there.
 fn basic() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     // Bracketed paste on. Set before the ready marker so a test that
     // reattaches the moment it sees the marker always finds the mode
-    // already live in tmux's pane state.
+    // already live in the terminal's modes.
     write!(out, "\x1b[?2004h")?;
     writeln!(out, "\x1b[1;32mfake-agent\x1b[0m starting (script=basic)\r")?;
     writeln!(out, "FAKE-AGENT READY\r")?;
@@ -1922,11 +1922,11 @@ fn hex_echo_loop<W: Write>(
 ///
 /// `legacy` DECRSTs 1006 before asserting 1000, rather than only
 /// asserting 1000 — necessary, not decorative: DECSET only ever turns
-/// bits ON, so cueing `sgr` and then `legacy` must still leave the pane
-/// in PLAIN legacy tracking. Without the explicit DECRST, `sgr`'s earlier
-/// DECSET 1006 would still be latched in tmux's pane state, and every
-/// report after the "corrective" `legacy` cue would keep arriving in SGR
-/// shape regardless — silently defeating the very cue meant to select
+/// bits ON, so cueing `sgr` and then `legacy` must still leave the
+/// terminal in PLAIN legacy tracking. Without the explicit DECRST, `sgr`'s
+/// earlier DECSET 1006 would still be latched in the terminal's modes, and
+/// every report after the "corrective" `legacy` cue would keep arriving in
+/// SGR shape regardless — silently defeating the very cue meant to select
 /// the other encoding.
 fn mouse_escape(word: &str) -> Option<&'static str> {
     match word {
@@ -2531,9 +2531,9 @@ fn set_raw_mode() -> anyhow::Result<()> {
 ///
 /// The ready marker every script owes the tests is printed first and then
 /// the screen AND the scrollback are cleared (`ESC[3J` is the xterm
-/// extension tmux honours for history), so the marker never appears in
-/// the picture: a plain clear-screen scrolls the marker into history in
-/// tmux, and an attach replays history, which put the marker at the top of
+/// extension that erases history), so the marker never appears in the
+/// picture: a plain clear-screen scrolls the marker into history, and an
+/// attach replays history, which put the marker at the top of
 /// the terminal in the first capture attempts.
 fn replay_transcript(options: ReplayOptions) -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
@@ -2996,8 +2996,8 @@ mod tests {
     /// written against: cueing `sgr` and then `legacy`, IN THAT ORDER,
     /// through the real scanner (not `mouse_escape` in isolation) must
     /// still end with SGR encoding turned back off. Before the DECRST fix
-    /// this second escape was just `\x1b[?1000h` — a no-op against tmux's
-    /// already-latched 1006, so every report after the "corrective" cue
+    /// this second escape was just `\x1b[?1000h` — a no-op against the
+    /// terminal's already-latched 1006, so every report after the "corrective" cue
     /// kept arriving in SGR shape regardless of what the user had just
     /// asked for.
     #[farhelm_testtrace::test]

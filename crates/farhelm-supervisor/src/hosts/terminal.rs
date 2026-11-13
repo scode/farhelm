@@ -2619,9 +2619,9 @@ impl HostTerminal {
     /// name inside the state directory's socket directory, never a path).
     ///
     /// The string is only meaningful beside the row's
-    /// [`crate::store::StoredSession::terminal_kind`]: a row of the old kind
-    /// holds a tmux pane id there, which is never looked up again
-    /// (`service::core::old_terminals`).
+    /// [`crate::store::StoredSession::terminal_kind`]: a row an earlier
+    /// release wrote for its private tmux holds a tmux pane id there, which
+    /// is never looked up again (`service::core::old_terminals`).
     ///
     /// Socket names are short base32 names this supervisor mints
     /// (`crate::hosts::names`), always valid UTF-8 and never empty, so the

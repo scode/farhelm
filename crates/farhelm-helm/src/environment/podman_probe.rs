@@ -99,8 +99,9 @@ pub(crate) trait PlaceCommands: Send + Sync {
     }
 }
 
-/// Execute through the place's ordinary route while keeping private helm and
-/// tmux inputs away from helpers that Podman may leave running after the call.
+/// Execute through the place's ordinary route while keeping the helm's private
+/// variables, and those of any tmux the caller runs in, away from helpers that
+/// Podman may leave running after the call.
 struct SystemPlaceCommands {
     control_dir: PathBuf,
 }
@@ -185,8 +186,9 @@ impl SystemPlaceCommands {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        // A local probe can initialize shared Podman helpers. Private helm and
-        // tmux inputs must not become those helpers' inherited environment.
+        // A local probe can initialize shared Podman helpers. The helm's private
+        // variables, and the caller's tmux ones, must not become those helpers'
+        // inherited environment.
         for (name, _) in std::env::vars_os() {
             if name.to_string_lossy().starts_with("FARHELM_")
                 || matches!(name.to_str(), Some("TMUX" | "TMUX_PANE" | "TMUX_TMPDIR"))

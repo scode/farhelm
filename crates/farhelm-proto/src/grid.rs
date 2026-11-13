@@ -183,8 +183,8 @@
 //!   is `{"x":col,"y":row,"visible":bool,"shape":"block"|"underline"|"bar",
 //!   "blink":bool}` and lies on the screen (`x < cols`, `y < rows`). The
 //!   default cursor (one no program has styled) is sent with `blink: true`,
-//!   so that a cursor blinks unless the program says otherwise, as it does in
-//!   old terminals (alacritty's own default is steady).
+//!   so that a cursor blinks unless the program says otherwise, as Farhelm's
+//!   cursor did before the grid (alacritty's own default is steady).
 //!
 //! A frame that changes `cols` or `rows` comes with `rows` for every non-blank
 //! row, since the client blanks every row a resizing frame does not update.
@@ -231,16 +231,15 @@
 //! [`GRID_MAX_MESSAGE`] once encoded), split only at character boundaries,
 //! all naming the same target, the last with `last: true`. The whole write is
 //! at most [`GRID_MAX_CLIPBOARD_BYTES`]; the sender drops a larger one. The
-//! client writes the text to the clipboard when the last part arrives, as
-//! old terminals honor OSC 52 writes. Reads are never answered: there is no
+//! client writes the text to the clipboard when the last part arrives (SPEC.md
+//! says a program's OSC 52 writes are honored). Reads are never answered: there is no
 //! clipboard-read message, so a program cannot read what the user copied.
 //!
 //! The client honors only `target: "clipboard"`: `primary` writes are not
 //! copied to the system clipboard, because a program setting its selection
-//! must not overwrite what the user copied. Old terminals honor only OSC 52
-//! writes to the clipboard selector too, with one accepted difference: the
-//! emulator maps an empty selector (and a list starting with `c`) to the
-//! clipboard, where old terminals ignore them.
+//! must not overwrite what the user copied. The emulator maps an empty
+//! selector (and a list starting with `c`) to the clipboard, so a write with
+//! either reaches the system clipboard too.
 //!
 //! ## `state`: on attach after `hello`, then whenever it changes
 //!
@@ -1091,8 +1090,7 @@ pub enum CursorShape {
 /// on a Mac) selects locally. One exception to "sends only what the program
 /// asked for": while [`TerminalState::alt_screen`] is true and this is `Off`,
 /// the client still sends `wheel` messages, which the supervisor turns into
-/// arrow keys, so a full-screen program without mouse support still scrolls
-/// (as in old terminals).
+/// arrow keys, so a full-screen program without mouse support still scrolls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MouseMode {
@@ -1549,7 +1547,7 @@ pub enum MouseEventKind {
     Move,
     /// The wheel moved; `button` 0 is up, 1 is down. One message per
     /// browser wheel event that scrolls at least one line, and so one report
-    /// (or one arrow key) per such event, as old terminals send.
+    /// (or one arrow key) per such event, however many lines it scrolls.
     Wheel,
 }
 
@@ -1569,23 +1567,24 @@ pub enum GridInput {
     /// them as the xterm terminal family encodes keys, which shells and
     /// agents expect, including Shift+Enter as ESC CR in one write. The
     /// bytes for every keydown are Farhelm's key table
-    /// (`crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl`), the
-    /// same bytes old terminals send.
+    /// (`crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl`), first
+    /// computed by xterm.js 6.0.0 so that programs kept reading the same keys
+    /// when the grid replaced it.
     ///
     /// Which keydowns become `key` messages is the client's decision; the
     /// supervisor never second-guesses it. The client sends no `key` for its
     /// own shortcuts (Cmd+K/J, Ctrl+Shift+K/J, the text-size keys), for a
     /// keydown the key table gives no sequence for, nor for one it leaves
-    /// to the browser's text input or drops: a third-level
-    /// shift (Option without Ctrl or Meta on a Mac, Ctrl+Alt or AltGraph on
-    /// Windows, as AltGr) on a key code above 47 or of 0, a single capital
-    /// A to Z without Ctrl, Alt or Meta, and the first sending keydown after
-    /// a dead key or AltGraph. The characters those type arrive as `text`,
-    /// as do space, other composed characters and composition results; a
-    /// third-level shift on a key code 0 (the iOS arrow names) or 112 to 123
-    /// (F1 to F12) sends nothing at all, as in old terminals. Printable keys
-    /// with a sequence at keydown (key code 48 and up) are `key` messages,
-    /// and the supervisor produces their bytes as the key table says.
+    /// to the browser's text input or drops: a third-level shift (Option
+    /// without Ctrl or Meta on a Mac, Ctrl+Alt or AltGraph on Windows, as
+    /// AltGr) on a key code above 47 or of 0, a single capital A to Z without
+    /// Ctrl, Alt or Meta, and the first sending keydown after a dead key or
+    /// AltGraph. The characters those type arrive as `text`, as do space,
+    /// other composed characters and composition results; a third-level
+    /// shift on a key code 0 (the iOS arrow names) or 112 to 123 (F1 to F12)
+    /// sends nothing at all. Printable keys with a sequence at keydown (key
+    /// code 48 and up) are `key` messages, and the supervisor produces their
+    /// bytes as the key table says.
     Key {
         key: String,
         code: String,
@@ -1624,11 +1623,10 @@ pub enum GridInput {
     /// down.
     ///
     /// De-duplicating motion is the client's job, against its last reported
-    /// event (as old terminals do): a `move` in the same cell, with the same
-    /// button and the same Shift, Alt and Ctrl as the last mouse message sent,
-    /// is not sent. The supervisor encodes every `move` it gets, so a client
-    /// that forwarded every pixel's `mousemove` would repeat the same report to
-    /// the program.
+    /// event: a `move` in the same cell, with the same button and the same
+    /// Shift, Alt and Ctrl as the last mouse message sent, is not sent. The
+    /// supervisor encodes every `move` it gets, so a client that forwarded
+    /// every pixel's `mousemove` would repeat the same report to the program.
     Mouse {
         kind: MouseEventKind,
         button: i8,

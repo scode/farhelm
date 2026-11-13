@@ -33,9 +33,8 @@
 //!   stage's exit status and the adoption, and how such a host is ended
 //!   ([`Supervisor::end_launch_host`]).
 //!
-//! The host's child stays in the supervisor's own control group, as a tmux
-//! pane under the old private tmux server did: a host gets no systemd scope
-//! of its own. Its lifetime is the unit's (`KillMode=process` keeps it
+//! The host's child stays in the supervisor's own control group: a host gets
+//! no systemd scope of its own. Its lifetime is the unit's (`KillMode=process` keeps it
 //! across supervisor restarts), and the agent inside keeps its
 //! per-launch scope from the wrapper in its command.
 
@@ -72,8 +71,7 @@ const HOST_COLORTERM: &str = "truecolor";
 /// `TERM_PROGRAM` for a host's child: the terminal is Farhelm's own, and
 /// says so. Programs that adapt to the terminal they run in read this
 /// variable, so it names the terminal the child really runs in rather than
-/// one it does not (the old terminals' tmux, or whatever terminal the
-/// supervisor was started from).
+/// one it does not (whatever terminal the supervisor was started from, say).
 pub(crate) const HOST_TERM_PROGRAM: &str = "farhelm";
 
 /// `TERM_PROGRAM_VERSION` for a host's child: this build's version, the
@@ -96,8 +94,8 @@ const DEFAULT_PATH: &str = "/usr/bin:/bin";
 ///   command to that server and believe it runs in one of its panes.
 /// - `FARHELM_TMUX` named the tmux program the supervisor ran its old
 ///   terminals with. The supervisor runs no tmux any more, and the variable
-///   means nothing to anything a session runs; installed units keep setting
-///   it until their next setup or Update rewrites them.
+///   means nothing to anything a session runs; units an earlier release
+///   rendered keep setting it until their next setup or Update rewrites them.
 /// - `LISTEN_PID`, `LISTEN_FDS`, `LISTEN_FDNAMES`: systemd's socket
 ///   activation hand-off, which names descriptors given to the supervisor
 ///   process, not to the child.
@@ -412,7 +410,7 @@ impl Supervisor {
     /// way, so a client's out-of-range size starts a terminal rather than
     /// having the host refuse its spec), with the environment of [`host_child_env`]
     /// and the default journal cap. `initial_snapshot` seeds its terminal:
-    /// a create has none, and a Restart gives the old terminal's history
+    /// a create has none, and a Restart gives the previous terminal's history
     /// (`host_restart`). The host is started from this supervisor's own program
     /// ([`Self::host_program`]) at a socket name drawn here; before its
     /// first stage is given the spec, the launch record (module docs) is
@@ -1090,7 +1088,7 @@ mod tests {
     ///
     /// Why: the child's environment is SPEC.md's "as if the user had
     /// SSHed in" contract, so the supervisor's own variables must pass
-    /// through; a new terminal must not claim to be tmux or the terminal
+    /// through; a terminal must not claim to be tmux or the terminal
     /// the supervisor happened to start from, since programs adapt to what
     /// these variables say; and the tmux program the supervisor once ran its
     /// old terminals with is nothing a session needs. Spec: from a

@@ -39,8 +39,7 @@
 //! **Best-effort atomic** ([`overwrite_private_file_sync`]). Write a fresh 0600
 //! temp file, `fsync` it, `rename` it over the destination; no fsync of
 //! the parent directory. One file class: the Running record
-//! (`crate::app_bundle::publish_running_record`; earlier releases also
-//! wrote their private tmux server's config this way). Losing a
+//! (`crate::app_bundle::publish_running_record`). Losing a
 //! Running-record update to a power loss is acceptable: the supervisor
 //! that wrote it died with the machine, and the next one to serve rewrites
 //! it before any session can reach it. "Losable, never torn": the

@@ -2560,8 +2560,7 @@ mod tests {
     /// Under a paused clock, "measured from the first pause" and "measured
     /// from anything else" resolve at two DIFFERENT virtual instants, so any
     /// wrong anchor misses the assertion below deterministically, which a
-    /// wall-clock end-to-end test (the tmux era's byte-stream one) could
-    /// only bound loosely.
+    /// wall-clock end-to-end test could only bound loosely.
     ///
     /// No real process or I/O is awaited anywhere in this test, which
     /// matters under `start_paused`: an awaited real-world event

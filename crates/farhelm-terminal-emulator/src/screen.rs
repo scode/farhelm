@@ -24,9 +24,10 @@
 //!   last column, which moves nothing, appears as nothing.
 //!
 //! The format is the shape of `tmux capture-pane -p`, and that is
-//! deliberate: old terminals' text comes from tmux, the readers were first
-//! written against it, and one set of reader rules serves both kinds of
-//! terminal. It is pinned here on its own terms (`tests/screen.rs`), and the
+//! deliberate: the status readers were first written against tmux's
+//! captures, and the captured agent screens from before November 2026 were
+//! taken with it, so one set of reader rules reads both those and this
+//! emulator's text. It is pinned here on its own terms (`tests/screen.rs`), and the
 //! supervisor's tests run every status reader on this emulator's repaint of
 //! the captured agent screens.
 //!

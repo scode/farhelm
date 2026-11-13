@@ -1,4 +1,4 @@
-//! End-to-end integration tests: real supervisor, real private tmux,
+//! End-to-end integration tests: real supervisor, real terminal hosts,
 //! real launch path through the user's login shell, fake agent as the
 //! process under supervision.
 //! The suite is Linux-only because its process-lifetime oracles read
@@ -7,11 +7,10 @@
 //! These tests exercise the exact production code path — the same
 //! `handle_connection` the unix socket serves and the same
 //! `SupervisorClient` the helm uses — over an in-process duplex pipe.
-//! What they deliberately do NOT fake: tmux, control-mode streaming,
-//! `send-keys -H` input, `capture-pane` replay, and pane-mode
-//! restoration.
-//! If tmux behavior drifts from the audited assumptions in SPEC_impl.md,
-//! it fails here first.
+//! What they deliberately do NOT fake: the terminal host and its pty, the
+//! supervisor's emulator, grid streams and grid input, and the replay of a
+//! host's journal when a supervisor adopts it again. If any of those stops
+//! behaving the way SPEC.md and SPEC_impl.md describe, it fails here first.
 //!
 //! They live in the `farhelm` bin crate because `CARGO_BIN_EXE_farhelm`
 //! (the built multi-call binary, which carries the fake agent and the

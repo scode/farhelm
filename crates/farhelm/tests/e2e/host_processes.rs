@@ -56,8 +56,8 @@ struct HostStack {
     /// inside it when a test needs a path of a chosen length.
     state: PathBuf,
     /// A `FARHELM_TMUX` for the supervisor's own environment, read at each
-    /// start: the program a test wants it handed, as an installed unit
-    /// hands it one. Set on the child only, never on the test process.
+    /// start: the program a test wants it handed, as a unit an earlier
+    /// release rendered still hands it one. Set on the child only, never on the test process.
     tmux_env: Option<PathBuf>,
     root: farhelm_teststate::TestDir,
     work: farhelm_teststate::TestDir,
@@ -456,16 +456,18 @@ fn write_recording_tmux(path: &Path, log: &Path) {
         .expect("make the recording tmux executable");
 }
 
-/// A supervisor whose sessions are all new terminals runs no tmux at all,
-/// through everything a user does with a session.
+/// A supervisor runs no tmux at all, through everything a user does with a
+/// session, even when its environment names one.
 ///
-/// Why: new terminals do not use tmux, and a machine without old sessions
-/// must run no tmux server (old servers are meant to die out as machines
-/// reboot). Every per-session path used to ask tmux for every session (the
+/// Why: the supervisor drives no tmux, yet a unit an earlier release
+/// rendered keeps setting `FARHELM_TMUX` until it is rendered again
+/// (SPEC_impl.md, "Provisioning"), so a path that still asked tmux would
+/// run that program.
+/// Every per-session path used to ask tmux for every session (the
 /// listing, a session's details, a tab lookup, the ticker's passes and its
 /// pane-death client, Delete, shutdown), so this drives each of them. The
-/// recording tmux the supervisor is given through `FARHELM_TMUX`, as an
-/// installed unit gives it one, is the observable; it fails every command,
+/// recording tmux the supervisor is given through `FARHELM_TMUX`, as such a
+/// unit gives it one, is the observable; it fails every command,
 /// so a supervisor that needed it would also show up as a failure. Spec:
 /// with `FARHELM_TMUX` naming a recording program, a bare supervisor starts, creates a session (a host row) whose
 /// agent draws its ready line, opens, attaches and closes a tab, lists,
@@ -565,10 +567,7 @@ async fn a_supervisor_with_only_new_terminals_runs_no_tmux() {
     );
 
     let invocations = std::fs::read_to_string(&log).unwrap_or_default();
-    assert_eq!(
-        invocations, "",
-        "a supervisor with only new terminals must not run tmux"
-    );
+    assert_eq!(invocations, "", "the supervisor must not run tmux");
     assert!(
         !stack.state.join("tmux.sock").exists(),
         "no tmux server was started on the private socket"

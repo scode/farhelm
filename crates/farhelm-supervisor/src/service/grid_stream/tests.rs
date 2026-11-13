@@ -771,7 +771,7 @@ async fn a_change_published_after_a_read_is_not_lost() {
 ///
 /// Why: a viewer that stops reading without closing its socket must not
 /// hold its attachment forever; the stall detach is what ends it, for grid
-/// streams as for byte streams. Spec: with a 200 ms stall timeout, a
+/// streams too. Spec: with a 200 ms stall timeout, a
 /// viewer that pauses after the attach and stays paused while output
 /// arrives has its stream end with `Stalled` well within the test's wait.
 #[farhelm_testtrace::test]
@@ -1525,8 +1525,8 @@ async fn drain_until(
 /// messages there (`<kind>.messages`, each a 4-byte little-endian length
 /// followed by the message, since binary rows cannot be split on newlines),
 /// and the output that made them (`<kind>.raw`), for measuring the grid
-/// client's memory and a byte-stream replay of the same output (what the
-/// old tmux terminals sent).
+/// client's memory and, for comparison, a replay of the same output as raw
+/// bytes.
 async fn measure_attach(kind: &str) {
     let out_dir = std::env::var_os("FARHELM_GRID_MEASURE_OUT").map(std::path::PathBuf::from);
     let (host, _test_host, output) = host_at_the_cap(kind).await;

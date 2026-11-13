@@ -11,7 +11,7 @@
 //!
 //! - a real `farhelm helm run`, with no session flags, on a real loopback
 //!   port, driven over real HTTP the way a browser drives it;
-//! - two real supervisors, each with its own private tmux server — one
+//! - two real supervisors, each with the terminal hosts of its sessions — one
 //!   reached over the unix socket in the helm's own state directory (the
 //!   reserved local row), one over the user's own `ssh` to `localhost`
 //!   running `farhelm internal stdio` (an ssh row);
@@ -139,8 +139,8 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
         );
         return;
     }
-    // Two supervisors (each with the terminal hosts of its sessions and an
-    // idle private tmux server), one helm: two slots, taken
+    // Two supervisors (each with the terminal hosts of its sessions), one
+    // helm: two slots, taken
     // together so this test never holds one while waiting for the other.
     let _slots = SLOTS
         .acquire_many(2)
@@ -261,8 +261,8 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
     }
 
     // `helm`, `remote`, and `local` are deliberately still alive here, and
-    // stay so until this function returns: they hold the processes, the tmux
-    // servers, and the state directories the helm and the ssh child are
+    // stay so until this function returns: they hold the processes, the
+    // terminal hosts, and the state directories the helm and the ssh child are
     // both still using. Explicit drops would say nothing the scope does not
     // already, and would invite someone to "tidy" them into the wrong order.
 }

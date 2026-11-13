@@ -34,8 +34,8 @@ pub enum MouseReporting {
 /// 1005 and 1006 are separate modes a program can hold at once (the
 /// vendored patch), and SGR wins whichever was set first. xterm, and
 /// upstream alacritty, keep only the one set last; Farhelm keeps the rule
-/// its old terminals follow, so a program that sets both gets SGR reports
-/// in either kind of terminal.
+/// its terminals followed before this emulator, so a program that sets both
+/// still gets SGR reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseEncoding {
     /// The original X10-style encoding, `CSI M` and three bytes, which cannot
