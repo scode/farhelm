@@ -760,12 +760,11 @@ app's own background install, or the installer run by hand in a terminal, which 
 the version readout in the sidebar's top bar shows that an update is ready: a red up-arrow before the version, and the
 whole readout red instead of grey. Its hover says which version is installed and that a restart finishes the update.
 Clicking it opens a small menu with **Restart to update**, which quits Farhelm and opens it again on the new version
-(sessions keep running, as they do across any quit; the one exception was the update that ended old terminals, see
-Terminal experience), and **What's new**, which opens the release notes on the docs website
-(`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting the version
-checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten both and turn
-the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (the web UI
-or a build from main), the readout stays plain text without the refresh glyph.
+(sessions keep running, as they do across any quit), and **What's new**, which opens the release notes on the docs
+website (`https://farhelm.io/docs/release-notes/`) in the system browser. Without an update waiting, selecting the
+version checks for updates. A dim refresh glyph after it hints at that action; hover and keyboard focus brighten both
+and turn the glyph a quarter. The reinstall warning keeps its mark and the same check action. Where no updater runs (the
+web UI or a build from main), the readout stays plain text without the refresh glyph.
 
 The update can be checked for on demand by selecting the version, by choosing the local machine's host row's Update (see
 [Session list](#session-list)), or by choosing **Check for updates** in the `?` menu (see [Feedback](#feedback)). Each
@@ -3458,9 +3457,8 @@ exception below:
   and sessions keep running, local and remote. Sandbox sessions have an explicit exception: after the remote connection
   ends, Tensorlake's 30-minute idle timeout freezes their processes until the sandbox is resumed.
 - The supervisor itself restarting — crash, upgrade, manual restart — must not interrupt its sessions. Terminals and
-  agent processes outlive the supervisor process; only a host reboot takes sessions down (and, once, the update that
-  ended old terminals; see Terminal experience). This is what makes updates, the desktop app's automatic ones included,
-  routine instead of scary.
+  agent processes outlive the supervisor process; only a host reboot takes sessions down. This is what makes updates,
+  the desktop app's automatic ones included, routine instead of scary.
 
 Local sessions have full behavioral parity with remote ones; what differs is availability, not behavior. The Mac desktop
 app's local supervisor is started by the app and keeps running after the app quits (or is started manually — see

@@ -10,7 +10,7 @@ starts it anew. Old shell tabs are closed.
 A session whose agent had already exited keeps its status, but its terminal no longer shows the agent's last screen,
 which lived in the old terminal. Programs that old agents and tabs left running in the background are stopped where
 Farhelm can tell which session they belong to; the rest are stopped when their session is deleted. The earlier warning
-notifications now show as resolved, and the installer's update message no longer says that sessions keep running.
+notifications now show as resolved.
 
 Creating a session that an older release was still starting in an old terminal when it was interrupted (by a crash, say)
 is no longer retried: the retry is refused, and the session has to be created again.
