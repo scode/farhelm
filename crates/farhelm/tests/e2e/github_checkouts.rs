@@ -646,7 +646,7 @@ impl CheckoutStack {
         .await;
         wait_for_supervisor_ready(supervisor.state.path()).await;
         let helm = helm_process(supervisor.state.path(), None).await;
-        let secret = device_secret(supervisor.state.path(), &helm.base).await;
+        let secret = device_secret(supervisor.state.path()).await;
         let client = client_with_secret(&secret);
         let claim = await_local_claim(&client, &helm.base).await;
         let mut stack = Self {
@@ -749,7 +749,7 @@ impl CheckoutStack {
             .stop_and_reap()
             .await;
         let helm = helm_process(self.supervisor.state.path(), None).await;
-        let secret = device_secret(self.supervisor.state.path(), &helm.base).await;
+        let secret = device_secret(self.supervisor.state.path()).await;
         let client = client_with_secret(&secret);
         let claim = await_local_claim(&client, &helm.base).await;
         assert_eq!(

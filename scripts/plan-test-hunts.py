@@ -23,7 +23,6 @@ _previous_bytecode_setting = sys.dont_write_bytecode
 try:
     sys.dont_write_bytecode = True
     import test_hunt
-    import test_run_playwright
 finally:
     sys.dont_write_bytecode = _previous_bytecode_setting
     del _previous_bytecode_setting
@@ -139,12 +138,9 @@ def selections(paths, packages, exists):
 
     Rust source changes widen through package dependencies. A changed Rust
     integration test selects its whole target rather than guessing module names
-    from filenames. Browser harness and application changes widen to both-engine
-    suite coverage; direct spec edits retain their file selection.
+    from filenames.
     """
     rust = {}
-    browser = set()
-    browser_reasons = []
     manual = []
     omitted = []
 
@@ -160,13 +156,6 @@ def selections(paths, packages, exists):
                      ".config/nextest.toml"}:
             for name in packages:
                 add_package(name, value + " affects workspace build inputs")
-            browser_reasons.append(value + " can affect the browser application")
-            continue
-        if value.startswith("e2e/"):
-            if value.startswith("e2e/tests/") and value.endswith(".spec.ts") and exists(value):
-                browser.add(value.removeprefix("e2e/"))
-            else:
-                browser_reasons.append(value + " changes shared browser inputs or removes a selector")
             continue
         if value in SHARED_RUST_HELPERS:
             consumers = SHARED_RUST_HELPERS[value]
@@ -201,7 +190,6 @@ def selections(paths, packages, exists):
         if relative.endswith(".rs") or relative == "Cargo.toml" or relative.startswith("assets/"):
             for name in dependent_closure({owner}, packages):
                 add_package(name, value + " affects this package or a dependency")
-            browser_reasons.append(value + " may affect the application or shared test support")
         else:
             manual.append(value)
 
@@ -209,36 +197,12 @@ def selections(paths, packages, exists):
     for name, target in list(rust):
         if target is not None and (name, None) in rust:
             rust[(name, None)].update(rust.pop((name, target)))
-    return rust, (["."] if browser_reasons else sorted(browser)), browser_reasons, manual, omitted
-
-
-def browser_groups(selectors):
-    """Partition literal selectors within the actual browser adapter's argv limits.
-
-    Both argument count and encoded bytes matter. No selector is discarded or
-    replaced with implicit suite-wide coverage merely to fit the command line.
-    """
-    groups = []
-    current = []
-    for selector in selectors:
-        try:
-            test_run_playwright.selection_args(["npx", "playwright", "test", *current, selector])
-        except ValueError:
-            if not current:
-                raise ValueError("a browser selector exceeds the runner's argv limits")
-            groups.append(current)
-            current = [selector]
-            test_run_playwright.selection_args(["npx", "playwright", "test", selector])
-        else:
-            current.append(selector)
-    if current:
-        groups.append(current)
-    return groups
+    return rust, manual, omitted
 
 
 def build_plan(paths, packages, exists, repeat, timeout):
     """Expose commands, widening reasons and finite cost without executing them."""
-    rust, browser, reasons, manual, omitted = selections(paths, packages, exists)
+    rust, manual, omitted = selections(paths, packages, exists)
     commands = []
     for (package, target), why in sorted(rust.items(), key=lambda pair: (pair[0][0], pair[0][1] or "")):
         child = ["cargo", "nextest", "run", "-p", package]
@@ -246,22 +210,8 @@ def build_plan(paths, packages, exists, repeat, timeout):
             child += ["--test", target]
         commands.append({"cwd": ".", "runner": "nextest", "reasons": sorted(why), "child": child,
                          "concurrency": "4 nextest slots; retries 0"})
-    if browser:
-        # Playwright interprets positional file selectors as regular expressions,
-        # so quote filenames rather than letting punctuation change selection.
-        selectors = ["."] if browser == ["."] else [re.escape(path) + "$" for path in browser]
-        groups = browser_groups(selectors)
-        for index, group in enumerate(groups):
-            why = list(reasons or ["changed browser spec files"])
-            if len(groups) > 1:
-                why.append(f"selection partition {index + 1} of {len(groups)} fits runner argv limits")
-            commands.append({"cwd": "e2e", "runner": "playwright", "reasons": why,
-                             "child": ["npx", "playwright", "test", *group],
-                             "concurrency": f"{test_run_playwright.WORKERS} workers, one stack each; "
-                                            "chromium and webkit; retries 0"})
     for command in commands:
-        script = "scripts/hunt-rust-tests.py" if command["runner"] == "nextest" else "../scripts/hunt-browser-tests.py"
-        command["argv"] = ["python3", script, "--repeat", str(repeat), "--timeout", str(timeout),
+        command["argv"] = ["python3", "scripts/hunt-rust-tests.py", "--repeat", str(repeat), "--timeout", str(timeout),
                            "--execute", "--", *command.pop("child")]
         command["shell"] = shlex.join(command["argv"])
         command["maximum_child_command_seconds"] = repeat * timeout

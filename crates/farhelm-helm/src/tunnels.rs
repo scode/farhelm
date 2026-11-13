@@ -251,9 +251,10 @@ fn same_owner(expected: &SessionClaim, current: &SessionClaim) -> bool {
 /// service's port number, and without address reuse.
 ///
 /// Reusing the remote number let a remote service on 7433 sit at
-/// `127.0.0.1:7433`, the standalone helm's default origin, where a browser
-/// that ever signed in to it keeps its helm credential; SPEC.md forbids a
-/// remote host reaching secrets on the helm's machine. And tokio's plain bind
+/// `127.0.0.1:7433`, the standalone helm's default address, which the rule
+/// first guarded because a browser that signed in there kept its helm
+/// credential at that origin (the browser interface is gone now). And
+/// tokio's plain bind
 /// sets `SO_REUSEADDR` outside Windows, which macOS may honor for a
 /// `127.0.0.1` bind beside another program's wildcard listener on the same
 /// port, shadowing it. Reuse stays off for the kernel-chosen bind too: on

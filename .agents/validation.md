@@ -2,9 +2,9 @@
 
 The full "Finishing work" text from the root `AGENTS.md`, moved here with its references rewritten: how to choose
 checks, the inventory of every CI-equivalent check and what it covers, reuse after a rebase, CI and the release
-workflow, and browser end-to-end validation. Read it before choosing validation, running any runtime test, creating or
-updating a PR, merging one, or reporting work as done (`AGENTS.md`, "Tests and validation"). The principles that apply
-to every task are also in that root section, word for word; when you change one copy, change both.
+workflow. Read it before choosing validation, running any runtime test, creating or updating a PR, merging one, or
+reporting work as done (`AGENTS.md`, "Tests and validation"). The principles that apply to every task are also in that
+root section, word for word; when you change one copy, change both.
 
 ## Finishing work
 
@@ -14,9 +14,9 @@ additional reviewer or a review swarm. Report concrete violations of the relevan
 every bullet to appear in every test.
 
 Run `python -B scripts/check-test-sleeps.py` with the isolated interpreter prepared in `docs/test-sleep-check.md` when
-changing Rust or browser tests, their helpers, or the checker. The CI workflow's formatting job runs this source-only
-check and requires zero unannotated delays. A `sleep-ok` reason explains a deliberate observation window, scheduling
-stimulus, or polling interval; it does not replace a readiness oracle or excuse an unverified fixture premise.
+changing Rust tests, their helpers, or the checker. The CI workflow's formatting job runs this source-only check and
+requires zero unannotated delays. A `sleep-ok` reason explains a deliberate observation window, scheduling stimulus, or
+polling interval; it does not replace a readiness oracle or excuse an unverified fixture premise.
 
 Before creating, updating, or merging a PR, or claiming work is done, make a judgment call about what validation would
 add useful evidence. Never mechanically run the entire test battery. A PR, rebase, stack completion, or merge request is
@@ -189,12 +189,7 @@ systemd or SSH substrate ran.
   workspace nextest run; the focused macOS CI job runs it too, in the terminal host step. Portable to macOS except where
   it reads `/proc`. Outside that selection, Linux only and part of the workspace nextest run:
   `cargo nextest run -p farhelm --test e2e -E 'test(terminal_host_cleanup::)'` shows that dropping the e2e suite's
-  in-process harness and its real supervisor process ends a host started in their state directories. The browser stack's
-  cleanup test, `scripts/test-start-stack-cleanup.sh` (by hand, after `cargo build` and the web build, a few minutes;
-  run it when `e2e/start-stack.sh`'s cleanup changes), plants a real host in both state directories of every stack it
-  boots and requires the stack's cleanup to end them, while a host in another stack's live run directory (in the sweep's
-  family, its lock held and backdated past the sweep's grace) survives every phase and a directly observed sweep pass,
-  which must reap a dead canary run beside it.
+  in-process harness and its real supervisor process ends a host started in their state directories.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal runtime' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test terminal_host_runtime -E 'test(/^hosts::terminal::/) | binary(terminal_host_runtime)'`
   — the supervisor's runtime for a terminal in a terminal host (`crates/farhelm-supervisor/src/hosts/terminal.rs`). The
   `hosts::terminal::` unit tests (also part of the `hosts::` selection above) drive it against stand-in hosts in the
@@ -624,37 +619,11 @@ systemd or SSH substrate ran.
   nothing else runs it. Run it when anything under `vendor/gpui-pre*` or `vendor/patches/gpui/` changes; minutes, since
   it builds GPUI on its own.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
-  (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
-  inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
-  in cwd) is the oldest, most version-portable form the test runner has, whereas quoted-glob CLI arguments are newer and
-  CI pins no node version. Run it also when `crates/farhelm-proto/grid-fixtures/` changes: `grid-proto-fixtures.test.js`
-  holds the grid client to those files and fails on a fixture it has no entry for, which `farhelm-proto`'s own tests
-  cannot show.
-- `node --test e2e/tests/helpers/program-input.test.ts` — the decoding the shortcut and dialog specs use to say what a
-  program read from a page's terminal input frames (`e2e/tests/helpers/program-input.ts`): grid keys as the supervisor
-  encodes them by their numeric codes (Shift kept on Enter and Tab; a missing code, or one that disagrees with the key,
-  a token), text messages as their text, anything else as a token that fails an exact comparison, and only the binary
-  frames a page sends recorded. Seconds, no browser. Run it when that module changes.
-- `cd e2e && npx playwright test --config grid-client/playwright.config.ts` — the grid terminal component
-  (`crates/farhelm-ui/assets/grid-*.js`) on a static page fed recorded grid streams (display, input, scrollback,
-  selection and copy, links, paste, history applied in slices), its fit held to the documented formula over the measured
-  character across text sizes and pixel ratios, an unchanged pane keeping its first fit, its copy across a wide
-  character's wrap leaving out the empty edge cell, and `terminal.js`'s plumbing for grid streams against a fake socket
-  (the grid mounted at its own fitted size, the socket URL carrying only that size, the island's test record, page-level
-  listeners removed at unmount, attach, paste and drop interception, link opening, the hyperlink mismatch warning,
-  file-path hovers and downloads, tunnels, reconnect and takeover snapshots, a catch-up ended by a takeover or a close
-  before its marker, a stalled detach that does not reconnect, and typing and pasting clearing the selection), in
-  Chromium and WebKit. No stack and no build: the page and the shipped assets are served through request routing. Needs
-  `npm install` and the browsers from the browser suite's setup below; a few minutes. Not in CI. Run it when the grid
-  assets, `terminal.js`'s grid handling or the fixtures under `crates/farhelm-ui/js-tests/fixtures/grid/` change.
-- `node --experimental-strip-types --test e2e/grid-client/benchmark.test.mts` — the opt-in grid benchmark's frame and
-  Linux process-accounting helpers. Run it when the benchmark changes; it starts no browser. The measurement itself
-  (`e2e/grid-client/BENCHMARK.md`) uses the production Rust grid encoder and shipped grid component, one fresh Chromium
-  or WebKit content process per workload, to report GC-requested resident growth, lifetime highwater, attach bytes and
-  time at 12,000 history lines by 200 columns. It is outside ordinary component-test discovery and has no performance
-  thresholds. Run it for grid encoding or history-storage performance changes, through the generic recorder; preserve
-  matching generated frames and assets for each compared revision and report raw samples beside medians. These
-  static-page measurements establish no helm, SSH or live terminal-host coverage.
+  (PLAN_M6_5.md item 1). Run from inside the directory rather than as a glob from the repo root: node's no-argument
+  default discovery (every `*.test.js` in cwd) is the oldest, most version-portable form the test runner has, whereas
+  quoted-glob CLI arguments are newer and CI pins no node version. Run it also when
+  `crates/farhelm-proto/grid-fixtures/` changes: `grid-proto-fixtures.test.js` holds the grid client to those files and
+  fails on a fixture it has no entry for, which `farhelm-proto`'s own tests cannot show.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
   (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, data that
@@ -710,22 +679,22 @@ systemd or SSH substrate ran.
   in the answering-supervisor leg's state directory. The app's supervisor creates its sessions in terminal hosts, as
   every shipped one does, and the smoke requires every session it creates to be a host row; a session's terminal counts
   as alive while a process listens on the host socket its database row names (`terminal_address`), read from the
-  kernel's socket table. Which session the relaunched window holds open, and that a token rotation left that attachment
-  open, are read from the embedded helm's attachment trace (the `farhelm_helm::terminal_attachments` debug events,
-  turned on through the launches' `RUST_LOG`), and after the supervisor replacement the kept session is attached as a
-  grid viewer through the replacement and a typed command must write its file. API checks retain host-qualified session
-  references; row and scope checks use their local session IDs. The optional coordinate-driven leg is not part of CI; it
-  checks typed input through a file the typed command writes.
+  kernel's socket table. Which session the relaunched window holds open is read from the embedded helm's attachment
+  trace (the `farhelm_helm::terminal_attachments` debug events, turned on through the launches' `RUST_LOG`), and after
+  the supervisor replacement the kept session is attached as a grid viewer through the replacement and a typed command
+  must write its file. API checks retain host-qualified session references; row and scope checks use their local session
+  IDs. The optional coordinate-driven leg is not part of CI; it checks typed input through a file the typed command
+  writes.
 - `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` — optional Linux native appearance integration using the
   ordinary owned Xvfb/openbox setup. Four fresh/stored dark/light cases check native media-query premises, palette
   before renderer content, real Settings choices, private WebKit profile persistence, Inter, embedded assets and the
   same live terminal attachment's input and ordered output. The session's terminal is a grid terminal (every session the
-  app creates runs in a terminal host), and the in-page probe reads it as the browser suite's terminal helpers do: the
-  grid's painted background, its input field for focus, its own paste and grid text messages for typing, and its model
-  for the 512-line burst; a terminal that is not a grid fails it. Retains bounded JSON and one final client screenshot
-  per case. DOM assertions do not prove transient paint correctness; normal appshots provide visual review. No live
-  native system-appearance event, physical keyboard dispatch, throughput or macOS claim. Run through the recorder; the
-  script supplies its own private profile and closed scenario inputs.
+  app creates runs in a terminal host), and the in-page probe reads it the way the removed browser suite's terminal
+  helpers did: the grid's painted background, its input field for focus, its own paste and grid text messages for
+  typing, and its model for the 512-line burst; a terminal that is not a grid fails it. Retains bounded JSON and one
+  final client screenshot per case. DOM assertions do not prove transient paint correctness; normal appshots provide
+  visual review. No live native system-appearance event, physical keyboard dispatch, throughput or macOS claim. Run
+  through the recorder; the script supplies its own private profile and closed scenario inputs.
 - `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` — one optional Linux missing-initialize leg using
   the same builds and owned display. A fixed valid rootless index exercises the creation-time startup deadline before
   App renders. It requires actual hidden native creation, natural refusal with exit 1, the owned supervisor's birth, its
@@ -855,11 +824,10 @@ systemd or SSH substrate ran.
   same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and
-  `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh scripts/tensorlake/run-rust-shard.sh` —
-  the Tensorlake harness's own checks (browser and Rust runners): how projects are balanced into shards, how the
-  snapshot listing is read, which projects a run of the suite has, and archive configuration retaining the scoped
-  prebuilt-Podman setup while removing only the local fixture build. Run them, with `deno check`, when the harness
-  changes; seconds, no sandbox. Using the harness itself is described in `.agents/tensorlake.md`.
+  `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-rust-shard.sh` — the Tensorlake harness's own
+  checks (the Rust runner and its template builder): how the snapshot listing is read, and archive configuration
+  retaining the scoped prebuilt-Podman setup while removing only the local fixture build. Run them, with `deno check`,
+  when the harness changes; seconds, no sandbox. Using the harness itself is described in `.agents/tensorlake.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline
   selection, guest execution, fixed command operations, durable handoffs, compiled checkpoint contracts,
@@ -902,22 +870,3 @@ user asks to publish them, or as part of landing them, never on the agent's own 
 The RELEASE workflow is not on that list: it is generated, runs on tag pushes only, and carries its own gate, which is
 not something to run locally. `releasing/.agents/workflow.md` describes it, the parts of it that CAN be checked locally
 (the changelog checks above among them), and the unsigned-release recovery procedure.
-
-Browser end-to-end validation follows the same judgment and reuse rules, including at merge time. Its CI job is disabled
-(`if: false` in ci.yml), so CI green does not include browser coverage. Assess whether the change leaves a concrete
-browser integration risk untested; choose relevant specs when they cover it, and run the full suite only when the risk
-needs that breadth. Do not start the full suite merely because a PR is about to merge. Documentation-only changes need
-no browser tests, and a minor rebase does not discard existing browser evidence.
-
-When browser validation is warranted, run the selected specs through the recorder on Chromium and WebKit (WebKit stands
-in for the desktop app's engine family). Every run, full or selected, boots three stacks and spreads its (engine, spec
-file) projects over three workers, one stack each (`e2e/stack-slots.ts`), so a selection of a few spec files already
-runs in parallel. Every terminal runs in a terminal host and is drawn by the grid component. Global setup waits for each
-stack's startup session. The full-suite child command is `cd e2e && npx playwright test`. It needs `cargo build` and
-`cd crates/farhelm-ui && dx build --package farhelm-ui --platform web --release` first, because it drives the built web
-UI against a real helm and supervisor, plus a one-time
-`cd e2e && npm install && npx playwright install chromium webkit`. Reuse matching builds and successful test results
-when the intervening diff leaves their coverage intact; see `docs/test-run-evidence.md` for recorded selections.
-
-When the maintainer asks for browser specs to run on Tensorlake sandboxes, read `.agents/tensorlake.md` in full first.
-It splits a selection across several cloud machines at once; it is never the default.

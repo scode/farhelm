@@ -1,10 +1,9 @@
 //! The `farhelm` multi-call binary.
 //!
-//! One artifact carries every role — helm serving and token management,
-//! `supervisor run`, and the hidden `internal` namespace — because
-//! provisioning copies exactly one binary to a host and the launch shim must
-//! exist inside every session without separate installation (SPEC_impl.md,
-//! "CLI").
+//! One artifact carries every role — helm serving, `supervisor run`, and the
+//! hidden `internal` namespace — because provisioning copies exactly one
+//! binary to a host and the launch shim must exist inside every session
+//! without separate installation (SPEC_impl.md, "CLI").
 //! The two in-session commands keep stdout machine-readable, with every
 //! diagnostic on stderr: `farhelm spawn`'s only successful output is the
 //! child id, and `farhelm agent`'s is the listing it was asked for
@@ -1156,16 +1155,11 @@ fn read_agent_prompt(path: &str) -> Result<String, String> {
 
 #[derive(Subcommand)]
 enum HelmCmd {
-    /// Serve the web UI and API on loopback, connected to the registered fleet.
+    /// Serve the API on loopback, connected to the registered fleet.
     Run(farhelm_helm::HelmArgs),
     /// Install (or remove) the systemd user units that run this helm and
     /// its supervisor on this machine.
     Setup(setup::SetupOptions),
-    /// View or rotate the browser bootstrap token on the helm's machine.
-    Token {
-        #[command(subcommand)]
-        command: TokenCmd,
-    },
     /// View or change where fresh checkouts are created (the working-copy
     /// root) and what runs after cloning (an optional post-clone command),
     /// globally or per registered host. Edits stored configuration only:
@@ -1173,22 +1167,6 @@ enum HelmCmd {
     CheckoutConfig {
         #[command(subcommand)]
         command: CheckoutConfigCmd,
-    },
-}
-
-#[derive(Subcommand)]
-enum TokenCmd {
-    /// Print the current token, minting it on first need.
-    Show {
-        /// State directory holding helm.db.
-        #[arg(long)]
-        state_dir: Option<PathBuf>,
-    },
-    /// Replace the token and invalidate every browser device session.
-    Rotate {
-        /// State directory holding helm.db.
-        #[arg(long)]
-        state_dir: Option<PathBuf>,
     },
 }
 
@@ -1721,22 +1699,6 @@ fn main() -> anyhow::Result<()> {
         Cmd::Helm {
             command: HelmCmd::Setup(options),
         } => run_helm_setup(options),
-        Cmd::Helm {
-            command: HelmCmd::Token { command },
-        } => {
-            init_tracing();
-            let runtime = runtime()?;
-            let token = match command {
-                TokenCmd::Show { state_dir } => {
-                    runtime.block_on(farhelm_helm::show_token(state_dir))?
-                }
-                TokenCmd::Rotate { state_dir } => {
-                    runtime.block_on(farhelm_helm::rotate_token(state_dir))?
-                }
-            };
-            println!("{token}");
-            Ok(())
-        }
         Cmd::Helm {
             command: HelmCmd::CheckoutConfig { command },
         } => {
@@ -3083,29 +3045,6 @@ mod tests {
             "farhelm helm setup manages systemd user units and only runs on Linux; on macOS run \
              farhelm-desktop, which starts its own helm and supervisor"
         );
-    }
-
-    /// Both token verbs accept the state directory after the verb, matching
-    /// the command shape the e2e harness and user-facing plan document.
-    #[farhelm_testtrace::test]
-    fn token_cli_parses_show_and_rotate_with_an_explicit_state_dir() {
-        for verb in ["show", "rotate"] {
-            let cli = Cli::try_parse_from([
-                "farhelm",
-                "helm",
-                "token",
-                verb,
-                "--state-dir",
-                "/tmp/farhelm-test-state",
-            ])
-            .unwrap();
-            assert!(matches!(
-                cli.command,
-                Cmd::Helm {
-                    command: HelmCmd::Token { .. }
-                }
-            ));
-        }
     }
 
     /// Every checkout-config verb accepts `--host` and `--state-dir`, and

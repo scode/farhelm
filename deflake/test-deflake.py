@@ -61,23 +61,21 @@ class KnownFlakesFormat(unittest.TestCase):
             "# header comment",
             "",
             "nextest farhelm::e2e agent_relay::a_helm_that_dies  # TODO: relay-helm-death",
-            "playwright terminal-keys.spec.ts plain Enter sends bare CR  # TODO: enter-cr",
             "phase desktop-smoke",
         ])
         ids = D.parse_known_flakes(text)
         self.assertEqual(ids, [
             TestId("nextest", ("farhelm::e2e", "agent_relay::a_helm_that_dies")),
-            TestId("playwright", ("terminal-keys.spec.ts", "plain Enter sends bare CR")),
             TestId("phase", ("desktop-smoke",)),
         ])
         self.assertEqual([TestId.parse(i.line()) for i in ids], ids)
 
-    def test_hash_inside_a_title_is_not_a_comment(self):
-        ids = D.parse_known_flakes("playwright feed.spec.ts row #3 stays put  # slug\n")
-        self.assertEqual(ids, [TestId("playwright", ("feed.spec.ts", "row #3 stays put"))])
+    def test_hash_after_one_space_is_not_a_comment(self):
+        ids = D.parse_known_flakes("nextest farhelm-helm a::b #3  # slug\n")
+        self.assertEqual(ids, [TestId("nextest", ("farhelm-helm", "a::b #3"))])
 
     def test_malformed_lines_are_errors(self):
-        for bad in ["nextest onlybinary", "playwright spec.ts", "phase two words", "bogus x y", "nextest"]:
+        for bad in ["nextest onlybinary", "playwright spec.ts title", "phase two words", "bogus x y", "nextest"]:
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 D.parse_known_flakes(bad)
 
@@ -85,33 +83,23 @@ class KnownFlakesFormat(unittest.TestCase):
 class Exclusions(unittest.TestCase):
     """Exclusion argv must name both binary and test, and must vanish when empty.
 
-    An empty `-E` or `--grep-invert` would either be refused by the recorder or,
+    An empty `-E` would either be refused by the recorder or,
     worse, select nothing, so "no known flakes" has to mean "no extra argv".
     """
 
     def test_nextest_filterset_names_binary_and_test(self):
         ids = [TestId("nextest", ("farhelm::e2e", "a::b")), TestId("nextest", ("farhelm-helm", "c::d")),
-               TestId("playwright", ("x.spec.ts", "t"))]
+               TestId("phase", ("desktop-smoke",))]
         self.assertEqual(D.nextest_exclusion(ids), [
             "-E", "not ((binary_id(=farhelm::e2e) & test(=a::b)) | (binary_id(=farhelm-helm) & test(=c::d)))",
         ])
         self.assertEqual(D.nextest_exclusion([TestId("phase", ("p",))]), [])
 
-    def test_playwright_grep_invert_escapes_titles(self):
-        ids = [TestId("playwright", ("feed.spec.ts", "a (b) rename")), TestId("nextest", ("x", "y"))]
-        argv = D.playwright_exclusion(ids)
-        self.assertEqual(argv[0], "--grep-invert")
-        self.assertIn(r"feed\.spec\.ts .*a\ \(b\)\ rename$", argv[1])
-        self.assertEqual(D.playwright_exclusion([]), [])
-
-
 class ReportParsing(unittest.TestCase):
     """Failed cases come from the runners' reports, never from console heuristics.
 
     Nextest's JUnit names suites by binary id and cases by full path, which is
-    exactly the pair the exclusion filterset needs. Playwright's JSON reports
-    one entry per project for the same case; the id must be engine-agnostic so
-    a flake is excluded from both engines, with the engine kept on the side.
+    exactly the pair the exclusion filterset needs.
     """
 
     def test_nextest_junit_failures(self):
@@ -126,18 +114,6 @@ class ReportParsing(unittest.TestCase):
   </testsuite>
 </testsuites>"""
         self.assertEqual(D.nextest_failures(junit), [TestId("nextest", ("farhelm::e2e", "a::fails"))])
-
-    def test_playwright_json_failures_merge_engines(self):
-        report = {"suites": [{"file": "feed.spec.ts", "suites": [{"title": "d", "specs": [
-            {"title": "t1", "file": "feed.spec.ts", "tests": [
-                {"projectName": "chromium-feed", "status": "expected", "results": [{"status": "passed"}]},
-                {"projectName": "webkit-feed", "status": "unexpected",
-                 "results": [{"status": "failed", "error": {"message": "expect failed"}}]},
-            ]},
-        ]}]}]}
-        self.assertEqual(D.playwright_failures(report), [
-            (TestId("playwright", ("feed.spec.ts", "t1")), "webkit-feed", "expect failed"),
-        ])
 
     def test_nextest_excerpt_takes_final_reprint(self):
         output = "\n".join([
@@ -230,20 +206,6 @@ class ClassificationEvidence(unittest.TestCase):
                     self.assertEqual(D.classification_verdict(results), 'deterministic' if actual else 'unclassified')
             self.assertFalse(D.rerun_conclusion(selected, 125, None)[0])
             self.assertTrue(D.rerun_conclusion(selected, 0, None)[0])
-
-    def test_playwright_failures_need_the_matching_selected_identity(self):
-        """The selected browser case must be in its own rerun report, regardless of engine."""
-        selected = TestId('playwright', ('fixture.spec.ts', 'selected'))
-        with tempfile.TemporaryDirectory() as tmp:
-            evidence = pathlib.Path(tmp)
-            report = evidence / 'playwright.json'
-            for title, conclusive in (('other', False), ('selected', True)):
-                report.write_text(json.dumps({'suites': [{'file': 'fixture.spec.ts', 'specs': [
-                    {'title': title, 'tests': [{'status': 'unexpected', 'projectName': 'webkit'}]},
-                ]}]}))
-                self.assertEqual(D.rerun_conclusion(selected, 1, evidence)[0], conclusive)
-            report.write_text('[]')
-            self.assertFalse(D.rerun_conclusion(selected, 1, evidence)[0])
 
     def test_pass_wins_but_incomplete_failures_do_not(self):
         """Early stop and inconclusive attempts cannot become deterministic; one pass suffices."""

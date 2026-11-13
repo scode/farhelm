@@ -24,6 +24,9 @@ mod agent_endpoints;
 pub mod assets;
 mod backend;
 pub(crate) mod credential_delivery;
+/// A filesystem-controlled provisioning backend for unit tests. The removed
+/// browser suite also enabled it at runtime through an environment variable.
+#[cfg(test)]
 mod e2e;
 mod http;
 mod installation;

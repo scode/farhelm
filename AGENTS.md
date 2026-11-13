@@ -173,8 +173,8 @@ A repo-wide rename, sweep or cleanup leaves these alone; each changes only under
 
 - `lore/`: historical artifacts, decision records written when the decision was made, never updated to track code
   changes (`lore/AGENTS.md`).
-- Published releases' `CHANGELOG.md` sections, `website/src/release-notes/*.json`, and the release shots and their tests
-  are never touched by a refresh, a sweep, or a cleanup, only by a task that targets them.
+- Published releases' `CHANGELOG.md` sections, `website/src/release-notes/*.json`, and the published release shots are
+  never touched by a refresh, a sweep, or a cleanup, only by a task that targets them.
 - `TRIAGE_OUTCOMES.md` and `TRIAGE_OUTCOMES_ARCHIVE.md` records (an entry still graduates to the archive per
   `review_feedback_queue/AGENTS.md`, "Lifecycle"), older `FLAKES.md` entries, and `plans/`, which has its own editing
   rules (`plans/AGENTS.md`).
@@ -231,7 +231,7 @@ fields.
 For changes to tests or their fixtures, apply `.agents/test-authoring.md` during authoring and supply its full text
 verbatim to the independent reviewer. Use the review process selected for the task; this checklist does not request an
 additional reviewer or a review swarm. Run `python -B scripts/check-test-sleeps.py` with the isolated interpreter
-prepared in `docs/test-sleep-check.md` when changing Rust or browser tests, their helpers, or the checker.
+prepared in `docs/test-sleep-check.md` when changing Rust tests, their helpers, or the checker.
 
 Before creating, updating, or merging a PR, or claiming work is done, make a judgment call about what validation would
 add useful evidence. Never mechanically run the entire test battery. A PR, rebase, stack completion, or merge request is
@@ -251,17 +251,15 @@ When investigating a failing, flaky, or suspicious test, reproduce it with the n
 widen only when the narrow run will not reproduce; read `.agents/narrow-tests.md` first.
 
 The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
-`gh pr ready`, nor a merge to main starts a run. Browser end-to-end validation's CI job is disabled (`if: false` in
-ci.yml), so CI green does not include browser coverage. PRs are still opened as drafts and marked ready when the user
-asks to publish them, or as part of landing them, never on the agent's own initiative. Landing is authorized where a
-flow's own file says so: plan landing, approved planning PRs, abandoned-plan source updates, release fix forward, the
-stable release's changelog and finalization PRs, its screenshot PR after the maintainer confirms the release is good and
-going out, a stable re-cut's changelog PR, an RC's announcements PR, run-all-tests fixes, the todo flow.
+`gh pr ready`, nor a merge to main starts a run. PRs are still opened as drafts and marked ready when the user asks to
+publish them, or as part of landing them, never on the agent's own initiative. Landing is authorized where a flow's own
+file says so: plan landing, approved planning PRs, abandoned-plan source updates, release fix forward, the stable
+release's changelog and finalization PRs, its screenshot PR after the maintainer confirms the release is good and going
+out, a stable re-cut's changelog PR, an RC's announcements PR, run-all-tests fixes, the todo flow.
 
-- Before choosing validation, running any runtime test (Rust, browser, JS, installer, provisioning), creating or
-  updating a PR, merging one, or reporting a change to the repository's files as done, read `.agents/validation.md` and
-  `.agents/test-evidence.md` in full (the inventory, the pinned nextest setup, the recorder's arguments, the browser
-  engines).
+- Before choosing validation, running any runtime test (Rust, JS, installer, provisioning), creating or updating a PR,
+  merging one, or reporting a change to the repository's files as done, read `.agents/validation.md` and
+  `.agents/test-evidence.md` in full (the inventory, the pinned nextest setup, the recorder's arguments).
 - When changing either workflow (`ci.yml`, or the release workflow through `release.yml`, `dist-workspace.toml` or
   `.github/dist-build-setup.yml`), a check or test script, or the deflake sweep's phases, update the inventory in
   `.agents/validation.md` and the lists in `.agents/run-all-tests.md` in the same change.
@@ -284,10 +282,9 @@ Before creating, editing or deleting anything under these paths, read the file n
 - `crates/farhelm-supervisor/tests/fixtures/screens/`: `docs/agent-screen-fixtures.md`.
 - `crates/terminal-host/`: `crates/terminal-host/SPEC.md` (running hosts outlive every release; its "Change policy").
 - `packaging/farhelm-desktop/`, `website/src/assets/intro/`, `docs/readme-hero/`, `docs/readme-video/`,
-  `docs/docs-shots/`, `e2e/readme-hero/`, `e2e/readme-video/`, `e2e/docs-shots/`, `scripts/readme-screenshot.sh`,
-  `scripts/publish-readme-hero.sh`, `scripts/readme-video.sh`, `scripts/docs-screenshots.sh`,
-  `scripts/publish-docs-shots.sh`: `.agents/docs-media.md`.
-- `.github/workflows/`, `scripts/`, `e2e/`, any test: `.agents/validation.md`.
+  `docs/docs-shots/`, `scripts/readme-screenshot.sh`, `scripts/publish-readme-hero.sh`, `scripts/readme-video.sh`,
+  `scripts/docs-screenshots.sh`, `scripts/publish-docs-shots.sh`: `.agents/docs-media.md`.
+- `.github/workflows/`, `scripts/`, any test: `.agents/validation.md`.
 - `vendor/`: `vendor/README.md` (never edit the upstream trees there without their patch files).
 
 ## Flows
@@ -337,8 +334,9 @@ Each entry: trigger phrases, the file to read in full before the first action, a
   main work changes the docs, start the preview and hand over page links when reporting, without being asked; unattended
   runs and incidental docs edits start no preview server and name the changed page instead.
 - **Screenshots, demo video, brand marks** ("refresh the README screenshot", "refresh the demo video", "refresh the docs
-  screenshots", anything showing Farhelm's icon or name as a mark): `.agents/docs-media.md`. Fence: only the publish
-  scripts push the screenshot refs; never commit a captured screenshot on main; never hand-edit the wordmark SVGs.
+  screenshots", anything showing Farhelm's icon or name as a mark): `.agents/docs-media.md`. The three refreshes are
+  unavailable until rebuilt for the GPUI app: they drove the removed browser UI. Fence: only the publish scripts push
+  the screenshot refs; never commit a captured screenshot on main; never hand-edit the wordmark SVGs.
 - **Agent screens** ("re-capture agent screens", checking a new claude or codex against status detection):
   `docs/agent-screen-fixtures.md`. Fence: it spends real vendor turns; only when asked or after an agent upgrade.
 - **Desktop or web UI bug reports**: before investigating one, read `docs/desktop-web-triage.md`.

@@ -265,9 +265,6 @@ class Inventory:
                 # both layouts are producer-owned, never manifest-selected.
                 present = (regular_beneath(fd, ("nextest", "default", "junit.xml"), 16 * 1024 * 1024)
                            or regular_beneath(fd, ("nextest-junit.xml",), 16 * 1024 * 1024))
-            elif name == "playwright":
-                present = (regular_beneath(fd, ("playwright.json",), 16 * 1024 * 1024)
-                           and regular_beneath(fd, ("playwright-policy.json",), 64 * 1024))
             else:
                 present = None
             summary["raw_report_retention"] = "unrequested" if present is None else "present_unverified" if present else "missing_or_invalid"

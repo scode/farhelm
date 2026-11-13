@@ -6,8 +6,7 @@
 //! script cannot start one by itself; and a test process must not fork one
 //! (a host daemonizes from a fork). This verb is the supervisor's own spawn
 //! (`farhelm_supervisor::hosts::spawn_host`) behind a command line, used by
-//! `scripts/test-start-stack-cleanup.sh`, the desktop smoke and the e2e
-//! suite's `terminal_host_cleanup` tests. It starts the host the supervisor's way
+//! the desktop smoke and the e2e suite's `terminal_host_cleanup` tests. It starts the host the supervisor's way
 //! (same program, same socket directory, same readiness), so a host it
 //! starts is indistinguishable, to a cleanup, from one a supervisor started.
 //!

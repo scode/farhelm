@@ -2,7 +2,7 @@
 /**
  * Runs a locally built nextest archive of Farhelm's Rust tests across Tensorlake sandboxes, one hash partition per
  * sandbox. Not the default way to test: use it only when the maintainer asks for Tensorlake (`.agents/tensorlake.md`).
- * The browser suite has its own runner beside this file, `sandbox-tests.ts`, whose template, ledger and sweep this one
+ * The template it clones is built by `sandbox-tests.ts make-template` beside this file, whose ledger and sweep this one
  * shares.
  *
  * The sandboxes have no Rust toolchain, so the tests are built here (`cargo nextest archive`) and only run there. That
@@ -23,7 +23,7 @@
  *       --archive <file> --out <dir> [--staged <snapshot>] [--repo <checkout>] [-- <nextest filter arguments>]
  * Build the archive first, from an empty working copy of the revision under test, with the pinned nextest on PATH:
  *   cargo nextest archive --locked [-p <package> ...] --archive-file <file>
- * and `cargo build` beforehand, so target/debug/farhelm-fixtures matches. Use a `--scratch` of its own when a browser
+ * and `cargo build` beforehand, so target/debug/farhelm-fixtures matches. Use a `--scratch` of its own when another
  * run is going at the same time: each run's sweep terminates every live sandbox in its scratch's ledger.
  */
 import $ from "jsr:@david/dax@0.50.1";

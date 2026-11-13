@@ -64,7 +64,15 @@ if [ -n "$setup_error" ]; then
   cat "$OUT/summary.txt"
   exit 1
 fi
-# --- self-ssh on a port of its own, as the browser shards do (scripts/tensorlake/run-shard.sh explains why not 22).
+# --- self-ssh
+# The ssh-to-localhost tests reach a second supervisor with plain `ssh localhost`, so the OpenSSH client must reach an
+# sshd that takes tl-user's key. Port 22 cannot be relied on for that: on clones that boot systemd (observed November
+# 2026) something other than the image's sshd already listens on 0.0.0.0:22, so ssh.socket fails to start, and that
+# listener presents its own host key and refuses tl-user's key ("Permission denied (publickey)"). The shard therefore
+# starts the image's sshd on a port of its own and points the client's `localhost` and `127.0.0.1` at it through
+# ~/.ssh/config, which `ssh localhost` honors. Earlier entries for those names are dropped from known_hosts first: a
+# template's file can hold keys from an earlier boot, and ssh refuses on a stale entry rather than trying an appended
+# one. The scan uses `-4` because `ssh-keyscan localhost` would otherwise try ::1 alone.
 SELF_SSH_PORT=2222
 sudo -n mkdir -p /run/sshd
 ss -ltn "sport = :$SELF_SSH_PORT" | grep -q LISTEN || sudo -n /usr/sbin/sshd -p "$SELF_SSH_PORT"

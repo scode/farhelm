@@ -41,11 +41,10 @@ class SleepCheckerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             (root / 'crates').mkdir()
-            (root / 'e2e/tests').mkdir(parents=True)
             target = root / 'fixture'
             target.mkdir()
-            (target / 'example.ts').write_text('setTimeout(cb, 1);')
-            link = root / 'e2e/tests/linked'
+            (target / 'example.rs').write_text('fn scenario() { sleep(d); }')
+            link = root / 'crates/linked'
             for destination in (target, root / 'missing'):
                 link.symlink_to(destination, target_is_directory=True)
                 result = subprocess.run([sys.executable, '-B', checker.__file__, '--root', str(root)],
@@ -53,21 +52,6 @@ class SleepCheckerTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 2, result.stderr)
                 self.assertIn('uninspected symlink', result.stderr)
                 link.unlink()
-
-    def test_linked_e2e_parent_is_not_followed(self):
-        """Starting inventory at e2e/tests must not skip the no-follow check for its fixed parent."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = pathlib.Path(temporary) / 'checkout'
-            (root / 'crates').mkdir(parents=True)
-            outside = pathlib.Path(temporary) / 'outside'
-            (outside / 'tests').mkdir(parents=True)
-            (outside / 'tests/example.ts').write_text('// sleep-ok: observation\nsetTimeout(cb, 1);')
-            (root / 'e2e').symlink_to(outside, target_is_directory=True)
-            result = subprocess.run([sys.executable, '-B', checker.__file__, '--root', str(root), '--inventory'],
-                                    capture_output=True, text=True, timeout=5)
-            self.assertEqual(result.returncode, 2, result.stderr)
-            self.assertIn('incomplete check', result.stderr)
-            self.assertEqual(result.stdout, '')
 
     def test_nested_tests_directory_is_not_a_crate_root(self):
         """External test helpers keep their module-relative child path even beneath a tests directory."""
@@ -135,7 +119,6 @@ class SleepCheckerTest(unittest.TestCase):
             root = pathlib.Path(temporary)
             source = root / 'crates/sample/tests/example.rs'
             source.parent.mkdir(parents=True)
-            (root / 'e2e/tests').mkdir(parents=True)
             for content, expected in (
                 ('fn scenario() { sleep(d); }', 1),
                 ('fn scenario() {\n // sleep-ok: observe the absence window\n sleep(d);\n}', 0),
@@ -157,7 +140,6 @@ class SleepCheckerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             (root / 'crates').mkdir()
-            (root / 'e2e/tests').mkdir(parents=True)
             target = root / 'outside.rs'
             target.write_text('fn helper() {}')
             linked = root / 'crates/linked.rs'

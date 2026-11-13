@@ -721,11 +721,6 @@ pub(crate) struct Harness {
     pub(crate) manager: Arc<ConnectionManager>,
     pub(crate) fleet: Arc<ScriptedFleet>,
     pub(crate) state: Arc<AppState>,
-    /// The credential used by [`Self::router`] and [`Self::serve`] by default:
-    /// a browser credential persisted in `helm.db` on a standalone fixture,
-    /// or an in-memory embedded credential after [`Self::embedded`]. The
-    /// explicit unauthenticated variants expose the enforcement boundary.
-    device_secret: String,
     port: u16,
     /// Declared LAST so it is dropped last — see this struct's own docs.
     _dir: tempfile::TempDir,
@@ -828,14 +823,27 @@ impl Harness {
     /// drives.
     pub(crate) fn router(&self) -> axum::Router {
         authenticated_router(
-            crate::build_router(Arc::clone(&self.state), crate::UiSource::None, self.port),
-            self.device_secret.clone(),
+            crate::build_router(Arc::clone(&self.state), self.port),
+            self.device_secret(),
         )
+    }
+
+    /// A device credential the current `state` accepts, minted on each call.
+    ///
+    /// Minted rather than stored because credentials live only in the
+    /// `AuthState` that minted them, and tests replace `state` (a restart,
+    /// [`Self::embedded`], an injected provisioning service): a stored secret
+    /// from the old state would be refused with 401 by the new one.
+    fn device_secret(&self) -> String {
+        self.state
+            .auth
+            .mint_device()
+            .expect("mint the harness device credential")
     }
 
     /// The real router without the harness's synthetic device secret.
     pub(crate) fn unauthenticated_router(&self) -> axum::Router {
-        crate::build_router(Arc::clone(&self.state), crate::UiSource::None, self.port)
+        crate::build_router(Arc::clone(&self.state), self.port)
     }
 
     /// Reuse this fixture's fleet and store with the embedded helm boundary.
@@ -843,8 +851,8 @@ impl Harness {
     /// CORS tests need the same router shape the desktop window uses: custom
     /// webview origins are admitted only in embedded mode, while the fixture
     /// still supplies the real manager, provisioning service, and clipboard
-    /// sink it had before the mode switch. The old stored device row remains
-    /// in the database deliberately; embedded authentication must ignore it.
+    /// sink it had before the mode switch. The new state mints its own
+    /// credential, so the standalone fixture's one stops working.
     /// This is a terminal mode switch for the fixture: [`Self::restart_with`]
     /// intentionally rebuilds standalone state and therefore must not follow
     /// this call.
@@ -868,13 +876,7 @@ impl Harness {
         state.feedback = old_state.feedback.clone();
         state.tensorlake = old_state.tensorlake.clone();
         state.podman = old_state.podman.clone();
-        let state = Arc::new(state);
-        let device_secret = state
-            .auth
-            .mint_embedded_device()
-            .expect("mint the embedded fixture credential");
-        self.state = state;
-        self.device_secret = device_secret;
+        self.state = Arc::new(state);
         self
     }
 
@@ -891,8 +893,8 @@ impl Harness {
             .expect("bind loopback");
         let addr = listener.local_addr().expect("local addr");
         let app = authenticated_router(
-            crate::build_router(Arc::clone(&self.state), crate::UiSource::None, addr.port()),
-            self.device_secret.clone(),
+            crate::build_router(Arc::clone(&self.state), addr.port()),
+            self.device_secret(),
         );
         self.served.push(ServerGuard(tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
@@ -907,7 +909,7 @@ impl Harness {
             .await
             .expect("bind loopback");
         let addr = listener.local_addr().expect("local addr");
-        let app = crate::build_router(Arc::clone(&self.state), crate::UiSource::None, addr.port());
+        let app = crate::build_router(Arc::clone(&self.state), addr.port());
         self.served.push(ServerGuard(tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         })));
@@ -987,6 +989,9 @@ impl Harness {
     /// The scripted fleet is shared between the two, deliberately: the
     /// "hosts" are the far side of the network and do not restart just
     /// because the helm did.
+    ///
+    /// The restarted helm's state mints its own device credentials, as a
+    /// real restart would (see [`Self::device_secret`]).
     pub(crate) async fn restart_with(self, rescript: impl FnOnce(&ScriptedFleet)) -> Harness {
         assert_eq!(
             self.state.mode,
@@ -1000,7 +1005,6 @@ impl Harness {
             manager,
             fleet,
             state,
-            device_secret,
             port,
             _dir,
         } = self;
@@ -1044,23 +1048,23 @@ impl Harness {
         )
         .await
         .expect("start the restarted manager");
+        let state = Arc::new(AppState {
+            feedback,
+            ..AppState::new(
+                Arc::clone(&manager),
+                store.clone(),
+                tensorlake,
+                None,
+                _dir.path().to_path_buf(),
+                sources,
+                crate::ServingMode::Standalone,
+            )
+            .expect("build restarted app state")
+        });
         Harness {
             served: Vec::new(),
             store: store.clone(),
-            state: Arc::new(AppState {
-                feedback,
-                ..AppState::new(
-                    Arc::clone(&manager),
-                    store.clone(),
-                    tensorlake,
-                    None,
-                    _dir.path().to_path_buf(),
-                    sources,
-                    crate::ServingMode::Standalone,
-                )
-                .expect("build restarted app state")
-            }),
-            device_secret,
+            state,
             manager,
             fleet,
             port,
@@ -1482,16 +1486,10 @@ impl FleetBuilder {
             .expect("build harness app state")
         };
         let state = Arc::new(state);
-        let device_secret = state
-            .auth
-            .mint_device()
-            .await
-            .expect("mint the harness device session");
         Harness {
             served: Vec::new(),
             store: state.store.clone(),
             state,
-            device_secret,
             manager,
             fleet: self.fleet,
             port: self.port,

@@ -1,5 +1,5 @@
-//! The explicit filesystem-controlled backend lets browser tests exercise the
-//! shipped provisioning orchestration without changing its HTTP or state path.
+//! The explicit filesystem-controlled backend lets tests exercise the shipped
+//! provisioning orchestration without changing its HTTP or state path.
 
 use super::backend::{
     ActionOutcome, BackendFailure, HostPath, PreparedPayload, ProbeObservation, ProbeTarget,
@@ -18,13 +18,12 @@ use tokio::io::AsyncWriteExt;
 pub(super) const E2E_BACKEND_ENV: &str = "FARHELM_E2E_PROVISIONING_BACKEND_DIR";
 const E2E_BACKEND_MARKER: &str = "farhelm-e2e-provisioning-v1\n";
 
-/// One explicit, filesystem-controlled backend used only by Playwright.
+/// One explicit, filesystem-controlled backend for unit tests.
 ///
-/// This is runtime gated because the E2E suite drives the ordinary debug
-/// binary, not a `cfg(test)` executable. Enabling it requires both the
-/// unmistakably test-named environment variable and a marker inside the
-/// helm's private state directory. Startup prints a warning before serving.
-/// The seam ends at [`ProvisioningBackend`]: HTTP routing, authentication,
+/// The removed browser suite enabled it at runtime in the ordinary debug
+/// binary through an environment variable; now only tests construct it, and
+/// it still requires a marker inside the helm's private state directory. The
+/// seam ends at [`ProvisioningBackend`]: HTTP routing, authentication,
 /// one-use plans, registration, progress retention, and feed bumps remain the
 /// shipped implementation.
 pub(super) struct E2eProvisioningBackend {
@@ -219,9 +218,11 @@ impl E2eProvisioningBackend {
                     "the E2E control file held the action for 30 seconds",
                 ));
             }
+            // sleep-ok: the fake polls a control file a test edits; a file has no wakeup to wait on.
             tokio::time::sleep(Duration::from_millis(20)).await;
         };
         if behavior.action_delay_ms != 0 {
+            // sleep-ok: a configured action delay is the stimulus a test asked the fake to inject.
             tokio::time::sleep(Duration::from_millis(behavior.action_delay_ms.min(30_000))).await;
         }
         if behavior.fail_action.as_deref() == Some(label) {

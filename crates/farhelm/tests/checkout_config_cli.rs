@@ -17,8 +17,7 @@ const V26_FIXTURE: &str = "tests/fixtures/helm-v26.db";
 
 /// Run the real binary with an explicit `--state-dir`, capturing all output.
 /// The state-dir flag is appended AFTER the verb, matching the per-verb
-/// grammar the token commands established (`farhelm helm token show
-/// --state-dir ...`).
+/// grammar the helm's offline commands use.
 fn checkout_config(state_dir: &Path, args: &[&str]) -> (bool, String, String) {
     let mut argv = vec!["helm", "checkout-config"];
     argv.extend_from_slice(args);

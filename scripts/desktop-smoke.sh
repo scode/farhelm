@@ -270,8 +270,8 @@ PY
 # for a terminal in a terminal host: such a host serves only its supervisor,
 # so nothing outside it can list a terminal's clients. Open
 # attachments rather than a running count, so that an attachment that came
-# and went (the page moving on to another session, a socket closed by a
-# rotation) does not count as one the page still holds.
+# and went (the page moving on to another session, a closed socket) does not
+# count as one the page still holds.
 open_agent_attachments() {
   python3 - "$1" "$2" <<'PY'
 import re, sys
@@ -285,15 +285,6 @@ with open(log, errors="replace") as lines:
             open_count += 1 if match.group(1) == "attached" else -1
 print(open_count)
 PY
-}
-# How many `terminal attached` events for session $2's agent terminal log $1
-# holds, open or not: what tells a socket that closed and came back from one
-# that stayed, alongside `open_agent_attachments`. `terminal=agent` may end the
-# line (the event carries no field after it), and a tab's value never starts
-# with `agent`, so no trailing delimiter is needed.
-agent_attachment_starts() {
-  sed 's/\x1b\[[0-9;]*m//g' "$1" |
-    grep -cF "farhelm_helm::terminal_attachments: terminal attached session=$2 terminal=agent"
 }
 # Type `printf smoke-typed-ok >$3` and Enter into session $1's agent terminal
 # through the embedded helm at $2 (http://host:port) as a viewer that can draw
@@ -397,7 +388,6 @@ PY
 TEARDOWN_DONE=""
 SID="" # set once the create-form phase produces a session; read by teardown
 SID_NEWEST="" # second restart fixture; empty during the interaction-only create
-SID_ROTATED="" # post-rotation fixture: proves native REST still works; read by teardown
 SID_KEPT="" # held across the supervisor replacement to prove sessions survive it; read by teardown
 # The helm's API IDs include their host entry; systemd scopes belong to this
 # run's local supervisor and contain only the session component.
@@ -545,7 +535,6 @@ teardown() {
   # the request itself takes a little over 5 s; see the cleanup below.
   [ -n "$SID" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID" >/dev/null 2>&1
   [ -n "$SID_NEWEST" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID_NEWEST" >/dev/null 2>&1
-  [ -n "$SID_ROTATED" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID_ROTATED" >/dev/null 2>&1
   [ -n "$SID_KEPT" ] && [ -s "$CURL_AUTH_CONFIG" ] && curl_auth -s --max-time 30 -X DELETE "$API/api/sessions/$SID_KEPT" >/dev/null 2>&1
 
   for p in desktop openbox xvfb; do
@@ -1402,60 +1391,11 @@ for _ in $(seq 1 30); do
 done
 [ -n "$SESSION_REDISCOVERED" ] || fail "the restarted app did not rediscover the surviving session"
 
-# The RESTARTED process must prove the client-log pipeline too, before the
-# rotation below: a regression that left logging dead after every ordinary
-# app restart would otherwise slip past all the other restart assertions.
+# The RESTARTED process must prove the client-log pipeline too: a regression
+# that left logging dead after every ordinary app restart would otherwise slip
+# past all the other restart assertions.
 echo "== waiting for the restarted app's client-log marker"
 wait_for_client_log_marker "$X/desktop-restart.log"
-
-echo "== rotating the token: the internal desktop credential carries on"
-# Rotation still changes the durable token used by a standalone helm, but the
-# desktop's per-launch credential is in memory and deliberately outside that
-# authority. The webview must not re-authenticate, and its terminal socket must
-# remain the same socket after rotation: the attachment trace shows no end and
-# no new attachment for the remembered session across the window below (a
-# closed socket reports its end, and the page's reconnect a new attachment).
-PAGE_OPEN_BEFORE=$(open_agent_attachments "$X/desktop-restart.log" "$SID")
-PAGE_STARTS_BEFORE=$(agent_attachment_starts "$X/desktop-restart.log" "$SID")
-[ "$PAGE_OPEN_BEFORE" -ge 1 ] ||
-  fail "test premise: the page has no open attachment to the remembered session before rotation"
-"$BUILT_FARHELM" helm token rotate --state-dir "$X/state" >/dev/null || fail "rotating desktop helm token"
-ROTATED_STATUS=$(curl_auth -s -o /dev/null -w '%{http_code}' --max-time 5 "$API/api/hosts")
-[ "$ROTATED_STATUS" = 200 ] || fail "rotation revoked the desktop's native credential (status $ROTATED_STATUS)"
-# An observation window rather than a readiness wait: the claim is that
-# nothing happens, so the script has to give the old behavior (a webview
-# re-authentication within a second or two of rotation) time to show up.
-sleep 5
-AFTER_ROTATION_GENERATION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("webview_auth_generation") or 0)' "$X/state/desktop-client.json")
-[ "$AFTER_ROTATION_GENERATION" = "$RESTART_WEBVIEW_GENERATION" ] ||
-  fail "rotation made the webview authenticate again (generation $RESTART_WEBVIEW_GENERATION -> $AFTER_ROTATION_GENERATION)"
-PAGE_OPEN_AFTER=$(open_agent_attachments "$X/desktop-restart.log" "$SID")
-PAGE_STARTS_AFTER=$(agent_attachment_starts "$X/desktop-restart.log" "$SID")
-[ "$PAGE_OPEN_AFTER/$PAGE_STARTS_AFTER" = "$PAGE_OPEN_BEFORE/$PAGE_STARTS_BEFORE" ] ||
-  fail "rotation closed or replaced the page's terminal socket (open/started before: $PAGE_OPEN_BEFORE/$PAGE_STARTS_BEFORE, after: $PAGE_OPEN_AFTER/$PAGE_STARTS_AFTER)"
-ROTATED_ROWS=$(device_rows)
-[ "$ROTATED_ROWS" = 0 ] || fail "rotation left $ROTATED_ROWS device rows instead of none"
-assert_no_persisted_credentials "rotation"
-# And the app's own native client is still authenticated: a new session makes
-# the page list sessions again over native REST, and the smoke hook logs a
-# listing only once the helm has answered it with success. Counting answered
-# lines (rather than waiting for a fixed one) is what pins the answer to
-# after the rotation.
-ANSWERED_BEFORE=$(grep -c '^desktop_smoke: session listing answered ' "$X/desktop-restart.log")
-ROTATED_BODY=$(python3 -c 'import json,sys; print(json.dumps({"cwd": sys.argv[1], "command": {"command": "bash", "yolo": False}, "title": "zzz-after-rotation"}))' "$X/work") || fail "encoding the post-rotation session"
-SID_ROTATED=$(curl_auth -sf --max-time 10 -H 'content-type: application/json' -d "$ROTATED_BODY" "$API/api/sessions" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || fail "creating the post-rotation session"
-expect_host_terminal "${SID_ROTATED#*:}"
-NATIVE_ANSWERED=""
-for _ in $(seq 1 30); do
-  if [ "$(grep -c '^desktop_smoke: session listing answered ' "$X/desktop-restart.log")" -gt "$ANSWERED_BEFORE" ]; then
-    NATIVE_ANSWERED=1
-    break
-  fi
-  sleep 1
-done
-[ -n "$NATIVE_ANSWERED" ] || fail "no native session listing succeeded after rotation (see $X/desktop-restart.log)"
-curl_auth -sf --max-time 30 -X DELETE "$API/api/sessions/$SID_ROTATED" >/dev/null || fail "cleaning up the post-rotation session"
-SID_ROTATED=""
 
 WID=""
 for _ in $(seq 1 20); do

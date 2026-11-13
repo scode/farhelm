@@ -1,30 +1,13 @@
 # Known flakes the deflake sweep excludes, one test per line, in the
 # `deflake/bin/deflake` TestId line format:
 #   nextest <binary id> <full test name>      # <slug naming the TODO.md entry>
-#   playwright <spec file> <leaf title>       # <slug naming the TODO.md entry>
 #   phase <phase name>                        # <slug naming the TODO.md entry>
 # A comment starts at a `#` at the start of the line or after two or more
-# spaces; a `#` after one space is part of a Playwright title.
+# spaces; a `#` after one space is part of the id.
 # Every entry pairs with a TODO.md Deflake entry; when that entry is removed,
 # remove this line in the same PR. See deflake/SPEC.md.
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
 
-playwright sidebar.spec.ts visit history chooses and remembers the next session after row deletion  # visit-history-stopped-session-error
-playwright header.spec.ts native tunnel preview keeps ports and actions inside a 650px pane  # native-tunnel-preview-webkit-budget
-playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 1000  # trash-dialog-pagedown
-playwright trash-dialog.spec.ts trash header and global confirmation remain reachable at width 360  # trash-dialog-pagedown
-playwright terminal-multihost.spec.ts create-intent-key-rebinds-on-host-change: a new target is a new intent  # launcher-yolo-question-webkit
-playwright terminal-multihost.spec.ts create-intent-key-rebinds-on-retarget: a moved host is a new intent  # launcher-yolo-question-webkit
-playwright terminal-create-idempotency.spec.ts editing the working directory after a failed create mints a new intent key  # launcher-yolo-question-webkit
-playwright provisioning.spec.ts changed-host advice while following: identity  # update-progress-step-name-late
-playwright provisioning.spec.ts a first identity learned while following: replacement  # update-progress-step-name-late
-playwright provisioning.spec.ts a first identity learned while following: completion  # update-progress-step-name-late
-playwright provisioning.spec.ts incarnation churn keeps a followed run while a target change detaches it  # update-progress-step-name-late
-playwright provisioning.spec.ts a progress read failure during an update recovers on retry demand alone  # update-progress-step-name-late
-playwright provisioning.spec.ts changed-host advice while following: destination  # update-progress-step-name-late
 nextest farhelm::e2e create_idempotency::a_crash_before_the_outcome_commit_still_replays_the_same_session  # crash-retry-delete-user-manager-silent
 nextest farhelm-supervisor service::core::tests::a_failed_create_replays_its_error_and_a_changed_override_conflicts  # failed-create-replay-timeout
-playwright stop-tabs.spec.ts bulk Stop carries each target's tab precondition with skip false  # stop-tabs-bulk-list-stale
-playwright tensorlake-lifecycle.spec.ts a suspended session banner resumes its host  # tensorlake-banner-route-after-cleanup
-playwright restart-replace-progress.spec.ts header progress keeps controls inside a 650px pane with a long host  # long-host-header-progress-route

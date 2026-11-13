@@ -66,10 +66,8 @@
 //! match, so a supervisor from before protocol 77, which could still stream
 //! an old terminal as bytes, fails the handshake as Needs update.
 
-use crate::auth::AuthenticatedSocket;
 use crate::sessions::{default_cols, default_rows, resolve_session_ref, route_active_session};
 use crate::{AppState, SupervisorClient, SupervisorError, TermEvent, TermStream};
-use axum::Extension;
 use axum::extract::{Path as AxPath, Query, State, WebSocketUpgrade, ws};
 use axum::response::IntoResponse;
 use farhelm_proto::{ErrorKind, TerminalSelector};
@@ -407,11 +405,10 @@ fn detached_notice(detach: &crate::client::Detach) -> serde_json::Value {
 pub(crate) async fn term_ws(
     State(state): State<Arc<AppState>>,
     upgrade: WebSocketUpgrade,
-    Extension(auth): Extension<AuthenticatedSocket>,
     AxPath(id): AxPath<String>,
     Query(q): Query<TermQuery>,
 ) -> impl IntoResponse {
-    serve_term_upgrade(state, auth, id, q, upgrade, false)
+    serve_term_upgrade(state, id, q, upgrade, false)
 }
 
 /// The same socket, attached NON-DISPLACINGLY: refused rather than taking
@@ -425,11 +422,10 @@ pub(crate) async fn term_ws(
 pub(crate) async fn term_ws_if_unowned(
     State(state): State<Arc<AppState>>,
     upgrade: WebSocketUpgrade,
-    Extension(auth): Extension<AuthenticatedSocket>,
     AxPath(id): AxPath<String>,
     Query(q): Query<TermQuery>,
 ) -> impl IntoResponse {
-    serve_term_upgrade(state, auth, id, q, upgrade, true)
+    serve_term_upgrade(state, id, q, upgrade, true)
 }
 
 /// The largest WebSocket message, and frame, a terminal socket accepts from
@@ -450,7 +446,6 @@ const TERM_WS_MAX_MESSAGE: usize = farhelm_proto::MAX_FRAME_LEN as usize;
 /// they differ in.
 fn serve_term_upgrade(
     state: Arc<AppState>,
-    auth: AuthenticatedSocket,
     id: String,
     q: TermQuery,
     upgrade: WebSocketUpgrade,
@@ -469,7 +464,7 @@ fn serve_term_upgrade(
         .max_frame_size(TERM_WS_MAX_MESSAGE)
         .max_message_size(TERM_WS_MAX_MESSAGE)
         .on_upgrade(move |socket| async move {
-            if let Err(e) = serve_term(state, auth, id, q, socket, if_unowned).await {
+            if let Err(e) = serve_term(state, id, q, socket, if_unowned).await {
                 // A refused non-displacing attach is an ORDINARY outcome,
                 // not a fault: a browser probing every thirty seconds for a
                 // session someone else holds is the reconnect ladder
@@ -571,17 +566,12 @@ const PONG_TEXT_MESSAGE: &str = r#"{"type":"pong"}"#;
 /// in arrival order. Only the outbound drain moved.
 async fn serve_term(
     state: Arc<AppState>,
-    auth: AuthenticatedSocket,
     session_id: String,
     q: TermQuery,
     mut socket: ws::WebSocket,
     if_unowned: bool,
 ) -> anyhow::Result<()> {
     use futures_util::{SinkExt, StreamExt};
-
-    if auth.is_revoked().await {
-        return Ok(());
-    }
 
     // One arm covers both failure sources `attach_from_query` can produce
     // — a locally-refused query shape (an explicit empty `?lease=`) and a
@@ -593,24 +583,8 @@ async fn serve_term(
     // `attach_from_query`'s own docs for why folding them into one
     // `Result` is what keeps this a single arm instead of two copies of
     // the same three lines.
-    let attached = attach_from_query(&state, &session_id, &q, if_unowned);
-    tokio::pin!(attached);
-    let (client, bare_session_id, channel, mut events) = tokio::select! {
-        biased;
-        _ = auth.revoked() => {
-            // The request may already have crossed into the supervisor. Drop
-            // the browser first, then wait only long enough to learn whether
-            // admission completed and needs an explicit detach.
-            drop(socket);
-            if let Ok(Ok((client, _bare_session_id, channel, _events))) =
-                tokio::time::timeout(WS_TEARDOWN_GRACE, &mut attached).await
-            {
-                detach_bounded(&client, channel).await;
-            }
-            return Ok(());
-        }
-        attached = &mut attached => {
-            match attached {
+    let (client, bare_session_id, channel, mut events) =
+        match attach_from_query(&state, &session_id, &q, if_unowned).await {
             Ok(parts) => parts,
             Err(e) => {
                 let code = if refused_as_taken_over(&e) {
@@ -634,18 +608,7 @@ async fn serve_term(
                 .await;
                 return Err(e);
             }
-            }
-        }
-    };
-
-    // Rotation may have committed after the attach future became ready but
-    // before this task won the select. Do not start either I/O pump in that
-    // admission gap.
-    if auth.is_revoked().await {
-        drop(socket);
-        detach_bounded(&client, channel).await;
-        return Ok(());
-    }
+        };
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -819,27 +782,13 @@ async fn serve_term(
     // lasts. That is the leak the stall detach exists to end, so the
     // detach has to be able to end this handler by itself.
     enum SocketEnd {
-        Revoked,
         Inbound(Result<anyhow::Result<()>, tokio::task::JoinError>),
         Outbound,
     }
     let end = tokio::select! {
-        _ = auth.revoked() => SocketEnd::Revoked,
         result = &mut inbound => SocketEnd::Inbound(result),
         _ = &mut outbound => SocketEnd::Outbound,
     };
-
-    if matches!(&end, SocketEnd::Revoked) {
-        // Drop both WebSocket halves before asking the supervisor to clean
-        // up. Cleanup can backpressure; revoked browser I/O must not remain
-        // reachable while it does.
-        inbound.abort();
-        outbound.abort();
-        let _ = inbound.await;
-        let _ = outbound.await;
-        detach_bounded(&client, channel).await;
-        return Ok(());
-    }
 
     let (result, outbound_finished, inbound_finished) = match end {
         SocketEnd::Inbound(result) => {
@@ -855,7 +804,6 @@ async fn serve_term(
             (result, false, true)
         }
         SocketEnd::Outbound => (Ok(()), true, false),
-        SocketEnd::Revoked => unreachable!("handled above"),
     };
     if !inbound_finished {
         inbound.abort();
@@ -1046,10 +994,10 @@ mod tests {
             .unwrap();
     }
 
-    /// A browser that forgets to request an upgrade must receive Axum's
-    /// ordinary missing-upgrade response, not an internal error naming the
-    /// authentication extension. The authenticated request matters: without
-    /// it, middleware would reject the request before handler extraction.
+    /// A client that forgets to request an upgrade must receive Axum's
+    /// ordinary missing-upgrade response, not an internal error. The
+    /// authenticated request matters: without it, middleware would reject the
+    /// request before handler extraction.
     #[farhelm_testtrace::test]
     async fn an_authenticated_plain_terminal_get_is_not_an_internal_error() {
         let harness = rest_harness::idle_helm().await;
@@ -1204,62 +1152,6 @@ mod tests {
         assert_eq!(detached, channel);
     }
 
-    /// Rotation during supervisor admission never starts browser I/O and
-    /// still detaches an attachment whose late reply crossed the revocation.
-    #[farhelm_testtrace::test]
-    async fn rotation_during_terminal_admission_closes_before_cleanup() {
-        let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
-        let (attach_seen_tx, attach_seen_rx) = tokio::sync::oneshot::channel();
-        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
-        let peer = tokio::spawn(async move {
-            let (read, write) = tokio::io::split(peer_side);
-            let mut reader = FrameReader::new(read);
-            let mut writer = FrameWriter::new(write);
-            handshake(&mut reader, &mut writer, "supervisor")
-                .await
-                .unwrap();
-            let request =
-                farhelm_proto::io::parse_control(&reader.read_frame().await.unwrap().unwrap())
-                    .unwrap();
-            let ControlMsg::Attach {
-                req_id, channel, ..
-            } = request
-            else {
-                panic!("expected Attach, got {request:?}");
-            };
-            attach_seen_tx.send(()).unwrap();
-            release_rx.await.unwrap();
-            writer
-                .write_control(&ControlMsg::Attached { req_id, channel })
-                .await
-                .unwrap();
-            loop {
-                let frame = reader.read_frame().await.unwrap().unwrap();
-                let message = farhelm_proto::io::parse_control(&frame).unwrap();
-                if matches!(message, ControlMsg::Detach { channel: got } if got == channel) {
-                    return;
-                }
-            }
-        });
-
-        let mut harness = rest_harness::spliced_helm(client_side).await;
-        let addr = harness.serve().await;
-        let mut ws = connect_session(&harness, addr, "/api/sessions/sess-1/term").await;
-        attach_seen_rx.await.unwrap();
-        harness.state.auth.rotate().await.unwrap();
-        release_tx.send(()).unwrap();
-
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while ws.recv().await.is_some() {}
-        })
-        .await
-        .expect("the revoked browser socket must close before cleanup can stall");
-        tokio::time::timeout(Duration::from_secs(5), peer)
-            .await
-            .expect("the admitted supervisor channel must be cleaned up")
-            .unwrap();
-    }
-
     /// For a completed initial attach catch-up, the marker's ordering
     /// property is: it must reach the browser AFTER the binary replay
     /// bytes it describes and BEFORE any binary live byte, on the exact
@@ -1337,8 +1229,7 @@ mod tests {
     /// end once when the browser closes the socket.
     ///
     /// Why: the desktop smoke test tells which session the relaunched window
-    /// has open, and that a token rotation left that attachment alone, only
-    /// through these two events, since a terminal in a terminal host shows no
+    /// has open only through these two events, since a terminal in a terminal host shows no
     /// viewer anywhere outside the supervisor; a trace that missed the start,
     /// or reported the end twice or never, would pass or fail those checks
     /// for the wrong reason. Spec: after an attach of `<entry>:sess-1`'s

@@ -137,8 +137,8 @@ dioxus = "0.7.10"
 # (`provisioning/release_payloads.rs`) share this one unpacking path.
 flate2 = "1"
 futures-util = { version = "0.3", default-features = false }
-# Browser bootstrap tokens and device cookies are credentials, not identifiers:
-# both are minted directly from 128 bits of operating-system randomness.
+# The helm's in-memory client credentials are credentials, not identifiers:
+# they are minted directly from 128 bits of operating-system randomness.
 getrandom = "0.3"
 # List-view polling sleep on wasm32 (farhelm-ui's `ListView`): a thin
 # `wasm-bindgen` binding to `setTimeout`, the only timer a browser tab
@@ -155,10 +155,7 @@ include_dir = "0.7"
 # ordinary serde.
 json5 = "1"
 libc = "0.2"
-# Content type for an embedded-UI asset response (`UiSource::Embedded`). A
-# transitive dependency already, through tower-http's own `ServeDir` — but a
-# transitive crate cannot be imported, so serving the embedded tree needs
-# its own direct dependency on the same crate.
+# Content type for an asset the desktop webview's asset handler serves.
 mime_guess = "2"
 # Verifies a release's `SHA256SUMS.minisig` against the public key compiled
 # into the binary (D3) — the whole trust anchor of download-based
@@ -166,12 +163,9 @@ mime_guess = "2"
 # signs, so the signing half of minisign stays out of the binary and out of
 # the audit surface.
 minisign-verify = "0.3"
-# Decodes an embedded-UI request path (`UiSource::Embedded`) before it is
-# looked up, classified by extension, or handed to `mime_guess` — a percent-
-# escaped asset name (a literal space, say) must resolve to the same file an
-# ordinary filesystem `ServeDir` would find. Already in `Cargo.lock`
-# transitively (both `axum` and `tower-http` depend on it), but a transitive
-# crate cannot be imported directly.
+# Percent-encoding for download file names and the desktop webview's asset
+# paths. Already in `Cargo.lock` transitively, but a transitive crate cannot
+# be imported directly.
 percent-encoding = "2"
 # reqwest's upstream defaults, deliberately: rustls with its default crypto
 # provider (aws-lc-rs) and the operating system's certificate store (through
@@ -227,9 +221,9 @@ serde = { version = "1", features = ["derive"] }
 # Trust edits rewrite Claude's settings; unrelated numbers must retain the
 # double values its JavaScript reader sees, without changing Number's representation.
 serde_json = { version = "1", features = ["float_roundtrip"] }
-# Device credentials are stored as fixed-size SHA-256 digests, and both those
-# digests and the recoverable bootstrap token are compared without revealing
-# a matching prefix through ordinary equality timing.
+# The helm keeps its client credentials only as fixed-size SHA-256 digests,
+# compared (with `subtle`) without revealing a matching prefix through
+# ordinary equality timing.
 sha2 = "0.11"
 shell-words = "1"
 subtle = "2"
@@ -258,7 +252,6 @@ tokio = { version = "1", features = [
 # test and prove it is valid TOML.
 toml = "0.8"
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.7", features = ["fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tree-sitter = { version = "0.27.1", default-features = false, features = ["std"] }

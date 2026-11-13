@@ -124,7 +124,7 @@ Before reading `refreshed_through`, read these in full:
 Fence: only a completed full refresh moves `refreshed_through`; new material and any Overview edit are proposed, not
 written; published release notes are left alone.
 
-### Release notes work (before editing `website/src/release-notes/`, `e2e/docs-shots/release-notes.spec.ts`, `website/scripts/release-notes.mjs`, or adding a release's screenshots)
+### Release notes work (before editing `website/src/release-notes/`, `website/scripts/release-notes.mjs`, or adding a release's screenshots)
 
 The release screenshot subagent reads the list in `releasing/AGENTS.md`, "Release screenshot subagent (fixed prompt)",
 which includes this one.

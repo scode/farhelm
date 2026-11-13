@@ -2,8 +2,8 @@
 
 `scripts/record-test-run.py` runs one command and leaves a private, bounded record of what ran, where it ran, which
 source tree it saw, and how the process ended. It is meant to provide input for later run tracking and flake hunting. It
-is not a test scheduler or retry loop, and a label never makes a run reproducible. Explicit nextest and Playwright modes
-also retain runner policy and reported test counts.
+is not a test scheduler or retry loop, and a label never makes a run reproducible. The explicit nextest mode also
+retains runner policy and reported test counts.
 
 NOTE: The command argv and combined stdout/stderr are retained exactly. Do not put credentials in argv. Output is
 private local evidence, not publication-ready material; review it before copying any part of a run directory elsewhere.
@@ -53,11 +53,9 @@ cost and preparing the required tools on a sandbox. Prerequisite builds, metadat
 
 Rust integration-test changes select the complete test target. Shared fixture changes therefore cannot accidentally
 select only a filename-derived test name; refine the suggested command with a verified nextest filter when a narrower
-reproduction is appropriate. Other Rust changes include reverse package dependencies. Browser spec changes select their
-files under both engines; shared browser inputs, deleted specs and application changes widen to the browser suite.
-Package-wide suggestions subsume narrower targets for the same package. Known cross-package fixture imports are mapped
-explicitly; unresolved helper ownership also appears in the manual-review list. Large browser selections are partitioned
-to respect the runner's argument-count and byte limits, and each partition contributes to the displayed total cost.
+reproduction is appropriate. Other Rust changes include reverse package dependencies. Package-wide suggestions subsume
+narrower targets for the same package. Known cross-package fixture imports are mapped explicitly; unresolved helper
+ownership also appears in the manual-review list.
 
 `manual_review_paths` contains inputs the planner does not map. An empty command list with manual-review paths is not
 evidence that no validation is needed. Prose paths are listed separately for applicable document checks.
@@ -98,16 +96,6 @@ Any other option the recorder does not know is refused with exit 125 before a ru
 `--tmux`, which selected a check against a pinned test tmux that no longer exists; commands kept in historical records
 (older `FLAKES.md` entries, `plans/`, `lore/`) still pass it and need it removed before they are rerun.
 
-The one thing a recorded browser run keeps outside that temporary tree is its timing record: after every
-`--runner playwright` run whose report is structurally complete, the recorder writes one small JSON file to
-`$XDG_STATE_HOME/farhelm-e2e-timings/` (`~/.local/state/farhelm-e2e-timings/` without an absolute `XDG_STATE_HOME`),
-named `<date>-<run id>.json`. It holds the run's id, start, commit, labels, worker count and host, and for every
-(engine, spec file) project its summed test time and outcome counts, so the history of how long the suite and its parts
-take survives the evidence cleanup. Each run writes only its own file, which is why this fixed directory under the home
-directory does not reintroduce the collisions the shared-machine rules in `AGENTS.md` guard against. Writing it never
-changes the run's result; the manifest records the record's path, or the error that kept it from being written. Nothing
-prunes the directory; a record is a few kilobytes.
-
 The default root is `$TMPDIR/farhelm-tmp/test-runs` when `TMPDIR` is an absolute path, otherwise
 `/tmp/farhelm-tmp/test-runs`: the agent scratch tree root AGENTS.md describes. The default used to be
 `~/.local/state/farhelm-test-runs`, where nothing ever pruned it, and agents running thousands of recorded commands grew
@@ -118,11 +106,10 @@ machine's temporary files.
 
 That cleanup alone did not keep up: on the shared Linux host it runs only at boot or after 30 days, and about 250
 recorded runs a day had grown the default root to 18 GB within three weeks, two fifths of it from runs that passed. So
-in the default root a run that passed (outcome `completed`, recorder exit 0) drops `traces.tar`, `test-traces/` and
-`playwright-artifacts/` as soon as it ends, keeping its manifest, output, reports and counts, and the manifest's
-`retention.slimmed` names what went. Each invocation also removes whole passing runs whose directories are more than
-three days old. Failed, refused, interrupted and still-running runs are never touched, and an explicit `--output-root`
-opts out of both.
+in the default root a run that passed (outcome `completed`, recorder exit 0) drops `traces.tar` and `test-traces/` as
+soon as it ends, keeping its manifest, output, reports and counts, and the manifest's `retention.slimmed` names what
+went. Each invocation also removes whole passing runs whose directories are more than three days old. Failed, refused,
+interrupted and still-running runs are never touched, and an explicit `--output-root` opts out of both.
 
 The recorder rejects roots equal to or below the tested Git checkout, the conventional `~/.local/state/farhelm` tree, or
 `$XDG_STATE_HOME/farhelm` when XDG state is configured. A newly created root and every run directory use mode `0700`;
@@ -195,68 +182,6 @@ with `--trigger test` to exercise nextest's own test deadline instead of the rec
 shortens only its copy of the per-test execution period for that case, retaining the real five-second signal grace. Both
 commands compile a dependency-free fixture and verify that nextest kills a SIGTERM-resistant test and its child in the
 runner-owned test group. These are explicit lifecycle checks, not a per-edit stress requirement or an added CI job.
-
-## Recorded browser runs
-
-Use `--runner playwright` from the checkout's `e2e` directory after explicitly preparing the application builds,
-installed npm dependencies and browser binaries described in AGENTS.md. Browser builds and runtime checks belong on a
-sandbox when they are expensive. The recorder neither installs prerequisites nor starts a build for you.
-
-```sh
-# From the checkout's e2e directory, after preparing the required builds:
-python3 ../scripts/record-test-run.py \
-  --runner playwright --kind development --timeout 300 \
-  --selection 'feed spec, both engines' --concurrency '3 browser workers, one stack each; retries 0' \
-  -- npx playwright test 'feed\.spec\.ts'
-```
-
-The requested `npx playwright test` prefix is a selection syntax; execution uses resolved Node and the locally installed
-Playwright CLI directly. Both Playwright packages and their lock entries must match 1.64.0. The maintained config runs
-with three workers, each driving its own stack (`e2e/stack-slots.ts`), zero retries, one execution per selected case, no
-focused-only tests and no snapshot updates. Only file-pattern and grep selectors are accepted; project, reporter, config
-and execution-policy overrides are refused. Both configured engines must execute cases before a zero child exit can
-support recorder success. A single-engine debugging command can still use generic recording, which does not claim
-validated browser counts.
-
-Each run owns `playwright.json`, `playwright-policy.json` and `playwright-artifacts/`. The supplementary reporter
-records resolved engine and project policy before execution and atomically replaces its own initial record at
-completion. Collection reconciles the reports, bounds reads and traversal, and keeps actual
-pass/failure/skip/interruption/unstarted counts separate from expected outcomes. An expected failure is an executed
-assertion, not a passing result. Missing or malformed evidence has no inferred zero denominator. The JSON read limit is
-16 MiB and policy read limit is 64 KiB; these are collection limits, not disk quotas on runner output. Raw reports and
-attachments remain private and may contain sensitive application data; no arbitrary attachment path is followed or
-exported.
-
-Timeout or operator interruption delivers SIGINT to Playwright so its teardown and reporters can run. The recorder
-retains the original operator signal or timeout as its own exit status and allows 60 seconds for owned-group cleanup.
-Even an already exited leader can keep the group visible during this interval; that wait preserves group ownership until
-the final signal. A forced kill can leave terminal reports incomplete. Report validation never overwrites an earlier
-nonzero child, timeout or interruption result.
-
-### Explicit browser repetitions
-
-From `e2e/`, plan a finite reproduction with a file pattern or grep selection:
-
-```sh
-python3 ../scripts/hunt-browser-tests.py --repeat 20 --timeout 60 \
-  -- npx playwright test tests/terminal-keys.spec.ts -g 'plain Enter sends bare CR'
-```
-
-Add `--execute` only when the displayed selection and cost are intended. Planning does not probe tools, create evidence,
-install dependencies or build the application. Execution needs the browser recorder's prerequisites above. Each attempt
-uses both Chromium and WebKit, the suite's three workers, no retries and no internal repeat-each loop. Use generic
-recording for an intentionally single-engine debugging run.
-
-The private batch index retains each attempt and its validated actual and expected outcome counts per engine. A later
-pass does not erase an earlier failure. Ordinary failed assertions and individual case timeouts may proceed to the next
-requested attempt; runner-wide timeouts, interrupted or unstarted cases, global errors, missing reports and incomplete
-output or cleanup stop the batch. Expected failures count as executed assertions; intentional skips do not. Before
-scheduling again, the wrapper revalidates the retained reports and checks that they match the recorder manifest.
-
-The batch returns 0 only when every requested attempt passed, 1 when all attempts completed but at least one failed, 125
-for incomplete evidence, or `128 + signal` for operator cancellation. The plan's `repeat * timeout` is the maximum sum
-of child command time, not a wall-clock deadline: metadata and the browser recorder's 60-second cleanup grace are
-additional. This is an operator-invoked investigation tool, not a required per-edit test or proof of flake absence.
 
 ## Exit status and lifecycle
 
@@ -386,14 +311,13 @@ to an ambient location. Metadata probes run before this override.
 The command also gets its own `TMPDIR`, overriding any ambient value: a fresh mode-0700 directory `/tmp/fh-tmp.XXXXXX`,
 in farhelm-teststate's sweep family. The recorder holds the family's liveness lock (`fh-run.lock` inside it) while the
 command runs and removes the directory once the command's processes and trace collection are done, so what tests leave
-in their temporary directory (plain `tempfile` directories of killed or failed tests, nested builds, Playwright's
-browser profiles and transform cache) no longer accumulates loose in `/tmp`. A directory that still holds a unix socket
-when the run ends is left in place with its lock released, because the socket may be a terminal host or tmux server the
-command left running; the sweep ends those before reaping it, as it does for the directory of a recorder that was itself
-killed. It sits directly under `/tmp` rather than under the evidence root because tests bind sockets below it and socket
-paths are limited to about 104 bytes. The manifest's `child_tmp` records the directory's name, whether an ambient
-`TMPDIR` was overridden (not its value), and whether it was removed or left for the sweep and why. One consequence:
-Playwright's transform cache no longer carries over between recorded runs.
+in their temporary directory (plain `tempfile` directories of killed or failed tests, nested builds) no longer
+accumulates loose in `/tmp`. A directory that still holds a unix socket when the run ends is left in place with its lock
+released, because the socket may be a terminal host or tmux server the command left running; the sweep ends those before
+reaping it, as it does for the directory of a recorder that was itself killed. It sits directly under `/tmp` rather than
+under the evidence root because tests bind sockets below it and socket paths are limited to about 104 bytes. The
+manifest's `child_tmp` records the directory's name, whether an ambient `TMPDIR` was overridden (not its value), and
+whether it was removed or left for the sweep and why.
 
 The manifest records only FARHELM variable names: `ambient_names`, `requested_names`, `retained_names`, `removed_names`,
 `requested_but_absent_names`, `overridden_names`, `recorder_owned_names`, and the resulting `child_names`. It never
@@ -500,9 +424,9 @@ reading it. `--flakes /path/to/FLAKES.md` selects another ledger; the default is
 The report keeps three denominators separate: recorded command attempts, reported test cases, and dated latent-flake
 entries. Development, repetition and release attempts have separate totals. Child failures remain failures when a later
 attempt passes; unavailable child results do not count as successful observations. Case totals use structurally
-consistent complete manifest reports, with actual browser results distinct from expected outcomes. The command does not
-revalidate raw report contents. Raw artifact presence, output retention and diagnostic gaps are reported separately, so
-a portable manifest can still contribute reported counts after its raw artifacts have expired.
+consistent complete manifest reports. The command does not revalidate raw report contents. Raw artifact presence, output
+retention and diagnostic gaps are reported separately, so a portable manifest can still contribute reported counts after
+its raw artifacts have expired.
 
 `--since YYYY-MM-DD` filters runs by their UTC start date and ledger entries by their heading date. Undated runs are
 excluded explicitly under that filter. Batch schedules remain unfiltered because their indexes have no batch start date.

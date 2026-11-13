@@ -8,7 +8,7 @@
 //!
 //! - [`api`]: the [`TensorlakeApi`] trait every caller uses, its types, and
 //!   the error classification; [`http`] is the production implementation and
-//!   [`e2e`] the browser suite's fake.
+//!   [`e2e`] a filesystem-controlled fake that tests use.
 //! - [`config`]: the stored account row (the API key and the "create
 //!   sandboxes without asking" choice) and the helm tag.
 //! - [`ssh_key`]: Farhelm's own ssh key pair, generated when the user asks.
@@ -93,7 +93,9 @@ struct Inner {
     preparer: Arc<dyn prepared::SnapshotPreparer>,
     /// Forwards are read here and owned by the connected actors' leases.
     tunnels: tunnels::Tunnels,
-    /// Same validated browser fake as the API, never a production fallback.
+    /// A fake serving connected tunnels from the same sandbox model as the
+    /// API. Only the removed browser suite selected one; production and
+    /// every current test leave it `None`.
     tunnel_fake: Option<Arc<e2e::E2eTensorlake>>,
     /// Explicit orphan deletions outlive the requesting component. Only
     /// successful snapshot cleanup removes their retry context.
@@ -148,13 +150,11 @@ impl Tensorlake {
     pub(crate) async fn ensure_host_key(&self) -> Result<(), String> {
         self.create_ssh_key().await
     }
-    /// The helm's service as `AppState::new` builds it: the real API, or
-    /// the browser suite's fake when its environment variable names a
-    /// marked directory inside the state directory, and the ssh key under
-    /// `<state>/tensorlake/`.
+    /// The helm's service as `AppState::new` builds it: the real API and
+    /// ssh shell, and the ssh key under `<state>/tensorlake/`.
     ///
-    /// Test builds never read the environment and never reach Tensorlake:
-    /// their API is offline unless a test injects one ([`Self::with_api`]).
+    /// Test builds never reach Tensorlake: their API is offline unless a
+    /// test injects one ([`Self::with_api`]).
     pub(crate) fn production_with_delivery(
         store: HelmStore,
         state_dir: &Path,
@@ -164,7 +164,7 @@ impl Tensorlake {
         let (api, shell, fake): ProductionSeams = if cfg!(test) {
             (Arc::new(Offline::test()), Arc::new(OfflineShell), None)
         } else {
-            production_seams(state_dir)?
+            production_seams()?
         };
         let tensorlake_dir = tensorlake_dir(state_dir)?;
         Ok(Self(Arc::new(Inner::new(
@@ -397,28 +397,16 @@ fn ready(key: ssh_key::SshKey, tag: &str) -> SshKeyStatus {
     }
 }
 
-/// Interfaces chosen together so the marked browser fake serves the API,
-/// shell commands and connected tunnels of the same sandbox model.
+/// The API client, the sandbox shell and an optional tunnel fake, chosen
+/// together. Nothing sets the fake any more (see `Inner::tunnel_fake`).
 type ProductionSeams = (
     Arc<dyn TensorlakeApi>,
     Arc<dyn SandboxShell>,
     Option<Arc<e2e::E2eTensorlake>>,
 );
 
-/// The real client and ssh, or the browser suite's fake for all three when the
-/// helm was started with its environment variable. Reading the environment
-/// here, once at startup, is the same opt-in the provisioning backend's fake
-/// uses. The shell and tunnel fake share the API's marked control directory.
-fn production_seams(state_dir: &Path) -> anyhow::Result<ProductionSeams> {
-    if let Some(root) = std::env::var_os(e2e::E2E_TENSORLAKE_ENV) {
-        let root = std::path::PathBuf::from(root);
-        let fake = Arc::new(e2e::E2eTensorlake::new(root.clone(), state_dir)?);
-        eprintln!(
-            "WARNING: E2E-only Tensorlake fake enabled from {}; Tensorlake API calls and sandbox commands are simulated",
-            root.display()
-        );
-        return Ok((fake.clone(), fake.clone(), Some(fake)));
-    }
+/// The real client and ssh.
+fn production_seams() -> anyhow::Result<ProductionSeams> {
     let shell = Arc::new(SshSandboxShell::new());
     match http::HttpTensorlake::production() {
         Ok(client) => Ok((Arc::new(client), shell, None)),

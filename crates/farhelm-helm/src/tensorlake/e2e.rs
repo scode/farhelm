@@ -1,29 +1,29 @@
-//! A filesystem-controlled stand-in for Tensorlake, used only by the browser
-//! end-to-end suite: its API and the shell a snapshot build runs in a
-//! sandbox.
+//! A filesystem-controlled stand-in for Tensorlake, used by the helm's own
+//! tests: its API and the shell a snapshot build runs in a sandbox.
 //!
-//! The browser suite drives the ordinary debug binary, not a `cfg(test)`
-//! build, so this fake is selected at runtime, the same way the injected
-//! provisioning backend is (`provisioning/e2e.rs`): an unmistakably
-//! test-named environment variable read once at helm startup, naming a
-//! directory that must lie inside the helm's private state directory and
-//! carry a marker file. Startup prints a warning before serving. Everything
-//! above the [`TensorlakeApi`] and [`SandboxShell`] seams (the routes, the
-//! stored key, the build engine) stays the shipped code.
+//! Only tests construct it ([`E2eTensorlake::new`] is `cfg(test)`); a
+//! production helm always gets the real client and no tunnel fake. It was
+//! written for the removed browser end-to-end suite, which selected it at
+//! runtime in the ordinary debug binary through an environment variable;
+//! that path is gone. What remains from it is the check that the control
+//! directory lies inside the helm's private state directory and carries a
+//! marker file. Everything above the [`TensorlakeApi`] and [`SandboxShell`]
+//! seams (the routes, the stored key, the build engine) stays the shipped
+//! code.
 //!
 //! The directory is the control plane:
 //!
-//! - `config.json`, written by the spec and read afresh on every call (a spec
+//! - `config.json`, written by the test and read afresh on every call (a test
 //!   changes behavior mid-run by replacing it atomically): the account's
 //!   extra sandboxes, an optional key the fake accepts (any other gets a
-//!   401, which is how a spec proves the helm sends the key it saved without
+//!   401, which is how a test proves the helm sends the key it saved without
 //!   the fake ever writing a key down), failures to inject per operation,
 //!   how many polls a snapshot takes, and the shell's behavior (hold every
 //!   command, fail a step with given stderr, answer a step with given
 //!   stdout).
 //! - `state.json`, written by the fake: the sandboxes and snapshots the helm
-//!   created, terminated and deleted, so a spec can assert what is left
-//!   billing. A spec may seed it before acting.
+//!   created, terminated and deleted, so a test can assert what is left
+//!   billing. A test may seed it before acting.
 //! - `events.jsonl`, appended by the fake: one line per call, API and shell.
 //!
 //! The model itself, [`FakeModel`], is plain data with Tensorlake's rules
@@ -38,15 +38,23 @@ use super::api::{
 };
 use super::shell::{SandboxShell, ShellFailure, ShellOutput};
 use super::ssh::TensorlakeSshAccess;
+#[cfg(test)]
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
-pub(crate) const E2E_TENSORLAKE_ENV: &str = "FARHELM_E2E_TENSORLAKE_DIR";
+/// The name of the control directory in error messages. The removed browser
+/// suite set this environment variable to enable the fake in a running helm;
+/// only tests construct it now.
+#[cfg(test)]
+const E2E_TENSORLAKE_ENV: &str = "FARHELM_E2E_TENSORLAKE_DIR";
+#[cfg(test)]
 const E2E_TENSORLAKE_MARKER: &str = "farhelm-e2e-tensorlake-v1\n";
 
 /// How often a held shell command re-reads `config.json` to see whether the
@@ -81,8 +89,9 @@ struct ShellConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct FakeConfig {
-    /// API operations parked until the control file releases them. Tests
-    /// use this boundary to close a browser with cleanup still in flight.
+    /// API operations parked until the control file releases them. The
+    /// removed browser suite used this boundary to close a browser with
+    /// cleanup still in flight; no current test sets it.
     hold_operations: std::collections::HashSet<String>,
     /// When set, only this key is accepted; any other answers 401.
     accepted_key: Option<String>,
@@ -401,6 +410,7 @@ impl E2eTensorlake {
     /// state directory and carries the marker. Both paths are canonicalized
     /// first, for the reason `provisioning/e2e.rs` records: a lexical prefix
     /// check accepts `..` components and symlinks that point anywhere.
+    #[cfg(test)]
     pub(crate) fn new(root: PathBuf, helm_state_dir: &Path) -> anyhow::Result<Self> {
         if !root.is_absolute() {
             bail!("{E2E_TENSORLAKE_ENV} must name a directory inside the helm state directory");

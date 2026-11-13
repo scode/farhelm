@@ -16,9 +16,6 @@ CLASSES = {
     "deterministic-regression", "unknown",
 }
 CAUSES = {"established", "hypothesis", "unknown"}
-ACTUAL_BROWSER_COUNTS = ("passed", "failed", "timed_out", "interrupted", "skipped", "not_run")
-OUTCOME_BROWSER_COUNTS = ("expected", "unexpected", "flaky", "outcome_skipped")
-BROWSER_COUNTS = ("tests", *ACTUAL_BROWSER_COUNTS, *OUTCOME_BROWSER_COUNTS, "expected_failures")
 RUST_COUNTS = ("tests", "passed", "skipped", "failures", "errors", "flaky")
 
 
@@ -99,18 +96,6 @@ def bounded_counts(value, names):
     return {name: value[name] for name in names}
 
 
-def browser_counts(value):
-    """Validate both actual-result and expected-outcome denominators independently."""
-    counts = bounded_counts(value, BROWSER_COUNTS)
-    if counts is None:
-        return None
-    if (counts["tests"] != sum(counts[name] for name in ACTUAL_BROWSER_COUNTS)
-            or counts["tests"] != sum(counts[name] for name in OUTCOME_BROWSER_COUNTS)
-            or counts["expected_failures"] > min(counts["failed"], counts["expected"])):
-        return None
-    return counts
-
-
 def reported_counts(runner):
     """Validate the recorder's exported counts without claiming to re-read raw reports.
 
@@ -131,18 +116,6 @@ def reported_counts(runner):
         if counts["flaky"] > counts["tests"]:
             return None
         return {"runner": "nextest", "counts": counts}
-    if runner.get("name") == "playwright":
-        counts = browser_counts(report.get("counts"))
-        errors = bounded_counts(report.get("counts"), ("global_errors",))
-        engines = report.get("engines")
-        if counts is None or errors is None or not isinstance(engines, dict):
-            return None
-        buckets = {name: browser_counts(engines.get(name)) for name in ("chromium", "webkit")}
-        if any(bucket is None for bucket in buckets.values()):
-            return None
-        if any(counts[name] != sum(bucket[name] for bucket in buckets.values()) for name in BROWSER_COUNTS):
-            return None
-        return {"runner": "playwright", "counts": {**counts, **errors}, "engines": buckets}
     return None
 
 

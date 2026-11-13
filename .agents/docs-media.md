@@ -11,6 +11,13 @@ reading list in `website/AGENTS.md`.
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
 
+> NOTE: The README screenshot, the demo video and the docs screenshots cannot be refreshed right now. Their capture
+> scripts drove the web UI through the Playwright suites under `e2e/readme-hero/`, `e2e/readme-video/` and
+> `e2e/docs-shots/`, which were removed with the browser interface, and they stay broken until they are rebuilt on the
+> GPUI desktop app's tooling. Asked for one of these refreshes, say so instead of running the scripts. The procedures
+> below describe how the flows worked and are kept for that rebuild. The brand marks and the docs refresh's text work
+> are unaffected; a docs refresh leaves its screenshots as they are.
+
 ## Brand marks: the icon and the wordmark
 
 The app icon is `packaging/farhelm-desktop/icon.svg` (the source of `icon.png` and `Farhelm.icns` beside it). The
@@ -25,6 +32,8 @@ it, never the SVGs by hand, and the outline step only reruns when the word or th
 
 ## README hero screenshot
 
+Unavailable until rebuilt on the GPUI app's tooling (see the note at the top).
+
 The image at the top of README.md, also shown on the docs website's landing page, is a real capture of the web UI
 against a staged fleet, governed by `docs/readme-hero/SPEC.md`. "Refresh the README screenshot" means exactly: run
 `scripts/readme-screenshot.sh`, look at the PNG it prints, run `scripts/publish-readme-hero.sh` on it, and commit the
@@ -35,6 +44,8 @@ Neither script is a gate: nothing in CI runs or checks the image. Changing the p
 `--self-test`, which is its whole validation and needs no network.
 
 ## README demo video
+
+Unavailable until rebuilt on the GPUI app's tooling (see the note at the top).
 
 The demo video is recorded from the web UI against a staged fleet, governed by `docs/readme-video/SPEC.md`; read it
 before touching anything under `docs/readme-video/` or `e2e/readme-video/`. "Refresh the demo video" means: run
@@ -55,6 +66,8 @@ completed full refresh moves that marker; a single-page fix or a screenshot refr
 
 ## Docs screenshots
 
+Unavailable until rebuilt on the GPUI app's tooling (see the note at the top).
+
 The docs website's annotated screenshots are captured from the web UI against a staged fleet and published off main,
 governed by `docs/docs-shots/SPEC.md`; read it before touching anything under `docs/docs-shots/` or `e2e/docs-shots/`.
 Screenshots are regenerated in bulk, every page at once from one capture, and the manifest
@@ -64,9 +77,9 @@ screenshots" means the procedure in the SPEC's "Refreshing" section: on the late
 shot that no longer works on the current UI so it shows the same thing, look at every image it prints and fix annotation
 placement until each points at the right thing and hides nothing the reader needs, then run
 `scripts/publish-docs-shots.sh` and commit the manifest change it leaves. Release notes are the exception: published
-releases' `CHANGELOG.md` sections, `website/src/release-notes/*.json`, and the release shots and their tests are never
-touched by a refresh, a sweep, or a cleanup, only by a task that targets them, and the scripts carry published release
-shots over unchanged (`website/.agents/release-notes.md`, "Release notes"). The publish script is the only thing that
-pushes `refs/docs-assets/keep`; never push that ref by hand, and never commit a screenshot on main. Neither script is a
-gate: nothing in CI runs or checks the images. Changing the publish script means running its `--self-test`, which is its
-whole validation and needs no network.
+releases' `CHANGELOG.md` sections, `website/src/release-notes/*.json`, and the published release shots are never touched
+by a refresh, a sweep, or a cleanup, only by a task that targets them, and the scripts carry published release shots
+over unchanged (`website/.agents/release-notes.md`, "Release notes"). The publish script is the only thing that pushes
+`refs/docs-assets/keep`; never push that ref by hand, and never commit a screenshot on main. Neither script is a gate:
+nothing in CI runs or checks the images. Changing the publish script means running its `--self-test`, which is its whole
+validation and needs no network.

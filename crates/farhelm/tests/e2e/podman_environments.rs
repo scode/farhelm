@@ -296,7 +296,7 @@ impl Fixture {
             &["--payload-dir", payload, "--backstop-refresh-secs", "1"],
         )
         .await;
-        self.http = authenticated_client(self.local.state.path(), &helm.base).await;
+        self.http = authenticated_client(self.local.state.path()).await;
         self.helm = Some(helm);
     }
 

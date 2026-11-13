@@ -36,15 +36,12 @@ class SelectionTest(unittest.TestCase):
         """Treat named fixture files as present unless the scenario marks them deleted."""
         return planner.build_plan(paths, packages(), lambda path: path not in missing, 2, 60)
 
-    def test_shared_rust_dependencies_and_browser_helpers_widen(self):
-        """A support change reaches consumer tests; browser helper changes reach both engines."""
-        result = self.plan(["crates/support/src/lib.rs", "e2e/tests/helpers/term.ts"])
+    def test_shared_rust_dependencies_widen(self):
+        """A support change reaches the tests of the packages that depend on it."""
+        result = self.plan(["crates/support/src/lib.rs"])
         rust = [c for c in result["commands"] if c["runner"] == "nextest"]
         self.assertEqual([c["argv"][c["argv"].index("-p") + 1] for c in rust], ["app", "support"])
-        browser = [c for c in result["commands"] if c["runner"] == "playwright"]
-        self.assertEqual(len(browser), 1)
-        self.assertEqual(browser[0]["argv"][-1], ".")
-        self.assertEqual(result["maximum_sequential_child_command_seconds"], 360)
+        self.assertEqual(result["maximum_sequential_child_command_seconds"], 240)
         self.assertTrue(all(c["reasons"] for c in result["commands"]))
 
     def test_test_targets_do_not_guess_rust_module_names(self):
@@ -63,14 +60,11 @@ class SelectionTest(unittest.TestCase):
         for path in ("crates/app/tests/removed.rs", "crates/app/tests/helpers.rs"):
             result = self.plan([path], missing=(path,))
             self.assertEqual(result["commands"][0]["argv"][-2:], ["-p", "app"])
-        result = self.plan(["e2e/tests/removed.spec.ts"], missing=("e2e/tests/removed.spec.ts",))
-        self.assertEqual(result["commands"][0]["argv"][-1], ".")
 
-    def test_browser_filenames_are_literal_regexes_and_unknown_inputs_remain_visible(self):
-        """Punctuation in filenames must not broaden a selector or make its regex invalid."""
-        path = "e2e/tests/odd[one].spec.ts"
-        result = self.plan([path, "scripts/new-check.py", "docs/notes.md"])
-        self.assertEqual(result["commands"][0]["argv"][-1], r"tests/odd\[one\]\.spec\.ts$")
+    def test_unknown_inputs_remain_visible(self):
+        """A path no package owns is listed for manual review, and prose is omitted with a reason."""
+        result = self.plan(["scripts/new-check.py", "docs/notes.md"])
+        self.assertEqual(result["commands"], [])
         self.assertEqual(result["manual_review_paths"], ["scripts/new-check.py"])
         self.assertEqual(result["omitted_paths"][0]["path"], "docs/notes.md")
         self.assertFalse(result["executed"])
@@ -78,7 +72,7 @@ class SelectionTest(unittest.TestCase):
     def test_workspace_policy_changes_and_budget_overflow_are_explicit(self):
         """Runner and toolchain changes widen every package; a nonfinite budget is refused."""
         result = self.plan([".config/nextest.toml", "rust-toolchain.toml"])
-        self.assertEqual(len(result["commands"]), 4)
+        self.assertEqual([c["argv"][-1] for c in result["commands"]], ["app", "support", "ui"])
         with self.assertRaises(ValueError):
             planner.build_plan(["Cargo.toml"], packages(), lambda path: True, 1000, 1e308)
 
@@ -94,25 +88,6 @@ class SelectionTest(unittest.TestCase):
         ambiguous = self.plan(["crates/app/tests/support/process.rs"],
                               missing=("crates/app/tests/support/main.rs",))
         self.assertEqual(ambiguous["manual_review_paths"], ["crates/app/tests/support/process.rs"])
-
-    def test_browser_partitions_preserve_all_selectors_within_both_limits(self):
-        """Count and byte limits create visible extra batches rather than unusable commands."""
-        cases = (
-            [f"e2e/tests/spec{number:03}.spec.ts" for number in range(126)],
-            ["e2e/tests/" + "nested/" * 200 + f"spec{number}.spec.ts" for number in range(20)],
-        )
-        for paths in cases:
-            with self.subTest(path_count=len(paths)):
-                result = self.plan(paths)
-                self.assertGreater(len(result["commands"]), 1)
-                actual = []
-                for command in result["commands"]:
-                    child = command["argv"][command["argv"].index("--") + 1:]
-                    actual += planner.test_run_playwright.selection_args(child)
-                    self.assertTrue(any("partition" in reason for reason in command["reasons"]))
-                self.assertEqual(actual, [planner.re.escape(p.removeprefix("e2e/")) + "$" for p in sorted(paths)])
-                self.assertEqual(result["maximum_sequential_child_command_seconds"], 120 * len(result["commands"]))
-
 
 class DiscoveryTest(unittest.TestCase):
     """Read actual Git changes and bounded manifests without relying on a build tool."""
@@ -183,7 +158,7 @@ class DiscoveryTest(unittest.TestCase):
             scripts = root / "scripts"
             scripts.mkdir()
             for name in ("plan-test-hunts.py", "test_hunt.py", "record-test-run.py", "test_run_nextest.py",
-                         "test_run_playwright.py", "test_run_timings.py", "test_run_traces.py"):
+                         "test_run_traces.py"):
                 shutil.copyfile(pathlib.Path(__file__).with_name(name), scripts / name)
             (root / "Cargo.toml").write_text('[workspace]\nmembers=["crates/app"]\n')
             package = root / "crates/app"

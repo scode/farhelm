@@ -3,8 +3,9 @@
 //! Per SPEC.md, exactly one helm runs at a time. It connects to
 //! supervisors (locally over their unix socket, remotely over the user's
 //! own ssh running `farhelm internal stdio`), aggregates their sessions,
-//! and serves the API over loopback HTTP/WS. A standalone helm also serves
-//! the browser UI; the desktop embeds a helm private to its window. It holds no
+//! and serves the API over loopback HTTP/WS. The desktop app embeds a helm
+//! private to its window; a standalone `farhelm helm run` serves the same API
+//! with no client of its own. It holds no
 //! authoritative session state — supervisors are the authority.
 //!
 //! The loopback-only bind is enforced here — SPEC.md's security posture
@@ -87,7 +88,6 @@ use farhelm_proto::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::warn;
 
 /// Shared machine execution routes for transport, provisioning and credentials.
 mod access;
@@ -111,8 +111,7 @@ pub mod agent_requests;
 /// An agent's create request (templates, then flags) resolved into a launch.
 mod agent_launch;
 
-/// Browser token exchange, explicit device-secret enforcement, and live socket
-/// revocation.
+/// Device-secret enforcement for the in-process credentials the helm mints.
 mod auth;
 
 /// `POST /api/client-log` — the desktop webview console shim's receiving
@@ -130,8 +129,8 @@ pub use browser::LinkOpener;
 pub use downloads::{FileOpener, NativeDownloads, cleanup_native_downloads};
 
 /// The web UI tree a release build compiles into this binary (D12/D13) —
-/// `build.rs`'s counterpart. Public so `farhelm-desktop` (Step 4) can reach
-/// the same compiled-in tree its embedded helm serves.
+/// `build.rs`'s counterpart. Public because the desktop app's asset handler
+/// serves its window from this tree; the helm itself serves it to nobody.
 mod embedded_ui;
 pub use embedded_ui::embedded_ui;
 
@@ -263,12 +262,9 @@ mod tunnels;
 /// never-migrate opening mode R1.5 requires.
 pub mod checkout_config;
 
-/// Private local coordination between the token CLI and a serving helm.
-mod token_control;
-pub use token_control::{
-    LOCK_NAME as HELM_LOCK_FILE, SERVING_CLAIM_WAIT as HELM_LOCK_WAIT, rotate as rotate_token,
-    show as show_token,
-};
+/// One serving helm per state directory, through a lifetime flock.
+mod ownership;
+pub use ownership::{LOCK_NAME as HELM_LOCK_FILE, SERVING_CLAIM_WAIT as HELM_LOCK_WAIT};
 
 /// Local sockets and routed child processes behind the connection manager's seam.
 mod transport;
@@ -305,26 +301,17 @@ mod http_contract_tests;
 /// them could only ever have meant the wrong thing.
 #[derive(Args, Debug, Clone)]
 pub struct HelmArgs {
-    /// Loopback port for the standalone web UI and API. The desktop passes
-    /// zero so the kernel chooses its private API port for each launch.
+    /// Loopback port for the API. The desktop passes zero so the kernel
+    /// chooses its private API port for each launch.
     #[arg(long, default_value_t = 7433)]
     pub port: u16,
 
     /// State directory (default: ~/.local/state/farhelm). Holds helm.db,
-    /// the private token-control socket, the ssh ControlMaster sockets, and
+    /// the helm's ownership lock, the ssh ControlMaster sockets, and
     /// — in the ordinary single-machine arrangement — the local supervisor's
     /// socket the reserved local host row is reached through.
     #[arg(long)]
     pub state_dir: Option<PathBuf>,
-
-    /// Directory with the built web UI (index.html + assets). Overrides
-    /// whatever UI this binary compiled in (D12/D13), for pointing at a
-    /// freshly rebuilt `dx` output without recompiling `farhelm-helm`. The
-    /// browser UI is unavailable — the API still serves, and the UI's own
-    /// paths 404 — only when neither this flag nor a compiled-in tree is
-    /// present.
-    #[arg(long)]
-    pub ui_dist: Option<PathBuf>,
 
     /// JSON5 file of hosts to guarantee are registered at startup:
     /// `{ hosts: [ { ssh, remote_farhelm?, remote_state_dir? } ] }`.
@@ -395,6 +382,19 @@ pub struct HelmArgs {
     /// rarely would show such a change that much later.
     #[arg(long, hide = true, value_name = "SECS")]
     pub backstop_refresh_secs: Option<u64>,
+
+    /// TEST ONLY: write a device credential minted for this helm process to
+    /// this path, created new with mode 0600, before the helm prints its
+    /// address.
+    ///
+    /// The API accepts only credentials the helm minted in its own process,
+    /// and a standalone helm otherwise mints none, so this is how an
+    /// end-to-end test reaches the real binary's API. Hidden because no
+    /// production launch passes it: the desktop app gets its credentials in
+    /// process (see [`EmbeddedReady`]). The credential dies with the process,
+    /// like every other.
+    #[arg(long, hide = true, value_name = "PATH")]
+    pub test_credential_file: Option<PathBuf>,
 }
 
 /// The one message a rejected `--release-base-url` produces, whatever was
@@ -511,13 +511,12 @@ impl HelmArgs {
 /// crate's docs for why the single-client `AppState` this replaced could
 /// not survive multi-host.
 struct AppState {
-    /// One choice controls credential admission, browser routes, static UI,
-    /// and whether the desktop custom-Origin exemption is active.
+    /// Whether the desktop custom-Origin exemption is active, and how the
+    /// process is asked to stop.
     mode: ServingMode,
     manager: Arc<manager::ConnectionManager>,
     store: store::HelmStore,
-    /// The client security boundary: mode-selected credentials plus the
-    /// process-local channel that closes admitted sockets on rotation.
+    /// The client security boundary: the credentials this process minted.
     auth: auth::AuthState,
     /// How many `/api/events` subscriptions this helm admits at once.
     ///
@@ -591,10 +590,10 @@ struct AppState {
     approvals: approvals::Approvals,
 }
 
-/// The two serving surfaces share their handlers, but the desktop's embedded
-/// helm has a narrower authentication and static-content boundary. The mode
-/// also controls whether the loopback guard admits the custom webview Origin
-/// that only the embedded window needs.
+/// The two serving surfaces share their handlers and authentication. The mode
+/// controls whether the loopback guard admits the custom webview Origin that
+/// only the embedded window needs, and whether the helm owns its process's
+/// signals.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ServingMode {
     Standalone,
@@ -673,8 +672,8 @@ impl AppState {
             podman: None,
             tensorlake,
             manager,
-            store: store.clone(),
-            auth: auth::AuthState::for_mode(store, mode),
+            store,
+            auth: auth::AuthState::new(),
             event_subscriber_cap: events::MAX_SUBSCRIBERS,
             trash_requests: Arc::default(),
             provisioning,
@@ -701,16 +700,12 @@ impl AppState {
 /// Assemble the API and WebSocket routes that share the helm's application
 /// state and security boundary.
 ///
-/// The static UI deliberately does not live here: it must remain reachable
-/// before a browser has authenticated. The control-plane routes are assembled
-/// first and protected as one group; standalone mode adds the public exchange
-/// route afterwards. Keeping both boundaries structural avoids relying on each
-/// future route to remember whether it belongs inside authentication.
+/// The control-plane routes are assembled and protected as one group, so no
+/// future route has to remember whether it belongs inside authentication.
 /// Ordinary state changes also acquire helm ownership here, before argument
 /// extraction. Add a route to the normal group unless its cancellation is part
 /// of the contract documented beside the explicit exceptions below.
 fn api_router(state: Arc<AppState>) -> Router {
-    let mode = state.mode;
     let protected = Router::new()
         .route(
             "/api/sessions",
@@ -996,10 +991,8 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/tensorlake/recipes/{name}/build",
             axum::routing::post(tensorlake::recipes::build_recipe),
         )
-        // API paths are reserved before the public SPA fallback is installed.
-        // Without this catch-all, an extensionless GET typo receives
-        // index.html and looks successful until JSON decoding fails; other
-        // methods inherit the static service's unrelated 405 response.
+        // An unknown API path is an authenticated 404 for every method, so a
+        // removed route never answers with some other layer's status.
         .route("/api/{*rest}", axum::routing::any(api_not_found))
         // Apply only to the normal group before merging the exceptions. Reads
         // and their implicit HEAD companions pass through this layer inline.
@@ -1093,9 +1086,7 @@ fn api_router(state: Arc<AppState>) -> Router {
         );
     let protected = protected
         .merge(cancellable)
-        // Applied to the ROUTES already assembled above. The exchange route
-        // is added afterwards and is therefore structurally outside the
-        // authenticated boundary rather than exempted inside middleware.
+        // Applied to the ROUTES already assembled above.
         .route_layer(axum::middleware::from_fn_with_state(
             Arc::clone(&state),
             auth::require_device_session,
@@ -1218,36 +1209,19 @@ fn api_router(state: Arc<AppState>) -> Router {
         )
         .layer(axum::middleware::from_fn(middleware::desktop_webview_cors));
 
-    let app = protected
+    protected
         .merge(desktop_device)
         .merge(desktop_attachment)
         .merge(desktop_client_log)
         .merge(desktop_clipboard)
-        .merge(desktop_files);
-    let app = match mode {
-        ServingMode::Standalone => {
-            // Leave the token route's preflight and CORS layer untouched. The
-            // standalone origin guard refuses every custom-scheme Origin
-            // before they run, so the layer is inert for standalone callers;
-            // retaining it keeps this route otherwise unchanged.
-            app.route(
-                "/api/auth/token",
-                axum::routing::post(auth::exchange_token)
-                    .layer(axum::extract::DefaultBodyLimit::max(256))
-                    .options(middleware::desktop_webview_preflight)
-                    .layer(axum::middleware::from_fn(middleware::desktop_webview_cors)),
-            )
-        }
-        ServingMode::Embedded => app,
-    };
-    app.with_state(state)
+        .merge(desktop_files)
+        .with_state(state)
 }
 
 /// Return the ordinary status for an authenticated but unknown API path.
 ///
 /// This handler intentionally defines no response-body schema. Its job is to
-/// keep API namespace misses inside the protected control-plane router so no
-/// configured UI source can reinterpret them as static or client-side paths.
+/// keep API namespace misses inside the protected control-plane router.
 async fn api_not_found() -> axum::http::StatusCode {
     axum::http::StatusCode::NOT_FOUND
 }
@@ -1389,385 +1363,63 @@ mod request_ownership_tests {
     }
 }
 
-/// Where [`build_router`] gets the web UI it serves, decided once at
-/// startup by [`select_ui_source`] and threaded through unchanged for the
-/// life of the process (D12/D13).
+/// Compose the API and the shared middleware from one serving mode.
 ///
-/// `Dir` and `Embedded` answer a MISSING asset differently, and that split
-/// is deliberate rather than something to reconcile away:
-///
-/// - `Dir` keeps `ServeDir`'s own behaviour — ANY miss, including a typo in
-///   an asset path that would be a real bug, falls back to `index.html`.
-/// - `Embedded` draws the asset/SPA-route line itself: an extension means a
-///   concrete asset the browser expected to exist (404 on a miss), no
-///   extension means a path reserved for a client-side route (`index.html`
-///   on a miss) — the fallback a single-page-application router would need,
-///   whether that is the UI as it exists today or one added later. The
-///   current UI has no router of its own to claim such a path yet; this
-///   rule exists so adding one is a client-side change with nothing to
-///   update here.
-///
-/// In EITHER mode the shipped UI never actually asks for a missing asset —
-/// its own build pins every asset URL it emits to a file that exists — so
-/// this divergence is observable only to a client hand-crafting requests,
-/// never to the UI as built.
-#[derive(Debug)]
-pub enum UiSource {
-    /// A filesystem directory of a built UI, read at request time so
-    /// editing it takes effect with no restart. Where `--ui-dist` (or a
-    /// developer override) points.
-    Dir(PathBuf),
-    /// The UI tree this binary compiled in via `FARHELM_UI_DIST` (see
-    /// [`embedded_ui`]). `'static` because `include_dir!` places it in the
-    /// binary's own read-only data, not behind a value anyone constructs at
-    /// runtime.
-    Embedded(&'static include_dir::Dir<'static>),
-    /// No UI is available — an ordinary developer build with no
-    /// `--ui-dist`. The API still serves; only the static routes are
-    /// absent.
-    None,
-}
-
-/// Decide which [`UiSource`] a helm serves: an explicit `--ui-dist` wins
-/// over whatever this build embedded, which in turn wins over serving no UI
-/// at all.
-///
-/// `--ui-dist` outranks the embedded tree so a developer holding a
-/// release-shaped build (`FARHELM_UI_DIST` was set, D13) can still point at
-/// a freshly rebuilt `dx` output without recompiling `farhelm-helm` — the
-/// build-time embedding and the runtime flag are independent inputs, not
-/// one substituting for the other.
-pub fn select_ui_source(
-    flag: Option<PathBuf>,
-    embedded: Option<&'static include_dir::Dir<'static>>,
-) -> UiSource {
-    match (flag, embedded) {
-        (Some(dir), _) => UiSource::Dir(dir),
-        (None, Some(dir)) => UiSource::Embedded(dir),
-        (None, None) => UiSource::None,
-    }
-}
-
-/// Warn once, at startup, that this process has no web UI to serve at all.
-///
-/// Split out of [`run_with_ready`]'s call site rather than inlined there, so
-/// a test can drive it directly against all three [`UiSource`] variants —
-/// asserting both that `None` logs and that `Dir`/`Embedded` stay silent —
-/// without standing up a whole helm just to observe one log line.
-fn warn_if_no_ui(ui: &UiSource) {
-    if matches!(ui, UiSource::None) {
-        // Not fatal — SPEC_impl.md's developer-build contract (D12: a build
-        // without an embedded UI and without `--ui-dist` serves the API
-        // alone) makes this a real, supported arrangement — but silent here
-        // would leave "why is the browser getting nothing" to be
-        // rediscovered from scratch every time a developer forgets
-        // `--ui-dist` on a build with nothing embedded.
-        warn!(
-            "no web UI: this build embeds none and --ui-dist was not given; the API still serves"
-        );
-    }
-}
-
-/// Answer one request against the compiled-in UI tree, gating by method the
-/// way `ServeDir` does for [`UiSource::Dir`] (the embedded fallback has to
-/// replicate that gate itself, since it is a bare `axum` handler rather than
-/// a `tower_http` service).
-///
-/// Only `GET` and `HEAD` are static-content methods; any other method is
-/// `405 Method Not Allowed` with `Allow: GET,HEAD`, before any path lookup
-/// happens at all — matching what `ServeDir` returns for `Dir`, asserted
-/// directly against both sources below so the parity is checked rather than
-/// assumed. `HEAD` returns the exact `GET` response, body included: status
-/// and every header, content-type included, must match what `GET` would
-/// have returned, so a `HEAD` probe learns the truth about a resource
-/// without ever fetching it. The body is not dropped here — see the comment
-/// below on why that has to happen one layer up.
-fn serve_embedded(
-    dir: &'static include_dir::Dir<'static>,
-    method: &axum::http::Method,
-    path: &str,
-) -> axum::response::Response {
-    if *method != axum::http::Method::GET && *method != axum::http::Method::HEAD {
-        return (
-            axum::http::StatusCode::METHOD_NOT_ALLOWED,
-            [(axum::http::header::ALLOW, "GET,HEAD")],
-        )
-            .into_response();
-    }
-    // Deliberately the SAME response object for GET and HEAD, body and all.
-    // axum's router computes `Content-Length` from the body's exact size
-    // hint before it strips a HEAD response's body (see
-    // `axum::routing::route::RouteFuture::poll`, which calls
-    // `set_content_length` first and only then empties the body for
-    // `Method::HEAD`) — that happens one layer up, at the fallback
-    // dispatch this function's caller is wrapped in. Emptying the body
-    // ourselves here would run BEFORE that router step sees it, so the
-    // size hint it measures would already be zero and every HEAD response
-    // would falsely claim `Content-Length: 0` instead of the real asset
-    // size. Verified empirically for this axum version (0.8.9) by the HEAD
-    // parity tests below asserting `Content-Length` against the fixture
-    // file's actual length.
-    serve_embedded_get(dir, path)
-}
-
-/// The `GET` half of [`serve_embedded`]: look one path up in the compiled-in
-/// tree and apply [`UiSource::Embedded`]'s asset/SPA-route split (see that
-/// variant's docstring for why it differs from `UiSource::Dir`'s fallback).
-fn serve_embedded_get(
-    dir: &'static include_dir::Dir<'static>,
-    path: &str,
-) -> axum::response::Response {
-    // Every `include_dir!` entry is keyed by its path relative to the
-    // embedded root, with no leading slash — but every path axum hands a
-    // fallback handler starts with one, so it has to come off before a
-    // lookup can match anything.
-    let relative = path.trim_start_matches('/');
-    // Percent-decoding happens once, here, before the lookup below, the
-    // extension check that follows it, and the `mime_guess` call inside
-    // `serve_embedded_bytes` all run — every one of those steps must agree
-    // on the same literal characters the browser meant, or an asset whose
-    // real name needs escaping in a URL (a literal space, say) would 404
-    // even though `include_dir!` compiled it in under its actual name.
-    let relative = match percent_encoding::percent_decode_str(relative).decode_utf8() {
-        Ok(decoded) => decoded,
-        // Not valid UTF-8 once decoded: no `include_dir!` entry — every one
-        // is a Rust string literal — could ever match this, so it is a
-        // miss, not a case worth panicking over or resolving lossily
-        // against a path it might coincidentally collide with.
-        Err(_) => return axum::http::StatusCode::NOT_FOUND.into_response(),
-    };
-    let relative = relative.as_ref();
-    if relative.is_empty() {
-        return serve_embedded_file(dir, "index.html");
-    }
-    if let Some(file) = dir.get_file(relative) {
-        return serve_embedded_bytes(relative, file.contents());
-    }
-    // No exact file at this path: an extension means the browser asked for
-    // a concrete asset that simply is not there (404, matching `Embedded`'s
-    // contract); no extension means a path reserved for a client-side
-    // route, which only `index.html` can take over and render — the
-    // fallback a single-page-application router needs, for the current UI
-    // or a future one. Nothing in the UI as it exists today actually owns
-    // such a route; this rule just makes sure adding one later needs no
-    // change here.
-    match std::path::Path::new(relative).extension() {
-        Some(_) => axum::http::StatusCode::NOT_FOUND.into_response(),
-        None => serve_embedded_file(dir, "index.html"),
-    }
-}
-
-/// Serve one exact path from the embedded tree, or 404 if it is not there.
-///
-/// Split out of [`serve_embedded`] because it has two callers: the ordinary
-/// lookup, and both of that function's `index.html` fallbacks (the empty
-/// path and the extension-less miss).
-fn serve_embedded_file(
-    dir: &'static include_dir::Dir<'static>,
-    path: &str,
-) -> axum::response::Response {
-    match dir.get_file(path) {
-        Some(file) => serve_embedded_bytes(path, file.contents()),
-        None => axum::http::StatusCode::NOT_FOUND.into_response(),
-    }
-}
-
-/// Wrap one embedded file's bytes in a response carrying its guessed
-/// content type — `mime_guess` maps `.js` to `text/javascript`, matching
-/// what `ServeDir` returns for [`UiSource::Dir`] so a browser sees the same
-/// type regardless of which source served it.
-fn serve_embedded_bytes(path: &str, bytes: &'static [u8]) -> axum::response::Response {
-    let content_type = mime_guess::from_path(path).first_or_octet_stream();
-    (
-        [(
-            axum::http::header::CONTENT_TYPE,
-            content_type.essence_str().to_string(),
-        )],
-        bytes,
-    )
-        .into_response()
-}
-
-/// Compose the API, static UI, and shared middleware from one serving mode.
-///
-/// An embedded helm ignores every supplied UI source: its mode also selected
-/// its credential authority when the state was built. Keeping the mode on
-/// that state makes a browser router over embedded auth (or the reverse)
-/// impossible through these constructors.
+/// The helm serves no page: every path outside `/api` is a 404 from the
+/// router itself, after the origin guard.
 ///
 /// Tests drive this same composition in-process against a scripted fleet,
 /// including the origin guard and headers, rather than exercising handlers
 /// in isolation and silently skipping the security boundary.
-fn build_router(state: Arc<AppState>, ui: UiSource, port: u16) -> Router {
+fn build_router(state: Arc<AppState>, port: u16) -> Router {
     let mode = state.mode;
-    let ui = match mode {
-        ServingMode::Standalone => ui,
-        ServingMode::Embedded => UiSource::None,
-    };
-    let mut app = api_router(state);
-
-    app = match ui {
-        UiSource::Dir(dist) => {
-            let serve = tower_http::services::ServeDir::new(&dist).fallback(
-                tower_http::services::ServeFile::new(dist.join("index.html")),
-            );
-            app.fallback_service(serve)
-        }
-        UiSource::Embedded(dir) => app.fallback(move |req: axum::extract::Request| async move {
-            serve_embedded(dir, req.method(), req.uri().path())
-        }),
-        UiSource::None => app,
-    };
-
-    app.layer(axum::middleware::from_fn(
-        move |req: axum::extract::Request, next: axum::middleware::Next| {
-            middleware::require_loopback_origin(port, mode, req, next)
-        },
-    ))
-    // OUTSIDE the origin guard, and that placement is the whole point:
-    // layers apply outside-in, so this one decorates every response the
-    // stack can produce — including the guard's own 403, which returns
-    // before anything inner runs. "Every reply carries the stamp" has to
-    // mean every reply, or the one path that skips it is the one a
-    // skewed client hits first.
-    .layer(axum::middleware::from_fn(middleware::stamp_build))
+    api_router(state)
+        .layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                middleware::require_loopback_origin(port, mode, req, next)
+            },
+        ))
+        // OUTSIDE the origin guard, and that placement is the whole point:
+        // layers apply outside-in, so this one decorates every response the
+        // stack can produce — including the guard's own 403, which returns
+        // before anything inner runs. "Every reply carries the stamp" has to
+        // mean every reply, or the one path that skips it is the one a
+        // skewed client hits first.
+        .layer(axum::middleware::from_fn(middleware::stamp_build))
 }
 
-/// [`UiSource`]'s decision function and its `Embedded` variant's actual
-/// serving behaviour — both against the tiny fixture tree committed at
-/// `tests/fixtures/ui` rather than a real `dx` build output, since nothing
-/// under test cares what a real UI looks like.
+/// The router's outer boundary: what answers outside the API, and that the
+/// build stamp reaches every reply.
 #[cfg(test)]
-mod embedded_ui_tests {
+mod router_boundary_tests {
     use super::*;
-    use axum::body::{Body, to_bytes};
+    use axum::body::Body;
     use axum::http::{Method, Request, StatusCode, header};
     use tower::ServiceExt;
 
-    /// The committed fixture tree. A `static` rather than built per test:
-    /// `include_dir!` output is `const` data, and every test here wants the
-    /// same `&'static Dir<'static>` [`UiSource::Embedded`] itself requires.
-    static FIXTURE_UI: include_dir::Dir<'static> =
-        include_dir::include_dir!("$CARGO_MANIFEST_DIR/tests/fixtures/ui");
-
-    /// The fixture `index.html`'s exact bytes, for exact-body assertions
-    /// rather than a mere substring check — committed alongside
-    /// [`FIXTURE_UI`] so a change to one always shows up as a diff to the
-    /// other.
-    const FIXTURE_INDEX_HTML: &[u8] = include_bytes!("../tests/fixtures/ui/index.html");
-    /// The fixture `assets/app.js`'s exact bytes — see [`FIXTURE_INDEX_HTML`].
-    const FIXTURE_APP_JS: &[u8] = include_bytes!("../tests/fixtures/ui/assets/app.js");
-
-    /// The real router, serving [`FIXTURE_UI`] the way a release build's
-    /// `UiSource::Embedded` actually would — built over `rest_harness`'s
-    /// idle scripted fleet since nothing here is about sessions or hosts,
-    /// only about what answers a static-asset path.
-    async fn embedded_router() -> Router {
-        let harness = rest_harness::idle_helm().await;
-        // 7433 rather than reading it off the harness: `Harness::port` is
-        // private to `rest_harness`, and every other test in this crate
-        // that builds a request by hand already hardcodes the same
-        // default (see e.g. `auth::tests`) rather than plumbing it out.
-        build_router(
-            Arc::clone(&harness.state),
-            UiSource::Embedded(&FIXTURE_UI),
-            7433,
-        )
+    /// A loopback API request carrying `secret`. Namespace-miss tests must
+    /// pass authentication so they prove routing reaches the protected 404
+    /// rather than merely observing a 401.
+    fn authenticated_api_request(method: Method, path: &str, secret: &str) -> Request<Body> {
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "127.0.0.1:7433")
+            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+            .body(Body::empty())
+            .unwrap()
     }
 
-    /// The desktop's private helm exposes the API only: a browser pointed at
-    /// its loopback address must find neither the standalone SPA nor the
-    /// bootstrap token exchange. A standalone custom-scheme request must be
-    /// refused, while the same Origin is admitted by the embedded mode. A
-    /// credential proven valid against standalone state must also be refused
-    /// even though the same durable row still exists.
+    /// The helm serves no page at `/`, and the browser sign-in route is gone.
+    ///
+    /// Why it matters: the browser UI was removed together with its sign-in;
+    /// a page or a token exchange answering again would bring back a surface
+    /// that nothing maintains.
     #[farhelm_testtrace::test]
-    async fn embedded_mode_has_no_browser_ui_or_token_exchange() {
+    async fn the_helm_serves_no_page_and_no_sign_in() {
         let harness = rest_harness::idle_helm().await;
-        let stored_secret = harness.state.auth.mint_device().await.unwrap();
-        let standalone = build_router(Arc::clone(&harness.state), UiSource::None, 7433);
-        let accepted = standalone
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/auth/device")
-                    .header(header::HOST, "127.0.0.1:7433")
-                    .header(header::AUTHORIZATION, format!("Bearer {stored_secret}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            accepted.status(),
-            StatusCode::NO_CONTENT,
-            "fixture premise: the durable credential authenticates standalone"
-        );
-        let custom_origin = standalone
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/auth/device")
-                    .header(header::HOST, "127.0.0.1:7433")
-                    .header(header::ORIGIN, "dioxus://index.html")
-                    .header(header::AUTHORIZATION, format!("Bearer {stored_secret}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            custom_origin.status(),
-            StatusCode::FORBIDDEN,
-            "standalone helm must refuse the desktop-only custom Origin"
-        );
-        assert!(
-            custom_origin
-                .headers()
-                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-                .is_none(),
-            "a refused Origin must not receive readable CORS headers"
-        );
-        let state = Arc::new(AppState::with_provisioning(
-            Arc::clone(&harness.state.manager),
-            harness.state.store.clone(),
-            Arc::clone(&harness.state.provisioning),
-            ServingMode::Embedded,
-        ));
-        let device_secret = state.auth.mint_embedded_device().unwrap();
-        let router = build_router(state, UiSource::Embedded(&FIXTURE_UI), 7433);
-        let embedded_origin = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/auth/device")
-                    .header(header::HOST, "127.0.0.1:7433")
-                    .header(header::ORIGIN, "dioxus://index.html")
-                    .header(header::AUTHORIZATION, format!("Bearer {device_secret}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(embedded_origin.status(), StatusCode::NO_CONTENT);
-        assert_eq!(
-            embedded_origin.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
-            "dioxus://index.html"
-        );
-        let stored_request = router
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/hosts")
-                    .header(header::HOST, "127.0.0.1:7433")
-                    .header(header::AUTHORIZATION, format!("Bearer {stored_secret}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(stored_request.status(), StatusCode::UNAUTHORIZED);
-
+        let secret = harness.state.auth.mint_device().unwrap();
+        let router = build_router(Arc::clone(&harness.state), 7433);
         let root = router
             .clone()
             .oneshot(
@@ -1780,448 +1432,70 @@ mod embedded_ui_tests {
             .await
             .unwrap();
         assert_eq!(root.status(), StatusCode::NOT_FOUND);
-
-        let token = router
-            .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/api/auth/token")
-                    .header(header::HOST, "127.0.0.1:7433")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .header(header::AUTHORIZATION, format!("Bearer {device_secret}"))
-                    .body(Body::from("{}"))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(token.status(), StatusCode::NOT_FOUND);
-    }
-
-    /// A `UiSource::Dir` router over a freshly written temp directory
-    /// holding the same two fixture files [`FIXTURE_UI`] compiles in —
-    /// built the way `auth.rs`'s `static_bundle_is_public` does — so a test
-    /// can assert `ServeDir`'s ACTUAL behaviour side by side with
-    /// `serve_embedded`'s, instead of assuming the two agree. Returns the
-    /// backing `TempDir` too: it must outlive every request the caller
-    /// makes against the router, or `ServeDir` reads a directory that no
-    /// longer exists.
-    async fn dir_router_over_fixtures() -> (Router, tempfile::TempDir) {
-        let harness = rest_harness::idle_helm().await;
-        let dist = tempfile::tempdir().unwrap();
-        std::fs::write(dist.path().join("index.html"), FIXTURE_INDEX_HTML).unwrap();
-        std::fs::create_dir(dist.path().join("assets")).unwrap();
-        std::fs::write(dist.path().join("assets").join("app.js"), FIXTURE_APP_JS).unwrap();
-        let router = build_router(
-            Arc::clone(&harness.state),
-            UiSource::Dir(dist.path().to_path_buf()),
-            7433,
-        );
-        (router, dist)
-    }
-
-    /// A loopback-origin-valid request for `method` and `path` — the Host
-    /// header `require_loopback_origin` demands of every request this
-    /// router answers, static UI included.
-    fn request(method: Method, path: &str) -> Request<Body> {
-        Request::builder()
-            .method(method)
-            .uri(path)
-            .header(header::HOST, "127.0.0.1:7433")
-            .body(Body::empty())
-            .unwrap()
-    }
-
-    /// A loopback-origin-valid GET for `path` — the common case of
-    /// [`request`].
-    fn get(path: &str) -> Request<Body> {
-        request(Method::GET, path)
-    }
-
-    /// A loopback API request carrying a real device credential minted by the
-    /// harness. Namespace-miss tests must pass authentication so they prove
-    /// routing reaches the protected 404 rather than merely observing a 401.
-    fn authenticated_api_request(method: Method, path: &str, secret: &str) -> Request<Body> {
-        Request::builder()
-            .method(method)
-            .uri(path)
-            .header(header::HOST, "127.0.0.1:7433")
-            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
-            .body(Body::empty())
-            .unwrap()
-    }
-
-    /// Spec: `/` serves the embedded tree's `index.html` verbatim, byte for
-    /// byte, as `text/html` — the content type a browser needs to actually
-    /// render it rather than offer it as a download.
-    #[farhelm_testtrace::test]
-    async fn root_serves_embedded_index() {
-        let response = embedded_router().await.oneshot(get("/")).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/html"
-        );
-        let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        assert_eq!(body.as_ref(), FIXTURE_INDEX_HTML);
-    }
-
-    /// Spec: a path matching a real embedded file serves it verbatim with
-    /// the `mime_guess`-derived content type — `.js` as `text/javascript`,
-    /// the same type `ServeDir` would return for `UiSource::Dir`, so a
-    /// browser sees identical types regardless of which source answered.
-    #[farhelm_testtrace::test]
-    async fn asset_path_serves_the_file_with_its_guessed_content_type() {
-        let response = embedded_router()
-            .await
-            .oneshot(get("/assets/app.js"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/javascript"
-        );
-        let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        assert_eq!(body.as_ref(), FIXTURE_APP_JS);
-    }
-
-    /// Spec: a percent-encoded path segment is decoded before the embedded
-    /// tree is consulted — `include_dir!` entries are keyed by their real,
-    /// unescaped names, so a request for the URL-escaped form of an asset
-    /// whose actual name needs escaping (a literal space, here) must still
-    /// resolve to it rather than 404.
-    #[farhelm_testtrace::test]
-    async fn percent_encoded_path_resolves_to_the_real_asset() {
-        let response = embedded_router()
-            .await
-            .oneshot(get("/assets/space%20name.js"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/javascript"
-        );
-        let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        assert_eq!(
-            body.as_ref(),
-            include_bytes!("../tests/fixtures/ui/assets/space name.js").as_slice()
-        );
-    }
-
-    /// Spec: percent-decoding runs before the asset/SPA-route extension
-    /// check too, not just before the `include_dir!` lookup. `%2E` decodes
-    /// to a literal `.`, so `app%2Ejs` names a file that DOES have an
-    /// extension once decoded — if the extension check ran on the raw,
-    /// still-encoded path instead, `app%2Ejs` would look extensionless and
-    /// wrongly fall back to `index.html` instead of resolving to the real
-    /// `app.js`.
-    #[farhelm_testtrace::test]
-    async fn percent_encoded_dot_resolves_to_the_real_asset() {
-        let response = embedded_router()
-            .await
-            .oneshot(get("/assets/app%2Ejs"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/javascript"
-        );
-        let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        assert_eq!(body.as_ref(), FIXTURE_APP_JS);
-    }
-
-    /// The missing-file counterpart to
-    /// [`percent_encoded_dot_resolves_to_the_real_asset`]: once `%2E` decodes
-    /// to `.`, `missing%2Ejs` names a path WITH an extension that matches no
-    /// compiled file, so it must take the extensioned-miss branch (a real
-    /// 404) rather than the extensionless SPA fallback to `index.html`.
-    #[farhelm_testtrace::test]
-    async fn percent_encoded_dot_missing_asset_is_404() {
-        let response = embedded_router()
-            .await
-            .oneshot(get("/assets/missing%2Ejs"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
-
-    /// Spec: `%FF` is not a valid UTF-8 byte on its own, so decoding it must
-    /// answer a plain 404 — not panic, and not resolve against whatever byte
-    /// sequence it happens to produce. `percent_decode_str(...).decode_utf8()`
-    /// is exactly the fallible step `serve_embedded_get` guards for this; this
-    /// test exercises it through the real router rather than only trusting
-    /// that guard exists.
-    #[farhelm_testtrace::test]
-    async fn invalid_percent_encoding_is_404_not_a_panic() {
-        let response = embedded_router().await.oneshot(get("/%FF")).await.unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
-
-    /// Spec: a path with no extension that matches no compiled file answers
-    /// with `index.html` — byte for byte, as `text/html` — rather than 404.
-    /// Locks down Step 1's agreed fallback rule for single-page-application
-    /// routes in general, not a claim that the UI as it exists today has
-    /// deep links or history-dependent routing of its own to depend on it.
-    #[farhelm_testtrace::test]
-    async fn extensionless_miss_falls_back_to_index_for_spa_routing() {
-        let response = embedded_router()
-            .await
-            .oneshot(get("/sessions/abc"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/html"
-        );
-        let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        assert_eq!(body.as_ref(), FIXTURE_INDEX_HTML);
-    }
-
-    /// Unknown control-plane paths stay API 404s for every ordinary HTTP
-    /// method, regardless of which production UI fallback is configured.
-    /// This prevents a removed GET route from becoming index.html and keeps
-    /// non-GET misses from inheriting a static service's 405 contract.
-    #[farhelm_testtrace::test]
-    async fn api_misses_never_fall_through_either_ui_source() {
-        let embedded_harness = rest_harness::idle_helm().await;
-        let embedded_secret = embedded_harness.state.auth.mint_device().await.unwrap();
-        let embedded = build_router(
-            Arc::clone(&embedded_harness.state),
-            UiSource::Embedded(&FIXTURE_UI),
-            7433,
-        );
-
-        let dir_harness = rest_harness::idle_helm().await;
-        let dir_secret = dir_harness.state.auth.mint_device().await.unwrap();
-        let dist = tempfile::tempdir().unwrap();
-        std::fs::write(dist.path().join("index.html"), FIXTURE_INDEX_HTML).unwrap();
-        let directory = build_router(
-            Arc::clone(&dir_harness.state),
-            UiSource::Dir(dist.path().to_path_buf()),
-            7433,
-        );
-
-        for (router, secret, source) in [
-            (embedded, embedded_secret, "embedded"),
-            (directory, dir_secret, "directory"),
-        ] {
-            for method in [
-                Method::GET,
-                Method::HEAD,
+        let sign_in = router
+            .oneshot(authenticated_api_request(
                 Method::POST,
-                Method::PUT,
-                Method::PATCH,
-                Method::DELETE,
-                Method::OPTIONS,
-            ] {
-                let response = router
-                    .clone()
-                    .oneshot(authenticated_api_request(
-                        method.clone(),
-                        "/api/removed-route",
-                        &secret,
-                    ))
-                    .await
-                    .unwrap();
-                assert_eq!(
-                    response.status(),
-                    StatusCode::NOT_FOUND,
-                    "{source} UI returned the wrong status for {method}"
-                );
-            }
+                "/api/auth/token",
+                &secret,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(sign_in.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Spec: an unknown path under `/api` is an authenticated 404 for every
+    /// method. This keeps a removed GET route from looking like something
+    /// else, and keeps non-GET misses from inheriting another layer's 405.
+    #[farhelm_testtrace::test]
+    async fn api_misses_are_404_for_every_method() {
+        let harness = rest_harness::idle_helm().await;
+        let secret = harness.state.auth.mint_device().unwrap();
+        let router = build_router(Arc::clone(&harness.state), 7433);
+        for method in [
+            Method::GET,
+            Method::HEAD,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ] {
+            let response = router
+                .clone()
+                .oneshot(authenticated_api_request(
+                    method.clone(),
+                    "/api/removed-route",
+                    &secret,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "wrong status for {method}"
+            );
         }
     }
 
-    /// Spec: a path WITH an extension that matches no compiled file is a
-    /// genuine 404 — the divergence from `UiSource::Dir`'s ServeDir
-    /// fallback that `UiSource`'s own docstring calls out. A typo in an
-    /// asset URL must surface as a failed request, not silently render a
-    /// page that looks like it loaded.
-    #[farhelm_testtrace::test]
-    async fn extensioned_miss_is_a_404() {
-        let response = embedded_router()
-            .await
-            .oneshot(get("/assets/missing.js"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
-
-    /// Spec: a non-`GET`/`HEAD` method against the embedded fallback is
-    /// `405 Method Not Allowed` naming the two methods that ARE allowed —
-    /// the same contract `ServeDir` enforces for `UiSource::Dir`, asserted
-    /// here for `Embedded` and below for `Dir` so the parity is checked
-    /// rather than assumed.
-    #[farhelm_testtrace::test]
-    async fn post_to_embedded_ui_is_405_with_allow_header() {
-        let response = embedded_router()
-            .await
-            .oneshot(request(Method::POST, "/"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
-        assert_eq!(response.headers().get(header::ALLOW).unwrap(), "GET,HEAD");
-    }
-
-    /// Spec: `HEAD` against a real embedded asset returns exactly what
-    /// `GET` would have — status, content-type, AND `Content-Length`
-    /// included — with the body dropped. A `HEAD` probe exists precisely so
-    /// a caller can learn that much without paying for the body; getting the
-    /// headers wrong, `Content-Length` especially, would defeat the point of
-    /// asking.
-    ///
-    /// `Content-Length` is asserted two ways: against the fixture file's own
-    /// length (so the number is checked against ground truth, not just
-    /// self-consistency) and against the sibling `GET`'s `Content-Length`
-    /// (so a regression that moves both numbers together, but away from the
-    /// truth, still fails). This pins the round-2 review fix: `serve_embedded`
-    /// used to empty the body itself before returning, which ran ahead of
-    /// axum's own router-level `Content-Length` computation (see that
-    /// function's doc comment) and produced `Content-Length: 0` on every
-    /// `HEAD` response instead of the real size.
-    #[farhelm_testtrace::test]
-    async fn head_asset_returns_get_headers_with_empty_body() {
-        let router = embedded_router().await;
-        let get_response = router.clone().oneshot(get("/assets/app.js")).await.unwrap();
-        assert_eq!(get_response.status(), StatusCode::OK);
-        let get_content_length = get_response
-            .headers()
-            .get(header::CONTENT_LENGTH)
-            .expect("GET response must carry Content-Length")
-            .clone();
-        assert_eq!(get_content_length, FIXTURE_APP_JS.len().to_string());
-
-        let response = router
-            .oneshot(request(Method::HEAD, "/assets/app.js"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/javascript"
-        );
-        assert_eq!(
-            response.headers().get(header::CONTENT_LENGTH).unwrap(),
-            &get_content_length,
-            "HEAD's Content-Length must match GET's, not the emptied HEAD body"
-        );
-        let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        assert!(body.is_empty(), "HEAD must not return a body, got {body:?}");
-    }
-
-    /// Spec: `UiSource::Dir`'s `ServeDir` gates by method exactly the way
-    /// `serve_embedded` now does for `Embedded` — the `Dir` half of the
-    /// method-parity pair started above (`post_to_embedded_ui_is_405_with_allow_header`,
-    /// `head_asset_returns_get_headers_with_empty_body`).
-    #[farhelm_testtrace::test]
-    async fn post_to_dir_ui_is_405_with_allow_header() {
-        let (router, _dist) = dir_router_over_fixtures().await;
-        let response = router.oneshot(request(Method::POST, "/")).await.unwrap();
-        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
-        assert_eq!(response.headers().get(header::ALLOW).unwrap(), "GET,HEAD");
-    }
-
-    /// The `Dir` half of `head_asset_returns_get_headers_with_empty_body` —
-    /// see that test's docstring, `Content-Length` assertions included.
-    /// `ServeDir` sets `Content-Length` itself (it has to, for range
-    /// requests), so this side was never at risk of the round-2 bug —
-    /// asserted anyway so the parity between the two `UiSource` variants is
-    /// checked, not assumed.
-    #[farhelm_testtrace::test]
-    async fn head_to_dir_ui_returns_get_headers_with_empty_body() {
-        let (router, _dist) = dir_router_over_fixtures().await;
-        let get_response = router.clone().oneshot(get("/assets/app.js")).await.unwrap();
-        assert_eq!(get_response.status(), StatusCode::OK);
-        let get_content_length = get_response
-            .headers()
-            .get(header::CONTENT_LENGTH)
-            .expect("GET response must carry Content-Length")
-            .clone();
-        assert_eq!(get_content_length, FIXTURE_APP_JS.len().to_string());
-
-        let response = router
-            .oneshot(request(Method::HEAD, "/assets/app.js"))
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "text/javascript"
-        );
-        assert_eq!(
-            response.headers().get(header::CONTENT_LENGTH).unwrap(),
-            &get_content_length,
-            "HEAD's Content-Length must match GET's"
-        );
-        let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        assert!(body.is_empty(), "HEAD must not return a body, got {body:?}");
-    }
-
-    /// Spec: `--ui-dist` outranks whatever this build embedded, which in
-    /// turn outranks serving nothing — `select_ui_source`'s whole contract,
-    /// and pure enough to assert without a router at all.
-    #[farhelm_testtrace::test]
-    fn select_ui_source_prefers_flag_over_embedded_and_falls_back_to_none() {
-        let flag = std::path::PathBuf::from("/some/dev/ui-dist");
-
-        assert!(matches!(
-            select_ui_source(Some(flag.clone()), Some(&FIXTURE_UI)),
-            UiSource::Dir(dir) if dir == flag
-        ));
-        assert!(matches!(
-            select_ui_source(None, Some(&FIXTURE_UI)),
-            UiSource::Embedded(_)
-        ));
-        assert!(matches!(select_ui_source(None, None), UiSource::None));
-    }
-
-    /// Spec: [`warn_if_no_ui`] logs the exact missing-UI warning for
-    /// [`UiSource::None`], and stays silent for `Dir`/`Embedded` — the
-    /// assertion `run_with_ready`'s previously-inlined `if` made impossible
-    /// to drive directly. The message is a unique sentence found nowhere
-    /// else in this crate, so exact content is enough to identify the one
-    /// event in this test-owned capture.
-    #[farhelm_testtrace::test]
-    fn warn_if_no_ui_warns_only_for_none() {
-        const MESSAGE: &str =
-            "no web UI: this build embeds none and --ui-dist was not given; the API still serves";
-        let events = crate::test_capture::current();
-
-        warn_if_no_ui(&UiSource::Dir(std::path::PathBuf::from(
-            "/some/dev/ui-dist",
-        )));
-        warn_if_no_ui(&UiSource::Embedded(&FIXTURE_UI));
-        assert!(
-            crate::test_capture::matching(&events, MESSAGE).is_empty(),
-            "Dir and Embedded must not log the missing-UI warning"
-        );
-
-        warn_if_no_ui(&UiSource::None);
-        let hits = crate::test_capture::matching(&events, MESSAGE);
-        assert_eq!(
-            hits.len(),
-            1,
-            "None must log the missing-UI warning exactly once"
-        );
-        assert_eq!(hits[0].field("message"), Some(MESSAGE));
-        assert_eq!(hits[0].level, "WARN");
-    }
-
     /// Spec: [`middleware::stamp_build`] is layered OUTSIDE the whole router
-    /// (see [`build_router`]'s own comment on why), so it must reach a
-    /// perfectly ordinary successful static-asset response too, not just the
-    /// API routes it was originally added for.
+    /// (see [`build_router`]'s own comment on why), so it reaches an ordinary
+    /// successful response.
     #[farhelm_testtrace::test]
-    async fn successful_embedded_response_carries_build_stamp_header() {
-        let response = embedded_router().await.oneshot(get("/")).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+    async fn successful_response_carries_build_stamp_header() {
+        let harness = rest_harness::idle_helm().await;
+        let secret = harness.state.auth.mint_device().unwrap();
+        let response = build_router(Arc::clone(&harness.state), 7433)
+            .oneshot(authenticated_api_request(
+                Method::GET,
+                "/api/auth/device",
+                &secret,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
         // Spelled out rather than taken from the constant: this pins the
         // header's wire name, so an edit to the shared constant fails here
-        // instead of silently renaming what the UI and the browser suite
-        // look for.
+        // instead of silently renaming what clients look for.
         assert_eq!(
             response.headers().get("x-farhelm-build").unwrap(),
             env!("CARGO_PKG_VERSION")
@@ -2236,14 +1510,14 @@ mod embedded_ui_tests {
     /// requests are failing needs the same skew signal a working one gets.
     #[farhelm_testtrace::test]
     async fn foreign_host_is_rejected_but_still_carries_build_stamp_header() {
+        let harness = rest_harness::idle_helm().await;
         let foreign_request = Request::builder()
             .method(Method::GET)
             .uri("/")
             .header(header::HOST, "evil.example:7433")
             .body(Body::empty())
             .unwrap();
-        let response = embedded_router()
-            .await
+        let response = build_router(Arc::clone(&harness.state), 7433)
             .oneshot(foreign_request)
             .await
             .unwrap();
@@ -2257,10 +1531,9 @@ mod embedded_ui_tests {
 
 /// Run the helm until SIGINT/SIGTERM or a fatal serving error: open helm.db, apply any
 /// `--ensure-hosts` floor, start a connection actor per registered host,
-/// open the private token-control endpoint, and serve the API and UI on
-/// loopback.
+/// and serve the API on loopback.
 ///
-/// Startup order is deliberate at four points, each for a different
+/// Startup order is deliberate at these points, each for a different
 /// reason:
 ///
 /// - The listener is bound FIRST, so the likely failure (port busy because
@@ -2278,9 +1551,6 @@ mod embedded_ui_tests {
 ///   have connected. A down host must never delay the helm's startup: it is
 ///   simply a host in a non-connected state, which the API exposes for the
 ///   forthcoming UI to draw.
-/// - The token-control socket is bound before HTTP serving begins, so a
-///   successful browser request cannot race a separate `token rotate` into
-///   the offline fallback and miss live WebSocket revocation.
 ///
 /// Signals end serving and drain connection actors, including their local
 /// tunnel processes. Sessions themselves continue on their supervisors.
@@ -2295,11 +1565,9 @@ pub fn run(args: HelmArgs) -> anyhow::Result<()> {
 ///
 /// The two device secrets are the desktop app's own credentials, one for its
 /// native REST client and one for its webview. They are minted in memory for
-/// this helm process alone (see `auth::AuthState::mint_embedded_device`):
-/// token rotation and the cap on remembered browser credentials never revoke
-/// them, no HTTP request can obtain one, and they are worthless once the
-/// process exits. The owner must not persist them; a fresh pair comes with
-/// every launch.
+/// this helm process alone (see `auth::AuthState::mint_device`): no HTTP
+/// request can obtain one, and they are worthless once the process exits.
+/// The owner must not persist them; a fresh pair comes with every launch.
 pub struct EmbeddedReady {
     /// The address the helm actually bound, which a port-0 caller needs.
     pub addr: SocketAddr,
@@ -2314,10 +1582,10 @@ pub struct EmbeddedReady {
 /// credentials once every serving dependency is ready.
 ///
 /// The desktop shell lets the kernel choose a fresh loopback port, but it must
-/// not launch the window until the HTTP listener, durable token, local-host
-/// actor, and token-control socket all exist. A synchronous channel keeps that
-/// startup boundary out of the Dioxus runtime and, unlike parsing stdout, cannot confuse another log
-/// line for readiness. The explicit shutdown receiver gives `DesktopBootstrap`
+/// not launch the window until the HTTP listener and the local-host actor
+/// exist. A synchronous channel keeps that startup boundary out of the Dioxus
+/// runtime and, unlike parsing stdout, cannot confuse another log line for
+/// readiness. The explicit shutdown receiver gives `DesktopBootstrap`
 /// a teardown path it can join; dropping its sender carries the same owner-
 /// disappeared meaning as sending the signal.
 ///
@@ -2351,8 +1619,8 @@ pub fn run_embedded(
 /// boundary than `farhelm helm run`.
 ///
 /// Native clipboard and Downloads saves belong to the embedded window's user.
-/// A server helm's browser may run on another machine, so its startup always
-/// supplies `None` for both capabilities; no CLI flag enables either one.
+/// A standalone helm has no window, so its startup always supplies `None` for
+/// both capabilities; no CLI flag enables either one.
 fn run_with_ready(
     args: HelmArgs,
     clipboard_sink: Option<ClipboardSink>,
@@ -2387,7 +1655,7 @@ thread_local! {
 }
 
 /// Serve inside the owning runtime, publishing the claim to its outer scope.
-/// The control endpoint ends with serving; ownership also covers runtime drain.
+/// Ownership outlives serving and also covers runtime drain.
 #[expect(
     clippy::too_many_arguments,
     reason = "the claim slot belongs outside this async serving lifetime"
@@ -2400,7 +1668,7 @@ async fn serve_with_ready(
     ready: Option<std::sync::mpsc::Sender<EmbeddedReady>>,
     shutdown: Option<tokio::sync::oneshot::Receiver<()>>,
     mode: ServingMode,
-    ownership: &mut Option<token_control::OwnershipLock>,
+    ownership: &mut Option<ownership::OwnershipLock>,
 ) -> anyhow::Result<()> {
     // Install before actors can spawn SSH. Embedded owners retain their own
     // process signal policy and stop the helm through the explicit receiver.
@@ -2416,7 +1684,7 @@ async fn serve_with_ready(
         Some(dir) => dir,
         None => farhelm_supervisor::default_state_dir()?,
     };
-    // 0700: this directory holds helm.db, the token-control socket, and ssh
+    // 0700: this directory holds helm.db, the ownership lock, and ssh
     // ControlMaster sockets. Each grants the user's authority when reached.
     farhelm_supervisor::ensure_private_dir(&state_dir).await?;
 
@@ -2435,7 +1703,7 @@ async fn serve_with_ready(
         .local_addr()
         .context("reading bound helm address")?;
 
-    *ownership = Some(token_control::claim_serving_ownership(&state_dir).await?);
+    *ownership = Some(ownership::claim_serving_ownership(&state_dir).await?);
     #[cfg(test)]
     HELM_RUNTIME_TEST_HOOK.with_borrow_mut(|hook| {
         if let Some(hook) = hook.take() {
@@ -2519,30 +1787,7 @@ async fn serve_with_ready(
     // Started here for the same reason: it needs the state the manager is a
     // field of. A seal noted before this point is kept and acted on at once.
     let _seal_finisher = sessions::spawn_seal_finisher(Arc::clone(&state));
-    // The control socket's flock (claimed above as `ownership`) comes FIRST,
-    // and only then is the bootstrap token read into its cache. Taking them
-    // in the other order left a gap:
-    // an offline `token rotate` can run between the cache fill and the flock
-    // (it takes the offline path exactly because no helm owns the directory
-    // yet), and a helm that then took the flock served with the pre-rotation
-    // token cached while the database held the new one, refusing both until
-    // a restart. With the flock held, an offline rotation is impossible and
-    // a live one goes through this process's control socket, which updates
-    // the same cache.
-    let mut token_control =
-        token_control::serve(&state_dir, ownership.as_ref().unwrap(), state.auth.clone()).await?;
-    // First run owns token creation. Browser serving must never begin with a
-    // database whose bootstrap secret exists only after somebody invokes the
-    // separate `token show` command.
-    state.auth.token().await?;
-    let ui = match mode {
-        ServingMode::Standalone => select_ui_source(args.ui_dist.clone(), embedded_ui()),
-        ServingMode::Embedded => UiSource::None,
-    };
-    if mode == ServingMode::Standalone {
-        warn_if_no_ui(&ui);
-    }
-    let app = build_router(Arc::clone(&state), ui, addr.port());
+    let app = build_router(Arc::clone(&state), addr.port());
 
     // Establish the configuration baseline before announcing readiness or
     // accepting previews. A later CLI commit is then necessarily a change
@@ -2554,14 +1799,17 @@ async fn serve_with_ready(
         // in-process owner to hand them to, so it holds none.
         let _ = ready.send(EmbeddedReady {
             addr,
-            native_device_secret: state.auth.mint_embedded_device()?,
-            webview_device_secret: state.auth.mint_embedded_device()?,
+            native_device_secret: state.auth.mint_device()?,
+            webview_device_secret: state.auth.mint_device()?,
         });
     }
+    if let Some(path) = args.test_credential_file.as_deref() {
+        write_test_credential(path, &state.auth.mint_device()?)?;
+    }
 
-    // Only a standalone helm has a browser-facing URL. Printing the embedded
-    // address invites users and other processes to treat the desktop's
-    // private implementation detail as a supported browser endpoint.
+    // The standalone helm prints the address it bound: with `--port 0` the
+    // kernel chose it, and a caller (the end-to-end tests) needs it. The
+    // embedded address stays private to the desktop process that owns it.
     if mode == ServingMode::Standalone {
         println!("farhelm helm: http://{addr}/");
     }
@@ -2580,7 +1828,6 @@ async fn serve_with_ready(
     };
     let serving = tokio::select! {
         result = axum::serve(listener, app) => result.context("serving helm HTTP"),
-        result = token_control.failed() => result,
         () = checkout_config::watch_revision(
             state.store.clone(), Arc::clone(state.manager.events()), checkout_revision,
         ) => unreachable!("checkout configuration watcher runs until serving ends"),
@@ -2592,12 +1839,29 @@ async fn serve_with_ready(
     serving
 }
 
-/// The response header carrying this helm's build version to the browser
+/// Write the `--test-credential-file` credential: a new file, mode 0600,
+/// refusing to replace anything already at `path`.
+///
+/// Refusing an existing file keeps a mistyped path from overwriting something
+/// that is not the test's, and keeps two helms from sharing one file.
+fn write_test_credential(path: &std::path::Path, secret: &str) -> anyhow::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .with_context(|| format!("creating the test credential file {}", path.display()))?;
+    file.write_all(secret.as_bytes())
+        .with_context(|| format!("writing the test credential file {}", path.display()))
+}
+
+/// The response header carrying this helm's build version to its client
 /// (PLAN_M6.md item 6).
 ///
 /// The name comes from [`farhelm_proto::http::BUILD_STAMP_HEADER`], which the
-/// UI reads as well; the browser suite also asserts the header by its
-/// literal name.
+/// UI reads as well.
 const BUILD_STAMP_HEADER: &str = farhelm_proto::http::BUILD_STAMP_HEADER;
 
 /// Classify an error chain into the coarse [`ErrorKind`] vocabulary this
@@ -2975,6 +2239,31 @@ mod tests {
         );
     }
 
+    /// `--test-credential-file` writes the credential to a new file that only
+    /// the user can read, and refuses a path that already exists.
+    ///
+    /// Why it matters: the file holds a live credential for the helm's whole
+    /// API, so it must not be readable by other accounts, and a mistyped path
+    /// must not overwrite somebody else's file. Spec: mode 0600 and exactly
+    /// the secret's bytes; a second write to the same path fails and leaves
+    /// the first file's contents alone.
+    #[farhelm_testtrace::test]
+    fn the_test_credential_file_is_private_and_never_replaced() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credential");
+        crate::write_test_credential(&path, "first-secret").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "the credential file must be owner-only, got {mode:o}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first-secret");
+        crate::write_test_credential(&path, "second-secret")
+            .expect_err("an existing path must be refused");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first-secret");
+    }
+
     /// A `HelmArgs` with every field at its argument-free default — the
     /// base every payload-selection test below customizes exactly the
     /// fields its case is about.
@@ -2982,7 +2271,7 @@ mod tests {
         crate::HelmArgs {
             port: 7433,
             state_dir: None,
-            ui_dist: None,
+            test_credential_file: None,
             ensure_hosts: None,
             payload_dir: None,
             release_base_url: None,
@@ -3047,7 +2336,7 @@ mod tests {
             upgraded > 29,
             "fixture premise: an unowned open upgrades this database"
         );
-        let _incumbent = crate::token_control::claim_serving_ownership(dir.path())
+        let _incumbent = crate::ownership::claim_serving_ownership(dir.path())
             .await
             .expect("fixture premise: the incumbent owns the directory");
 
@@ -3072,7 +2361,7 @@ mod tests {
         .expect("a refused helm must return rather than serve");
         let error = result.expect_err("the second helm must refuse an owned state directory");
         assert!(
-            format!("{error:#}").contains("another process owns token control"),
+            format!("{error:#}").contains("another helm owns this state directory"),
             "the refusal names the owner lock: {error:#}"
         );
         let after: i64 = rusqlite::Connection::open(&path)
@@ -3083,8 +2372,9 @@ mod tests {
     }
 
     /// A successor must stay excluded after serving ends while the old runtime
-    /// joins blocking work. Socket removal proves serving ended; the worker's
-    /// entered/release channels prove that runtime drain still has work to join.
+    /// joins blocking work. A refused connection to the helm's address proves
+    /// serving ended; the worker's entered/release channels prove that runtime
+    /// drain still has work to join.
     /// Releasing it then permits a new claim, so a leaked lock cannot pass.
     #[farhelm_testtrace::test]
     async fn helm_ownership_outlives_runtime_drain() {
@@ -3138,18 +2428,22 @@ mod tests {
         entered_rx
             .recv_timeout(Duration::from_secs(10))
             .expect("worker started on owned runtime");
-        ready_rx
+        let ready = ready_rx
             .recv_timeout(Duration::from_secs(10))
             .expect("real helm serving dependencies ready");
         assert!(parked.load(Ordering::SeqCst));
-        assert!(dir.path().join("helm-token.sock").exists());
+        // Premise for the oracle below: a refused connection only shows that
+        // serving ended if the listener accepted connections before it.
+        tokio::net::TcpStream::connect(ready.addr)
+            .await
+            .expect("fixture premise: the serving helm accepts connections");
         shutdown_tx.send(()).unwrap();
-        wait_for_control_endpoint_removal(dir.path()).await;
+        wait_for_serving_to_end(ready.addr).await;
         assert!(
             parked.load(Ordering::SeqCst),
             "fixture worker must still be parked after serving ends"
         );
-        let busy = crate::token_control::acquire_ownership(dir.path().to_path_buf()).await;
+        let busy = crate::ownership::acquire_ownership(dir.path().to_path_buf()).await;
         let refused = busy.is_err();
         let message = busy
             .err()
@@ -3163,27 +2457,28 @@ mod tests {
             "a successor acquired ownership while old work was parked"
         );
         assert!(
-            message.contains("another process owns token control"),
+            message.contains("another helm owns this state directory"),
             "{message}"
         );
         assert!(!parked.load(Ordering::SeqCst));
-        let _successor = crate::token_control::acquire_ownership(dir.path().to_path_buf())
+        let _successor = crate::ownership::acquire_ownership(dir.path().to_path_buf())
             .await
             .expect("ownership is released after runtime drain finishes");
     }
 
-    /// Observe ControlGuard teardown rather than assuming a shutdown send ran.
-    /// This bounds only the fixture's readiness wait, while its owned worker
-    /// remains parked and gives timeout diagnostics the premise they need.
-    async fn wait_for_control_endpoint_removal(state_dir: &std::path::Path) {
+    /// Observe the HTTP listener closing rather than assuming a shutdown send
+    /// ran. This bounds only the fixture's readiness wait, while its owned
+    /// worker remains parked and gives timeout diagnostics the premise they
+    /// need.
+    async fn wait_for_serving_to_end(addr: std::net::SocketAddr) {
         tokio::time::timeout(std::time::Duration::from_secs(10), async {
-            while state_dir.join("helm-token.sock").exists() {
-                // sleep-ok: poll the owned control endpoint's teardown before probing the still-draining runtime's lock.
+            while tokio::net::TcpStream::connect(addr).await.is_ok() {
+                // sleep-ok: poll the owned listener's teardown before probing the still-draining runtime's lock.
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
         })
         .await
-        .expect("serving must remove its control endpoint before the drain assertion");
+        .expect("serving must close its listener before the drain assertion");
     }
 
     /// Spec (D18): `--payload-dir` wins over `--release-base-url` when both

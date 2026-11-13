@@ -6,11 +6,10 @@ release gate in GitHub, with straightforward fixes validated and landed along th
 most of it the sweep.
 
 The point is to find, before a release is cut, what the release process would otherwise find: deterministic failures
-that crept in because no ordinary gate runs a suite (the browser suite runs in neither CI nor the release gate), and
-failures that only happen on GitHub's runners. It was first done by hand on 2026-10-09, and that run found one of each:
-a browser test whose cleanup broke when hosts started refusing more than eight concurrent session operations (#1740),
-and clippy failing in CI because CI's floating Rust stable had moved to 1.99 while the local machine was on 1.98.1
-(#1742).
+that crept in because no ordinary gate runs a suite, and failures that only happen on GitHub's runners. It was first
+done by hand on 2026-10-09, and that run found one of each: a browser test (from the since-removed browser suite) whose
+cleanup broke when hosts started refusing more than eight concurrent session operations (#1740), and clippy failing in
+CI because CI's floating Rust stable had moved to 1.99 while the local machine was on 1.98.1 (#1742).
 
 ## Reading list
 
@@ -101,14 +100,6 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` (includes both Claude
   instruction-file names in the repository inventory and mixed-case specification pointers)
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`
-- `cd e2e && npx playwright test --config grid-client/playwright.config.ts` (the grid terminal's static-page specs,
-  which boot no stack and which neither the sweep nor CI runs)
-- `node --experimental-strip-types --test e2e/grid-client/benchmark.test.mts` (the opt-in grid benchmark's framing and
-  process-accounting helpers). The separate measurement in `e2e/grid-client/BENCHMARK.md` is run on demand for encoding
-  or history-storage performance changes, with matching frames/assets, both engines and interleaved comparison samples;
-  it reports memory, bytes and time without performance thresholds and is not an ordinary sweep gate.
-- `node --test e2e/tests/helpers/program-input.test.ts` (the decoding the shortcut specs use to say what a program read
-  from a terminal's input frames; seconds)
 - `dist generate --check`
 - `python3 scripts/install-pinned-cargo-deny.py`, then `<printed directory>/cargo-deny --locked check licenses sources`
   (the dependency license and source policy in `deny.toml`)
@@ -128,10 +119,9 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and
-  `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-shard.sh scripts/tensorlake/run-rust-shard.sh` (the
-  Tensorlake harness's own checks, including the project list and archive configuration preserving the scoped Podman
-  payload setup while removing the local fixture build). Run the harness only on the maintainer's request, per
-  `.agents/tensorlake.md`.
+  `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-rust-shard.sh` (the Tensorlake harness's own
+  checks, including the snapshot listing and archive configuration preserving the scoped Podman payload setup while
+  removing the local fixture build). Run the harness only on the maintainer's request, per `.agents/tensorlake.md`.
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
 - `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-dx.py` and
   `python3 -B scripts/test-install-pinned-cargo-deny.py`
@@ -161,17 +151,15 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   since the crate's fixtures do not support parallel libtest threads), compared with the baseline in
   `crates/terminal-host/TESTING.md`: a drop in line coverage below 95% or a new surviving mutant is a finding.
 
-Deliberately not here: everything the sweep runs (workspace nextest including the e2e suite, the browser suite on both
-engines, desktop nextest, both doctest runs, the two JS harnesses, `test-install-sh.sh`, CentOS provisioning, desktop
-smoke, including the public-to-local session identity boundary), and the macOS-only uninstall acceptance (the
-rehearsal's macOS leg runs it in step 4, including legacy upgrade-floor refusal with the old installation preserved and
-uninstall through an indirect Terminal link). Also not here: `scripts/test-start-stack-cleanup.sh`, a by-hand check of
-`e2e/start-stack.sh`'s cleanup that `.agents/validation.md` names for changes to it; the sweep's browser phase stops
-every stack it boots through that same cleanup. The focused macOS CI job's terminal host step (the host crate, its entry
-test in the CLI, and the supervisor's spawning, its client, its host terminal runtime, discovery, the test-state cleanup
-and the stop command) runs only with `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is
-part of the sweep's workspace nextest. The same goes for that job's desktop supervisor record and stop tests and the
-stop's macOS process-exit check (`managed_supervisor::`, `procs::tests::finished_exiting`).
+Deliberately not here: everything the sweep runs (workspace nextest including the e2e suite, desktop nextest, both
+doctest runs, the two JS harnesses, `test-install-sh.sh`, CentOS provisioning, desktop smoke, including the
+public-to-local session identity boundary), and the macOS-only uninstall acceptance (the rehearsal's macOS leg runs it
+in step 4, including legacy upgrade-floor refusal with the old installation preserved and uninstall through an indirect
+Terminal link). The focused macOS CI job's terminal host step (the host crate, its entry test in the CLI, and the
+supervisor's spawning, its client, its host terminal runtime, discovery, the test-state cleanup and the stop command)
+runs only with `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is part of the sweep's
+workspace nextest. The same goes for that job's desktop supervisor record and stop tests and the stop's macOS
+process-exit check (`managed_supervisor::`, `procs::tests::finished_exiting`).
 
 The workspace nextest selection includes historical `containerized_sessions` compatibility and the real Linux
 `podman_environments` managed-checkout and lifecycle fixture. It covers credential delivery and ordinary tab, file,
@@ -216,9 +204,9 @@ PRs. Handle and acknowledge an event in the same turn, including any landing for
 
 A fix for a deterministic failure needs a runtime check of its own (usually the failing test, through the recorder).
 Running it in the middle of the sweep competes with the sweep for the machine; prefer to run it once the sweep is past
-its timing-sensitive phases (the nextest and browser phases come first) or after it finishes, and do not count the
-sweep's own pre-fix result as evidence for the fix. A fix waiting for that required check is not ready to land; once the
-check passes, land it without waiting for unrelated work.
+its timing-sensitive phases (the nextest phases come first) or after it finishes, and do not count the sweep's own
+pre-fix result as evidence for the fix. A fix waiting for that required check is not ready to land; once the check
+passes, land it without waiting for unrelated work.
 
 ## 4. Release gate and CI in GitHub
 

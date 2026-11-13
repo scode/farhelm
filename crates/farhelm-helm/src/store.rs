@@ -16,24 +16,23 @@
 //! This module is STORAGE ONLY: schema, types, and CRUD. It holds no
 //! connections, makes no routing decisions, and knows nothing about which
 //! hosts are currently reachable — [`crate::manager`] owns all of that, and
-//! [`crate::aggregate`] is what joins the two into the served list. The one
-//! other boundary is browser authentication: this module persists the
-//! recoverable bootstrap token and hashed device credentials, while
-//! [`crate::auth`] owns their protocol and comparison. SPEC_impl.md's "Helm
-//! internals" section carries the settled data model this schema implements.
+//! [`crate::aggregate`] is what joins the two into the served list. The
+//! `web_token` and `device_sessions` tables older helms wrote for browser
+//! sign-in remain in the schema, unread: dropping them would be a migration.
+//! SPEC_impl.md's "Helm internals" section carries the settled data model this schema implements.
 //!
 //! ## Divergences from the supervisor store, and why
 //!
 //! - **Serving and offline opens have different migration authority.** The
 //!   serving helm always migrates its database while it owns the state
-//!   directory. Offline readers such as `token show` must not migrate under a
-//!   serving helm: a newer CLI may know a schema the incumbent does not, and
-//!   a non-additive migration could make that incumbent unable to continue.
+//!   directory. Offline readers must not migrate under a serving helm: a
+//!   newer CLI may know a schema the incumbent does not, and a non-additive
+//!   migration could make that incumbent unable to continue.
 //!   [`HelmStore::open`] remains the migrating entry point, while
 //!   [`HelmStore::open_without_migration`] is the incumbent-safe reader.
-//! - **Concurrent-open safety despite the single-helm rule.** The token-control
-//!   ownership lock prevents two serving helms or an offline rotation from
-//!   claiming the state directory together, but this storage type remains
+//! - **Concurrent-open safety despite the single-helm rule.** The helm's
+//!   ownership lock prevents two serving helms from claiming the state
+//!   directory together, but this storage type remains
 //!   independently openable by tests and maintenance callers.
 //!   [`ensure_local_row`]'s conditional `ON CONFLICT` and
 //!   [`HelmStore::add_ssh_host`]'s own conditional insert hold regardless: a
@@ -84,16 +83,7 @@ use anyhow::Context;
 use farhelm_proto::{LaunchSelection, SessionInfo, SessionStatus};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::path::Path;
-use subtle::ConstantTimeEq;
-
-/// Maximum number of authenticated browser profiles retained by one helm.
-///
-/// A device exchange is user-mediated and infrequent, so retaining the 64
-/// newest credentials leaves ample room for ordinary use while preventing a
-/// leaked bootstrap token from growing helm.db without bound.
-pub(crate) const MAX_DEVICE_SESSIONS: usize = 64;
 
 /// Keep suggestions useful without letting routine creates grow helm.db
 /// forever. The same bounded window supplies recency and frequency; callers
@@ -2404,6 +2394,15 @@ pub enum FirstContactOutcome {
 #[derive(Clone, Debug)]
 pub struct HelmStore {
     conn: farhelm_supervisor::db::Db,
+    /// The schema version this handle opened at, which an offline open may
+    /// leave below [`SCHEMA_VERSION`].
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "only tests read it since the browser token, its last production reader, was removed"
+        )
+    )]
     schema_version: i64,
 }
 
@@ -5206,23 +5205,7 @@ impl HelmStore {
     /// This authority also attempts WAL conversion before schema work; all
     /// ordinary connections then select sync from the actual journal mode.
     pub async fn open(path: &Path) -> anyhow::Result<HelmStore> {
-        Self::open_inner(path, true, true).await
-    }
-
-    /// [`Self::open`], migrating as it does, but for a database that must
-    /// already exist: nothing is created when the file is absent.
-    ///
-    /// For offline `token rotate`, which is revocation. Pointed at a state
-    /// directory where no helm ever ran (a mistyped `--state-dir`, or a shell
-    /// whose `XDG_STATE_HOME` differs from the one `helm setup` pinned), the
-    /// creating open minted a fresh database, rotated the token in it, and
-    /// reported success while the real helm kept the leaked token. Unlike
-    /// [`Self::open_existing_current_schema`], an older schema is still
-    /// accepted and migrated: token control deliberately keeps that
-    /// tolerance, since it runs with the state directory's ownership lock
-    /// held and no helm serving it.
-    pub async fn open_existing(path: &Path) -> anyhow::Result<HelmStore> {
-        Self::open_inner(path, true, false).await
+        Self::open_inner(path, true).await
     }
 
     /// Crate-internal access to the shared connection for sibling modules
@@ -5240,7 +5223,7 @@ impl HelmStore {
     /// until an operation needs a schema feature they do not have; newer
     /// schemas are refused by the same version check as [`Self::open`].
     pub async fn open_without_migration(path: &Path) -> anyhow::Result<HelmStore> {
-        Self::open_inner(path, false, true).await
+        Self::open_inner(path, false).await
     }
 
     /// Open an EXISTING database at the CURRENT schema, creating and
@@ -5330,11 +5313,7 @@ impl HelmStore {
         })
     }
 
-    async fn open_inner(
-        path: &Path,
-        may_migrate: bool,
-        may_create: bool,
-    ) -> anyhow::Result<HelmStore> {
+    async fn open_inner(path: &Path, may_migrate: bool) -> anyhow::Result<HelmStore> {
         let path = path.to_path_buf();
         let (conn, schema_version) = tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64)> {
             // Explicit flags rather than `Connection::open`'s defaults —
@@ -5344,11 +5323,7 @@ impl HelmStore {
             // feature this module wants regardless) and why
             // `SQLITE_OPEN_NO_MUTEX` is correct (this module already
             // serializes every access through its own `Mutex`).
-            let mut conn = if may_create {
-                farhelm_supervisor::db::open_private(&path, "helm database")?
-            } else {
-                farhelm_supervisor::db::open_private_existing(&path, "helm database")?
-            };
+            let mut conn = farhelm_supervisor::db::open_private(&path, "helm database")?;
             farhelm_supervisor::db::configure_durability(&conn, "helm database", may_migrate)?;
             // Not durable in the database file — SQLite enforces foreign
             // keys only when a connection has asked for it, so every open
@@ -5627,318 +5602,6 @@ impl HelmStore {
                 },
             )
             .await
-    }
-
-    /// Read the recoverable web token without creating one.
-    ///
-    /// `token show`'s read-only path depends on this never inserting: it
-    /// must report a missing token rather than mint one. Keeping this read
-    /// separate lets callers avoid consuming randomness or
-    /// consulting the clock on the overwhelmingly common existing-token path.
-    pub async fn web_token(&self) -> anyhow::Result<Option<String>> {
-        const WEB_TOKEN_SCHEMA: i64 = 7;
-        if self.schema_version < WEB_TOKEN_SCHEMA {
-            anyhow::bail!(
-                "helm.db schema version {} is older than the version {WEB_TOKEN_SCHEMA} required to read the web token",
-                self.schema_version
-            );
-        }
-        self.conn
-            .call(
-                "web token read task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<Option<String>> {
-                    conn.query_row(
-                        "SELECT token FROM web_token WHERE singleton = 1",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .context("reading the web token")
-                },
-            )
-            .await
-    }
-
-    /// Commit `candidate` only if the singleton token was still absent.
-    ///
-    /// Two fresh processes may both decide they need to mint. The immediate
-    /// transaction makes one candidate authoritative and returns that same
-    /// committed value to both callers.
-    pub async fn web_token_or_insert(
-        &self,
-        candidate: String,
-        created_at: i64,
-    ) -> anyhow::Result<String> {
-        self.conn
-            .call(
-                "web token task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<String> {
-                    let tx = conn
-                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                        .context("beginning web-token transaction")?;
-                    tx.execute(
-                        "INSERT INTO web_token (singleton, token, created_at) VALUES (1, ?1, ?2) \
-                 ON CONFLICT (singleton) DO NOTHING",
-                        rusqlite::params![candidate, created_at],
-                    )
-                    .context("minting the web token")?;
-                    let token = tx
-                        .query_row(
-                            "SELECT token FROM web_token WHERE singleton = 1",
-                            [],
-                            |row| row.get(0),
-                        )
-                        .context("reading the web token")?;
-                    tx.commit().context("committing the web token")?;
-                    Ok(token)
-                },
-            )
-            .await
-    }
-
-    /// Replace the web token and invalidate every device session atomically.
-    ///
-    /// Neither half may commit alone: a new token with old credentials still
-    /// admitted would make rotation lie, while deleted credentials paired with
-    /// the old token would log every device out without changing the secret
-    /// the user asked to rotate. The commit uses at least FULL synchronous
-    /// durability before success is reported: losing an acknowledged rotation
-    /// on power loss would restore credentials the user has revoked. Ordinary
-    /// writes resume their previous sync setting afterwards.
-    pub async fn rotate_web_token(
-        &self,
-        replacement: String,
-        created_at: i64,
-    ) -> anyhow::Result<String> {
-        self.conn
-            .call(
-                "web token rotation task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<String> {
-                    // Returning success acknowledges revocation of secrets held
-                    // outside this process. Losing this commit must not restore
-                    // the old bootstrap token and the revoked device credentials.
-                    farhelm_supervisor::db::with_full_sync(conn, |conn| {
-                        let tx = conn
-                            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                            .context("beginning web-token rotation")?;
-                        tx.execute(
-                            "INSERT INTO web_token (singleton, token, created_at) VALUES (1, ?1, ?2) \
-                     ON CONFLICT (singleton) DO UPDATE SET token = excluded.token, \
-                         created_at = excluded.created_at",
-                            rusqlite::params![replacement, created_at],
-                        )
-                        .context("replacing the web token")?;
-                        tx.execute("DELETE FROM device_sessions", [])
-                            .context("deleting device sessions during token rotation")?;
-                        tx.commit().context("committing web-token rotation")?;
-                        Ok(replacement)
-                    })
-                },
-            )
-            .await
-    }
-
-    /// Validate a bootstrap token and record its device credential atomically.
-    ///
-    /// The immediate transaction serializes this decision with rotation. An
-    /// exchange using the old token therefore either commits before rotation
-    /// and is deleted by it, or validates afterwards and is refused.
-    pub async fn exchange_device_session(
-        &self,
-        supplied_token: String,
-        device_hash: [u8; 32],
-        created_at: i64,
-    ) -> anyhow::Result<bool> {
-        self.exchange_device_session_inner(supplied_token, device_hash, created_at, None)
-            .await
-    }
-
-    /// Pause a test after validation while the immediate transaction remains
-    /// open, exposing the exact exchange-versus-rotation serialization seam.
-    #[cfg(test)]
-    pub(crate) async fn exchange_device_session_with_pause(
-        &self,
-        supplied_token: String,
-        device_hash: [u8; 32],
-        created_at: i64,
-        after_validation: Box<dyn FnOnce() + Send>,
-    ) -> anyhow::Result<bool> {
-        self.exchange_device_session_inner(
-            supplied_token,
-            device_hash,
-            created_at,
-            Some(after_validation),
-        )
-        .await
-    }
-
-    /// Shared transaction body with an optional test-only pause after
-    /// validation. The pause runs while the immediate transaction is held so
-    /// a race test can prove rotation waits at the real serialization point.
-    async fn exchange_device_session_inner(
-        &self,
-        supplied_token: String,
-        device_hash: [u8; 32],
-        created_at: i64,
-        after_validation: Option<Box<dyn FnOnce() + Send>>,
-    ) -> anyhow::Result<bool> {
-        self.conn
-            .call(
-                "device exchange task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<bool> {
-                    let tx = conn
-                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                        .context("beginning device exchange")?;
-                    let expected: Option<String> = tx
-                        .query_row(
-                            "SELECT token FROM web_token WHERE singleton = 1",
-                            [],
-                            |row| row.get(0),
-                        )
-                        .optional()
-                        .context("reading the web token during device exchange")?;
-                    let accepted = expected.is_some_and(|expected| {
-                        Sha256::digest(expected.as_bytes())
-                            .ct_eq(&Sha256::digest(supplied_token.as_bytes()))
-                            .into()
-                    });
-                    if !accepted {
-                        return Ok(false);
-                    }
-                    if let Some(after_validation) = after_validation {
-                        after_validation();
-                    }
-                    tx.execute(
-                        "INSERT INTO device_sessions (cookie_hash, created_at) VALUES (?1, ?2) \
-                     ON CONFLICT (cookie_hash) DO NOTHING",
-                        rusqlite::params![device_hash.as_slice(), created_at],
-                    )
-                    .context("recording a device session")?;
-                    // Eviction is by INSERTION order (`rowid`), never by the
-                    // caller-supplied `created_at`: the row just inserted is the
-                    // newest by construction and must survive its own exchange. A
-                    // clock rollback, or a tie on `created_at` broken by the hash,
-                    // would otherwise rank the fresh row past the cap and delete it
-                    // in the same transaction that reports success, handing the
-                    // browser a secret no later request can present.
-                    tx.execute(
-                        "DELETE FROM device_sessions WHERE cookie_hash IN (\
-                     SELECT cookie_hash FROM device_sessions \
-                     ORDER BY rowid DESC LIMIT -1 OFFSET ?1\
-                 )",
-                        [
-                            i64::try_from(MAX_DEVICE_SESSIONS)
-                                .expect("device-session cap fits i64"),
-                        ],
-                    )
-                    .context("evicting old device sessions")?;
-                    tx.commit().context("committing device exchange")?;
-                    Ok(true)
-                },
-            )
-            .await
-    }
-
-    /// Test whether an exact device digest is present through its primary-key
-    /// index. The digest is public output of SHA-256, so SQLite's equality
-    /// lookup reveals no useful secret-dependent prefix information.
-    pub async fn has_device_session(&self, device_hash: [u8; 32]) -> anyhow::Result<bool> {
-        self.conn
-            .call(
-                "device-session read task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<bool> {
-                    conn.query_row(
-                        "SELECT EXISTS(SELECT 1 FROM device_sessions WHERE cookie_hash = ?1)",
-                        [device_hash.as_slice()],
-                        |row| row.get(0),
-                    )
-                    .context("looking up a device session")
-                },
-            )
-            .await
-    }
-
-    /// Insert a device digest without token validation for storage fixtures.
-    #[cfg(test)]
-    pub(crate) async fn insert_device_session(
-        &self,
-        device_hash: [u8; 32],
-        created_at: i64,
-    ) -> anyhow::Result<()> {
-        self.conn
-            .call(
-                "fixture device-session insert task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<()> {
-                    conn.execute(
-                        "INSERT INTO device_sessions (cookie_hash, created_at) VALUES (?1, ?2)",
-                        rusqlite::params![device_hash.as_slice(), created_at],
-                    )
-                    .context("inserting a fixture device session")?;
-                    Ok(())
-                },
-            )
-            .await
-    }
-
-    /// Decode every digest for storage tests that assert exact rotation rows.
-    #[cfg(test)]
-    pub(crate) async fn device_session_hashes(&self) -> anyhow::Result<Vec<[u8; 32]>> {
-        self.conn
-            .call(
-                "fixture device-session read task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<Vec<[u8; 32]>> {
-                    let mut stmt = conn
-                        .prepare("SELECT cookie_hash FROM device_sessions ORDER BY cookie_hash")
-                        .context("preparing fixture device-session read")?;
-                    stmt.query_map([], |row| {
-                        let bytes: Vec<u8> = row.get(0)?;
-                        bytes.try_into().map_err(|bytes: Vec<u8>| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                0,
-                                rusqlite::types::Type::Blob,
-                                format!("device-session digest is {} bytes", bytes.len()).into(),
-                            )
-                        })
-                    })
-                    .context("reading fixture device sessions")?
-                    .collect::<Result<Vec<_>, _>>()
-                    .context("decoding fixture device-session digests")
-                },
-            )
-            .await
-    }
-
-    /// Count retained device credentials for rotation and bound tests.
-    #[cfg(test)]
-    pub(crate) async fn device_session_count(&self) -> anyhow::Result<usize> {
-        self.conn
-            .call(
-                "device-session count task panicked",
-                move |conn: &mut Connection| -> anyhow::Result<usize> {
-                    let count: i64 = conn
-                        .query_row("SELECT COUNT(*) FROM device_sessions", [], |row| row.get(0))
-                        .context("counting device sessions")?;
-                    usize::try_from(count).context("device-session count does not fit usize")
-                },
-            )
-            .await
-    }
-
-    /// Install a deterministic device-insert failure for authentication error
-    /// surface tests.
-    #[cfg(test)]
-    pub(crate) async fn refuse_device_inserts_for_test(&self) {
-        let conn = self.conn.clone();
-        tokio::task::spawn_blocking(move || {
-            conn.lock()
-                .execute_batch(
-                    "CREATE TRIGGER refuse_auth_insert BEFORE INSERT ON device_sessions \
-                     BEGIN SELECT RAISE(ABORT, 'secret database detail'); END;",
-                )
-                .expect("install device-insert refusal");
-        })
-        .await
-        .expect("device-insert refusal task panicked");
     }
 
     // ---- The shared client preference ---------------------------------
@@ -9852,36 +9515,6 @@ mod tests {
         let db_path = dir.path().join("helm.db");
         let store = HelmStore::open(&db_path).await.expect("open");
         (dir, store)
-    }
-
-    /// `open_existing` never creates a database, and otherwise opens like
-    /// `open`.
-    ///
-    /// Offline `token rotate` relies on this for revocation: the creating
-    /// open answered a mistyped state directory with a fresh database, so a
-    /// rotation "succeeded" against nothing. The absent case must fail and
-    /// leave no file; an existing database must open, migrate, and keep its
-    /// rows, since token control deliberately tolerates older schemas.
-    #[farhelm_testtrace::test]
-    async fn open_existing_refuses_an_absent_database_and_opens_a_present_one() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let db_path = dir.path().join("helm.db");
-        HelmStore::open_existing(&db_path)
-            .await
-            .expect_err("an absent database must not be created");
-        assert!(!db_path.exists(), "the refused open must leave no file");
-
-        let created = HelmStore::open(&db_path).await.expect("create");
-        let hosts = created.list_hosts().await.expect("hosts");
-        drop(created);
-        let reopened = HelmStore::open_existing(&db_path)
-            .await
-            .expect("an existing database opens");
-        assert_eq!(
-            reopened.list_hosts().await.expect("hosts").len(),
-            hosts.len(),
-            "reopening must keep the existing rows"
-        );
     }
 
     /// Count the four history tables without exposing a production-only
@@ -15169,7 +14802,6 @@ mod tests {
 
         let offline = HelmStore::open_without_migration(&path).await.unwrap();
         assert_eq!(offline.schema_version, 53);
-        assert_eq!(offline.web_token().await.unwrap(), None);
         assert!(
             offline.registry_namespace().await.is_err(),
             "offline open must not create the missing table"
@@ -15273,10 +14905,10 @@ mod tests {
         assert_eq!(preferences.open_extensions.as_deref(), Some(""));
     }
 
-    /// Token-control readers cannot convert an incumbent's rollback journal.
-    /// Owning opens, including offline rotation's existing-only path, convert;
-    /// every ordinary WAL connection sets NORMAL, while checkout-config keeps
-    /// its explicitly separate FULL-sync opening contract.
+    /// Offline readers cannot convert an incumbent's rollback journal. Owning
+    /// opens convert; every ordinary WAL connection sets NORMAL, while
+    /// checkout-config keeps its explicitly separate FULL-sync opening
+    /// contract.
     #[farhelm_testtrace::test]
     async fn open_selects_durability_by_ownership_and_preserves_the_cli_exception() {
         let dir = tempfile::tempdir().unwrap();
@@ -15307,7 +14939,7 @@ mod tests {
         let reader = HelmStore::open_without_migration(&path).await.unwrap();
         assert_eq!(settings(&reader), ("delete".into(), 2));
         drop(reader);
-        let owner = HelmStore::open_existing(&path).await.unwrap();
+        let owner = HelmStore::open(&path).await.unwrap();
         assert_eq!(settings(&owner), ("wal".into(), 1));
         let reader = HelmStore::open_without_migration(&path).await.unwrap();
         assert_eq!(settings(&reader), ("wal".into(), 1));
@@ -18062,41 +17694,6 @@ mod tests {
         );
     }
 
-    /// First need mints one recoverable token, and later callers read that
-    /// committed value rather than replacing it with their own candidate.
-    #[farhelm_testtrace::test]
-    async fn web_token_is_recoverable_and_stable_after_first_need() {
-        let (_dir, store) = fresh_store().await;
-        assert_eq!(
-            store
-                .web_token_or_insert("first-token".to_string(), 100)
-                .await
-                .unwrap(),
-            "first-token"
-        );
-        assert_eq!(
-            store
-                .web_token_or_insert("losing-candidate".to_string(), 200)
-                .await
-                .unwrap(),
-            "first-token"
-        );
-
-        let conn = store.conn.clone();
-        let created_at: i64 = tokio::task::spawn_blocking(move || {
-            conn.lock()
-                .query_row(
-                    "SELECT created_at FROM web_token WHERE singleton = 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap()
-        })
-        .await
-        .unwrap();
-        assert_eq!(created_at, 100, "a losing mint must not rewrite history");
-    }
-
     /// Revocations must reach FULL before acknowledgement, while unrelated preferences keep NORMAL.
     /// Triggers witness all five host permissions, tunnel consent and host removal inside their real writes;
     /// SQLite cannot change synchronous within a transaction, so the commit keeps that barrier.
@@ -18172,192 +17769,6 @@ mod tests {
             .query_row("PRAGMA synchronous", [], |r| r.get(0))
             .unwrap();
         assert_eq!(sync, 1, "the next ordinary write must use NORMAL again");
-    }
-
-    /// Rotation's user-visible meaning is one database commit: the new token
-    /// and the absence of every old device row become visible together.
-    /// Triggers observe FULL at both production writes; SQLite cannot change
-    /// synchronous inside their transaction, so its commit keeps that setting.
-    /// NORMAL must be restored afterwards for unrelated runtime writes.
-    #[farhelm_testtrace::test]
-    async fn rotation_replaces_the_token_and_deletes_every_device_session() {
-        let (_dir, store) = fresh_store().await;
-        store
-            .web_token_or_insert("old-token".to_string(), 100)
-            .await
-            .unwrap();
-        store.insert_device_session([1; 32], 101).await.unwrap();
-        store.insert_device_session([2; 32], 102).await.unwrap();
-        {
-            let conn = store.conn.lock();
-            let mode: String = conn
-                .query_row("PRAGMA journal_mode", [], |row| row.get(0))
-                .unwrap();
-            assert_eq!(mode, "wal", "the fixture must exercise WAL/NORMAL");
-            let sync: i64 = conn
-                .query_row("PRAGMA synchronous", [], |row| row.get(0))
-                .unwrap();
-            assert_eq!(sync, 1);
-            conn.execute_batch(
-                "CREATE TEMP TABLE rotation_sync_observations(boundary TEXT, value INTEGER);
-                 CREATE TEMP TRIGGER observe_token_rotation BEFORE UPDATE ON main.web_token
-                 BEGIN
-                     INSERT INTO rotation_sync_observations SELECT 'token', synchronous FROM pragma_synchronous;
-                 END;
-                 CREATE TEMP TRIGGER observe_device_revocation BEFORE DELETE ON main.device_sessions
-                 BEGIN
-                     INSERT INTO rotation_sync_observations SELECT 'device', synchronous FROM pragma_synchronous;
-                 END;",
-            ).unwrap();
-        }
-
-        assert_eq!(
-            store
-                .rotate_web_token("new-token".to_string(), 200)
-                .await
-                .unwrap(),
-            "new-token"
-        );
-        {
-            let conn = store.conn.lock();
-            let observed: Vec<(String, i64)> = conn
-                .prepare("SELECT boundary, value FROM rotation_sync_observations ORDER BY rowid")
-                .unwrap()
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-                .unwrap()
-                .collect::<rusqlite::Result<_>>()
-                .unwrap();
-            assert_eq!(
-                observed,
-                vec![
-                    ("token".into(), 2),
-                    ("device".into(), 2),
-                    ("device".into(), 2)
-                ]
-            );
-            let sync: i64 = conn
-                .query_row("PRAGMA synchronous", [], |row| row.get(0))
-                .unwrap();
-            assert_eq!(sync, 1, "rotation must restore NORMAL for ordinary writes");
-        }
-        assert!(store.device_session_hashes().await.unwrap().is_empty());
-        assert_eq!(
-            store
-                .web_token_or_insert("unused".to_string(), 300)
-                .await
-                .unwrap(),
-            "new-token"
-        );
-    }
-
-    /// The credential an exchange just issued must survive that exchange's
-    /// own cap eviction, whatever `created_at` it carries.
-    ///
-    /// Spec: with the cap already full, a successful exchange whose stamp is
-    /// OLDER than every stored row (a clock rollback) still leaves exactly
-    /// the cap's worth of rows, the new row among them, and the row evicted
-    /// is the one inserted first. Eviction therefore follows insertion
-    /// order, not the stamp: ranking by stamp would delete the fresh secret
-    /// in the same transaction that reports success, and the browser would
-    /// be handed a cookie no request can present.
-    #[farhelm_testtrace::test]
-    async fn device_exchange_never_evicts_the_credential_it_just_issued() {
-        let (_dir, store) = fresh_store().await;
-        store
-            .web_token_or_insert("token".to_string(), 100)
-            .await
-            .unwrap();
-        for n in 0..MAX_DEVICE_SESSIONS {
-            let mut hash = [0u8; 32];
-            hash[0] = 1;
-            hash[1] = u8::try_from(n).expect("the cap fits one byte");
-            store
-                .insert_device_session(hash, 1_000 + n as i64)
-                .await
-                .unwrap();
-        }
-        assert_eq!(
-            store.device_session_count().await.unwrap(),
-            MAX_DEVICE_SESSIONS,
-            "the fixture must start exactly at the cap"
-        );
-
-        let fresh = [9u8; 32];
-        // Older than every row already stored: the clock went backwards.
-        assert!(
-            store
-                .exchange_device_session("token".to_string(), fresh, 5)
-                .await
-                .unwrap(),
-            "a valid token must be accepted"
-        );
-
-        assert_eq!(
-            store.device_session_count().await.unwrap(),
-            MAX_DEVICE_SESSIONS,
-            "the cap holds by eviction"
-        );
-        assert!(
-            store.has_device_session(fresh).await.unwrap(),
-            "the credential just issued must be usable"
-        );
-        let mut first_inserted = [0u8; 32];
-        first_inserted[0] = 1;
-        assert!(
-            !store.has_device_session(first_inserted).await.unwrap(),
-            "the row inserted first is the one evicted"
-        );
-    }
-
-    /// A failure deleting device rows must roll the token replacement back
-    /// too; this is the transaction boundary rotation promises. The trigger
-    /// also requires FULL during deletion, and an error must restore NORMAL
-    /// without publishing the replacement or revoking only some credentials.
-    #[farhelm_testtrace::test]
-    async fn rotation_rolls_back_both_halves_when_device_deletion_fails() {
-        let (_dir, store) = fresh_store().await;
-        store
-            .web_token_or_insert("old-token".to_string(), 100)
-            .await
-            .unwrap();
-        store.insert_device_session([7; 32], 101).await.unwrap();
-        let conn = store.conn.clone();
-        tokio::task::spawn_blocking(move || {
-            conn.lock()
-                .execute_batch(
-                    "CREATE TEMP TRIGGER refuse_device_delete BEFORE DELETE ON main.device_sessions \
-                     BEGIN \
-                         SELECT CASE WHEN (SELECT synchronous FROM pragma_synchronous) != 2 \
-                             THEN RAISE(ABORT, 'rotation did not select FULL') END; \
-                         SELECT RAISE(ABORT, 'scripted delete refusal'); \
-                     END;",
-                )
-                .unwrap();
-        })
-        .await
-        .unwrap();
-
-        let error = store
-            .rotate_web_token("must-not-commit".to_string(), 200)
-            .await
-            .expect_err("the trigger refuses deletion");
-        assert!(format!("{error:#}").contains("scripted delete refusal"));
-        {
-            let conn = store.conn.lock();
-            let sync: i64 = conn
-                .query_row("PRAGMA synchronous", [], |row| row.get(0))
-                .unwrap();
-            assert_eq!(sync, 1, "a refused rotation must restore NORMAL");
-        }
-        assert_eq!(
-            store
-                .web_token_or_insert("unused".to_string(), 300)
-                .await
-                .unwrap(),
-            "old-token",
-            "the token update must roll back with the failed delete"
-        );
-        assert_eq!(store.device_session_hashes().await.unwrap(), vec![[7; 32]]);
     }
 
     /// The confidentiality repair `open` performs on top of the state

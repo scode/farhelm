@@ -16,8 +16,8 @@
 use std::path::PathBuf;
 
 /// The build-time switch for D12/D13: the `dx`-built web UI's output
-/// directory, so a release binary carries its own UI with no `--ui-dist`
-/// needed at runtime. Unset in an ordinary developer build.
+/// directory, so a release binary carries the UI tree the desktop app's
+/// asset handler serves. Unset in an ordinary developer build.
 ///
 /// Release CI sets it: `.github/dist-build-setup.yml` builds the web bundle
 /// and exports this variable into every cargo-dist build job. (That file sits

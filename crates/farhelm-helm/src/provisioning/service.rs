@@ -15,7 +15,6 @@ use super::backend::{
     ProvisioningBackend, ReachOutcome, SystemBackend, path_text,
 };
 use super::credential_delivery::CredentialDelivery;
-use super::e2e::{E2E_BACKEND_ENV, E2ePayloads, E2eProvisioningBackend};
 use super::http::{
     HostPlanResponse, ProbeDestination, ProbeRequest, ProbeResponse, ProvisionRequest,
     ProvisioningRequestError, ProvisioningView, RunAccepted, RunStatus, StepStatus,
@@ -406,7 +405,7 @@ pub(crate) struct ProductionProvisioning {
 }
 
 impl ProductionProvisioning {
-    /// Validate the marked E2E source or select the ordinary transport once.
+    /// Select the ordinary transport and payload source once.
     /// Release payload policy follows the binary build, independently of the
     /// UI serving mode, just as it did in the former service constructor.
     pub(crate) fn new(
@@ -419,20 +418,7 @@ impl ProductionProvisioning {
             Arc<dyn ProvisioningBackend>,
             Arc<dyn ProvisioningBackend>,
             Arc<dyn PayloadSource>,
-        ) = if let Some(root) = std::env::var_os(E2E_BACKEND_ENV) {
-            let root = PathBuf::from(root);
-            let backend = E2eProvisioningBackend::new(root.clone(), state_dir)?;
-            eprintln!(
-                "WARNING: E2E-only injected provisioning backend enabled from {}; host setup actions are simulated",
-                root.display()
-            );
-            let backend: Arc<dyn ProvisioningBackend> = Arc::new(backend);
-            (
-                Arc::clone(&backend),
-                backend,
-                Arc::new(E2ePayloads(root.join("ENABLED"))),
-            )
-        } else {
+        ) = {
             // Resolve a relative payload selection against the same cwd as
             // the former service constructor, preserving its alias guard.
             let cwd = std::env::current_dir().context("reading the current working directory")?;
