@@ -30,7 +30,8 @@ announcements in that same reply, as described in `releasing/AGENTS.md`, "In-app
 states the base and version needs that answer. Dev releases are exempt, and fix-forward attempts and stable re-cuts
 carry the settled announcements over without asking again. After those request-time decisions, nothing before the tag's
 build waits for the maintainer: the build gate takes the longest and finds the failures to fix forward, so it starts as
-soon as the pre-tag checks pass.
+soon as the pre-tag checks pass. At an RC or dev release, local version-parity tests run alongside GitHub's builds and
+do not hold up the tag (`releasing/.agents/rc.md`, "Cutting an RC release").
 
 At request time, compare `UPGRADE_FLOOR` in `crates/farhelm-proto/src/version.rs` between the previous promoted stable
 and the proposed product-source base. A previous release without the constant has the earlier documented v0.23.0
