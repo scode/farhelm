@@ -81,6 +81,22 @@ class SleepCheckerTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'missing or ambiguous'):
             checker.inventory({'crates/sample/src/lib.rs': b'#![cfg(test)] mod missing;'}, checker.SourceBudget())
 
+    def test_gui_crates_one_level_deeper_resolve_like_other_crates(self):
+        """A crate under `crates/gui/` gets the same crate-root and integration-test handling as one under `crates/`.
+
+        The GUI crates live there so their own clippy.toml scopes the GUI lint bans; without this, the checker reads
+        their `src/lib.rs` as an ordinary module and fails to find its `mod tests;`.
+        """
+        files = {
+            'crates/gui/sample/src/lib.rs': b'#[cfg(test)] mod tests;',
+            'crates/gui/sample/src/tests.rs': b'fn helper() { sleep(d); }',
+            'crates/gui/sample/tests/scenario.rs': b'fn helper() { sleep(d); }',
+            'crates/gui/sample/src/production.rs': b'fn routine() { sleep(d); }',
+        }
+        calls = checker.inventory(files, checker.SourceBudget())
+        self.assertEqual(sorted(item['path'] for item in calls),
+                         ['crates/gui/sample/src/tests.rs', 'crates/gui/sample/tests/scenario.rs'])
+
     def test_external_test_module_inherits_scope(self):
         """A path-attributed helper file remains checked even without its own test attribute."""
         files = {
